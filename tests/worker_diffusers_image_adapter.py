@@ -70,8 +70,9 @@ class FakeTensor:
         self.allocator.allocated -= self.nbytes
 
 
-def fake_modules(calls, free_gib=11.0, allocator=None):
+def fake_modules(calls, free_gib=11.0, allocator=None, hook_cache=None, workspace_api=True):
     allocator = allocator or FakeAllocator()
+    workspaces = []  # torch keeps cuBLAS workspaces per handle, outside any model
 
     class FakePipeline:
         @classmethod
@@ -81,6 +82,9 @@ def fake_modules(calls, free_gib=11.0, allocator=None):
 
         def to(self, device):
             calls.append(("to", device))
+            self.weights = FakeTensor(allocator, 1 * GIB)  # the model is now resident
+            if hook_cache is not None:
+                hook_cache.append(self)  # e.g. an offload hook registry that outlives the adapter
             return self
 
         def enable_model_cpu_offload(self, **kwargs):
@@ -88,6 +92,8 @@ def fake_modules(calls, free_gib=11.0, allocator=None):
 
         def __call__(self, **kwargs):
             calls.append(("call", kwargs))
+            if not workspaces:
+                workspaces.append(FakeTensor(allocator, 32 * 1024 * 1024))
             return types.SimpleNamespace(images=[_Image()])
 
     class Generator:
@@ -106,7 +112,12 @@ def fake_modules(calls, free_gib=11.0, allocator=None):
         memory_allocated=allocator.memory_allocated,
         synchronize=lambda index: calls.append(("synchronize", index)),
     )
-    torch = types.SimpleNamespace(bfloat16="bf16", cuda=cuda, Generator=Generator)
+    def clear_workspaces():
+        calls.append(("clear_cublas_workspaces",))
+        workspaces.clear()
+
+    torch_c = types.SimpleNamespace(_cuda_clearCublasWorkspaces=clear_workspaces) if workspace_api else types.SimpleNamespace()
+    torch = types.SimpleNamespace(bfloat16="bf16", cuda=cuda, Generator=Generator, _C=torch_c)
     diffusers = types.SimpleNamespace(StableDiffusionXLPipeline=FakePipeline, FluxPipeline=FakePipeline,
                                       QwenImagePipeline=FakePipeline)
     return {"torch": torch, "diffusers": diffusers}
@@ -363,6 +374,66 @@ class AdapterTests(unittest.TestCase):
             self.adapter().load()
         self.assertEqual([c for c in self.calls if c[0] == "from_pretrained"], [])
         self.assertTrue(self.other_executor_can_take_the_gpu())
+
+    # --- #2315 review 5696815799: a successful load's close() follows the same rule ------------------
+    def test_close_releases_once_the_model_is_measurably_gone(self):
+        allocator = FakeAllocator()
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget"), \
+                patch.dict(sys.modules, fake_modules(self.calls, allocator=allocator)):
+            adapter = self.adapter()
+            adapter.load()
+            adapter.render(self.req(seed=1))  # leaves a cuBLAS workspace behind, as torch does
+        self.assertEqual(allocator.allocated, 1 * GIB + 32 * 1024 * 1024)
+        self.assertFalse(self.other_executor_can_take_the_gpu())
+        self.assertTrue(adapter.close())
+        self.assertIn(("clear_cublas_workspaces",), self.calls)
+        self.assertEqual(allocator.allocated, 0)
+        self.assertTrue(self.other_executor_can_take_the_gpu())
+        self.assertTrue(adapter.close(), "closing twice is harmless")
+
+    def test_close_keeps_the_lease_while_a_hook_cache_holds_the_model(self):
+        cache, allocator = [], FakeAllocator()
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget"), \
+                patch.dict(sys.modules, fake_modules(self.calls, allocator=allocator, hook_cache=cache)):
+            adapter = self.adapter()
+            adapter.load()
+            self.assertFalse(adapter.close(), "the model is still referenced by the hook cache")
+            self.assertTrue(adapter.retains_gpu)
+            self.assertFalse(adapter.loaded)
+            self.assertFalse(self.other_executor_can_take_the_gpu(),
+                             "a second executor must not get a GPU that still holds the model")
+            with self.assertRaises(GpuResourcesRetained):
+                adapter.load()
+            cache.clear()
+            gc.collect()
+            self.assertTrue(adapter.close())
+        self.assertEqual(allocator.allocated, 0)
+        self.assertTrue(self.other_executor_can_take_the_gpu())
+
+    def test_close_with_a_broken_cuda_context_keeps_the_lease(self):
+        allocator = FakeAllocator()
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget"), \
+                patch.dict(sys.modules, fake_modules(self.calls, allocator=allocator)):
+            adapter = self.adapter()
+            adapter.load()
+        allocator.broken = True
+        self.assertFalse(adapter.close())
+        self.assertFalse(self.other_executor_can_take_the_gpu())
+        allocator.broken = False
+        self.assertTrue(adapter.close())
+        self.assertTrue(self.other_executor_can_take_the_gpu())
+
+    def test_without_the_workspace_api_a_leftover_workspace_keeps_the_lease(self):
+        """Older torch without _cuda_clearCublasWorkspaces: measured, not assumed -> fail closed."""
+        allocator = FakeAllocator()
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget"), \
+                patch.dict(sys.modules, fake_modules(self.calls, allocator=allocator, workspace_api=False)):
+            adapter = self.adapter()
+            adapter.load()
+            adapter.render(self.req())
+            self.assertFalse(adapter.close())
+        self.assertFalse(self.other_executor_can_take_the_gpu())
+        adapter._lease.release()  # test cleanup only
 
     def test_profile_resources_decide_admission(self):
         sdxl = parse_profile(image_profile())  # needs 8 GiB usable after a 2 GiB reserve

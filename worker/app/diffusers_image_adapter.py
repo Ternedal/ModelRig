@@ -25,8 +25,15 @@ keeps the pipeline alive, then gc, synchronize, empty_cache) and the lease is
 released only if torch's allocator is measurably back at the pre-load
 baseline. Otherwise the adapter keeps the lease and raises
 GpuResourcesRetained: the executor must exit, and the OS frees both the
-memory and the lease. Stated limit: memory_allocated() counts PyTorch's
-caching allocator only, not allocations made outside it.
+memory and the lease.
+
+close() follows the same rule for a successful load (#2315 review
+5696815799): it drops the pipeline, clears PyTorch's cuBLAS workspaces when
+that API exists, and releases the lease only once memory_allocated() is back
+at the baseline. If an offload hook or library cache still holds the model,
+close() keeps the lease and returns False.
+Stated limit: memory_allocated() counts PyTorch's caching allocator only, not
+allocations made outside it.
 
 Nothing is imported or loaded at import time.
 """
@@ -81,6 +88,8 @@ class DiffusersImageAdapter:
         self._lease = None
         self._pipeline = None
         self._retained_baseline: int | None = None
+        self._baseline: int | None = None
+        self._torch = None
 
     @property
     def loaded(self) -> bool:
@@ -88,13 +97,16 @@ class DiffusersImageAdapter:
 
     @property
     def retains_gpu(self) -> bool:
-        """True after a failed load that could not prove its GPU memory free."""
+        """True while memory from a failed load or an unloaded model is not proven free."""
         return self._retained_baseline is not None
 
     def _memory_back_to(self, torch, baseline: int) -> bool:
         try:
             gc.collect()
             torch.cuda.synchronize(self.index)
+            clear_workspaces = getattr(getattr(torch, "_C", None), "_cuda_clearCublasWorkspaces", None)
+            if callable(clear_workspaces):
+                clear_workspaces()  # persistent per-handle cuBLAS workspaces are not the model
             torch.cuda.empty_cache()
             return int(torch.cuda.memory_allocated(self.index)) <= baseline
         except Exception:
@@ -104,7 +116,7 @@ class DiffusersImageAdapter:
         if self._pipeline is not None:
             return
         if self._retained_baseline is not None:
-            raise GpuResourcesRetained("an earlier failed load still holds this GPU; restart the executor")
+            raise GpuResourcesRetained("memory from an earlier load is still allocated on this GPU; restart the executor")
         if self._env.get("HF_HUB_OFFLINE") != "1" or self._env.get("TRANSFORMERS_OFFLINE") != "1":
             raise GenerationError("offline mode required: HF_HUB_OFFLINE=1 and TRANSFORMERS_OFFLINE=1")
         gpu_uuid = device_uuid_map(self._env).get(self.index)
@@ -143,18 +155,18 @@ class DiffusersImageAdapter:
         except BaseException:
             # Interrupted mid-load: cleanup cannot be proven. Keep the lease;
             # the process is ending and the OS releases it with the memory.
-            self._lease, self._retained_baseline = lease, baseline
+            self._lease, self._retained_baseline, self._torch = lease, baseline, torch
             raise
         if failure is None:
-            self._lease = lease
-            self._pipeline = pipeline
+            self._lease, self._pipeline = lease, pipeline
+            self._baseline, self._torch = baseline, torch
             return
         # Outside the except block: the exception object is gone, and so is
         # every frame it pinned. Now measure instead of assuming.
         if self._memory_back_to(torch, baseline):
             lease.release()
             raise GenerationError(f"model load failed ({failure}); GPU memory verified released")
-        self._lease, self._retained_baseline = lease, baseline
+        self._lease, self._retained_baseline, self._torch = lease, baseline, torch
         raise GpuResourcesRetained(
             f"model load failed ({failure}) and GPU memory could not be proven free; "
             "the GPU lease is kept until this process exits")
@@ -179,25 +191,20 @@ class DiffusersImageAdapter:
         image.save(output, format="PNG")
         return RenderedArtifact(output.getvalue(), "image/png")
 
-    def close(self) -> None:
-        if self._retained_baseline is not None:
-            # Release only once the failed load's memory is measurably gone.
-            import torch
-            if self._memory_back_to(torch, self._retained_baseline):
-                lease, self._lease, self._retained_baseline = self._lease, None, None
-                if lease is not None:
-                    lease.release()
-            return
-        pipeline, self._pipeline = self._pipeline, None
-        lease, self._lease = self._lease, None
-        try:
-            if pipeline is not None:
-                del pipeline
-                try:
-                    import torch
-                    torch.cuda.empty_cache()
-                except Exception:
-                    pass
-        finally:
-            if lease is not None:
-                lease.release()
+    def close(self) -> bool:
+        """Unload. True once the lease is released; False while GPU memory is not proven free.
+
+        After False the lease stays held (no cooperating executor can take the
+        GPU); call close() again later or restart the executor.
+        """
+        if self._pipeline is not None:
+            self._pipeline = None  # drop our reference first
+            self._retained_baseline = self._baseline
+        if self._retained_baseline is None:
+            return self._lease is None
+        if not self._memory_back_to(self._torch, self._retained_baseline):
+            return False
+        lease, self._lease, self._retained_baseline = self._lease, None, None
+        if lease is not None:
+            lease.release()
+        return True
