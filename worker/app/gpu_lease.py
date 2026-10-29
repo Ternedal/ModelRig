@@ -157,6 +157,17 @@ class GpuLease:
         """
         self._hold_until_exit = True
 
+    def fileno(self) -> int:
+        """The locked descriptor, for handing to a supervised child (pass_fds).
+
+        flock belongs to the open file description, so a child that inherits
+        this descriptor keeps the GPU leased until both processes have closed
+        it (or exited), even if the parent dies first.
+        """
+        if self._fd is None:
+            raise GpuLeaseError("lease already released")
+        return self._fd
+
     def release(self) -> None:
         fd, self._fd = self._fd, None
         if fd is None:
