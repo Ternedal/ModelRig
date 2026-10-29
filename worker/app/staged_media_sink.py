@@ -55,7 +55,11 @@ class StagedFileArtifactSink:
         try:
             yield path
         finally:
-            path.unlink(missing_ok=True)
+            # Do not follow or remove a replacement symlink planted by another process.
+            if path.is_symlink():
+                path.unlink()
+            elif path.exists():
+                path.unlink()
 
     def adopt(self, staged_path: str | Path, mime_type: str) -> str:
         root = self._validate_root()
@@ -89,7 +93,12 @@ class StagedFileArtifactSink:
                 os.fsync(fd)
             finally:
                 os.close(fd)
-            os.replace(path, destination)
+            # Exclusive destination creation prevents overwriting an existing asset.
+            try:
+                os.link(path, destination, follow_symlinks=False)
+            except FileExistsError as exc:
+                raise MediaStoreUnavailable("asset_id_collision") from exc
+            path.unlink()
             directory_fd = os.open(root, os.O_RDONLY)
             try:
                 os.fsync(directory_fd)
