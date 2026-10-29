@@ -89,3 +89,19 @@ def iter_asset_chunks(handle, entry: dict, *, chunk_size: int = 256 * 1024):
             raise GalleryUnavailable("asset_changed_during_read")
         remaining -= len(data)
         yield data
+
+
+def stream_open_asset(media_root: str | Path, verified_volume_root: str | Path,
+                      asset_id: str, *, chunk_size: int = 256 * 1024):
+    """Own and close the descriptor for the entire streaming response lifecycle.
+
+    The caller may close the returned generator on client disconnect. No file
+    descriptor is opened until iteration starts.
+    """
+    if type(chunk_size) is not int or not 1 <= chunk_size <= 1024 * 1024:
+        raise ValueError("invalid_stream_chunk")
+    def stream():
+        handle, entry = open_asset(media_root, verified_volume_root, asset_id)
+        with handle:
+            yield from iter_asset_chunks(handle, entry, chunk_size=chunk_size)
+    return stream()

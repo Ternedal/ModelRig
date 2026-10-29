@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.media_gallery_asset import open_asset, read_asset_range, iter_asset_chunks, GalleryAssetNotFound
+from app.media_gallery_asset import open_asset, read_asset_range, iter_asset_chunks, stream_open_asset, GalleryAssetNotFound
 from app.media_gallery_catalog import GalleryUnavailable
 from app.media_gallery_range import RangeNotSatisfiable
 
@@ -49,6 +49,16 @@ class GalleryAssetTests(unittest.TestCase):
     def test_stream_rejects_unbounded_chunk(self):
         with self.assertRaises(ValueError):
             list(iter_asset_chunks(None, {"size_bytes": 1}, chunk_size=2 * 1024 * 1024))
+
+    def test_stream_owns_file_handle_and_closes_on_completion(self):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            stream = stream_open_asset(self.root, self.volume, "asset_1", chunk_size=4)
+            self.assertEqual(b"".join(stream), b"0123456789")
+            self.assertEqual(list(stream), [])
+
+    def test_stream_rejects_invalid_chunk_before_open(self):
+        with self.assertRaises(ValueError):
+            stream_open_asset(self.root, self.volume, "asset_1", chunk_size=0)
 
     def test_missing_and_traversal_are_refused(self):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
