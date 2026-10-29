@@ -182,7 +182,7 @@ check(
     'name: stage-b-cache-${{ inputs.head_sha }}' in stage_b_workflow
     and "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
     in stage_b_workflow
-    and "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+    and "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333"
     in stage_b_workflow,
     "Stage-B cache handoff is exact-head named and uses pinned artifact actions",
 )
