@@ -42,6 +42,7 @@ import json
 import math
 import os
 import subprocess
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,6 +55,7 @@ _WINDOWS = os.name == "nt"
 LOOPBACK = "127.0.0.1"
 MAX_RESPONSE_BYTES = 1024 * 1024
 GIB = 1024 ** 3
+_PROMPT_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 
 # Flags the supervisor may pass. Anything else is refused, so a profile cannot
 # smuggle --listen 0.0.0.0, --enable-cors-header, --enable-manager, etc.
@@ -113,10 +115,11 @@ class VramBudget:
     usable_bytes: int
 
 
-def _get_json(port: int, path: str, timeout_s: float, *, method: str = "GET") -> object:
+def _get_json(port: int, path: str, timeout_s: float, *, method: str = "GET",
+              payload: object | None = None) -> object:
     connection = http.client.HTTPConnection(LOOPBACK, port, timeout=timeout_s)
     try:
-        body = b"{}" if method == "POST" else None
+        body = json.dumps({} if payload is None else payload).encode() if method == "POST" else None
         connection.request(method, path, body=body, headers={"Content-Type": "application/json"})
         response = connection.getresponse()
         raw = response.read(MAX_RESPONSE_BYTES + 1)
@@ -269,6 +272,46 @@ class ComfySupervisor:
         except (OSError, ValueError) as exc:
             raise ComfySupervisorError("ComfyUI /system_stats unavailable") from exc
         return parse_vram_budget(stats, reserve_gib=self.reserve_gib, min_usable_gib=self.min_usable_gib)
+
+    # --- the ComfyUI API the adapter needs; HTTP stays in this module -------
+    def _api(self, path: str, *, method: str = "GET", payload: object | None = None,
+             timeout_s: float = 10.0) -> dict:
+        if not self.running:
+            raise ComfySupervisorError("ComfyUI is not running")
+        try:
+            result = _get_json(self.port, path, timeout_s, method=method, payload=payload)
+        except (OSError, ValueError) as exc:
+            raise ComfySupervisorError(f"ComfyUI {path} unavailable") from exc
+        if not isinstance(result, dict):
+            raise ComfySupervisorError(f"ComfyUI {path} returned a non-object")
+        return result
+
+    def queue_is_empty(self) -> bool:
+        """Single-tenant proof before a submit: nothing running, nothing pending."""
+        queue = self._api("/queue")
+        running, pending = queue.get("queue_running"), queue.get("queue_pending")
+        if not isinstance(running, list) or not isinstance(pending, list):
+            raise ComfySupervisorError("ComfyUI /queue is malformed")
+        return not running and not pending
+
+    def submit(self, graph: dict) -> str:
+        """Submit a server-owned, bound template graph. Never forward a client graph."""
+        if not isinstance(graph, dict) or not graph:
+            raise ComfySupervisorError("a bound workflow graph is required")
+        prompt_id = self._api("/prompt", method="POST", payload={"prompt": graph}).get("prompt_id")
+        if not isinstance(prompt_id, str) or not _PROMPT_ID.fullmatch(prompt_id):
+            raise ComfySupervisorError("ComfyUI returned no valid prompt id")
+        return prompt_id
+
+    def history(self, prompt_id: str) -> dict | None:
+        """The finished record for prompt_id, None while it is pending."""
+        if not isinstance(prompt_id, str) or not _PROMPT_ID.fullmatch(prompt_id):
+            raise ComfySupervisorError("invalid prompt id")
+        record = self._api(f"/history/{prompt_id}").get(prompt_id)
+        return record if isinstance(record, dict) else None
+
+    def interrupt(self) -> None:
+        self._api("/interrupt", method="POST")
 
     def stop(self) -> None:
         """Interrupt, terminate, kill. The lease is released only after ComfyUI has exited."""

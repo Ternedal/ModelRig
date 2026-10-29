@@ -57,6 +57,8 @@ lock = threading.Lock()
 history: dict = {}
 queue: list = []
 interrupted = threading.Event()
+if os.environ.get("FAKE_COMFY_PREQUEUED") == "1":
+    queue.append("foreign-job")  # someone else's prompt is already running
 
 
 def _render(prompt_id: str) -> None:
@@ -68,15 +70,46 @@ def _render(prompt_id: str) -> None:
                 queue.remove(prompt_id)
             return
         time.sleep(0.02)
+    mode = os.environ.get("FAKE_COMFY_OUTPUT_MODE", "ok")
     name = f"kaliv_{prompt_id[:8]}.mp4"
-    with open(os.path.join(args.output_directory, name), "wb") as fh:
-        fh.write(b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2" + b"\x00" * 64)
+    path = os.path.join(args.output_directory, name)
+    mp4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2" + b"\x00" * int(os.environ.get("FAKE_COMFY_MP4_PAD", "64"))
+    entries = [{"filename": name, "subfolder": "", "type": "output"}]
+    status = {"status_str": "success", "completed": True}
+    if mode == "symlink":
+        target = os.path.join(args.output_directory, "..", "outside.mp4")
+        with open(target, "wb") as fh:
+            fh.write(mp4)
+        os.symlink(target, path)
+    elif mode == "notmp4":
+        with open(path, "wb") as fh:
+            fh.write(b"<html>not a video</html>")
+    elif mode != "none":
+        with open(path, "wb") as fh:
+            fh.write(mp4)
+    if mode == "two":
+        entries.append({"filename": "second.mp4", "subfolder": "", "type": "output"})
+    elif mode == "none":
+        entries = []
+    elif mode == "subfolder":
+        entries[0]["subfolder"] = "sub"
+    elif mode == "traversal":
+        entries[0]["filename"] = "../outside.mp4"
+    elif mode == "temp_only":
+        entries[0]["type"] = "temp"
+    elif mode == "stale":
+        entries[0]["filename"] = "old.mp4"  # a file that was there before this job
+    elif mode == "error":
+        status = {"status_str": "error", "completed": False}
     with lock:
-        history[prompt_id] = {
-            "status": {"status_str": "success", "completed": True},
-            "outputs": {"9": {"videos": [{"filename": name, "subfolder": "", "type": "output"}]}},
-        }
+        history[prompt_id] = {"status": status, "outputs": {"9": {"videos": entries}}}
         queue.remove(prompt_id)
+    if mode == "growing":  # reported done, but the writer is still appending
+        with open(path, "ab") as fh:
+            for _ in range(600):
+                fh.write(b"\x00" * 512)
+                fh.flush()
+                time.sleep(0.005)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -93,8 +126,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/system_stats":
+            free = vram_free
+            override = os.path.join(STATE, "vram_free_gib") if STATE else ""
+            if override and os.path.exists(override):
+                free = int(float(open(override).read()) * GIB)  # another process took VRAM
             device = {"name": "cuda:0 Fake GPU", "type": device_type, "index": 0,
-                      "vram_total": vram_total, "vram_free": vram_free}
+                      "vram_total": vram_total, "vram_free": free}
             self._send({"system": {"comfyui_version": "fake"}, "devices": [device] * devices})
         elif self.path == "/queue":
             with lock:
@@ -114,6 +151,9 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(body.get("prompt"), dict):
                 self._send({"error": "no prompt"}, 400)
                 return
+            if STATE:
+                with open(os.path.join(STATE, "last_prompt.json"), "w") as fh:
+                    json.dump(body, fh)
             prompt_id = str(uuid.uuid4())
             interrupted.clear()
             with lock:
