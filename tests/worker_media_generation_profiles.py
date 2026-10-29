@@ -36,6 +36,7 @@ def image_profile(**overrides):
         "resources": {"min_usable_gib": 8, "reserve_gib": 2, "devices": ["cuda:1"], "cpu_offload": False},
         "qualification": "candidate",
         "license": "openrail++",
+        "backend_options": {},
     }
     profile.update(overrides)
     return profile
@@ -47,6 +48,8 @@ def video_profile(**overrides):
         backend="comfyui", pipeline=None, model_id="example/wan", outputs=["video/mp4"],
         limits={"max_prompt_chars": 500, "sizes": [[832, 480]], "max_steps": 30, "max_frames": 81},
         license="apache-2.0",
+        backend_options={"template_name": "wan-t2v.json", "template_sha256": "ab" * 32, "fps": 16,
+                         "max_render_seconds": 1800, "max_output_bytes": 512 * 1024 * 1024, "port": 8188},
     )
     profile.update(overrides)
     return profile
@@ -90,6 +93,32 @@ class ProfileParsingTests(unittest.TestCase):
         for name, bad in cases.items():
             with self.subTest(case=name), self.assertRaises(GenerationError):
                 parse_profile(bad)
+
+    def test_backend_options_are_exact_per_backend(self):
+        video = parse_profile(video_profile())
+        self.assertEqual(video.backend_options.template_name, "wan-t2v.json")
+        self.assertEqual(video.backend_options.fps, 16)
+        self.assertIsNone(parse_profile(image_profile()).backend_options)
+        good = video_profile()["backend_options"]
+        bad_options = [
+            {"template_name": "../wan.json"}, {"template_name": "dir/wan.json"}, {"template_name": "wan.yaml"},
+            {"template_name": "Wan.json"}, {"template_name": "..json"}, {"template_sha256": "ab" * 31},
+            {"template_sha256": "AB" * 32}, {"template_sha256": None}, {"fps": 0}, {"fps": 61},
+            {"fps": True}, {"max_render_seconds": 5}, {"max_render_seconds": 7201},
+            {"max_output_bytes": 2 * 1024 ** 3 + 1}, {"max_output_bytes": 10}, {"port": 80},
+            {"port": 65536}, {"port": "8188"},
+        ]
+        for patch in bad_options:
+            with self.subTest(options=patch), self.assertRaises(GenerationError):
+                parse_profile(video_profile(backend_options=dict(good, **patch)))
+        extra = dict(good, listen="0.0.0.0")
+        missing = {k: v for k, v in good.items() if k != "port"}
+        for options in (extra, missing, {}, None, []):
+            with self.subTest(options=options), self.assertRaises(GenerationError):
+                parse_profile(video_profile(backend_options=options))
+        for options in (good, {"fps": 16}, None):
+            with self.subTest(diffusers_options=options), self.assertRaises(GenerationError):
+                parse_profile(image_profile(backend_options=options))
 
     def test_revision_must_be_pinned(self):
         for revision in ("", "main", "v1.0", FAKE_REV[:39], FAKE_REV.upper(), None, 123):

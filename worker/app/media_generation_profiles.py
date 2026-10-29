@@ -13,6 +13,9 @@ Safe defaults:
 - Unknown keys, backends, pipelines, tasks or MIME types are refused. There is
   no dynamic class loading beyond DIFFUSERS_PIPELINES.
 - The model revision must be a pinned 40-hex commit. Loading is offline only.
+- backend_options carries backend-specific settings with exact keys: {} for
+  diffusers; for comfyui the pinned workflow template (name + SHA-256), fps,
+  render deadline, output size cap and the loopback port.
 
 Nothing here imports torch or diffusers.
 """
@@ -51,8 +54,14 @@ _ASSET_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 
 _TOP_KEYS = frozenset({
     "schema", "profile_id", "modality", "tasks", "backend", "pipeline", "model_id",
-    "revision", "limits", "outputs", "resources", "qualification", "license",
+    "revision", "limits", "outputs", "resources", "qualification", "license", "backend_options",
 })
+_COMFY_OPTION_KEYS = frozenset({
+    "template_name", "template_sha256", "fps", "max_render_seconds", "max_output_bytes", "port",
+})
+_TEMPLATE_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}\.json")
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+MAX_VIDEO_BYTES = 2 * 1024 ** 3
 _LIMIT_KEYS = frozenset({"max_prompt_chars", "sizes", "max_steps", "max_frames"})
 _RESOURCE_KEYS = frozenset({"min_usable_gib", "reserve_gib", "devices", "cpu_offload"})
 
@@ -74,6 +83,16 @@ class Resources:
 
 
 @dataclass(frozen=True)
+class ComfyOptions:
+    template_name: str
+    template_sha256: str
+    fps: int
+    max_render_seconds: int
+    max_output_bytes: int
+    port: int
+
+
+@dataclass(frozen=True)
 class ModelProfile:
     profile_id: str
     modality: str
@@ -87,6 +106,7 @@ class ModelProfile:
     resources: Resources
     qualification: str
     license: str
+    backend_options: ComfyOptions | None = None
 
 
 def _fail(reason: str) -> GenerationError:
@@ -213,10 +233,29 @@ def parse_profile(obj: object) -> ModelProfile:
         raise _fail("unknown qualification")
     license_ = _string(data["license"], _LICENSE, "license")
 
+    raw_options = data["backend_options"]
+    backend_options = None
+    if backend == "comfyui":
+        options = _exact_keys(raw_options, _COMFY_OPTION_KEYS, "backend_options")
+        name = _string(options["template_name"], _TEMPLATE_NAME, "backend_options.template_name")
+        if ".." in name:
+            raise _fail("backend_options.template_name must be a plain file name")
+        backend_options = ComfyOptions(
+            template_name=name,
+            template_sha256=_string(options["template_sha256"], _SHA256, "backend_options.template_sha256"),
+            fps=_strict_int(options["fps"], 1, 60, "backend_options.fps"),
+            max_render_seconds=_strict_int(options["max_render_seconds"], 10, 7200, "backend_options.max_render_seconds"),
+            max_output_bytes=_strict_int(options["max_output_bytes"], 1024, MAX_VIDEO_BYTES, "backend_options.max_output_bytes"),
+            port=_strict_int(options["port"], 1024, 65535, "backend_options.port"),
+        )
+    elif raw_options != {}:
+        raise _fail("backend_options must be {} for the diffusers backend")
+
     return ModelProfile(
         profile_id=profile_id, modality=modality, tasks=frozenset(tasks), backend=backend,
         pipeline=pipeline, model_id=model_id, revision=revision, limits=limits,
         outputs=frozenset(outputs), resources=resources, qualification=qualification, license=license_,
+        backend_options=backend_options,
     )
 
 
