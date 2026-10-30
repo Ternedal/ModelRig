@@ -19,6 +19,9 @@ from .media_gallery_catalog import (
 def register_asset(media_root: str | Path, verified_volume_root: str | Path,
                    asset_id: str, extension: str, size_bytes: int) -> None:
     """Register a previously durably published asset; never silently reset index."""
+    from .media_gallery_catalog import _ID
+    if not isinstance(asset_id, str) or not _ID.fullmatch(asset_id):
+        raise ValueError("invalid_asset_id")
     if extension not in (".png", ".mp4"):
         raise ValueError("invalid_extension")
     if type(size_bytes) is not int or size_bytes <= 0:
