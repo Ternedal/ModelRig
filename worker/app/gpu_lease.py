@@ -16,6 +16,13 @@ Windows) on <lease dir>/<GPU UUID>.lock. The operating system releases it when
 the holding process exits or is killed, so a crashed generator never leaves a
 stale lease behind.
 
+Resident lock (slice 2): a long-running server such as ComfyUI holds
+<lease dir>/<GPU UUID>.resident.lock in its OWN process (comfy_resident_launcher)
+for as long as it lives. acquire_gpu_lease() treats a held resident lock as
+busy, so an orphaned ComfyUI blocks every cooperating generator until it has
+exited, on POSIX and Windows alike. Only a process started by the holder of
+the main lease takes the resident lock.
+
 Scope (decision 6491161681): the lease coordinates only processes that take
 it. Ollama, a WSL2 instance or any other worker that does not use this module
 is NOT covered; whole-rig GPU exclusivity is unproven and not claimed.
@@ -39,6 +46,7 @@ DEVICE_UUIDS_ENV = "KALIV_GPU_DEVICE_UUIDS"
 DEVICE_ORDER_ENV = "CUDA_DEVICE_ORDER"
 MAX_GPU_INDEX = 15
 MAX_TIMEOUT_SECONDS = 3600.0
+RESIDENT_SUFFIX = ".resident.lock"
 
 _UUID = re.compile(r"GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
@@ -157,6 +165,17 @@ class GpuLease:
         """
         self._hold_until_exit = True
 
+    def fileno(self) -> int:
+        """The locked descriptor, for handing to a supervised child (pass_fds).
+
+        flock belongs to the open file description, so a child that inherits
+        this descriptor keeps the GPU leased until both processes have closed
+        it (or exited), even if the parent dies first.
+        """
+        if self._fd is None:
+            raise GpuLeaseError("lease already released")
+        return self._fd
+
     def release(self) -> None:
         fd, self._fd = self._fd, None
         if fd is None:
@@ -181,6 +200,35 @@ class GpuLease:
             pass
 
 
+def _open_lock_file(path: Path) -> int:
+    if path.is_symlink():
+        raise GpuLeaseError("lease file must not be a symlink")
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    return os.open(path, flags, 0o600)
+
+
+def resident_lock_path(gpu_uuid: str, *, lease_dir: str) -> Path:
+    return _check_lease_dir(lease_dir) / f"{normalize_gpu_uuid(gpu_uuid)}{RESIDENT_SUFFIX}"
+
+
+def _resident_held(path: Path) -> bool:
+    fd = _open_lock_file(path)
+    try:
+        try:
+            _try_lock(fd)
+        except OSError:
+            return True
+        _unlock(fd)
+        return False
+    finally:
+        os.close(fd)
+
+
+def resident_is_held(gpu_uuid: str, *, lease_dir: str) -> bool:
+    """True while a resident server (e.g. ComfyUI) still holds this GPU's resident lock."""
+    return _resident_held(resident_lock_path(gpu_uuid, lease_dir=lease_dir))
+
+
 def acquire_gpu_lease(gpu_uuid: str, *, lease_dir: str, timeout_s: float = 0.0,
                       poll_s: float = 0.25) -> GpuLease:
     """Take the exclusive lease for one physical GPU, waiting at most timeout_s seconds."""
@@ -192,18 +240,27 @@ def acquire_gpu_lease(gpu_uuid: str, *, lease_dir: str, timeout_s: float = 0.0,
         raise GpuLeaseError("poll interval must be 0.01..5 seconds")
     directory = _check_lease_dir(lease_dir)
     path = directory / f"{normalized}.lock"
-    if path.is_symlink():
-        raise GpuLeaseError("lease file must not be a symlink")
-
-    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
-    fd = os.open(path, flags, 0o600)
+    resident = directory / f"{normalized}{RESIDENT_SUFFIX}"
+    fd = _open_lock_file(path)
     deadline = time.monotonic() + timeout_s
     while True:
+        reason = "is leased by another process"
         try:
             _try_lock(fd)
-            return GpuLease(normalized, fd, path)
         except OSError:
-            if time.monotonic() >= deadline:
+            pass
+        else:
+            try:
+                held = _resident_held(resident)
+            except BaseException:
+                _unlock(fd)
                 os.close(fd)
-                raise GpuBusy(f"{normalized} is leased by another process") from None
-            time.sleep(poll_s)
+                raise
+            if not held:
+                return GpuLease(normalized, fd, path)
+            _unlock(fd)  # a resident server (an orphaned ComfyUI?) still occupies the GPU
+            reason = "is still held by a resident process"
+        if time.monotonic() >= deadline:
+            os.close(fd)
+            raise GpuBusy(f"{normalized} {reason}") from None
+        time.sleep(poll_s)

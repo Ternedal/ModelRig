@@ -11,7 +11,7 @@ Nothing here imports torch, diffusers or a web framework.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping, Protocol, runtime_checkable
+from typing import BinaryIO, ContextManager, Mapping, Protocol, runtime_checkable
 
 TASKS = ("text_to_image", "image_to_image", "text_to_video", "image_to_video")
 
@@ -72,6 +72,47 @@ class ArtifactSink(Protocol):
     """
 
     def publish(self, data: bytes, extension: str) -> str: ...
+
+
+@runtime_checkable
+class StagedFileArtifactSink(Protocol):
+    """Optional sink for artifacts too large for bytes (video). ChatGPT implements it (#2296 6494148463).
+
+    Use, and only this way:
+
+        with sink.staged(".mp4") as output:          # an exclusive new file on the verified volume
+            mime = adapter.render_to(request, output)  # the adapter only writes into the handle
+            asset_id = sink.adopt(output, mime)        # inside the context: promote + register
+
+    Required by the seam (tests/support/staged_sink_conformance.py checks them):
+    - staged() hands out a writable binary handle; the generator never sees a path.
+    - adopt() accepts only a live handle this sink issued, only "video/mp4",
+      only within the size bound, flushes/fsyncs and atomically promotes it,
+      and returns an asset id only after durable registration.
+    - adopt() twice, or with a foreign or closed handle, is refused.
+    - Leaving the context after adopt() keeps the asset; leaving it without
+      adopt() (or on any error) publishes nothing and removes the staged file.
+    - No publish(bytes) fallback for video. Raise ArtifactSinkUnavailable when
+      the verified volume is not there.
+    """
+
+    def staged(self, extension: str) -> ContextManager[BinaryIO]: ...
+
+    def adopt(self, handle: BinaryIO, mime_type: str) -> str: ...
+
+
+@runtime_checkable
+class VerifiedMediaVolume(Protocol):
+    """The external-media mount check (ChatGPT implements it; #2316 review 5700997784).
+
+    require(path) returns only if path lies on the verified, currently mounted
+    external media volume, and raises ArtifactSinkUnavailable otherwise. Every
+    directory that ever holds generated media -- including ComfyUI's own
+    input/output/temp/user scratch -- must pass it: media never lands on the
+    internal disk, not even transiently.
+    """
+
+    def require(self, path: str) -> None: ...
 
 
 @runtime_checkable
