@@ -21,7 +21,9 @@ class IndexWriterTests(unittest.TestCase):
         self.addCleanup(self.mount.stop)
 
     def test_register_and_preserve_entries(self):
+        (self.root / "first.png").write_bytes(b"12345")
         register_asset(self.root, self.volume, "first", ".png", 5)
+        (self.root / "second.mp4").write_bytes(b"0123456789")
         register_asset(self.root, self.volume, "second", ".mp4", 10)
         items = list_gallery(self.root, verified_volume_root=self.volume)["items"]
         self.assertEqual([item["id"] for item in items], ["first", "second"])
@@ -37,13 +39,23 @@ class IndexWriterTests(unittest.TestCase):
                 register_asset(self.root, self.volume, "first", extension, size)
         self.assertEqual((self.root / "gallery-index.json").read_bytes(), before)
 
+    def test_refuse_missing_or_wrong_size_asset(self):
+        with self.assertRaisesRegex(GalleryUnavailable, "asset_unavailable"):
+            register_asset(self.root, self.volume, "missing", ".png", 5)
+        (self.root / "wrong.png").write_bytes(b"123")
+        with self.assertRaisesRegex(GalleryUnavailable, "asset_size_mismatch"):
+            register_asset(self.root, self.volume, "wrong", ".png", 5)
+        self.assertFalse((self.root / "gallery-index.json").exists())
+
     def test_refuse_active_lock(self):
+        (self.root / "first.png").write_bytes(b"12345")
         (self.root / ".gallery-index.lock").write_text("busy")
         with self.assertRaisesRegex(GalleryUnavailable, "gallery_index_locked"):
             register_asset(self.root, self.volume, "first", ".png", 5)
         self.assertFalse((self.root / "gallery-index.json").exists())
 
     def test_refuse_corrupt_index_without_replacing_it(self):
+        (self.root / "first.png").write_bytes(b"12345")
         (self.root / "gallery-index.json").write_text("{invalid")
         with self.assertRaises(GalleryUnavailable):
             register_asset(self.root, self.volume, "first", ".png", 5)
