@@ -38,6 +38,14 @@ class ExternalMediaSinkTests(unittest.TestCase):
                 self.sink.publish_for_job("job_42", b"changed!", ".png")
         self.assertEqual((self.media / (asset + ".png")).read_bytes(), b"original")
 
+    def test_job_key_cannot_change_media_type(self):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            asset = self.sink.publish_for_job("job_42", b"original", ".png")
+            with self.assertRaisesRegex(ArtifactSinkUnavailable, "asset_job_conflict"):
+                self.sink.publish_for_job("job_42", b"video", ".mp4")
+        self.assertTrue((self.media / (asset + ".png")).exists())
+        self.assertFalse((self.media / (asset + ".mp4")).exists())
+
     def test_job_publication_rejects_unsafe_key(self):
         with self.assertRaisesRegex(ValueError, "invalid_job_key"):
             self.sink.publish_for_job("../escape", b"data", ".png")
