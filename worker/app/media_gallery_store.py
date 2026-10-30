@@ -27,6 +27,13 @@ class ExternalMediaSink:
         except (GalleryUnavailable, OSError, RuntimeError) as exc:
             raise ArtifactSinkUnavailable("external_media_unavailable") from exc
 
+    def job_asset_id(self, job_key: str) -> str:
+        import hashlib
+        import re
+        if not isinstance(job_key, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", job_key):
+            raise ValueError("invalid_job_key")
+        return hashlib.sha256(("kaliv-media-job-v1:" + job_key).encode("utf-8")).hexdigest()[:32]
+
     def inspect_unindexed_assets(self) -> list[str]:
         """Read-only inventory of published files absent from the gallery index.
 
@@ -100,7 +107,7 @@ class ExternalMediaSink:
             raise ValueError("invalid_artifact_bytes")
         if extension not in _EXTENSIONS:
             raise ValueError("invalid_artifact_extension")
-        asset_id = hashlib.sha256(("kaliv-media-job-v1:" + job_key).encode("utf-8")).hexdigest()[:32]
+        asset_id = self.job_asset_id(job_key)
         root = self._root()
         destination = root / (asset_id + extension)
         # A job key identifies one artifact, regardless of media type.
