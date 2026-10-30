@@ -27,6 +27,76 @@ class ExternalMediaSink:
         except (GalleryUnavailable, OSError, RuntimeError) as exc:
             raise ArtifactSinkUnavailable("external_media_unavailable") from exc
 
+    def publish_for_job(self, job_key: str, data: bytes, extension: str) -> str:
+        """Idempotent publication with a deterministic, opaque asset ID.
+
+        A repeated job can reuse its exact bytes, but cannot overwrite a
+        different artifact. The caller must still reconcile the gallery index.
+        """
+        import hashlib
+        import hmac
+        import re
+        if not isinstance(job_key, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", job_key):
+            raise ValueError("invalid_job_key")
+        if type(data) is not bytes or not data or len(data) > MAX_ARTIFACT_BYTES:
+            raise ValueError("invalid_artifact_bytes")
+        if extension not in _EXTENSIONS:
+            raise ValueError("invalid_artifact_extension")
+        asset_id = hashlib.sha256(("kaliv-media-job-v1:" + job_key).encode("utf-8")).hexdigest()[:32]
+        root = self._root()
+        destination = root / (asset_id + extension)
+        # A retry is only successful if the complete existing artifact matches.
+        # Never follow links and never replace an existing destination.
+        def matches() -> bool:
+            import stat
+            if destination.is_symlink():
+                return False
+            try:
+                fd = os.open(destination, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+            except FileNotFoundError:
+                return False
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_size != len(data):
+                    return False
+                digest = hashlib.sha256()
+                while True:
+                    chunk = os.read(fd, 1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                return hmac.compare_digest(digest.digest(), hashlib.sha256(data).digest())
+            finally:
+                os.close(fd)
+        if destination.exists() or destination.is_symlink():
+            if matches():
+                return asset_id
+            raise ArtifactSinkUnavailable("asset_job_conflict")
+        temporary = None
+        try:
+            self._root()
+            with tempfile.NamedTemporaryFile(mode="wb", prefix=".kaliv-", suffix=".tmp",
+                                             dir=root, delete=False) as handle:
+                temporary = Path(handle.name)
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            self._root()
+            try:
+                os.link(temporary, destination, follow_symlinks=False)
+            except FileExistsError:
+                if not matches():
+                    raise ArtifactSinkUnavailable("asset_job_conflict")
+            return asset_id
+        except OSError as exc:
+            raise ArtifactSinkUnavailable("external_media_write_failed") from exc
+        finally:
+            if temporary is not None:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
     def publish(self, data: bytes, extension: str) -> str:
         if type(data) is not bytes or not data or len(data) > MAX_ARTIFACT_BYTES:
             raise ValueError("invalid_artifact_bytes")
