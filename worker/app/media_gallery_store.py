@@ -32,8 +32,10 @@ class ExternalMediaSink:
         import stat
         root = self._root()
         candidates = []
+        import re
         for entry in root.iterdir():
-            if not entry.name.startswith(".kaliv-") or not entry.name.endswith(".tmp"):
+            # Only our tempfile naming convention, not arbitrary similarly named files.
+            if not re.fullmatch(r"\\.kaliv-[A-Za-z0-9_-]{8,}\\.tmp", entry.name):
                 continue
             if entry.is_symlink():
                 continue
