@@ -11,8 +11,10 @@ from .media_generation_contract import ArtifactSinkUnavailable
 from .media_gallery_catalog import GalleryUnavailable, _index
 
 
-def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink) -> list[dict]:
-    """Return deterministic diagnostic findings without modifying either store."""
+def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink, *, limit: int = 100) -> list[dict]:
+    """Return at most ``limit`` deterministic findings without mutating stores."""
+    if type(limit) is not int or not 1 <= limit <= 1000:
+        raise ValueError("invalid_reconciliation_limit")
     findings = []
     root = sink._root()
     index_path = root / "gallery-index.json"
@@ -23,7 +25,8 @@ def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink)
     with jobs._db() as db:
         rows = db.execute(
             "SELECT id, state, asset_id FROM image_jobs "
-            "WHERE state IN ('running','completed','failed') ORDER BY created,id"
+            "WHERE state IN ('running','completed','failed') ORDER BY created,id LIMIT ?"
+            , (limit,)
         ).fetchall()
     for row in rows:
         job_id, state, recorded = row["id"], row["state"], row["asset_id"]
