@@ -119,6 +119,13 @@ class ExternalMediaSinkTests(unittest.TestCase):
             self.sink.publish_and_register_for_job("receipt_1", b"image", ".png")
             self.assertTrue(self.sink.inspect_job_asset("receipt_1")["indexed"])
 
+    def test_inspect_job_asset_refuses_missing_file_referenced_by_index(self):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            asset = self.sink.publish_and_register_for_job("receipt_missing", b"image", ".png")
+            (self.media / (asset + ".png")).unlink()
+            with self.assertRaisesRegex(ArtifactSinkUnavailable, "job_asset_missing_but_indexed"):
+                self.sink.inspect_job_asset("receipt_missing")
+
     def test_inspect_job_asset_refuses_extension_conflict(self):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
             asset = self.sink.publish_for_job("receipt_2", b"image", ".png")
