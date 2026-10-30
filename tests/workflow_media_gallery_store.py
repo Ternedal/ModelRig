@@ -126,6 +126,17 @@ class ExternalMediaSinkTests(unittest.TestCase):
             with self.assertRaisesRegex(ArtifactSinkUnavailable, "job_asset_missing_but_indexed"):
                 self.sink.inspect_job_asset("receipt_missing")
 
+    def test_inspect_job_asset_refuses_mismatched_index_mime(self):
+        import json
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            self.sink.publish_and_register_for_job("receipt_mime", b"image", ".png")
+            index = self.media / "gallery-index.json"
+            entries = json.loads(index.read_text(encoding="utf-8"))
+            entries[0]["mime_type"] = "video/mp4"
+            index.write_text(json.dumps(entries), encoding="utf-8")
+            with self.assertRaises(ArtifactSinkUnavailable):
+                self.sink.inspect_job_asset("receipt_mime")
+
     def test_inspect_job_asset_refuses_extension_conflict(self):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
             asset = self.sink.publish_for_job("receipt_2", b"image", ".png")
