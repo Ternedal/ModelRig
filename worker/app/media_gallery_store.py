@@ -54,6 +54,8 @@ class ExternalMediaSink:
             found.append((extension, info.st_size))
         self._root()
         if not found:
+            if asset_id in {item["id"] for item in entries}:
+                raise ArtifactSinkUnavailable("job_asset_missing_but_indexed")
             return None
         if len(found) != 1:
             raise ArtifactSinkUnavailable("job_asset_extension_conflict")
