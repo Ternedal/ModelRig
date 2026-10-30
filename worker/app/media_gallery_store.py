@@ -27,6 +27,25 @@ class ExternalMediaSink:
         except (GalleryUnavailable, OSError, RuntimeError) as exc:
             raise ArtifactSinkUnavailable("external_media_unavailable") from exc
 
+    def inspect_temporary_files(self) -> list[str]:
+        """List potential abandoned writer files without deleting anything."""
+        import stat
+        root = self._root()
+        candidates = []
+        for entry in root.iterdir():
+            if not entry.name.startswith(".kaliv-") or not entry.name.endswith(".tmp"):
+                continue
+            if entry.is_symlink():
+                continue
+            try:
+                info = entry.lstat()
+            except OSError:
+                continue
+            if stat.S_ISREG(info.st_mode):
+                candidates.append(entry.name)
+        self._root()
+        return sorted(candidates)
+
     def publish_and_register_for_job(self, job_key: str, data: bytes, extension: str) -> str:
         """Publish then register, retrying safely after interrupted registration.
 
