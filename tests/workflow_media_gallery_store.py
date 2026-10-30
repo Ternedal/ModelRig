@@ -110,6 +110,22 @@ class ExternalMediaSinkTests(unittest.TestCase):
         self.assertEqual(files[0].stem, asset)
         self.assertEqual([item["id"] for item in items], [asset])
 
+    def test_inspect_job_asset_reports_unindexed_then_indexed(self):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            self.assertIsNone(self.sink.inspect_job_asset("receipt_1"))
+            asset = self.sink.publish_for_job("receipt_1", b"image", ".png")
+            receipt = self.sink.inspect_job_asset("receipt_1")
+            self.assertEqual(receipt, {"asset_id": asset, "extension": ".png", "size_bytes": 5, "indexed": False})
+            self.sink.publish_and_register_for_job("receipt_1", b"image", ".png")
+            self.assertTrue(self.sink.inspect_job_asset("receipt_1")["indexed"])
+
+    def test_inspect_job_asset_refuses_extension_conflict(self):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            asset = self.sink.publish_for_job("receipt_2", b"image", ".png")
+            (self.media / (asset + ".mp4")).write_bytes(b"video")
+            with self.assertRaisesRegex(ArtifactSinkUnavailable, "job_asset_extension_conflict"):
+                self.sink.inspect_job_asset("receipt_2")
+
     def test_job_asset_id_matches_publication_and_rejects_bad_key(self):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
             asset = self.sink.publish_for_job("job_42", b"payload", ".png")
