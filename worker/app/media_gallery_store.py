@@ -98,6 +98,36 @@ class ExternalMediaSink:
         self._root()
         return sorted(candidates)
 
+    def inspect_temporary_file_candidates(self, *, minimum_age_seconds: int = 3600) -> list[dict]:
+        """Read-only stale-temp candidates; never proof of orphan ownership.
+
+        Snapshot inode/device/size/mtime so a future operator workflow can
+        revalidate identity before any cleanup. No deletion is performed here.
+        """
+        import re
+        import stat
+        import time
+        if type(minimum_age_seconds) is not int or not 60 <= minimum_age_seconds <= 30 * 86400:
+            raise ValueError("invalid_minimum_age")
+        root = self._root()
+        now_ns = time.time_ns()
+        cutoff_ns = now_ns - minimum_age_seconds * 1_000_000_000
+        candidates = []
+        for entry in root.iterdir():
+            if not re.fullmatch(r"[.]kaliv-[A-Za-z0-9_-]{8,}[.]tmp", entry.name):
+                continue
+            try:
+                info = entry.lstat()
+            except (FileNotFoundError, OSError):
+                continue
+            if not stat.S_ISREG(info.st_mode) or info.st_mtime_ns > cutoff_ns:
+                continue
+            candidates.append({"name": entry.name, "device": info.st_dev,
+                               "inode": info.st_ino, "size_bytes": info.st_size,
+                               "mtime_ns": info.st_mtime_ns})
+        self._root()
+        return sorted(candidates, key=lambda item: item["name"])
+
     def inspect_temporary_files(self) -> list[str]:
         """List potential abandoned writer files without deleting anything."""
         import stat
