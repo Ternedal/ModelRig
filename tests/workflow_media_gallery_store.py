@@ -18,7 +18,7 @@ class ExternalMediaSinkTests(unittest.TestCase):
         self.sink = ExternalMediaSink(self.media, self.volume)
 
     def test_temporary_inspection_refuses_unmounted_volume(self):
-        temporary = self.media / ".kaliv-abcd.tmp"
+        temporary = self.media / ".kaliv-abcdefgh.tmp"
         temporary.write_bytes(b"unfinished")
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=False):
             with self.assertRaisesRegex(ArtifactSinkUnavailable, "external_media_unavailable"):
@@ -26,9 +26,11 @@ class ExternalMediaSinkTests(unittest.TestCase):
         self.assertEqual(temporary.read_bytes(), b"unfinished")
 
     def test_temporary_inspection_is_read_only(self):
-        temporary = self.media / ".kaliv-abcd.tmp"
+        temporary = self.media / ".kaliv-abcdefgh.tmp"
         temporary.write_bytes(b"unfinished")
         (self.media / "published.png").write_bytes(b"keep")
+        (self.media / ".kaliv-not-owned.tmp.backup").write_bytes(b"keep")
+        (self.media / ".kaliv-short.tmp").write_bytes(b"keep")
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
             self.assertEqual(self.sink.inspect_temporary_files(), [temporary.name])
         self.assertEqual(temporary.read_bytes(), b"unfinished")
