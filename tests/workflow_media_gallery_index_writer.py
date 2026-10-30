@@ -30,6 +30,7 @@ class IndexWriterTests(unittest.TestCase):
         self.assertEqual(items[1]["mime_type"], "video/mp4")
 
     def test_refuse_duplicate_without_corrupting_index(self):
+        (self.root / "first.png").write_bytes(b"12345")
         register_asset(self.root, self.volume, "first", ".png", 5)
         before = (self.root / "gallery-index.json").read_bytes()
         register_asset(self.root, self.volume, "first", ".png", 5)
