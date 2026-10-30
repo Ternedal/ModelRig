@@ -45,6 +45,12 @@ class ExternalMediaSink:
         asset_id = hashlib.sha256(("kaliv-media-job-v1:" + job_key).encode("utf-8")).hexdigest()[:32]
         root = self._root()
         destination = root / (asset_id + extension)
+        # A job key identifies one artifact, regardless of media type.
+        # Reject an existing sibling extension before treating a retry as new.
+        for other_extension in _EXTENSIONS - {extension}:
+            sibling = root / (asset_id + other_extension)
+            if sibling.exists() or sibling.is_symlink():
+                raise ArtifactSinkUnavailable("asset_job_conflict")
         # A retry is only successful if the complete existing artifact matches.
         # Never follow links and never replace an existing destination.
         def matches() -> bool:
