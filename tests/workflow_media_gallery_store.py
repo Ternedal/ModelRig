@@ -23,6 +23,25 @@ class ExternalMediaSinkTests(unittest.TestCase):
         self.assertEqual((self.media / (asset + ".png")).read_bytes(), b"png-bytes")
         self.assertEqual(list(self.media.glob(".kaliv-*")), [])
 
+    def test_job_publication_retries_same_asset(self):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            first = self.sink.publish_for_job("job_42", b"same-payload", ".png")
+            second = self.sink.publish_for_job("job_42", b"same-payload", ".png")
+        self.assertEqual(first, second)
+        self.assertEqual((self.media / (first + ".png")).read_bytes(), b"same-payload")
+        self.assertEqual(len(list(self.media.glob("*.png"))), 1)
+
+    def test_job_publication_refuses_conflicting_content(self):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            asset = self.sink.publish_for_job("job_42", b"original", ".png")
+            with self.assertRaisesRegex(ArtifactSinkUnavailable, "asset_job_conflict"):
+                self.sink.publish_for_job("job_42", b"changed!", ".png")
+        self.assertEqual((self.media / (asset + ".png")).read_bytes(), b"original")
+
+    def test_job_publication_rejects_unsafe_key(self):
+        with self.assertRaisesRegex(ValueError, "invalid_job_key"):
+            self.sink.publish_for_job("../escape", b"data", ".png")
+
     def test_existing_asset_is_never_overwritten(self):
         asset = "f" * 32
         existing = self.media / (asset + ".png")
