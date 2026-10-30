@@ -36,6 +36,20 @@ class ExternalMediaSinkTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in items], [asset])
         self.assertEqual(len(list(self.media.glob("*.png"))), 1)
 
+    def test_register_failure_preserves_published_asset_for_retry(self):
+        from app.media_gallery_catalog import GalleryUnavailable, list_gallery
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            with patch("app.media_gallery_index_writer.register_asset",
+                       side_effect=GalleryUnavailable("simulated_index_failure")):
+                with self.assertRaisesRegex(GalleryUnavailable, "simulated_index_failure"):
+                    self.sink.publish_and_register_for_job("recover_2", b"image", ".png")
+            files = list(self.media.glob("*.png"))
+            self.assertEqual(len(files), 1)
+            asset = self.sink.publish_and_register_for_job("recover_2", b"image", ".png")
+            items = list_gallery(self.media, verified_volume_root=self.volume)["items"]
+        self.assertEqual(files[0].stem, asset)
+        self.assertEqual([item["id"] for item in items], [asset])
+
     def test_job_publication_retries_same_asset(self):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
             first = self.sink.publish_for_job("job_42", b"same-payload", ".png")
