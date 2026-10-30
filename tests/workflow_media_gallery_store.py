@@ -23,6 +23,19 @@ class ExternalMediaSinkTests(unittest.TestCase):
         self.assertEqual((self.media / (asset + ".png")).read_bytes(), b"png-bytes")
         self.assertEqual(list(self.media.glob(".kaliv-*")), [])
 
+    def test_publish_and_register_recovers_after_interrupted_index_write(self):
+        from app.media_gallery_catalog import list_gallery
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            asset = self.sink.publish_for_job("recover_1", b"image", ".png")
+            self.assertFalse((self.media / "gallery-index.json").exists())
+            adopted = self.sink.publish_and_register_for_job("recover_1", b"image", ".png")
+            again = self.sink.publish_and_register_for_job("recover_1", b"image", ".png")
+            items = list_gallery(self.media, verified_volume_root=self.volume)["items"]
+        self.assertEqual(asset, adopted)
+        self.assertEqual(adopted, again)
+        self.assertEqual([item["id"] for item in items], [asset])
+        self.assertEqual(len(list(self.media.glob("*.png"))), 1)
+
     def test_job_publication_retries_same_asset(self):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
             first = self.sink.publish_for_job("job_42", b"same-payload", ".png")
