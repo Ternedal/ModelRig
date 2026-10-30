@@ -385,6 +385,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_kaliv_repository_authority_qualifier.py`
 - `tests/worker_kaliv_software_exact_green_qualifier.py`
 - `tests/worker_kaliv_voicerig_physical_qualifier.py`
+- `tests/worker_media_executor.py`
 - `tests/worker_media_generation_profiles.py`
 - `tests/worker_media_generation_runner.py`
 - `tests/worker_migrate.py`

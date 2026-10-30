@@ -25,11 +25,15 @@ class GenerationError(ValueError):
     """A request or artifact was refused. The message never contains a prompt."""
 
 
+class GenerationCancelled(GenerationError):
+    """The job's owner cancelled it while it was rendering; nothing is published."""
+
+
 class ArtifactSinkUnavailable(RuntimeError):
     """The sink cannot accept artifacts (for example the external volume is gone).
 
     This is a fatal safety event for an executor: stop, do not fall back to
-    another disk, and leave the job for recover_interrupted().
+    another disk, and leave the job for recovery (recover_gpu() at the next start).
     """
 
 

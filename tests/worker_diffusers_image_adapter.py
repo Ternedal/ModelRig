@@ -98,6 +98,14 @@ def fake_modules(calls, free_gib=11.0, allocator=None, hook_cache=None, workspac
             calls.append(("call", kwargs))
             if not workspaces:
                 workspaces.append(FakeTensor(allocator, 32 * 1024 * 1024))
+            callback = kwargs.get("callback_on_step_end")
+            if callback is not None:  # diffusers' loop: an interrupted pipeline skips the remaining steps
+                self._interrupt = False
+                for step in range(kwargs["num_inference_steps"]):
+                    if self._interrupt:
+                        continue
+                    calls.append(("step", step))
+                    callback(self, step, 1000 - step, {})
             return types.SimpleNamespace(images=[_Image()])
 
     class Generator:
@@ -617,6 +625,37 @@ with patch("app.diffusers_image_adapter.inspect_cuda_budget"), patch.dict(sys.mo
                          ("a lighthouse", 12, 832, 1216))
         self.assertIn(("seed", "cpu", 42), self.calls)
         self.assertIn(("empty_cache",), self.calls)
+
+    # --- G2 cooperative cancellation (#2296 6510332634) ------------------------------------------
+    def test_cancel_mid_render_interrupts_the_pipeline_and_discards_the_image(self):
+        from app.media_generation_contract import GenerationCancelled
+        polls = []
+
+        def should_cancel():
+            polls.append(1)
+            return len(polls) >= 4  # 1 pre-check + 3 completed steps, then the owner cancels
+
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget"), \
+                patch.dict(sys.modules, fake_modules(self.calls)):
+            adapter = self.adapter()
+            adapter.load()
+            with self.assertRaises(GenerationCancelled):
+                adapter.render(self.req(steps=12), should_cancel=should_cancel)
+            self.assertTrue(adapter.loaded, "the model stays resident for the next job")
+            adapter.close()
+        steps = [c[1] for c in self.calls if c[0] == "step"]
+        self.assertEqual(steps, [0, 1, 2], "the remaining nine steps were skipped")
+
+    def test_cancel_before_render_never_calls_the_pipeline(self):
+        from app.media_generation_contract import GenerationCancelled
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget"), \
+                patch.dict(sys.modules, fake_modules(self.calls)):
+            adapter = self.adapter()
+            adapter.load()
+            with self.assertRaises(GenerationCancelled):
+                adapter.render(self.req(), should_cancel=lambda: True)
+            adapter.close()
+        self.assertFalse([c for c in self.calls if c[0] == "call"])
 
     def test_image_to_image_is_not_rendered_by_this_slice(self):
         both = parse_profile(image_profile(tasks=["text_to_image", "image_to_image"]))

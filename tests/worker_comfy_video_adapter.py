@@ -18,6 +18,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -539,6 +540,20 @@ class AdapterTests(unittest.TestCase):
                                 env=dict(os.environ, PYTHONPATH=str(contract.parents[2] / "worker")))
         self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
         self.assertIn("(0 failures)", result.stdout)
+
+    # --- G2 cooperative cancellation (#2296 6510332634) ------------------------------------------
+    def test_should_cancel_interrupts_comfyui_and_runs_the_normal_cleanup(self):
+        from app.media_generation_contract import GenerationCancelled
+        adapter = self.adapter(fake={"FAKE_COMFY_RENDER_SECONDS": "5"})
+        adapter.load()
+        deadline = time.monotonic() + 0.5
+        started = time.monotonic()
+        with self.assertRaises(GenerationCancelled):
+            adapter.render_to(request(), io.BytesIO(), should_cancel=lambda: time.monotonic() >= deadline)
+        self.assertLess(time.monotonic() - started, 3, "interrupted, not waited out")
+        self.assertEqual(adapter.last_cleanup.get("failed"), [], "cleanup ran and touched nothing it cannot prove")
+        self.assertTrue(adapter.supervisor.running, "ComfyUI stays resident for the next job")
+        self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4", "and it still renders")
 
     def test_cleanup_never_masks_the_render_result_or_error(self):
         adapter = self.adapter(fake={"FAKE_COMFY_OUTPUT_MODE": "notmp4"})
