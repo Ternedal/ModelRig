@@ -41,6 +41,15 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(inspect_generation_consistency(self.jobs, self.sink)[0]["status"], "consistent")
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_legacy_completed_job_is_not_misclassified_as_missing_deterministic_asset(self, _mount):
+        job_id = self.submit_running()
+        asset = self.sink.publish(b"image", ".png")
+        self.assertTrue(self.jobs.finish(job_id, asset_id=asset))
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "completed_non_job_scoped_asset")
+        self.assertEqual(self.jobs.get(job_id, "owner")["asset_id"], asset)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_failed_job_with_indexed_file_is_flagged(self, _mount):
         job_id = self.submit_running()
         self.sink.publish_and_register_for_job(job_id, b"image", ".png")
