@@ -17,6 +17,15 @@ class ExternalMediaSinkTests(unittest.TestCase):
         self.media.mkdir()
         self.sink = ExternalMediaSink(self.media, self.volume)
 
+    def test_temporary_inspection_is_read_only(self):
+        temporary = self.media / ".kaliv-abcd.tmp"
+        temporary.write_bytes(b"unfinished")
+        (self.media / "published.png").write_bytes(b"keep")
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            self.assertEqual(self.sink.inspect_temporary_files(), [temporary.name])
+        self.assertEqual(temporary.read_bytes(), b"unfinished")
+        self.assertTrue((self.media / "published.png").exists())
+
     def test_publish_only_to_verified_volume(self):
         with patch("app.media_gallery_catalog.os.path.ismount", side_effect=lambda p: p == self.volume):
             asset = self.sink.publish(b"png-bytes", ".png")
