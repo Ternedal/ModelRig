@@ -83,3 +83,21 @@ def test_unknown_is_not_pass(authority):
 def test_invalid_source_rejected(override):
     with pytest.raises(ValueError):
         sample(**override)
+
+
+def test_claimed_pass_is_not_evidence(authority):
+    grants, _, receipt = authority
+    store = HandoffProjection(sqlite3.connect(":memory:"))
+    claimed = sample(implemented="PASS", tested="PASS", handed_off="PASS", released="PASS")
+    store.ingest(claimed, receipt=receipt(), grants=grants)
+    assert all(store.list_records()[0][field] == "UNKNOWN" for field in
+               ("implemented", "tested", "handed_off", "released"))
+
+
+def test_old_revision_cannot_replace_new_revision(authority):
+    grants, _, receipt = authority
+    store = HandoffProjection(sqlite3.connect(":memory:"))
+    assert store.ingest(sample(), receipt=receipt(), grants=grants)
+    assert store.ingest(sample(revision="rev-2"), receipt=receipt("rev-2"), grants=grants)
+    assert not store.ingest(sample(), receipt=receipt(), grants=grants)
+    assert store.list_records()[0]["revision"] == "rev-2"
