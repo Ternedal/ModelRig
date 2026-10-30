@@ -45,10 +45,15 @@ def register_asset(media_root: str | Path, verified_volume_root: str | Path,
             ]
         else:
             entries = []
+        existing = next((item for item in entries if item["id"] == asset_id), None)
+        if existing is not None:
+            kind = "video" if extension == ".mp4" else "image"
+            mime = "video/mp4" if extension == ".mp4" else "image/png"
+            if (existing["kind"], existing["mime_type"], existing["size_bytes"]) == (kind, mime, size_bytes):
+                return  # Idempotent retry; preserve the original timestamp.
+            raise GalleryUnavailable("duplicate_index_id")
         if len(entries) >= _MAX_INDEX_ITEMS:
             raise GalleryUnavailable("index_item_limit")
-        if any(item["id"] == asset_id for item in entries):
-            raise GalleryUnavailable("duplicate_index_id")
         entries.append({
             "id": asset_id, "kind": "video" if extension == ".mp4" else "image",
             "mime_type": "video/mp4" if extension == ".mp4" else "image/png",
