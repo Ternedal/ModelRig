@@ -27,6 +27,17 @@ class ExternalMediaSink:
         except (GalleryUnavailable, OSError, RuntimeError) as exc:
             raise ArtifactSinkUnavailable("external_media_unavailable") from exc
 
+    def publish_and_register_for_job(self, job_key: str, data: bytes, extension: str) -> str:
+        """Publish then register, retrying safely after interrupted registration.
+
+        The caller must retain the original bytes for retries. A crash after
+        publication leaves an unindexed asset that this method can adopt.
+        """
+        from .media_gallery_index_writer import register_asset
+        asset_id = self.publish_for_job(job_key, data, extension)
+        register_asset(self.media_root, self.volume_root, asset_id, extension, len(data))
+        return asset_id
+
     def publish_for_job(self, job_key: str, data: bytes, extension: str) -> str:
         """Idempotent publication with a deterministic, opaque asset ID.
 
