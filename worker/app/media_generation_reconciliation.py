@@ -31,6 +31,8 @@ def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink)
             continue
         if state == "completed":
             if recorded != expected:
+                # Legacy random-ID publication needs its own indexed-file check;
+                # deterministic receipt absence cannot establish a missing file.
                 status = "completed_non_job_scoped_asset"
             elif receipt is None:
                 status = "completed_without_job_artifact"
