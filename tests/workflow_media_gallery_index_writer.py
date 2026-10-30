@@ -41,6 +41,13 @@ class IndexWriterTests(unittest.TestCase):
             register_asset(self.root, self.volume, "first", ".png", 6)
         self.assertEqual((self.root / "gallery-index.json").read_bytes(), before)
 
+    def test_refuse_traversal_asset_id_before_filesystem_access(self):
+        with self.assertRaisesRegex(ValueError, "invalid_asset_id"):
+            register_asset(self.root, self.volume, "../outside", ".png", 5)
+        with self.assertRaisesRegex(ValueError, "invalid_asset_id"):
+            register_asset(self.root, self.volume, "", ".png", 5)
+        self.assertFalse((self.root / "gallery-index.json").exists())
+
     def test_refuse_missing_or_wrong_size_asset(self):
         with self.assertRaisesRegex(GalleryUnavailable, "asset_unavailable"):
             register_asset(self.root, self.volume, "missing", ".png", 5)
