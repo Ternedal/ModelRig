@@ -36,6 +36,24 @@ class ExternalMediaSinkTests(unittest.TestCase):
         self.assertEqual(temporary.read_bytes(), b"unfinished")
         self.assertTrue((self.media / "published.png").exists())
 
+    def test_unindexed_inventory_detects_failed_registration_without_mutation(self):
+        from app.media_gallery_catalog import GalleryUnavailable
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            with patch("app.media_gallery_index_writer.register_asset", side_effect=GalleryUnavailable("index_down")):
+                with self.assertRaises(GalleryUnavailable):
+                    self.sink.publish(b"image", ".png")
+            orphan = self.sink.inspect_unindexed_assets()
+            self.assertEqual(len(orphan), 1)
+            self.assertTrue((self.media / orphan[0]).exists())
+            self.assertFalse((self.media / "gallery-index.json").exists())
+
+    def test_unindexed_inventory_ignores_indexed_assets_and_unrelated_files(self):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            asset = self.sink.publish(b"image", ".png")
+            (self.media / "unrelated.png").write_bytes(b"other")
+            self.assertEqual(self.sink.inspect_unindexed_assets(), [])
+        self.assertTrue((self.media / (asset + ".png")).exists())
+
     def test_generic_publish_propagates_index_failure(self):
         from app.media_gallery_catalog import GalleryUnavailable
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
