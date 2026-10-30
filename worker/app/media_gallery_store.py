@@ -169,6 +169,10 @@ class ExternalMediaSink:
                 # name is a cleanup issue, not a failed publication.
                 pass
             temp_name = None
+            # The generic ArtifactSink.publish contract is used by G2 today.
+            # Do not report success until the asset is visible in the gallery.
+            from .media_gallery_index_writer import register_asset
+            register_asset(self.media_root, self.volume_root, asset_id, extension, len(data))
             return asset_id
         except OSError as exc:
             raise ArtifactSinkUnavailable("external_media_write_failed") from exc
