@@ -20,6 +20,9 @@ def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink)
         ).fetchall()
     for row in rows:
         job_id, state, recorded = row["id"], row["state"], row["asset_id"]
+        # Legacy generic publication uses a random asset ID. Never label
+        # those completed jobs as missing solely from a deterministic lookup.
+        expected = sink.job_asset_id(job_id)
         try:
             receipt = sink.inspect_job_asset(job_id)
         except ArtifactSinkUnavailable as exc:
@@ -27,7 +30,9 @@ def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink)
                              "status": "media_conflict", "reason": str(exc)})
             continue
         if state == "completed":
-            if receipt is None:
+            if recorded != expected:
+                status = "completed_non_job_scoped_asset"
+            elif receipt is None:
                 status = "completed_without_job_artifact"
             elif recorded != receipt["asset_id"]:
                 status = "completed_asset_mismatch"
