@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+
+from .github_connector_contract import GitHubConnectorGrantStore, GitHubSourceReceipt
 from dataclasses import dataclass
 
 _REPO = re.compile(r"^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$")
@@ -66,10 +68,17 @@ class HandoffProjection:
             payload TEXT NOT NULL,
             PRIMARY KEY (repository, source_type, source_id, revision))""")
 
-    def ingest(self, handoff: Handoff, *, authorized: bool = False) -> bool:
+    def ingest(self, handoff: Handoff, *, receipt: GitHubSourceReceipt, grants: GitHubConnectorGrantStore) -> bool:
         """Return True on a new revision; fail closed without explicit authority."""
-        if authorized is not True:
-            raise PermissionError("verified GitHub grant and receipt required")
+        if not isinstance(receipt, GitHubSourceReceipt) or not isinstance(grants, GitHubConnectorGrantStore):
+            raise PermissionError("verified GitHub receipt and grant store required")
+        grant = grants.authorize(receipt.grant_id, repository=handoff.repository, operation=handoff.source_type)
+        if (receipt.scope_sha256 != grant.scope.digest
+                or receipt.repository != handoff.repository
+                or receipt.object_type != handoff.source_type
+                or receipt.object_id != str(handoff.source_id)
+                or receipt.revision != handoff.revision):
+            raise PermissionError("source receipt does not match handoff identity")
         from dataclasses import asdict
         payload = json.dumps(asdict(handoff), sort_keys=True)
         key = (handoff.repository, handoff.source_type, handoff.source_id)
