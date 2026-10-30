@@ -536,3 +536,10 @@ one-liner) and **ROADMAP.md** for where this is going (closed-ended at V15).
 
 ## License
 MIT — see LICENSE.
+
+## Cross-repository documentation (2026-10-23)
+
+- [Kaliv ecosystem and KalivNexus ownership map](docs/KALIV_ECOSYSTEM.md)
+- [Documentation verification matrix](docs/DOCUMENTATION_STATUS_2026-10-23.md)
+
+These documents distinguish proposed integrations from implemented, tested and released functionality. They do not supersede this repository's operational instructions or evidence gates.
