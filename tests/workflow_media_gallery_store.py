@@ -36,6 +36,13 @@ class ExternalMediaSinkTests(unittest.TestCase):
         self.assertEqual(temporary.read_bytes(), b"unfinished")
         self.assertTrue((self.media / "published.png").exists())
 
+    def test_generic_publish_registers_gallery_entry(self):
+        from app.media_gallery_catalog import list_gallery
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            asset = self.sink.publish(b"image", ".png")
+            items = list_gallery(self.media, verified_volume_root=self.volume)["items"]
+        self.assertEqual([item["id"] for item in items], [asset])
+
     def test_publish_only_to_verified_volume(self):
         with patch("app.media_gallery_catalog.os.path.ismount", side_effect=lambda p: p == self.volume):
             asset = self.sink.publish(b"png-bytes", ".png")
