@@ -34,6 +34,37 @@ class ExternalMediaSink:
             raise ValueError("invalid_job_key")
         return hashlib.sha256(("kaliv-media-job-v1:" + job_key).encode("utf-8")).hexdigest()[:32]
 
+    def inspect_job_asset(self, job_key: str) -> dict | None:
+        """Read-only evidence of a durable job artifact, not job completion."""
+        import stat
+        from .media_gallery_catalog import _index
+        root = self._root()
+        asset_id = self.job_asset_id(job_key)
+        index_path = root / "gallery-index.json"
+        entries = _index(root) if index_path.exists() or index_path.is_symlink() else []
+        found = []
+        for extension in sorted(_EXTENSIONS):
+            path = root / (asset_id + extension)
+            try:
+                info = path.lstat()
+            except FileNotFoundError:
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                raise ArtifactSinkUnavailable("job_asset_not_regular")
+            found.append((extension, info.st_size))
+        self._root()
+        if not found:
+            return None
+        if len(found) != 1:
+            raise ArtifactSinkUnavailable("job_asset_extension_conflict")
+        extension, size = found[0]
+        entry = next((item for item in entries if item["id"] == asset_id), None)
+        if entry is not None:
+            expected = "video" if extension == ".mp4" else "image"
+            if entry["kind"] != expected or entry["size_bytes"] != size:
+                raise ArtifactSinkUnavailable("job_asset_index_conflict")
+        return {"asset_id": asset_id, "extension": extension, "size_bytes": size, "indexed": entry is not None}
+
     def inspect_unindexed_assets(self) -> list[str]:
         """Read-only inventory of published files absent from the gallery index.
 
