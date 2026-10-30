@@ -48,15 +48,16 @@ import secrets
 import stat
 import time
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Callable
 
 from .comfy_supervisor import ComfyBusy, ComfySupervisor, ComfySupervisorError
 from .comfy_workflow_template import MAX_TEMPLATE_BYTES, WorkflowTemplate, load_template
-from .media_generation_contract import GenerationError, GenerationRequest, RenderedArtifact
+from .media_generation_contract import GenerationCancelled, GenerationError, GenerationRequest, RenderedArtifact
 from .media_generation_profiles import ModelProfile, validate_request
 
 MIME = "video/mp4"
 COPY_CHUNK = 1024 * 1024
+DRAIN_SECONDS = 30  # how long an interrupted job may take to leave ComfyUI's queue
 _log = logging.getLogger("kaliv.media.comfy")
 
 
@@ -122,7 +123,10 @@ class ComfyVideoAdapter:
         raise GenerationError("video is written to a staged sink file; use render_to()")
 
     # --- one job ------------------------------------------------------------
-    def render_to(self, request: GenerationRequest, sink_file: BinaryIO) -> str:
+    def render_to(self, request: GenerationRequest, sink_file: BinaryIO, *,
+                  should_cancel: Callable[[], bool] | None = None) -> str:
+        """Render into sink_file. should_cancel is polled with the history; True interrupts
+        ComfyUI and raises GenerationCancelled (the normal cleanup still runs)."""
         if self._template is None:
             raise GenerationError("adapter not loaded")
         request = validate_request(self.profile, request)
@@ -132,16 +136,17 @@ class ComfyVideoAdapter:
             # One job per ComfyUI, from admission to cleanup (#2316 review 5700997784):
             # a concurrent second call is refused here and never submitted.
             with self.supervisor.job_slot():
-                return self._render_one(request, sink_file)
+                return self._render_one(request, sink_file, should_cancel)
         except ComfyBusy:
             raise GenerationError("ComfyUI is busy with another job: refused, not queued") from None
 
-    def _render_one(self, request: GenerationRequest, sink_file: BinaryIO) -> str:
+    def _render_one(self, request: GenerationRequest, sink_file: BinaryIO,
+                    should_cancel: Callable[[], bool] | None = None) -> str:
         self.supervisor.require_media_volume()  # ArtifactSinkUnavailable propagates: fatal
         before = self._entry_names()  # snapshot before anything is submitted
         owned: list[tuple[str, int, int]] = []  # (name, st_dev, st_ino) attested by THIS prompt's history
         try:
-            return self._render_and_hand_over(request, sink_file, before, owned)
+            return self._render_and_hand_over(request, sink_file, before, owned, should_cancel)
         finally:
             try:
                 self._remove_job_outputs(before, owned)
@@ -149,13 +154,13 @@ class ComfyVideoAdapter:
                 _log.warning("comfy cleanup raised %s; outputs left in place", type(exc).__name__)
 
     def _render_and_hand_over(self, request: GenerationRequest, sink_file: BinaryIO, before: set[str],
-                              owned: list) -> str:
+                              owned: list, should_cancel: Callable[[], bool] | None = None) -> str:
         try:
             self.supervisor.check_budget()
             if not self.supervisor.queue_is_empty():
                 raise GenerationError("ComfyUI queue is not empty: refusing to share it")
             prompt_id = self.supervisor.submit(self._template.bind(request, fps=self.options.fps))
-            outputs = self._wait(prompt_id)
+            outputs = self._wait(prompt_id, should_cancel)
         except ComfySupervisorError as exc:
             raise GenerationError("ComfyUI unavailable") from exc
         owned.extend(self._attested_outputs(outputs, before))  # recorded before any validation can fail
@@ -239,7 +244,7 @@ class ComfyVideoAdapter:
             _log.warning("comfy cleanup kept files it cannot prove are this job's: replaced=%s untracked=%s",
                          report["kept_replaced"], report["untracked"])
 
-    def _wait(self, prompt_id: str) -> dict:
+    def _wait(self, prompt_id: str, should_cancel: Callable[[], bool] | None = None) -> dict:
         deadline = time.monotonic() + self.options.max_render_seconds
         while True:
             record = self.supervisor.history(prompt_id)
@@ -254,13 +259,30 @@ class ComfyVideoAdapter:
                     if not isinstance(outputs, dict):
                         raise GenerationError("ComfyUI history has no outputs")
                     return outputs
+            if should_cancel is not None and should_cancel():
+                self._interrupt_and_drain()
+                raise GenerationCancelled("cancelled while rendering")
             if time.monotonic() >= deadline:
-                try:
-                    self.supervisor.interrupt()
-                except ComfySupervisorError:
-                    pass  # stop() interrupts again and terminates if needed
+                self._interrupt_and_drain()
                 raise GenerationError("render exceeded the profile deadline")
             time.sleep(self.poll_s)
+
+    def _interrupt_and_drain(self) -> None:
+        """Interrupt, then wait (bounded) until ComfyUI's queue is empty, so the next job on this
+        resident ComfyUI is not refused as "queue not empty" while the interrupt is still landing."""
+        try:
+            self.supervisor.interrupt()
+        except ComfySupervisorError:
+            return  # stop() interrupts again and terminates if needed
+        until = time.monotonic() + DRAIN_SECONDS
+        while time.monotonic() < until:
+            try:
+                if self.supervisor.queue_is_empty():
+                    return
+            except ComfySupervisorError:
+                return
+            time.sleep(self.poll_s)
+        _log.warning("comfy queue still busy %ss after an interrupt", DRAIN_SECONDS)
 
     def _delete_if_same(self, name: str, dev: int, ino: int, dir_fd: int | None) -> str:
         """Delete `name` only if it is still the file with (dev, ino); never delete anything else.

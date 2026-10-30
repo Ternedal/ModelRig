@@ -51,11 +51,11 @@ import io
 import os
 import traceback
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Callable, Mapping
 
 from .gpu_lease import GpuLease, acquire_gpu_lease, device_uuid_map, parse_cuda_device
 from .image_gpu_admission import inspect_cuda_budget
-from .media_generation_contract import GenerationError, GenerationRequest, RenderedArtifact
+from .media_generation_contract import GenerationCancelled, GenerationError, GenerationRequest, RenderedArtifact
 from .media_generation_profiles import DIFFUSERS_PIPELINES, ModelProfile, validate_request
 
 
@@ -217,12 +217,17 @@ class DiffusersImageAdapter:
             f"model load failed ({failure}) and GPU memory could not be proven free; "
             "the GPU lease is kept until this process exits")
 
-    def render(self, request: GenerationRequest) -> RenderedArtifact:
+    def render(self, request: GenerationRequest, *,
+               should_cancel: Callable[[], bool] | None = None) -> RenderedArtifact:
+        """Render one PNG. should_cancel is polled after each denoising step; True sets the
+        pipeline's interrupt flag, the partial image is discarded and GenerationCancelled is raised."""
         if self._pipeline is None:
             raise RuntimeError("adapter is not loaded")
         request = validate_request(self.profile, request)
         if request.task != "text_to_image":
             raise GenerationError("this adapter renders text_to_image only")
+        if should_cancel is not None and should_cancel():
+            raise GenerationCancelled("cancelled before rendering")
         kwargs = {
             "prompt": request.prompt,
             "num_inference_steps": request.steps,
@@ -232,7 +237,17 @@ class DiffusersImageAdapter:
         if request.seed is not None:
             import torch
             kwargs["generator"] = torch.Generator(device="cpu").manual_seed(request.seed)
+        cancelled = []
+        if should_cancel is not None:
+            def on_step_end(pipeline, step, timestep, callback_kwargs):
+                if not cancelled and should_cancel():
+                    cancelled.append(step)
+                    pipeline._interrupt = True  # diffusers skips the remaining steps
+                return callback_kwargs
+            kwargs["callback_on_step_end"] = on_step_end
         image = self._pipeline(**kwargs).images[0]
+        if cancelled:
+            raise GenerationCancelled("cancelled while rendering")
         output = io.BytesIO()
         image.save(output, format="PNG")
         return RenderedArtifact(output.getvalue(), "image/png")

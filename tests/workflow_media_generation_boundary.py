@@ -26,7 +26,7 @@ APP = ROOT / "worker" / "app"
 SLICE = (
     "media_generation_contract", "media_generation_profiles", "gpu_lease", "image_gpu_admission",
     "image_job_store", "media_generation_runner", "diffusers_image_adapter", "comfy_supervisor",
-    "comfy_workflow_template", "comfy_video_adapter", "comfy_resident_launcher",
+    "comfy_workflow_template", "comfy_video_adapter", "comfy_resident_launcher", "media_executor",
 )
 # The ComfyUI supervisor is the one module that must start a process and talk
 # HTTP. It gets exactly those two, and only in the checked shape below.
