@@ -24,6 +24,22 @@ def register_asset(media_root: str | Path, verified_volume_root: str | Path,
     if type(size_bytes) is not int or size_bytes <= 0:
         raise ValueError("invalid_size")
     root = _root(media_root, verified_volume_root=verified_volume_root)
+    # A catalog row must never point to an absent or differently sized asset.
+    # lstat refuses symlinks; the asset is opened without following them.
+    import stat
+    asset_path = root / (asset_id + extension)
+    if asset_path.is_symlink():
+        raise GalleryUnavailable("asset_symlink_refused")
+    try:
+        fd = os.open(asset_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_size != size_bytes:
+                raise GalleryUnavailable("asset_size_mismatch")
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise GalleryUnavailable("asset_unavailable") from exc
     lock = root / ".gallery-index.lock"
     flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0)
     try:
