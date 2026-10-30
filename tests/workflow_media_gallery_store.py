@@ -126,6 +126,25 @@ class ExternalMediaSinkTests(unittest.TestCase):
             with self.assertRaisesRegex(ArtifactSinkUnavailable, "job_asset_missing_but_indexed"):
                 self.sink.inspect_job_asset("receipt_missing")
 
+    def test_inspect_job_asset_refuses_corrupt_index(self):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            self.sink.publish_for_job("corrupt_receipt", b"image", ".png")
+            (self.media / "gallery-index.json").write_text("{invalid", encoding="utf-8")
+            with self.assertRaisesRegex(ArtifactSinkUnavailable, "job_asset_index_unavailable"):
+                self.sink.inspect_job_asset("corrupt_receipt")
+
+    def test_inspect_job_asset_refuses_symlink_candidate(self):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            target = self.media / "unrelated.png"
+            target.write_bytes(b"image")
+            candidate = self.media / (self.sink.job_asset_id("linked_receipt") + ".png")
+            try:
+                candidate.symlink_to(target)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlink creation not supported")
+            with self.assertRaisesRegex(ArtifactSinkUnavailable, "job_asset_not_regular"):
+                self.sink.inspect_job_asset("linked_receipt")
+
     def test_inspect_job_asset_refuses_mismatched_index_mime(self):
         import json
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
