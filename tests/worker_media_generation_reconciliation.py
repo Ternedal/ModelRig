@@ -58,6 +58,26 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(self.jobs.get(job_id, "owner")["asset_id"], asset)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_completed_job_with_missing_artifact_is_flagged(self, _mount):
+        job_id = self.submit_running()
+        asset = self.sink.publish_and_register_for_job(job_id, b"image", ".png")
+        self.assertTrue(self.jobs.finish(job_id, asset_id=asset))
+        (self.sink.media_root / (asset + ".png")).unlink()
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "media_conflict")
+        self.assertEqual(report[0]["reason"], "job_asset_missing_but_indexed")
+        self.assertEqual(self.jobs.get(job_id, "owner")["state"], "completed")
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_completed_job_with_unindexed_artifact_is_flagged(self, _mount):
+        job_id = self.submit_running()
+        asset = self.sink.publish_for_job(job_id, b"image", ".png")
+        self.assertTrue(self.jobs.finish(job_id, asset_id=asset))
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "completed_not_indexed")
+        self.assertEqual(self.jobs.get(job_id, "owner")["state"], "completed")
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_failed_job_with_indexed_file_is_flagged(self, _mount):
         job_id = self.submit_running()
         self.sink.publish_and_register_for_job(job_id, b"image", ".png")
