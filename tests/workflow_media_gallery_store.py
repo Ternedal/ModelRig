@@ -47,6 +47,14 @@ class ExternalMediaSinkTests(unittest.TestCase):
             self.assertTrue((self.media / orphan[0]).exists())
             self.assertFalse((self.media / "gallery-index.json").exists())
 
+    def test_unindexed_inventory_detects_same_id_with_wrong_extension(self):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            asset = self.sink.publish(b"image", ".png")
+            other = self.media / (asset + ".mp4")
+            other.write_bytes(b"unexpected")
+            self.assertEqual(self.sink.inspect_unindexed_assets(), [other.name])
+        self.assertEqual(other.read_bytes(), b"unexpected")
+
     def test_unindexed_inventory_ignores_indexed_assets_and_unrelated_files(self):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
             asset = self.sink.publish(b"image", ".png")
