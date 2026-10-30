@@ -30,8 +30,11 @@ class IndexWriterTests(unittest.TestCase):
     def test_refuse_duplicate_without_corrupting_index(self):
         register_asset(self.root, self.volume, "first", ".png", 5)
         before = (self.root / "gallery-index.json").read_bytes()
-        with self.assertRaises(GalleryUnavailable):
-            register_asset(self.root, self.volume, "first", ".png", 5)
+        register_asset(self.root, self.volume, "first", ".png", 5)
+        self.assertEqual((self.root / "gallery-index.json").read_bytes(), before)
+        for extension, size in ((".png", 6), (".mp4", 5)):
+            with self.assertRaisesRegex(GalleryUnavailable, "duplicate_index_id"):
+                register_asset(self.root, self.volume, "first", extension, size)
         self.assertEqual((self.root / "gallery-index.json").read_bytes(), before)
 
     def test_refuse_active_lock(self):
