@@ -30,7 +30,15 @@ class ReconciliationTests(unittest.TestCase):
         job_id = self.submit_running()
         self.sink.publish_for_job(job_id, b"image", ".png")
         report = inspect_generation_consistency(self.jobs, self.sink)
-        self.assertEqual(report[0]["status"], "interrupted_with_unindexed_artifact")
+        self.assertEqual(report[0]["status"], "running_with_unindexed_artifact")
+        self.assertEqual(self.jobs.get(job_id, "owner")["state"], "running")
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_running_with_indexed_file_is_not_mislabeled_failed(self, _mount):
+        job_id = self.submit_running()
+        self.sink.publish_and_register_for_job(job_id, b"image", ".png")
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "running_with_indexed_artifact")
         self.assertEqual(self.jobs.get(job_id, "owner")["state"], "running")
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
@@ -55,7 +63,7 @@ class ReconciliationTests(unittest.TestCase):
         self.sink.publish_and_register_for_job(job_id, b"image", ".png")
         self.assertTrue(self.jobs.finish(job_id, error="interrupted"))
         report = inspect_generation_consistency(self.jobs, self.sink)
-        self.assertEqual(report[0]["status"], "interrupted_with_indexed_artifact")
+        self.assertEqual(report[0]["status"], "failed_with_indexed_artifact")
         self.assertEqual(self.jobs.get(job_id, "owner")["state"], "failed")
 
 
