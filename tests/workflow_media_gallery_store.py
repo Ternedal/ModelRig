@@ -110,6 +110,13 @@ class ExternalMediaSinkTests(unittest.TestCase):
         self.assertEqual(files[0].stem, asset)
         self.assertEqual([item["id"] for item in items], [asset])
 
+    def test_job_asset_id_matches_publication_and_rejects_bad_key(self):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            asset = self.sink.publish_for_job("job_42", b"payload", ".png")
+        self.assertEqual(self.sink.job_asset_id("job_42"), asset)
+        with self.assertRaises(ValueError):
+            self.sink.job_asset_id("../escape")
+
     def test_job_publication_retries_same_asset(self):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
             first = self.sink.publish_for_job("job_42", b"same-payload", ".png")
