@@ -102,6 +102,22 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(self.jobs.get(job_id, "owner")["state"], "completed")
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_crash_after_publish_before_completion_is_reported_without_mutation(self, _mount):
+        """Simulate a process dying after durable publication, before DB commit."""
+        job_id = self.submit_running()
+        asset = self.sink.publish_and_register_for_job(job_id, b"image", ".png")
+        before = self.jobs.get(job_id, "owner")
+        self.assertEqual(before["state"], "running")
+        self.assertIsNone(before["asset_id"])
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "running_with_indexed_artifact")
+        self.assertEqual(report[0]["asset_id"], asset)
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
+        self.assertEqual((self.sink.media_root / (asset + ".png")).read_bytes(), b"image")
+        # A second inspection is idempotent; no false completion or cleanup.
+        self.assertEqual(inspect_generation_consistency(self.jobs, self.sink), report)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_failed_job_with_indexed_file_is_flagged(self, _mount):
         job_id = self.submit_running()
         self.sink.publish_and_register_for_job(job_id, b"image", ".png")
