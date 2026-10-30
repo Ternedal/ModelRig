@@ -14,10 +14,11 @@ from __future__ import annotations
 import os
 import secrets
 import time
+import uuid
 from typing import Callable, Mapping
 
 from app.diffusers_image_adapter import GpuResourcesRetained
-from app.image_job_store import ImageJobStore
+from app.image_job_store import _PROFILE_ID, ImageJobError, ImageJobStore, _encode_params
 from app.media_generation_contract import (ArtifactSink, ArtifactSinkUnavailable, GenerationError,
                                            GenerationRequest, RenderedArtifact, StagedFileArtifactSink)
 from app.media_generation_profiles import ModelProfile, validate_request
@@ -69,6 +70,35 @@ class GenerationJobStore(ImageJobStore):
                 db.execute("ALTER TABLE image_jobs ADD COLUMN claimed_by TEXT")
             if "cancel_requested" not in columns:
                 db.execute("ALTER TABLE image_jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")
+
+    ACTIVE_STATES = ("queued", "running", "publishing")
+
+    def submit(self, owner: str, prompt: str, *, profile_id: str, params: dict | None = None,
+               max_queued: int = 16, max_owner_active: int = 3) -> dict:
+        """As ImageJobStore.submit, but a job that is publishing still counts as active (#2296 6512440682 P2)."""
+        if not isinstance(owner, str) or not owner.strip() or len(owner) > 256 or (
+            not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 4000
+        ):
+            raise ImageJobError("invalid owner or prompt")
+        if not isinstance(profile_id, str) or not _PROFILE_ID.fullmatch(profile_id):
+            raise ImageJobError("invalid profile id")
+        encoded_params = _encode_params(params)
+        if (type(max_queued) is not int or type(max_owner_active) is not int
+                or max_queued < 1 or max_owner_active < 1):
+            raise ImageJobError("invalid queue limits")
+        job_id, now = uuid.uuid4().hex, time.time()
+        marks = ",".join("?" * len(self.ACTIVE_STATES))
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute("SELECT count(*) FROM image_jobs WHERE state='queued'").fetchone()[0] >= max_queued:
+                raise ImageJobError("image job queue full")
+            if db.execute(f"SELECT count(*) FROM image_jobs WHERE owner=? AND state IN ({marks})",
+                          (owner, *self.ACTIVE_STATES)).fetchone()[0] >= max_owner_active:
+                raise ImageJobError("owner image job limit reached")
+            db.execute("INSERT INTO image_jobs (id,owner,prompt,profile_id,params,state,created,updated) "
+                       "VALUES (?,?,?,?,?,?,?,?)",
+                       (job_id, owner, prompt, profile_id, encoded_params, "queued", now, now))
+        return {"job_id": job_id, "state": "queued"}
 
     def claim_for(self, profile_ids, claimed_by: str) -> dict | None:
         ids = sorted(profile_ids)
@@ -163,6 +193,7 @@ class MediaExecutor:
         self.lease_dir = lease_dir
         self.instance = f"{executor_id}:{secrets.token_hex(8)}"  # claim generation: this process only
         self._lifetime_fd: int | None = None
+        self._retained: list = []  # adapters whose unload failed: kept alive (and their lease held) until exit
         self.adapter_factory, self.image_sink, self.video_sink = adapter_factory, image_sink, video_sink
         self.idle_unload_s, self.cancel_poll_s, self.clock = idle_unload_s, cancel_poll_s, clock
         self.adapter = None
@@ -178,10 +209,19 @@ class MediaExecutor:
         return recovered
 
     def _unload(self) -> None:
+        """Any unload failure -- False OR an exception -- is fatal (#2296 6512440682 P1).
+
+        The adapter is kept referenced, so nothing (GC, a finaliser) releases its lease before the
+        process exits; the executor then exits 70 and never loads another model on top of it.
+        """
         adapter, self.adapter = self.adapter, None
-        ok = adapter.close()
+        try:
+            ok = adapter.close() is True
+        except Exception:
+            ok = False
         self.events.append(f"closed:{adapter.profile_id}:{ok}")
         if not ok:
+            self._retained.append(adapter)
             raise GpuResourcesRetained("GPU memory not proven free after unload; the executor must exit")
 
     def _adapter_for(self, profile: ModelProfile):
@@ -221,6 +261,8 @@ class MediaExecutor:
     def step(self) -> str:
         if self._lifetime_fd is None:
             raise ExecutorConfigError("start() first: no claims without the executor lock")
+        if self._retained:
+            raise GpuResourcesRetained("an earlier unload failed; this executor must exit")
         job = self.store.claim_for(self.profiles, self.instance)
         if job is None:
             self.maybe_unload_idle()

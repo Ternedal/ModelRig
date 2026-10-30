@@ -50,6 +50,7 @@ class FakeImageAdapter:
 
     def __init__(self, profile, *, lease_dir, gpu_uuid, close_ok=True, load_error=None, log=None, on_render=None):
         self.on_render = on_render
+        self.close_raises = close_ok == "raise"
         self.profile_id = profile.profile_id
         self.lease_dir, self.gpu_uuid, self.close_ok, self.load_error = lease_dir, gpu_uuid, close_ok, load_error
         self.lease = None
@@ -68,6 +69,8 @@ class FakeImageAdapter:
 
     def close(self):
         self.log.append(f"close:{self.profile_id}")
+        if self.close_raises:
+            raise RuntimeError("offload hook failed")  # lease still held by this adapter
         if not self.close_ok:
             self.lease.hold_until_exit()
             return False
@@ -223,6 +226,49 @@ class ExecutorTests(unittest.TestCase):
         second = self.submit("sdxl-b")
         self.assertEqual(ex.run(max_steps=2, idle_sleep=lambda: None), EXIT_GPU_RETAINED)
         self.assertEqual((self.state(second)["state"], self.state(second)["error"]), ("failed", "gpu_memory_retained"))
+
+    def test_unload_raising_on_a_switch_is_fatal_and_the_next_model_never_loads(self):
+        ex = self.executor([self.image("sdxl-a"), self.image("sdxl-b")], close_ok="raise", start=False)
+        self.submit("sdxl-a")
+        second = self.submit("sdxl-b")
+        self.assertEqual(ex.run(max_steps=3, idle_sleep=lambda: None), EXIT_GPU_RETAINED)
+        self.assertEqual(self.log, ["load:sdxl-a", "close:sdxl-a"], "sdxl-b is never loaded on top")
+        self.assertEqual((self.state(second)["state"], self.state(second)["error"]), ("failed", "gpu_memory_retained"))
+        self.assertFalse(lease_free(GPU_A, self.lease_dir), "the failed adapter's lease is kept until exit")
+
+    def test_after_a_fatal_unload_no_further_step_loads_or_claims(self):
+        ex = self.executor([self.image("sdxl-a"), self.image("sdxl-b")], close_ok="raise")
+        self.submit("sdxl-a")
+        self.submit("sdxl-b")
+        third = self.submit("sdxl-b")
+        ex.step()
+        with self.assertRaises(GpuResourcesRetained):
+            ex.step()
+        with self.assertRaises(GpuResourcesRetained):
+            ex.step()  # an embedding loop that ignores the first exit still cannot load or claim
+        self.assertEqual(self.log, ["load:sdxl-a", "close:sdxl-a"])
+        self.assertEqual(self.state(third)["state"], "queued", "never claimed")
+
+    def test_idle_unload_raising_is_fatal(self):
+        ex = self.executor([self.image()], close_ok="raise", start=False)
+        self.submit("sdxl-a")
+
+        def idle_sleep():
+            self.clock.now += 120
+        self.assertEqual(ex.run(max_steps=3, idle_sleep=idle_sleep), EXIT_GPU_RETAINED)
+        self.assertEqual(self.log, ["load:sdxl-a", "close:sdxl-a"])
+
+    def test_a_publishing_job_still_counts_toward_the_owner_quota(self):
+        from app.image_job_store import ImageJobError
+        ex = self.executor([self.image()])
+        job = self.store.submit("anders", "a red bicycle", profile_id="sdxl-a", max_owner_active=1,
+                                params={"width": 1024, "height": 1024, "steps": 20})["job_id"]
+        self.store.claim_for(["sdxl-a"], ex.instance)
+        self.assertTrue(self.store.begin_publish(job, ex.instance))
+        with self.assertRaisesRegex(ImageJobError, "owner image job limit"):
+            self.store.submit("anders", "another", profile_id="sdxl-a", max_owner_active=1)
+        self.store.complete(job, ex.instance, "asset0")
+        self.store.submit("anders", "another", profile_id="sdxl-a", max_owner_active=1)  # free again
 
     def test_retained_gpu_on_load_exits_70(self):
         ex = self.executor([self.image()], load_error=GpuResourcesRetained("not proven free"), start=False)
