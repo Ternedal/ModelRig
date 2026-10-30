@@ -25,6 +25,20 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(claimed["id"], job_id)
         return job_id
 
+    def test_reconciliation_limit_rejects_invalid_values(self):
+        for limit in (0, -1, 1001, True, 1.5, "10"):
+            with self.subTest(limit=limit):
+                with self.assertRaisesRegex(ValueError, "invalid_reconciliation_limit"):
+                    inspect_generation_consistency(self.jobs, self.sink, limit=limit)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_reconciliation_limit_caps_rows(self, _mount):
+        for _ in range(3):
+            self.jobs.submit("owner", "prompt", profile_id="test")
+            self.jobs.claim()
+        self.assertEqual(len(inspect_generation_consistency(self.jobs, self.sink, limit=2)), 2)
+        self.assertEqual(len(inspect_generation_consistency(self.jobs, self.sink, limit=3)), 3)
+
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_running_with_published_unindexed_file_is_reported_without_mutation(self, _mount):
         job_id = self.submit_running()
