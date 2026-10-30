@@ -153,6 +153,8 @@ dependencies {
     implementation("androidx.media3:media3-datasource-okhttp:1.11.1")
     implementation("androidx.media3:media3-ui:1.11.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    // VisionRig's producer, vendored from one VisionRig SHA (#2275).
+    implementation(project(":visionrig-producer"))
     // Android 12+ splash. Without this the app only set windowBackground, which
     // the system splash overrides on 12+ -- so on a Pixel there was effectively
     // no branded splash. This API is the supported way to theme it.

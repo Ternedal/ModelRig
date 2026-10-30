@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "ModelRig"
 include(":app")
+// VisionRig producer, vendored from one VisionRig SHA (#2275).
+include(":visionrig-producer")
