@@ -63,7 +63,8 @@ class ExternalMediaSink:
         entry = next((item for item in entries if item["id"] == asset_id), None)
         if entry is not None:
             expected = "video" if extension == ".mp4" else "image"
-            if entry["kind"] != expected or entry["size_bytes"] != size:
+            expected_mime = "video/mp4" if extension == ".mp4" else "image/png"
+            if entry["kind"] != expected or entry["mime_type"] != expected_mime or entry["size_bytes"] != size:
                 raise ArtifactSinkUnavailable("job_asset_index_conflict")
         return {"asset_id": asset_id, "extension": extension, "size_bytes": size, "indexed": entry is not None}
 
