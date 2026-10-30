@@ -737,6 +737,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/support/windows_credential_acl_contract.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/support/windows_resident_lock_contract.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/support/windows_cleanup_identity_contract.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/worker_toolhost.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
