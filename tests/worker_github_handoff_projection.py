@@ -4,6 +4,9 @@ import sqlite3
 import pytest
 
 from worker.app.github_handoff_projection import Handoff, HandoffProjection
+from worker.app.github_connector_contract import (
+    GitHubConnectorGrantStore, GitHubConnectorScope, GitHubSourceReceipt,
+)
 
 
 def sample(**kwargs):
@@ -14,27 +17,56 @@ def sample(**kwargs):
     return Handoff(**fields)
 
 
-def test_requires_explicit_authority():
+@pytest.fixture
+def authority(tmp_path):
+    grants = GitHubConnectorGrantStore(str(tmp_path / "grants.db"))
+    scope = GitHubConnectorScope(account="ternedal", repositories=("Ternedal/ModelRig",),
+                                 operations=("issue",))
+    grant = grants.create(scope, actor="test", now=100)
+    def receipt(revision="rev-1", object_id="2319"):
+        return GitHubSourceReceipt(grant_id=grant.grant_id,
+                                   scope_sha256=scope.digest,
+                                   repository="Ternedal/ModelRig",
+                                   repository_id=1287914122, object_type="issue",
+                                   object_id=object_id, revision=revision, retrieved_at=101)
+    yield grants, grant, receipt
+    grants.close()
+
+
+def test_requires_receipt_and_grant(authority):
     store = HandoffProjection(sqlite3.connect(":memory:"))
+    grants, _, receipt = authority
+    with pytest.raises((PermissionError, TypeError)):
+        store.ingest(sample(), receipt=None, grants=grants)
     with pytest.raises(PermissionError):
-        store.ingest(sample())
+        store.ingest(sample(), receipt=receipt(object_id="2320"), grants=grants)
     assert store.list_records() == []
 
 
-def test_idempotent_and_revision_history():
+def test_idempotent_and_revision_history(authority):
+    grants, _, receipt = authority
     db = sqlite3.connect(":memory:")
     store = HandoffProjection(db)
-    assert store.ingest(sample(), authorized=True)
-    assert not store.ingest(sample(), authorized=True)
-    assert store.ingest(sample(revision="rev-2"), authorized=True)
+    assert store.ingest(sample(), receipt=receipt(), grants=grants)
+    assert not store.ingest(sample(), receipt=receipt(), grants=grants)
+    assert store.ingest(sample(revision="rev-2"), receipt=receipt("rev-2"), grants=grants)
     assert len(store.list_records()) == 1
     assert store.list_records()[0]["revision"] == "rev-2"
     assert db.execute("SELECT COUNT(*) FROM handoff_revisions").fetchone()[0] == 2
 
 
-def test_untrusted_claims_do_not_become_pass():
+def test_revocation_blocks_new_ingest(authority):
+    grants, grant, receipt = authority
     store = HandoffProjection(sqlite3.connect(":memory:"))
-    store.ingest(sample(), authorized=True)
+    grants.revoke(grant.grant_id, actor="test", now=102)
+    with pytest.raises(PermissionError):
+        store.ingest(sample(), receipt=receipt(), grants=grants)
+
+
+def test_unknown_is_not_pass(authority):
+    grants, _, receipt = authority
+    store = HandoffProjection(sqlite3.connect(":memory:"))
+    store.ingest(sample(), receipt=receipt(), grants=grants)
     record = store.list_records()[0]
     assert all(record[key] == "UNKNOWN" for key in
                ("implemented", "tested", "handed_off", "released"))
