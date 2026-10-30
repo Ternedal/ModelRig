@@ -27,6 +27,32 @@ class ExternalMediaSink:
         except (GalleryUnavailable, OSError, RuntimeError) as exc:
             raise ArtifactSinkUnavailable("external_media_unavailable") from exc
 
+    def inspect_unindexed_assets(self) -> list[str]:
+        """Read-only inventory of published files absent from the gallery index.
+
+        Never adopt or delete these automatically: ownership must be reconciled
+        with the generation job database before an operator takes action.
+        """
+        import stat
+        from .media_gallery_catalog import _index
+        root = self._root()
+        index_path = root / "gallery-index.json"
+        indexed = {item["id"] for item in _index(root)} if index_path.exists() or index_path.is_symlink() else set()
+        candidates = []
+        for entry in root.iterdir():
+            if entry.suffix not in _EXTENSIONS or entry.stem in indexed:
+                continue
+            if len(entry.stem) != 32 or any(c not in "0123456789abcdef" for c in entry.stem):
+                continue
+            try:
+                info = entry.lstat()
+            except OSError:
+                continue
+            if stat.S_ISREG(info.st_mode):
+                candidates.append(entry.name)
+        self._root()
+        return sorted(candidates)
+
     def inspect_temporary_files(self) -> list[str]:
         """List potential abandoned writer files without deleting anything."""
         import stat
