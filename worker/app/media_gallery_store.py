@@ -41,7 +41,11 @@ class ExternalMediaSink:
         root = self._root()
         asset_id = self.job_asset_id(job_key)
         index_path = root / "gallery-index.json"
-        entries = _index(root) if index_path.exists() or index_path.is_symlink() else []
+        from .media_gallery_catalog import GalleryUnavailable
+        try:
+            entries = _index(root) if index_path.exists() or index_path.is_symlink() else []
+        except GalleryUnavailable as exc:
+            raise ArtifactSinkUnavailable("job_asset_index_unavailable") from exc
         found = []
         for extension in sorted(_EXTENSIONS):
             path = root / (asset_id + extension)
