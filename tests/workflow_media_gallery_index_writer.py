@@ -34,9 +34,11 @@ class IndexWriterTests(unittest.TestCase):
         before = (self.root / "gallery-index.json").read_bytes()
         register_asset(self.root, self.volume, "first", ".png", 5)
         self.assertEqual((self.root / "gallery-index.json").read_bytes(), before)
-        for extension, size in ((".png", 6), (".mp4", 5)):
-            with self.assertRaisesRegex(GalleryUnavailable, "duplicate_index_id"):
-                register_asset(self.root, self.volume, "first", extension, size)
+        (self.root / "first.mp4").write_bytes(b"12345")
+        with self.assertRaisesRegex(GalleryUnavailable, "duplicate_index_id"):
+            register_asset(self.root, self.volume, "first", ".mp4", 5)
+        with self.assertRaisesRegex(GalleryUnavailable, "asset_size_mismatch"):
+            register_asset(self.root, self.volume, "first", ".png", 6)
         self.assertEqual((self.root / "gallery-index.json").read_bytes(), before)
 
     def test_refuse_missing_or_wrong_size_asset(self):
