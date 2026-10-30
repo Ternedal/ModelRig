@@ -37,10 +37,10 @@ class ExternalMediaSink:
         from .media_gallery_catalog import _index
         root = self._root()
         index_path = root / "gallery-index.json"
-        indexed = {item["id"] for item in _index(root)} if index_path.exists() or index_path.is_symlink() else set()
+        indexed = {(item["id"], ".mp4" if item["kind"] == "video" else ".png") for item in _index(root)} if index_path.exists() or index_path.is_symlink() else set()
         candidates = []
         for entry in root.iterdir():
-            if entry.suffix not in _EXTENSIONS or entry.stem in indexed:
+            if entry.suffix not in _EXTENSIONS or (entry.stem, entry.suffix) in indexed:
                 continue
             if len(entry.stem) != 32 or any(c not in "0123456789abcdef" for c in entry.stem):
                 continue
