@@ -54,8 +54,18 @@ class ReconciliationTests(unittest.TestCase):
         asset = self.sink.publish(b"image", ".png")
         self.assertTrue(self.jobs.finish(job_id, asset_id=asset))
         report = inspect_generation_consistency(self.jobs, self.sink)
-        self.assertEqual(report[0]["status"], "completed_non_job_scoped_asset")
+        self.assertEqual(report[0]["status"], "completed_legacy_indexed")
         self.assertEqual(self.jobs.get(job_id, "owner")["asset_id"], asset)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_legacy_completed_job_with_deleted_file_is_flagged(self, _mount):
+        job_id = self.submit_running()
+        asset = self.sink.publish(b"image", ".png")
+        self.assertTrue(self.jobs.finish(job_id, asset_id=asset))
+        (self.sink.media_root / (asset + ".png")).unlink()
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "completed_legacy_missing_file")
+        self.assertEqual(self.jobs.get(job_id, "owner")["state"], "completed")
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_completed_job_with_missing_artifact_is_flagged(self, _mount):
