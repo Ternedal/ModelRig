@@ -42,10 +42,12 @@ def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink)
                 status = "consistent"
         elif receipt is None:
             status = "no_job_artifact"
-        elif receipt["indexed"]:
-            status = "interrupted_with_indexed_artifact"
+        elif state == "running":
+            status = ("running_with_indexed_artifact" if receipt["indexed"]
+                      else "running_with_unindexed_artifact")
         else:
-            status = "interrupted_with_unindexed_artifact"
+            status = ("failed_with_indexed_artifact" if receipt["indexed"]
+                      else "failed_with_unindexed_artifact")
         findings.append({"job_id": job_id, "state": state, "status": status,
                          "asset_id": receipt["asset_id"] if receipt else None})
     return findings
