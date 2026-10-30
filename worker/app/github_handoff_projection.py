@@ -9,8 +9,9 @@ import json
 import re
 import sqlite3
 
-from .github_connector_contract import GitHubConnectorGrantStore, GitHubSourceReceipt
 from dataclasses import dataclass
+
+from .github_connector_contract import GitHubConnectorGrantStore, GitHubSourceReceipt
 
 _REPO = re.compile(r"^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$")
 _SHA = re.compile(r"^[0-9a-f]{40,64}$")
@@ -80,7 +81,11 @@ class HandoffProjection:
                 or receipt.revision != handoff.revision):
             raise PermissionError("source receipt does not match handoff identity")
         from dataclasses import asdict
-        payload = json.dumps(asdict(handoff), sort_keys=True)
+        record = asdict(handoff)
+        # GitHub source identity does not establish CI, merge or release.
+        for field in ('implemented', 'tested', 'handed_off', 'released'):
+            record[field] = 'UNKNOWN'
+        payload = json.dumps(record, sort_keys=True)
         key = (handoff.repository, handoff.source_type, handoff.source_id)
         with self.db:
             row = self.db.execute(
@@ -88,6 +93,13 @@ class HandoffProjection:
                 key,
             ).fetchone()
             if row is not None and row[0] == handoff.revision:
+                return False
+            # Do not roll back to an already-seen opaque revision.
+            seen = self.db.execute(
+                'SELECT 1 FROM handoff_revisions WHERE repository=? AND source_type=? AND source_id=? AND revision=?',
+                (*key, handoff.revision),
+            ).fetchone()
+            if seen is not None:
                 return False
             self.db.execute(
                 "INSERT OR IGNORE INTO handoff_revisions VALUES (?, ?, ?, ?, ?)",
