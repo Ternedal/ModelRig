@@ -36,6 +36,14 @@ class ExternalMediaSinkTests(unittest.TestCase):
         self.assertEqual(temporary.read_bytes(), b"unfinished")
         self.assertTrue((self.media / "published.png").exists())
 
+    def test_generic_publish_propagates_index_failure(self):
+        from app.media_gallery_catalog import GalleryUnavailable
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            with patch("app.media_gallery_index_writer.register_asset", side_effect=GalleryUnavailable("index_unavailable")):
+                with self.assertRaises(GalleryUnavailable):
+                    self.sink.publish(b"image", ".png")
+        self.assertEqual(len(list(self.media.glob("*.png"))), 1)
+
     def test_generic_publish_registers_gallery_entry(self):
         from app.media_gallery_catalog import list_gallery
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
