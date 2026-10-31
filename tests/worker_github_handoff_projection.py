@@ -81,6 +81,19 @@ class HandoffProjectionTests(unittest.TestCase):
             db.execute("SELECT COUNT(*) FROM handoff_revisions").fetchone()[0], 2,
         )
 
+    def test_repository_case_alias_has_one_canonical_identity(self):
+        upper = sample()
+        lower = sample(
+            repository="ternedal/modelrig",
+            source_url="https://github.com/ternedal/modelrig/issues/2319",
+        )
+        self.assertEqual(upper.repository, lower.repository)
+        self.assertEqual(upper.source_url, lower.source_url)
+        store = HandoffProjection(sqlite3.connect(":memory:"))
+        self.assertTrue(store.ingest(upper, receipt=self.receipt(), grants=self.grants))
+        self.assertFalse(store.ingest(lower, receipt=self.receipt(), grants=self.grants))
+        self.assertEqual(len(store.list_records()), 1)
+
     def test_revocation_blocks_new_ingest(self):
         store = HandoffProjection(sqlite3.connect(":memory:"))
         self.grants.revoke(self.grant.grant_id, actor="test", now=102)
