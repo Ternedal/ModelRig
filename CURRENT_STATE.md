@@ -370,6 +370,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_file_capabilities.py`
 - `tests/worker_file_capabilities_audit.py`
 - `tests/worker_file_capabilities_scope_authority.py`
+- `tests/worker_github_handoff_projection.py`
 - `tests/worker_gpu_lease.py`
 - `tests/worker_hardening.py`
 - `tests/worker_hardening_stream_disconnect.py`
