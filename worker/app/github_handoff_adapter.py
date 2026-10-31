@@ -56,6 +56,10 @@ class GitHubHandoffAdapter:
             grant_id, repository=repository, operation=source_type,
             object_id=source_id, now=now,
         )
+        if (result.repository != repository
+                or result.operation != source_type
+                or result.object_id != str(source_id)):
+            raise PermissionError("GitHub read result identity mismatch")
         path = "issues" if source_type == "issue" else "pull"
         handoff = Handoff(
             repository=repository,
