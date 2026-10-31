@@ -11,7 +11,7 @@ import sqlite3
 
 from dataclasses import dataclass
 
-from .github_connector_contract import GitHubConnectorGrantStore, GitHubSourceReceipt
+from .github_connector_contract import GitHubConnectorGrantStore, GitHubSourceReceipt, normalize_repository
 
 _REPO = re.compile(r"^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$")
 _SHA = re.compile(r"^[0-9a-f]{40,64}$")
@@ -49,6 +49,12 @@ class Handoff:
         if any(getattr(self, name) not in _STATES for name in
                ("implemented", "tested", "handed_off", "released")):
             raise ValueError("invalid status")
+        # GitHub receipts canonicalize owner/repo to lowercase. Keep the
+        # projection key and URL canonical too, or valid receipts mismatch and
+        # differently-cased source identities create duplicate records.
+        canonical_repo = normalize_repository(self.repository)
+        object.__setattr__(self, "repository", canonical_repo)
+        object.__setattr__(self, "source_url", f"https://github.com/{canonical_repo}/{path}/{self.source_id}")
         # Status claims must be supplied only by trusted evidence, never
         # inferred from arbitrary GitHub issue or PR text.
 
