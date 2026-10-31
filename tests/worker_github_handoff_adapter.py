@@ -69,6 +69,46 @@ class HandoffAdapterTests(unittest.TestCase):
             finally:
                 grants.close()
 
+    def test_mismatched_client_result_rejected(self):
+        from unittest.mock import patch
+        from worker.app.github_connector_client import GitHubReadResult
+        from worker.app.github_connector_contract import (
+            GitHubConnectorScope, GitHubSourceReceipt,
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            grants = GitHubConnectorGrantStore(str(Path(folder) / "a.db"))
+            try:
+                scope = GitHubConnectorScope(
+                    account="ternedal", repositories=("Ternedal/ModelRig",),
+                    operations=("issue",),
+                )
+                grant = grants.create(scope, actor="test", now=100)
+                client = GitHubReadClient(grants=grants, transport=Mock())
+                projection = HandoffProjection(sqlite3.connect(":memory:"))
+                adapter = GitHubHandoffAdapter(
+                    client=client, grants=grants, projection=projection,
+                )
+                receipt = GitHubSourceReceipt(
+                    grant_id=grant.grant_id, scope_sha256=scope.digest,
+                    repository="Ternedal/ModelRig", repository_id=1287914122,
+                    object_type="issue", object_id="2319",
+                    revision="etag-sha256:" + "a" * 64, retrieved_at=101,
+                )
+                result = GitHubReadResult(
+                    repository="ternedal/modelrig", operation="issue",
+                    object_id="2320", document={}, source=receipt,
+                    revalidated_cache=False,
+                )
+                with patch.object(client, "read", return_value=result):
+                    with self.assertRaises(PermissionError):
+                        adapter.ingest_one(
+                            grant.grant_id, repository="Ternedal/ModelRig",
+                            source_type="issue", source_id=2319, now=101,
+                        )
+                self.assertEqual(projection.list_records(), [])
+            finally:
+                grants.close()
+
     def test_invalid_selector_rejected(self):
         with tempfile.TemporaryDirectory() as folder:
             grants = GitHubConnectorGrantStore(str(Path(folder) / "a.db"))
