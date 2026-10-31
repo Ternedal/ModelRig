@@ -1,8 +1,12 @@
 """Offline contract tests for GitHub handoff projection (stdlib-only CI)."""
 import sqlite3
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+# CI executes test files directly, so the repository root is not on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from worker.app.github_handoff_projection import Handoff, HandoffProjection
 from worker.app.github_connector_contract import (
