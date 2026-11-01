@@ -94,6 +94,29 @@ class HandoffProjectionTests(unittest.TestCase):
         self.assertFalse(store.ingest(lower, receipt=self.receipt(), grants=self.grants))
         self.assertEqual(len(store.list_records()), 1)
 
+    def test_persists_across_database_reopen(self):
+        path = str(Path(self.temp.name) / "handoffs.db")
+        db = sqlite3.connect(path)
+        try:
+            store = HandoffProjection(db)
+            self.assertTrue(store.ingest(sample(), receipt=self.receipt(), grants=self.grants))
+        finally:
+            db.close()
+        db = sqlite3.connect(path)
+        try:
+            restored = HandoffProjection(db)
+            self.assertEqual(restored.list_records()[0]["revision"], "rev-1")
+            self.assertFalse(restored.ingest(sample(), receipt=self.receipt(), grants=self.grants))
+            self.assertTrue(restored.ingest(
+                sample(revision="rev-2"), receipt=self.receipt("rev-2"),
+                grants=self.grants,
+            ))
+            self.assertEqual(
+                db.execute("SELECT COUNT(*) FROM handoff_revisions").fetchone()[0], 2,
+            )
+        finally:
+            db.close()
+
     def test_revocation_blocks_new_ingest(self):
         store = HandoffProjection(sqlite3.connect(":memory:"))
         self.grants.revoke(self.grant.grant_id, actor="test", now=102)
