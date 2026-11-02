@@ -47,7 +47,7 @@ def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink,
                 if entry is None:
                     status = "completed_legacy_not_indexed"
                 else:
-                    extension = ".mp4" if entry["kind"] == "video" else (".png" if entry["mime_type"] == "image/png" else None)
+                    extension = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "video/mp4": ".mp4"}.get(entry["mime_type"])
                     if extension is None:
                         status = "completed_legacy_unsupported_media_type"
                     else:
