@@ -9,10 +9,13 @@ from app.media_source_image import read_source_png
 from app.media_generation_contract import ArtifactSinkUnavailable
 
 
-PNG = b"\\x89PNG\\r\\n\\x1a\\n" + b"fixture"
+PNG = b"\x89PNG\r\n\x1a\n" + b"fixture"
 
 
 class SourceImageTests(unittest.TestCase):
+    def test_fixture_is_real_png_signature(self):
+        self.assertEqual(PNG[:8], bytes.fromhex("89504e470d0a1a0a"))
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
