@@ -1,4 +1,5 @@
 """Offline regressions for the read-only image source seam."""
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,6 +50,10 @@ class SourceImageTests(unittest.TestCase):
             self.skipTest("symlinks unavailable")
         with self.assertRaises(ArtifactSinkUnavailable):
             read_source_png(self.sink, asset_id)
+        # Windows lacks O_NOFOLLOW; static symlinks must still fail closed.
+        with patch.object(os, "O_NOFOLLOW", 0, create=True):
+            with self.assertRaises(ArtifactSinkUnavailable):
+                read_source_png(self.sink, asset_id)
         self.assertEqual(target.read_bytes(), PNG)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
