@@ -73,10 +73,24 @@ class ReconciliationTests(unittest.TestCase):
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_legacy_completed_jpeg_and_webp_are_indexed(self, _mount):
-        for extension in (".jpg", ".webp"):
+        # The new sink deliberately publishes PNG/MP4 only. Model older
+        # producer-written assets directly; do not widen its write allowlist.
+        import json
+        import secrets
+        index_path = self.sink.media_root / "gallery-index.json"
+        for extension, mime in ((".jpg", "image/jpeg"), (".webp", "image/webp")):
             with self.subTest(extension=extension):
+                with self.assertRaisesRegex(ValueError, "invalid_artifact_extension"):
+                    self.sink.publish(b"image", extension)
                 job_id = self.submit_running()
-                asset = self.sink.publish(b"image", extension)
+                asset = secrets.token_hex(16)
+                (self.sink.media_root / (asset + extension)).write_bytes(b"image")
+                entries = json.loads(index_path.read_text()) if index_path.exists() else []
+                entries.append({
+                    "id": asset, "kind": "image", "mime_type": mime,
+                    "size_bytes": len(b"image"), "created_at": "2026-01-01T00:00:00Z",
+                })
+                index_path.write_text(json.dumps(entries))
                 self.assertTrue(self.jobs.finish(job_id, asset_id=asset))
                 findings = inspect_generation_consistency(self.jobs, self.sink)
                 match = next(item for item in findings if item["job_id"] == job_id)
