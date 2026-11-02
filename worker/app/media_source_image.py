@@ -55,7 +55,7 @@ def read_source_png(sink: ExternalMediaSink, asset_id: str) -> bytes:
                 or before.st_mtime_ns != after.st_mtime_ns):
             raise ArtifactSinkUnavailable("source_image_changed")
         sink._root()
-        if not payload.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+        if not payload.startswith(b"\x89PNG\r\n\x1a\n"):
             raise ArtifactSinkUnavailable("source_image_invalid_png")
         return bytes(payload)
     except OSError as exc:
