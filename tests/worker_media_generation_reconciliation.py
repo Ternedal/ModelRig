@@ -72,6 +72,17 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(self.jobs.get(job_id, "owner")["asset_id"], asset)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_legacy_completed_jpeg_and_webp_are_indexed(self, _mount):
+        for extension in (".jpg", ".webp"):
+            with self.subTest(extension=extension):
+                job_id = self.submit_running()
+                asset = self.sink.publish(b"image", extension)
+                self.assertTrue(self.jobs.finish(job_id, asset_id=asset))
+                findings = inspect_generation_consistency(self.jobs, self.sink)
+                match = next(item for item in findings if item["job_id"] == job_id)
+                self.assertEqual(match["status"], "completed_legacy_indexed")
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_legacy_completed_job_with_deleted_file_is_flagged(self, _mount):
         job_id = self.submit_running()
         asset = self.sink.publish(b"image", ".png")
