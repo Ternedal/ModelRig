@@ -20,7 +20,7 @@ def _png_chunk(kind: bytes, payload: bytes) -> bytes:
 # A genuine, decodable 1x1 RGB PNG, not just a matching signature.
 PNG = (bytes.fromhex("89504e470d0a1a0a")
        + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
-       + _png_chunk(b"IDAT", zlib.compress(b"\\x00\\xff\\x00\\x00"))
+       + _png_chunk(b"IDAT", zlib.compress(bytes.fromhex("00ff0000")))
        + _png_chunk(b"IEND", b""))
 
 
