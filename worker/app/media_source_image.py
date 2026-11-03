@@ -12,6 +12,7 @@ import stat
 from .media_gallery_catalog import GalleryUnavailable, _ID, _index
 from .media_gallery_store import ExternalMediaSink
 from .media_generation_contract import ArtifactSinkUnavailable
+from .media_source_png_validation import InvalidSourcePng, validate_png_container
 
 MAX_SOURCE_IMAGE_BYTES = 32 * 1024 * 1024
 
@@ -70,8 +71,10 @@ def read_source_png(sink: ExternalMediaSink, asset_id: str) -> bytes:
         if (not stat.S_ISREG(path_after.st_mode) or path_after.st_dev != before.st_dev
                 or path_after.st_ino != before.st_ino):
             raise ArtifactSinkUnavailable("source_image_changed")
-        if not payload.startswith(b"\x89PNG\r\n\x1a\n"):
-            raise ArtifactSinkUnavailable("source_image_invalid_png")
+        try:
+            validate_png_container(bytes(payload))
+        except InvalidSourcePng as exc:
+            raise ArtifactSinkUnavailable("source_image_invalid_png") from exc
         return bytes(payload)
     except OSError as exc:
         raise ArtifactSinkUnavailable("source_image_read_failed") from exc
