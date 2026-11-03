@@ -66,6 +66,47 @@ class RunnerTests(unittest.TestCase):
     def state(self, job_id):
         return self.jobs.get(job_id, "client-a")
 
+    def test_gallery_asset_survives_job_completion_write_failure(self):
+        from unittest.mock import patch
+        from app.media_gallery_store import ExternalMediaSink
+        from app.media_gallery_catalog import list_gallery
+        volume = Path(self.tmp.name)
+        media = volume / "media"
+        media.mkdir()
+        job_id = self.submit()
+        runner, _ = self.runner(lambda request: RenderedArtifact(PNG, "image/png"), ExternalMediaSink(media, volume))
+        original_finish = self.jobs.finish
+        def fail_completion(key, *, asset_id=None, error=None):
+            if asset_id is not None:
+                raise OSError("simulated database failure")
+            return original_finish(key, asset_id=asset_id, error=error)
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            with patch.object(self.jobs, "finish", side_effect=fail_completion):
+                result = runner.run_one()
+            items = list_gallery(media, verified_volume_root=volume)["items"]
+        self.assertEqual(result["state"], "failed")
+        self.assertEqual(self.state(job_id)["state"], "failed")
+        self.assertEqual(len(items), 1)
+        self.assertEqual((media / (items[0]["id"] + ".png")).read_bytes(), PNG)
+
+    def test_real_gallery_sink_end_to_end(self):
+        from unittest.mock import patch
+        from app.media_gallery_store import ExternalMediaSink
+        from app.media_gallery_catalog import list_gallery
+        volume = Path(self.tmp.name)
+        media = volume / "media"
+        media.mkdir()
+        job_id = self.submit()
+        sink = ExternalMediaSink(media, volume)
+        runner, _ = self.runner(lambda request: RenderedArtifact(PNG, "image/png"), sink)
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            result = runner.run_one()
+            items = list_gallery(media, verified_volume_root=volume)["items"]
+        self.assertEqual(result["state"], "completed")
+        self.assertEqual(self.state(job_id)["state"], "completed")
+        self.assertEqual([item["id"] for item in items], [result["asset_id"]])
+        self.assertEqual((media / (result["asset_id"] + ".png")).read_bytes(), PNG)
+
     def test_successful_render_is_published_and_completed(self):
         job_id = self.submit(width=832, height=1216, steps=20, seed=7)
         sink = MemorySink()
