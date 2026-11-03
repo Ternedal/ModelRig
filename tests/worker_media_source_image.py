@@ -8,7 +8,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.media_gallery_store import ExternalMediaSink
-from app.media_source_image import read_source_png
+from app.media_source_image import read_source_png, read_owned_source_png
+from app.image_job_store import ImageJobStore
 from app.media_generation_contract import ArtifactSinkUnavailable
 
 
@@ -120,6 +121,23 @@ class SourceImageTests(unittest.TestCase):
                 asset_id = self.sink.publish(bad, ".png")
                 with self.assertRaises(ArtifactSinkUnavailable):
                     read_source_png(self.sink, asset_id)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_owner_guard_requires_completed_matching_job(self, _mount):
+        jobs = ImageJobStore(str(self.sink.volume_root / "jobs.sqlite"))
+        asset_id = self.sink.publish(PNG, ".png")
+        created = jobs.submit("owner-a", "test prompt", profile_id="test")
+        with self.assertRaises(ArtifactSinkUnavailable):
+            read_owned_source_png(self.sink, jobs, "owner-a", asset_id)
+        claimed = jobs.claim()
+        self.assertEqual(claimed["id"], created["job_id"])
+        self.assertTrue(jobs.finish(created["job_id"], asset_id=asset_id))
+        self.assertEqual(read_owned_source_png(self.sink, jobs, "owner-a", asset_id), PNG)
+        for owner in ("owner-b", "", None):
+            with self.subTest(owner=owner), self.assertRaises(ArtifactSinkUnavailable):
+                read_owned_source_png(self.sink, jobs, owner, asset_id)
+        with self.assertRaises(ArtifactSinkUnavailable):
+            read_owned_source_png(self.sink, jobs, "owner-a", "a" * 32)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_wrong_bytes_and_bad_ids_refused(self, _mount):
