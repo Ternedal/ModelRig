@@ -389,6 +389,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_media_generation_profiles.py`
 - `tests/worker_media_generation_reconciliation.py`
 - `tests/worker_media_generation_runner.py`
+- `tests/worker_media_source_image.py`
 - `tests/worker_migrate.py`
 - `tests/worker_netguard.py`
 - `tests/worker_occurrence_ledger.py`
