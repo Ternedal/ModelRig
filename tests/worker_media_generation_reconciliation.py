@@ -83,6 +83,21 @@ class ReconciliationTests(unittest.TestCase):
         self.assertNotEqual(older, newer)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_bounded_scan_includes_newer_stranded_publishing_job(self, _mount):
+        older = self.submit_running()
+        newer = self.submit_running()
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET created=? WHERE id=?", (100, older))
+            db.execute("UPDATE image_jobs SET created=?,state='publishing' WHERE id=?", (200, newer))
+        self.sink.publish_and_register_for_job(newer, b"image", ".png")
+        before = self.jobs.get(newer, "owner")
+        report = inspect_generation_consistency(self.jobs, self.sink, limit=1)
+        self.assertEqual(len(report), 1)
+        self.assertEqual(report[0]["job_id"], newer)
+        self.assertEqual(report[0]["status"], "publishing_with_indexed_artifact")
+        self.assertEqual(self.jobs.get(newer, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_running_with_published_unindexed_file_is_reported_without_mutation(self, _mount):
         job_id = self.submit_running()
         self.sink.publish_for_job(job_id, b"image", ".png")
