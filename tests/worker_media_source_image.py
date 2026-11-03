@@ -1,5 +1,6 @@
 """Offline regressions for the read-only image source seam."""
 import os
+import sqlite3
 import struct
 import tempfile
 import unittest
@@ -153,6 +154,25 @@ class SourceImageTests(unittest.TestCase):
         self.assertEqual(jobs.recover_interrupted(), 1)
         self.assertFalse(jobs.owns_completed_asset("owner-a", "d" * 32))
         self.assertEqual(jobs.get(interrupted["job_id"], "owner-a")["state"], "failed")
+        # Even a stale/corrupt artifact pointer on a noncompleted job must
+        # never grant access to a valid, indexed source image.
+        with sqlite3.connect(jobs.path) as db:
+            db.execute(
+                "UPDATE image_jobs SET asset_id=? WHERE id IN (?,?,?)",
+                (asset_id, failed["job_id"], cancelled["job_id"], interrupted["job_id"]),
+            )
+        for job in (failed, cancelled, interrupted):
+            self.assertEqual(jobs.get(job["job_id"], "owner-a")["asset_id"], asset_id)
+        # A separate owner with only failed/cancelled jobs cannot borrow access.
+        with sqlite3.connect(jobs.path) as db:
+            db.execute(
+                "UPDATE image_jobs SET owner=? WHERE id IN (?,?,?)",
+                ("owner-b", failed["job_id"], cancelled["job_id"], interrupted["job_id"]),
+            )
+        self.assertFalse(jobs.owns_completed_asset("owner-b", asset_id))
+        with self.assertRaises(ArtifactSinkUnavailable):
+            read_owned_source_png(self.sink, jobs, "owner-b", asset_id)
+        self.assertEqual(read_owned_source_png(self.sink, jobs, "owner-a", asset_id), PNG)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_wrong_bytes_and_bad_ids_refused(self, _mount):
