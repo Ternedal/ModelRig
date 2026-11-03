@@ -70,6 +70,10 @@ class ReconciliationTests(unittest.TestCase):
     def test_bounded_scan_prefers_newest_jobs(self, _mount):
         older = self.submit_running()
         newer = self.submit_running()
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET created = ? WHERE id = ?", (100, older))
+            db.execute("UPDATE image_jobs SET created = ? WHERE id = ?", (200, newer))
+            db.commit()
         report = inspect_generation_consistency(self.jobs, self.sink, limit=1)
         self.assertEqual([item["job_id"] for item in report], [newer])
         self.assertNotEqual(older, newer)
