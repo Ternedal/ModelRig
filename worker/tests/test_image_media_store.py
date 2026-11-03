@@ -135,6 +135,14 @@ class MediaStoreTests(unittest.TestCase):
                         store.publish(b"payload")
             self.assertEqual(list(Path(directory).iterdir()), [])
 
+    def test_atomic_publish_failure_removes_temporary_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(directory)
+            with patch("app.image_media_store.os.replace", side_effect=OSError("simulated rename failure")):
+                with self.assertRaises(OSError):
+                    store.publish(b"payload")
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
     def test_free_space_floor(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(MediaStorageError):
