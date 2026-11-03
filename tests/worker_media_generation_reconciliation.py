@@ -41,30 +41,21 @@ class ReconciliationTests(unittest.TestCase):
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_publishing_states_are_read_only_and_distinct(self, _mount):
-        from contextlib import contextmanager
-
         job_id = self.submit_running()
-        @contextmanager
-        def fake_db():
-            class Connection:
-                def execute(self, query, params):
-                    self_query = query
-                    assert "'publishing'" in self_query
-                    return self
-                def fetchall(self):
-                    return [{"id": job_id, "state": "publishing", "asset_id": None}]
-            yield Connection()
-
-        with patch.object(self.jobs, "_db", fake_db):
-            self.assertEqual(inspect_generation_consistency(self.jobs, self.sink)[0]["status"],
-                             "publishing_without_job_artifact")
-            self.sink.publish_for_job(job_id, b"image", ".png")
-            self.assertEqual(inspect_generation_consistency(self.jobs, self.sink)[0]["status"],
-                             "publishing_with_unindexed_artifact")
-            self.sink.publish_and_register_for_job(job_id, b"image", ".png")
-            self.assertEqual(inspect_generation_consistency(self.jobs, self.sink)[0]["status"],
-                             "publishing_with_indexed_artifact")
-        self.assertEqual(self.jobs.get(job_id, "owner")["state"], "running")
+        # Simulate the forward-compatible G2 state on a real SQLite row.
+        # Do not use a mocked cursor: the actual SELECT must include publishing.
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET state='publishing' WHERE id=?", (job_id,))
+        before = self.jobs.get(job_id, "owner")
+        self.assertEqual(inspect_generation_consistency(self.jobs, self.sink)[0]["status"],
+                         "publishing_without_job_artifact")
+        self.sink.publish_for_job(job_id, b"image", ".png")
+        self.assertEqual(inspect_generation_consistency(self.jobs, self.sink)[0]["status"],
+                         "publishing_with_unindexed_artifact")
+        self.sink.publish_and_register_for_job(job_id, b"image", ".png")
+        self.assertEqual(inspect_generation_consistency(self.jobs, self.sink)[0]["status"],
+                         "publishing_with_indexed_artifact")
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_bounded_scan_prefers_newest_jobs(self, _mount):
