@@ -175,6 +175,19 @@ class SourceImageTests(unittest.TestCase):
         self.assertEqual(read_owned_source_png(self.sink, jobs, "owner-a", asset_id), PNG)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_owner_guard_refuses_unmounted_volume_after_authorization(self, _mount):
+        jobs = ImageJobStore(str(self.sink.volume_root / "jobs.sqlite"))
+        asset_id = self.sink.publish(PNG, ".png")
+        created = jobs.submit("owner-a", "test prompt", profile_id="test")
+        self.assertEqual(jobs.claim()["id"], created["job_id"])
+        self.assertTrue(jobs.finish(created["job_id"], asset_id=asset_id))
+        self.assertEqual(read_owned_source_png(self.sink, jobs, "owner-a", asset_id), PNG)
+        # Ownership in SQLite cannot override a missing/unverified media mount.
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=False):
+            with self.assertRaises(ArtifactSinkUnavailable):
+                read_owned_source_png(self.sink, jobs, "owner-a", asset_id)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_wrong_bytes_and_bad_ids_refused(self, _mount):
         asset_id = self.sink.publish(b"not png", ".png")
         with self.assertRaises(ArtifactSinkUnavailable):
