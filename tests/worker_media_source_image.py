@@ -68,6 +68,22 @@ class SourceImageTests(unittest.TestCase):
         self.assertEqual(target.read_bytes(), PNG)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_corrupt_crc_and_truncated_png_refused(self, _mount):
+        for bad in (PNG[:-5], PNG[:-12], PNG[:8] + b"junk", PNG[:-1] + bytes([PNG[-1] ^ 1])):
+            with self.subTest(length=len(bad)):
+                asset_id = self.sink.publish(bad, ".png")
+                with self.assertRaises(ArtifactSinkUnavailable):
+                    read_source_png(self.sink, asset_id)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_oversized_dimensions_refused(self, _mount):
+        oversized = (PNG[:8] + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 9000, 1, 8, 2, 0, 0, 0))
+                     + PNG[33:])
+        asset_id = self.sink.publish(oversized, ".png")
+        with self.assertRaises(ArtifactSinkUnavailable):
+            read_source_png(self.sink, asset_id)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_wrong_bytes_and_bad_ids_refused(self, _mount):
         asset_id = self.sink.publish(b"not png", ".png")
         with self.assertRaises(ArtifactSinkUnavailable):
