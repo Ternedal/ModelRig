@@ -25,7 +25,7 @@ def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink,
     with jobs._db() as db:
         rows = db.execute(
             "SELECT id, state, asset_id FROM image_jobs "
-            "WHERE state IN ('running','completed','failed') ORDER BY created,id LIMIT ?"
+            "WHERE state IN ('running','publishing','completed','failed') ORDER BY created DESC,id DESC LIMIT ?"
             , (limit,)
         ).fetchall()
     for row in rows:
@@ -69,10 +69,13 @@ def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink,
             else:
                 status = "consistent"
         elif receipt is None:
-            status = "no_job_artifact"
+            status = ("publishing_without_job_artifact" if state == "publishing" else "no_job_artifact")
         elif state == "running":
             status = ("running_with_indexed_artifact" if receipt["indexed"]
                       else "running_with_unindexed_artifact")
+        elif state == "publishing":
+            status = ("publishing_with_indexed_artifact" if receipt["indexed"]
+                      else "publishing_with_unindexed_artifact")
         else:
             status = ("failed_with_indexed_artifact" if receipt["indexed"]
                       else "failed_with_unindexed_artifact")
