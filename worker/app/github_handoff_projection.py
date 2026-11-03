@@ -32,7 +32,7 @@ class Handoff:
     released: str = "UNKNOWN"
 
     def __post_init__(self) -> None:
-        if not _REPO.fullmatch(self.repository):
+        if not isinstance(self.repository, str) or not _REPO.fullmatch(self.repository):
             raise ValueError("invalid repository")
         if self.source_type not in ("issue", "pull_request"):
             raise ValueError("invalid source type")
@@ -46,9 +46,9 @@ class Handoff:
         path = "issues" if self.source_type == "issue" else "pull"
         if self.source_url != f"{expected}{path}/{self.source_id}":
             raise ValueError("source URL must match identity")
-        if self.head_sha is not None and not _SHA.fullmatch(self.head_sha):
+        if self.head_sha is not None and (not isinstance(self.head_sha, str) or not _SHA.fullmatch(self.head_sha)):
             raise ValueError("invalid SHA")
-        if any(getattr(self, name) not in _STATES for name in
+        if any(not isinstance(getattr(self, name), str) or getattr(self, name) not in _STATES for name in
                ("implemented", "tested", "handed_off", "released")):
             raise ValueError("invalid status")
         # GitHub receipts canonicalize owner/repo to lowercase. Keep the
