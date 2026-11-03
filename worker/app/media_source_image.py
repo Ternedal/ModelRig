@@ -13,6 +13,7 @@ from .media_gallery_catalog import GalleryUnavailable, _ID, _index
 from .media_gallery_store import ExternalMediaSink
 from .media_generation_contract import ArtifactSinkUnavailable
 from .media_source_png_validation import InvalidSourcePng, validate_png_container
+from .image_job_store import ImageJobStore
 
 MAX_SOURCE_IMAGE_BYTES = 32 * 1024 * 1024
 
@@ -80,3 +81,15 @@ def read_source_png(sink: ExternalMediaSink, asset_id: str) -> bytes:
         raise ArtifactSinkUnavailable("source_image_read_failed") from exc
     finally:
         os.close(fd)
+
+
+def read_owned_source_png(sink: ExternalMediaSink, jobs: ImageJobStore,
+                          authenticated_owner: str, asset_id: str) -> bytes:
+    """Owner-gated source access; owner must come from trusted pairing context.
+
+    This is not an HTTP route and does not establish pairing authentication.
+    Unowned, unknown and incomplete assets are all refused identically.
+    """
+    if not jobs.owns_completed_asset(authenticated_owner, asset_id):
+        raise ArtifactSinkUnavailable("source_image_not_authorized")
+    return read_source_png(sink, asset_id)
