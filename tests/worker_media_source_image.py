@@ -148,6 +148,11 @@ class SourceImageTests(unittest.TestCase):
         cancelled = jobs.submit("owner-a", "cancelled prompt", profile_id="test")
         self.assertTrue(jobs.cancel(cancelled["job_id"], "owner-a"))
         self.assertFalse(jobs.owns_completed_asset("owner-a", "c" * 32))
+        interrupted = jobs.submit("owner-a", "interrupted prompt", profile_id="test")
+        self.assertEqual(jobs.claim()["id"], interrupted["job_id"])
+        self.assertEqual(jobs.recover_interrupted(), 1)
+        self.assertFalse(jobs.owns_completed_asset("owner-a", "d" * 32))
+        self.assertEqual(jobs.get(interrupted["job_id"], "owner-a")["state"], "failed")
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_wrong_bytes_and_bad_ids_refused(self, _mount):
