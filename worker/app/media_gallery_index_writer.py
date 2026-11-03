@@ -58,8 +58,9 @@ def register_asset(media_root: str | Path, verified_volume_root: str | Path,
             entries = _index(root)
             # Strip computed presentation-only fields before serialization.
             entries = [
-                {k: v for k, v in item.items()
-                 if k not in ("url", "thumbnail_url", "playback")}
+                {**{k: v for k, v in item.items()
+                    if k not in ("url", "thumbnail_url", "playback")},
+                 "supports_range": item["playback"]["supports_range"]}
                 for item in entries
             ]
         else:
