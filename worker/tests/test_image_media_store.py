@@ -104,6 +104,37 @@ class MediaStoreTests(unittest.TestCase):
                     store.publish(b"x" * 21)
                 self.assertEqual(list(Path(directory).iterdir()), [])
 
+    def test_payload_equal_to_available_reserve_is_allowed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("app.image_media_store.shutil.disk_usage") as usage:
+                usage.return_value.free = 100
+                store = self._store(directory, min_free_bytes=80)
+                result = store.publish(b"x" * 20)
+                self.assertEqual(result["bytes"], 20)
+                self.assertEqual(store.resolve(result["asset_id"], ".png").read_bytes(), b"x" * 20)
+
+    def test_post_write_free_space_failure_removes_temporary_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(directory, min_free_bytes=10)
+            with patch("app.image_media_store.shutil.disk_usage") as usage:
+                usage.return_value.free = 100
+                # publish preflight checks twice; the post-write check then fails.
+                usage.return_value.free = 100
+                original_check = store._check_free
+                calls = 0
+
+                def check_then_exhaust():
+                    nonlocal calls
+                    calls += 1
+                    if calls == 2:
+                        usage.return_value.free = 0
+                    original_check()
+
+                with patch.object(store, "_check_free", side_effect=check_then_exhaust):
+                    with self.assertRaises(MediaStorageError):
+                        store.publish(b"payload")
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
     def test_free_space_floor(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(MediaStorageError):
