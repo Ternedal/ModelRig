@@ -58,6 +58,19 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(self.jobs.get(job_id, "owner"), before)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_publishing_indexed_missing_file_is_conflict_without_mutation(self, _mount):
+        job_id = self.submit_running()
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET state='publishing' WHERE id=?", (job_id,))
+        asset = self.sink.publish_and_register_for_job(job_id, b"image", ".png")
+        before = self.jobs.get(job_id, "owner")
+        (self.sink.media_root / (asset + ".png")).unlink()
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "media_conflict")
+        self.assertEqual(report[0]["reason"], "job_asset_missing_but_indexed")
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_bounded_scan_prefers_newest_jobs(self, _mount):
         older = self.submit_running()
         newer = self.submit_running()
