@@ -29,6 +29,20 @@ class IndexWriterTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in items], ["first", "second"])
         self.assertEqual(items[1]["mime_type"], "video/mp4")
 
+    def test_preserves_explicit_range_support_on_subsequent_registration(self):
+        (self.root / "first.mp4").write_bytes(b"video")
+        (self.root / "gallery-index.json").write_text(json.dumps([{
+            "id": "first", "kind": "video", "mime_type": "video/mp4",
+            "size_bytes": 5, "created_at": "2026-11-03T00:00:00Z",
+            "supports_range": False,
+        }]))
+        (self.root / "second.png").write_bytes(b"image")
+        register_asset(self.root, self.volume, "second", ".png", 5)
+        raw = json.loads((self.root / "gallery-index.json").read_text())
+        self.assertIs(raw[0]["supports_range"], False)
+        items = list_gallery(self.root, verified_volume_root=self.volume)["items"]
+        self.assertIs(items[0]["playback"]["supports_range"], False)
+
     def test_refuse_duplicate_without_corrupting_index(self):
         (self.root / "first.png").write_bytes(b"12345")
         register_asset(self.root, self.volume, "first", ".png", 5)
