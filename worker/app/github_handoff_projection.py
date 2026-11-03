@@ -79,6 +79,8 @@ class HandoffProjection:
 
     def ingest(self, handoff: Handoff, *, receipt: GitHubSourceReceipt, grants: GitHubConnectorGrantStore) -> bool:
         """Return True on a new revision; fail closed without explicit authority."""
+        if not isinstance(handoff, Handoff):
+            raise ValueError("validated handoff required")
         if not isinstance(receipt, GitHubSourceReceipt) or not isinstance(grants, GitHubConnectorGrantStore):
             raise PermissionError("verified GitHub receipt and grant store required")
         grant = grants.authorize(receipt.grant_id, repository=handoff.repository, operation=handoff.source_type)
