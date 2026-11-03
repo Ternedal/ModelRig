@@ -138,6 +138,16 @@ class SourceImageTests(unittest.TestCase):
                 read_owned_source_png(self.sink, jobs, owner, asset_id)
         with self.assertRaises(ArtifactSinkUnavailable):
             read_owned_source_png(self.sink, jobs, "owner-a", "a" * 32)
+        for invalid_owner in (True, 123, "owner-a' OR 1=1 --"):
+            with self.subTest(owner=invalid_owner), self.assertRaises(ArtifactSinkUnavailable):
+                read_owned_source_png(self.sink, jobs, invalid_owner, asset_id)
+        failed = jobs.submit("owner-a", "failed prompt", profile_id="test")
+        jobs.claim()
+        self.assertTrue(jobs.finish(failed["job_id"], error="generation_failed"))
+        self.assertFalse(jobs.owns_completed_asset("owner-a", "b" * 32))
+        cancelled = jobs.submit("owner-a", "cancelled prompt", profile_id="test")
+        self.assertTrue(jobs.cancel(cancelled["job_id"], "owner-a"))
+        self.assertFalse(jobs.owns_completed_asset("owner-a", "c" * 32))
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_wrong_bytes_and_bad_ids_refused(self, _mount):
