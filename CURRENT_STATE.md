@@ -390,6 +390,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_media_generation_reconciliation.py`
 - `tests/worker_media_generation_runner.py`
 - `tests/worker_media_source_image.py`
+
+Source PNG integration note: `worker/app/media_source_image.py` provides an internal, read-only, bounded PNG byte reader for indexed files on a verified external volume. It is **not** a public route, an owner-authorization check, a decoder resource limit, or image-to-video activation. API callers must use a separately authenticated owner-gated seam before exposing source images; physical rig proof is still required.
 - `tests/worker_migrate.py`
 - `tests/worker_netguard.py`
 - `tests/worker_occurrence_ledger.py`
