@@ -40,6 +40,41 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(len(inspect_generation_consistency(self.jobs, self.sink, limit=3)), 3)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_publishing_states_are_read_only_and_distinct(self, _mount):
+        from contextlib import contextmanager
+
+        job_id = self.submit_running()
+        @contextmanager
+        def fake_db():
+            class Connection:
+                def execute(self, query, params):
+                    self_query = query
+                    assert "'publishing'" in self_query
+                    return self
+                def fetchall(self):
+                    return [{"id": job_id, "state": "publishing", "asset_id": None}]
+            yield Connection()
+
+        with patch.object(self.jobs, "_db", fake_db):
+            self.assertEqual(inspect_generation_consistency(self.jobs, self.sink)[0]["status"],
+                             "publishing_without_job_artifact")
+            self.sink.publish_for_job(job_id, b"image", ".png")
+            self.assertEqual(inspect_generation_consistency(self.jobs, self.sink)[0]["status"],
+                             "publishing_with_unindexed_artifact")
+            self.sink.publish_and_register_for_job(job_id, b"image", ".png")
+            self.assertEqual(inspect_generation_consistency(self.jobs, self.sink)[0]["status"],
+                             "publishing_with_indexed_artifact")
+        self.assertEqual(self.jobs.get(job_id, "owner")["state"], "running")
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_bounded_scan_prefers_newest_jobs(self, _mount):
+        older = self.submit_running()
+        newer = self.submit_running()
+        report = inspect_generation_consistency(self.jobs, self.sink, limit=1)
+        self.assertEqual([item["job_id"] for item in report], [newer])
+        self.assertNotEqual(older, newer)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_running_with_published_unindexed_file_is_reported_without_mutation(self, _mount):
         job_id = self.submit_running()
         self.sink.publish_for_job(job_id, b"image", ".png")
