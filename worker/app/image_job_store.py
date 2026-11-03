@@ -109,6 +109,21 @@ class ImageJobStore:
             row = db.execute("SELECT * FROM image_jobs WHERE id=? AND owner=?", (job_id, owner)).fetchone()
             return dict(row) if row else None
 
+    def owns_completed_asset(self, owner: str, asset_id: str) -> bool:
+        """Authorize only a completed artifact owned by this exact principal.
+
+        No job prompt or owner metadata is returned. The API layer must obtain
+        owner from verified pairing/auth context, never from request payload.
+        """
+        if (type(owner) is not str or not owner.strip() or len(owner) > 256
+                or type(asset_id) is not str or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", asset_id)):
+            return False
+        with self._db() as db:
+            row = db.execute(
+                "SELECT 1 FROM image_jobs WHERE owner=? AND asset_id=? "
+                "AND state='completed' LIMIT 1", (owner, asset_id)).fetchone()
+            return row is not None
+
     def claim(self) -> dict | None:
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
