@@ -56,6 +56,10 @@ class GitHubHandoffAdapter:
             grant_id, repository=repository, operation=source_type,
             object_id=source_id, now=now,
         )
+        # A receipt authorized under another valid grant must not silently
+        # replace the authority explicitly selected for this read.
+        if result.source.grant_id != grant_id:
+            raise PermissionError("GitHub read receipt grant mismatch")
         if (result.repository != repository
                 or result.operation != source_type
                 or result.object_id != str(source_id)):
