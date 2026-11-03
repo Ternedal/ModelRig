@@ -38,7 +38,9 @@ class Handoff:
             raise ValueError("invalid source type")
         if type(self.source_id) is not int or self.source_id <= 0:
             raise ValueError("invalid source id")
-        if not self.revision or len(self.revision) > 160:
+        # Match the connector receipt contract before persisting a revision.
+        # Opaque revisions must not contain control characters or whitespace.
+        if not isinstance(self.revision, str) or not re.fullmatch(r"[A-Za-z0-9._:/+-]{1,160}", self.revision):
             raise ValueError("invalid revision")
         expected = f"https://github.com/{self.repository}/"
         path = "issues" if self.source_type == "issue" else "pull"
