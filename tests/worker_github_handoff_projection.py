@@ -66,6 +66,14 @@ class HandoffProjectionTests(unittest.TestCase):
             )
         self.assertEqual(store.list_records(), [])
 
+    def test_rejects_unvalidated_handoff_before_grant_lookup(self):
+        store = HandoffProjection(sqlite3.connect(":memory:"))
+        for malformed in (None, {}, object(), "issue"):
+            with self.subTest(malformed=type(malformed).__name__):
+                with self.assertRaises(ValueError):
+                    store.ingest(malformed, receipt=self.receipt(), grants=self.grants)
+        self.assertEqual(store.list_records(), [])
+
     def test_idempotent_and_revision_history(self):
         db = sqlite3.connect(":memory:")
         store = HandoffProjection(db)
