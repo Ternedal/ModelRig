@@ -84,6 +84,26 @@ class SourceImageTests(unittest.TestCase):
             read_source_png(self.sink, asset_id)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_invalid_png_chunk_order_and_color_depth_refused(self, _mount):
+        sig = PNG[:8]
+        ihdr = _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+        invalid_depth = _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 4, 2, 0, 0, 0))
+        idat = _png_chunk(b"IDAT", zlib.compress(bytes.fromhex("00ff0000")))
+        end = _png_chunk(b"IEND", b"")
+        bad_images = (
+            sig + invalid_depth + idat + end,
+            sig + ihdr + idat + _png_chunk(b"tEXt", b"k\\x00v") + idat + end,
+            sig + ihdr + idat + _png_chunk(b"PLTE", b"\\x00\\x00\\x00") + end,
+            sig + ihdr + _png_chunk(b"ABcD", b"") + idat + end,
+            sig + ihdr + _png_chunk(b"1bad", b"") + idat + end,
+        )
+        for bad in bad_images:
+            with self.subTest(length=len(bad)):
+                asset_id = self.sink.publish(bad, ".png")
+                with self.assertRaises(ArtifactSinkUnavailable):
+                    read_source_png(self.sink, asset_id)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_wrong_bytes_and_bad_ids_refused(self, _mount):
         asset_id = self.sink.publish(b"not png", ".png")
         with self.assertRaises(ArtifactSinkUnavailable):
