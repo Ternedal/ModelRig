@@ -138,6 +138,10 @@ class HandoffProjectionTests(unittest.TestCase):
             {"source_url": "https://github.com/Ternedal/Other/issues/2319"},
             {"source_id": True},
             {"revision": ""},
+            {"revision": "rev with spaces"},
+            {"revision": "rev\\nnewline"},
+            {"revision": "x" * 161},
+            {"revision": 123},
             {"head_sha": "deadbeef"},
             {"released": "YES"},
         )
