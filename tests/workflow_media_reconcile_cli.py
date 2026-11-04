@@ -31,6 +31,30 @@ class MediaReconcileCliTests(unittest.TestCase):
                     db.execute("CREATE TABLE diagnostic_mutation (id TEXT)")
             self.assertEqual(db_path.read_bytes(), before)
 
+    def test_snapshot_keeps_stable_rows_across_external_commits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "jobs.sqlite"
+            with sqlite3.connect(db_path) as db:
+                db.execute("PRAGMA journal_mode=WAL")
+                db.execute("CREATE TABLE image_jobs (id TEXT PRIMARY KEY)")
+                db.executemany("INSERT INTO image_jobs VALUES (?)", [("a",), ("b",)])
+            store = cli.ReadOnlyImageJobStore(db_path)
+            with store.snapshot():
+                with store._db() as db:
+                    first = [row[0] for row in db.execute(
+                        "SELECT id FROM image_jobs ORDER BY id").fetchall()]
+                with sqlite3.connect(db_path) as writer:
+                    writer.execute("INSERT INTO image_jobs VALUES ('c')")
+                with store._db() as db:
+                    second = [row[0] for row in db.execute(
+                        "SELECT id FROM image_jobs ORDER BY id").fetchall()]
+            self.assertEqual(first, ["a", "b"])
+            self.assertEqual(second, first)
+            with store._db() as db:
+                self.assertEqual([row[0] for row in db.execute(
+                    "SELECT id FROM image_jobs ORDER BY id").fetchall()],
+                    ["a", "b", "c"])
+
     def test_all_pages_aggregates_conflicts_and_outputs_every_row(self):
         import contextlib
         import io
