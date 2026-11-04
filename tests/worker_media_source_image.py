@@ -201,6 +201,25 @@ class SourceImageTests(unittest.TestCase):
         self.assertTrue(reopened.owns_completed_asset("owner-a", asset_id))
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_g2_executor_only_grants_source_after_complete(self, _mount):
+        """Exercise actual G2 transitions rather than synthetic SQLite state."""
+        jobs = ImageJobStore(str(self.sink.volume_root / "g2_executor_jobs.sqlite"))
+        asset_id = self.sink.publish(PNG, ".png")
+        instance = "GPU-00000000-0000-0000-0000-000000000001:0123456789abcdef"
+        created = jobs.submit("owner-a", "test prompt", profile_id="test")
+        claimed = jobs.claim_for(["test"], instance)
+        self.assertEqual(claimed["id"], created["job_id"])
+        self.assertFalse(jobs.owns_completed_asset("owner-a", asset_id))
+        self.assertTrue(jobs.begin_publish(created["job_id"], instance))
+        self.assertFalse(jobs.owns_completed_asset("owner-a", asset_id))
+        with self.assertRaises(SourceImageUnavailable):
+            read_owned_source_png(self.sink, jobs, "owner-a", asset_id)
+        self.assertTrue(jobs.complete(created["job_id"], instance, asset_id))
+        self.assertTrue(jobs.owns_completed_asset("owner-a", asset_id))
+        self.assertEqual(read_owned_source_png(self.sink, jobs, "owner-a", asset_id), PNG)
+        self.assertFalse(jobs.owns_completed_asset("owner-b", asset_id))
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_g2_publishing_and_recovered_publication_never_authorize_source(self, _mount):
         """A published file alone is insufficient until G2 commits completion."""
         jobs = ImageJobStore(str(self.sink.volume_root / "publishing_jobs.sqlite"))
