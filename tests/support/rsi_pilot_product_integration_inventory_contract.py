@@ -224,6 +224,38 @@ def run_contract() -> None:
         )
         transitions.setdefault(sensor_transition["path"], []).append(sensor_transition)
 
+    # The image-pilot branch adds only these default-off authenticated routes
+    # after the sensor-control handoff. Bind both exact Git blobs and the
+    # source-level delta; arbitrary changes cannot be approved by this check.
+    image_route_path = "backend/internal/httpapi/server.go"
+    image_route_block = (
+        "\t// Image generation pilot: explicit opt-in, paired-device auth, loopback worker.\n"
+        "\tif imageMediaPilotEnabled() {\n"
+        "\t\ts.mux.Handle(\"POST /api/v1/media/images/jobs\", s.authMW(http.HandlerFunc(s.handleImageMedia)))\n"
+        "\t\ts.mux.Handle(\"GET /api/v1/media/images/jobs/{id}\", s.authMW(http.HandlerFunc(s.handleImageMedia)))\n"
+        "\t\ts.mux.Handle(\"POST /api/v1/media/images/jobs/{id}/cancel\", s.authMW(http.HandlerFunc(s.handleImageMedia)))\n"
+        "\t\ts.mux.Handle(\"GET /api/v1/media/images/assets/{id}\", s.authMW(http.HandlerFunc(s.handleImageMedia)))\n"
+        "\t}\n"
+    )
+    image_route_source = (ROOT / image_route_path).read_bytes().decode("utf-8")
+    image_route_code = code_of(ROOT / image_route_path)
+    assert 's.mux.Handle("POST /api/v1/media/images/jobs"' in image_route_code
+    if image_route_block in image_route_source:
+        assert image_route_source.count(image_route_block) == 1
+        prior_source = image_route_source.replace(image_route_block, "", 1)
+        prior_bytes = prior_source.encode("utf-8")
+        prior_header = f"blob {len(prior_bytes)}\0".encode("ascii")
+        assert hashlib.sha1(prior_header + prior_bytes).hexdigest() == (
+            "f9b646350c70900ec256387b7a7e544d2de3eb0b"
+        ), "image pilot changed unrelated selected source"
+        assert _git_blob_sha(ROOT / image_route_path) == (
+            "494521056c4d93bb62f65f0830762b1c1e7439a9"
+        )
+        transitions.setdefault(image_route_path, []).append({
+            "from_git_blob_sha": "f9b646350c70900ec256387b7a7e544d2de3eb0b",
+            "to_git_blob_sha": "494521056c4d93bb62f65f0830762b1c1e7439a9",
+        })
+
     candidates = inventory["candidate_surfaces"]
     assert len(candidates) == len(EXPECTED) == 3
     for item, (candidate_id, relative_path, expected_sha) in zip(candidates, EXPECTED, strict=True):

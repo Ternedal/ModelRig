@@ -50,7 +50,7 @@ class ExternalMediaStore:
                 break
         if not allowed:
             raise MediaStorageError("media root is not on a configured mounted volume")
-        if min_free_bytes < 0:
+        if type(min_free_bytes) is not int or min_free_bytes < 0:
             raise ValueError("min_free_bytes must be nonnegative")
         self.min_free_bytes = min_free_bytes
         self._check_free()
@@ -74,9 +74,13 @@ class ExternalMediaStore:
             raise MediaStorageError("media volume below free-space floor")
 
     def publish(self, data: bytes, extension: str = ".png") -> dict[str, str | int]:
-        if extension not in _ALLOWED or not data:
+        if not isinstance(extension, str) or extension not in _ALLOWED or not isinstance(data, bytes) or not data:
             raise MediaStorageError("invalid media payload or extension")
         self._check_free()
+        # Reserve the configured free-space floor before allocating a media file.
+        # A second check after writing still protects against concurrent writers.
+        if len(data) > shutil.disk_usage(self.root).free - self.min_free_bytes:
+            raise MediaStorageError("insufficient free space for media payload")
         asset_id = uuid.uuid4().hex
         final = self.root / (asset_id + extension)
         self._check_mount()
@@ -95,7 +99,7 @@ class ExternalMediaStore:
                 os.unlink(temp_path)
 
     def resolve(self, asset_id: str, extension: str) -> Path:
-        if not _ASSET_ID.fullmatch(asset_id) or extension not in _ALLOWED:
+        if not isinstance(asset_id, str) or not _ASSET_ID.fullmatch(asset_id) or not isinstance(extension, str) or extension not in _ALLOWED:
             raise MediaStorageError("invalid asset identifier")
         self._check_mount()
         path = self.root / (asset_id + extension)

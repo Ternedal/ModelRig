@@ -81,7 +81,20 @@ def run_contract() -> None:
         successor_transition = successor["tracked_source_transition"]
         assert successor_transition["path"] == "backend/internal/httpapi/server.go"
         assert successor_transition["from_git_blob_sha"] == transition["to_git_blob_sha"]
-        assert successor_transition["to_git_blob_sha"] == server_sha
+        sensor_sha = successor_transition["to_git_blob_sha"]
+        assert sensor_sha == "f9b646350c70900ec256387b7a7e544d2de3eb0b"
+        if server_sha != sensor_sha:
+            # The image pilot adds only its exact, separately pinned route block.
+            # Keep the sensor handoff immutable and reject all other drift.
+            assert server_sha == "494521056c4d93bb62f65f0830762b1c1e7439a9"
+            server_code = code_of(SERVER)
+            for route in (
+                'POST /api/v1/media/images/jobs',
+                'GET /api/v1/media/images/jobs/{id}',
+                'POST /api/v1/media/images/jobs/{id}/cancel',
+                'GET /api/v1/media/images/assets/{id}',
+            ):
+                assert route in server_code, route
         run_sensor_control_handoff_contract()
 
     new_files = handoff["new_product_files"]
