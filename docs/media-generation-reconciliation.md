@@ -21,10 +21,10 @@ python3 scripts/media_reconcile.py \
   --jobs-db /path/to/jobs.sqlite \
   --volume-root /mounted-volume \
   --media-root /mounted-volume/media \
-  --limit 100 --offset 0
+  --limit 100 --offset 0 --fail-on-conflict
 ```
 
-Each output line is a JSON finding. Increase `--offset` by `--limit`
+Each output line is a JSON finding. With `--fail-on-conflict`, exit code 0\nmeans no conflicts in this page, 1 means operator investigation is needed,\nand 2 means the inspection itself failed. These codes describe **one page**,\nnot the entire database. Increase `--offset` by `--limit`
 to inspect further pages. The CLI opens SQLite with `mode=ro` and avoids
 the schema-creating `ImageJobStore.__init__`; do **not** substitute the
 ordinary job-store constructor for a read-only forensic inspection.
