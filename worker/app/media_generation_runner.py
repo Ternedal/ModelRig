@@ -19,6 +19,7 @@ from .media_generation_contract import (
     GenerationError,
     GenerationRequest,
     GeneratorAdapter,
+    JobKeyedArtifactSink,
     RenderedArtifact,
 )
 from .media_generation_profiles import ModelProfile, validate_request
@@ -78,14 +79,12 @@ class GenerationJobRunner:
                 raise TypeError("adapter must return RenderedArtifact")
             if rendered.mime_type not in self.profiles[job["profile_id"]].outputs:
                 raise GenerationError("adapter produced a type its profile does not declare")
-            asset_id = self.sink.publish(rendered.data, rendered.extension)
+            if isinstance(self.sink, JobKeyedArtifactSink):  # deterministic id: reconcilable after a crash
+                asset_id = self.sink.publish_and_register_for_job(job_id, rendered.data, rendered.extension)
+            else:
+                asset_id = self.sink.publish(rendered.data, rendered.extension)
             if not isinstance(asset_id, str) or not asset_id:
                 raise ArtifactSinkUnavailable("sink returned no asset id")
-            if not self.jobs.finish(job_id, asset_id=asset_id):
-                # Only an external writer can cause this. Keep the published
-                # asset for reconciliation rather than claiming success.
-                raise RuntimeError("job completion transition rejected")
-            return {"job_id": job_id, "state": "completed", "asset_id": asset_id}
         except ArtifactSinkUnavailable:
             # A missing external disk is a fatal safety event. Do not touch the
             # job (recover_interrupted() fails it at the next start) and do not
@@ -95,3 +94,12 @@ class GenerationJobRunner:
             # Never persist model exceptions: they can contain prompts or paths.
             self.jobs.finish(job_id, error=FAILED)
             return {"job_id": job_id, "state": "failed", "error": FAILED}
+        # The artifact is durable now. A completion write that fails must not turn into an
+        # ordinary failure (#2318 6517442207): leave the job running for reconciliation.
+        try:
+            recorded = self.jobs.finish(job_id, asset_id=asset_id)
+        except Exception:
+            recorded = False
+        if not recorded:
+            return {"job_id": job_id, "state": "unrecorded", "asset_id": asset_id}
+        return {"job_id": job_id, "state": "completed", "asset_id": asset_id}

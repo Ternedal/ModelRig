@@ -30,11 +30,23 @@ Rules
 - ArtifactSinkUnavailable is fatal (exit 75): the job is left for recovery,
   no other disk is tried. Job errors are stored as fixed codes, never as
   exception text (it can contain prompts or paths).
+- A failed load is only survivable if close() then proves the release (True);
+  otherwise the adapter is retained and the executor exits 70 (#2318 6623359226).
+  A GpuResourcesRetained from load() is always fatal.
+- Publication is job-keyed whenever the sink offers it (JobKeyedArtifactSink,
+  JobKeyedStagedSink), so an artifact can be correlated with its job after a crash.
+  If the completion write then fails, the job stays "publishing" (never
+  "generation_failed") and the executor exits 76; recovery turns it into
+  "interrupted during publication" for the sink owner's reconciliation.
+- The executor lock is released on every terminal path of run(). The GPU lease of
+  a retained adapter is not: it stays held until the process exits.
+- Bookkeeping writes on the fatal paths are best-effort: a failing database never
+  replaces the fatal exit (#2318 6516453287).
 
 Exit codes: 0 done, 70 GPU memory not proven free, 73 another executor holds
-this GPU, 75 media volume unavailable, 78 configuration. A process supervisor
-(next slice) maps them to restart policy: restart after 70, never loop on 73,
-wait for the volume after 75, stop on 78.
+this GPU, 75 media volume unavailable, 76 publication not recorded (reconcile),
+78 configuration. A process supervisor (next slice) maps them to restart policy:
+restart after 70 and 76, never loop on 73, wait for the volume after 75, stop on 78.
 """
 from __future__ import annotations
 
@@ -47,11 +59,13 @@ from .diffusers_image_adapter import GpuResourcesRetained
 from .gpu_lease import ExecutorAlreadyRunning, GpuBusy, acquire_executor_lock, normalize_gpu_uuid
 from .image_job_store import ImageJobStore
 from .media_generation_contract import (ArtifactSink, ArtifactSinkUnavailable, GenerationCancelled, GenerationError,
-                                        GenerationRequest, RenderedArtifact, StagedFileArtifactSink)
+                                        GenerationRequest, JobKeyedArtifactSink, JobKeyedStagedSink,
+                                        RenderedArtifact, StagedFileArtifactSink)
 from .media_generation_profiles import ModelProfile, validate_request
 
-EXIT_DONE, EXIT_GPU_RETAINED, EXIT_DUPLICATE, EXIT_SINK_UNAVAILABLE, EXIT_CONFIG = 0, 70, 73, 75, 78
+EXIT_DONE, EXIT_GPU_RETAINED, EXIT_DUPLICATE, EXIT_SINK_UNAVAILABLE, EXIT_UNRECORDED, EXIT_CONFIG = 0, 70, 73, 75, 76, 78
 FAILED = "generation_failed"
+PUBLICATION_FAILED = "publication_failed"
 REJECTED = "generation_request_rejected"
 GPU_RETAINED = "gpu_memory_retained"
 GPU_BUSY = "gpu_busy"
@@ -60,6 +74,10 @@ _REQUEST_PARAMS = ("width", "height", "steps", "seed", "input_asset_id", "frames
 
 class ExecutorConfigError(RuntimeError):
     pass
+
+
+class PublicationUnrecorded(RuntimeError):
+    """The artifact is durable but its completion could not be recorded; the job stays publishing."""
 
 
 class MediaExecutor:
@@ -120,7 +138,23 @@ class MediaExecutor:
             self._unload()  # one resident model per GPU: a switch is a proven unload, then a load
         if self.adapter is None:
             adapter = self.adapter_factory(profile)
-            adapter.load()  # GpuResourcesRetained -> exit 70; GpuBusy -> this job fails "gpu_busy"
+            try:
+                adapter.load()
+            except GpuResourcesRetained:
+                self._retained.append(adapter)  # the adapter says its memory is not free: always fatal
+                raise
+            except BaseException as exc:
+                # A partial load may hold the GPU (memory, a started ComfyUI). Continue only if
+                # close() proves the release; otherwise keep it referenced and exit 70.
+                try:
+                    released = adapter.close() is True
+                except Exception:
+                    released = False
+                self.events.append(f"failed_load:{profile.profile_id}:{released}")
+                if not released:
+                    self._retained.append(adapter)
+                    raise GpuResourcesRetained("a failed load did not prove its release; the executor must exit") from exc
+                raise  # released: GpuBusy -> "gpu_busy", anything else -> "generation_failed"
             self.adapter = adapter
             self.events.append(f"loaded:{profile.profile_id}")
         return self.adapter
@@ -170,6 +204,7 @@ class MediaExecutor:
         except (GenerationError, ValueError, TypeError, KeyError):
             self.store.fail(job_id, self.instance, REJECTED)
             return "rejected"
+        publishing = False
         try:
             adapter = self._adapter_for(profile)
             should_cancel = self._cancel_check(job_id)
@@ -178,23 +213,29 @@ class MediaExecutor:
                     mime = adapter.render_to(request, out, should_cancel=should_cancel)
                     if not self.store.begin_publish(job_id, self.instance):
                         raise GenerationCancelled("cancelled before publication")  # staged file is removed
-                    asset_id = self.video_sink.adopt(out, mime)
+                    publishing = True
+                    if isinstance(self.video_sink, JobKeyedStagedSink):
+                        asset_id = self.video_sink.adopt_for_job(out, mime, job_id)
+                    else:
+                        asset_id = self.video_sink.adopt(out, mime)
             else:
                 rendered = adapter.render(request, should_cancel=should_cancel)
                 if not isinstance(rendered, RenderedArtifact) or rendered.mime_type not in profile.outputs:
                     raise GenerationError("adapter output does not match the profile")
                 if not self.store.begin_publish(job_id, self.instance):
                     raise GenerationCancelled("cancelled before publication")
-                asset_id = self.image_sink.publish(rendered.data, rendered.extension)
+                publishing = True
+                if isinstance(self.image_sink, JobKeyedArtifactSink):
+                    asset_id = self.image_sink.publish_and_register_for_job(job_id, rendered.data, rendered.extension)
+                else:
+                    asset_id = self.image_sink.publish(rendered.data, rendered.extension)
+            if not isinstance(asset_id, str) or not asset_id:
+                raise ArtifactSinkUnavailable("sink returned no asset id")
             self.last_used = self.clock()
-            if not self.store.complete(job_id, self.instance, asset_id):
-                # Only an external writer can cause this while the executor lock is held.
-                raise RuntimeError("completion transition rejected; asset kept for reconciliation")
-            return "completed"
         except ArtifactSinkUnavailable:
             raise  # left running/publishing; recover_gpu() fails it at the next start; no other disk
         except GpuResourcesRetained:
-            self.store.fail(job_id, self.instance, GPU_RETAINED)
+            self._record_failure(job_id, GPU_RETAINED)  # best-effort: never replaces the fatal exit
             raise
         except GenerationCancelled:
             self.last_used = self.clock()
@@ -205,11 +246,29 @@ class MediaExecutor:
             return "failed"
         except Exception:
             self.last_used = self.clock()
-            self.store.fail(job_id, self.instance, FAILED)  # never persist exception text
+            # Never persist exception text. After the commit point it is a publication failure.
+            self.store.fail(job_id, self.instance, PUBLICATION_FAILED if publishing else FAILED)
             return "failed"
+        # The artifact is durable. If its completion cannot be recorded, the job stays publishing
+        # (never "generation_failed") and this executor stops: recovery and reconciliation follow.
+        try:
+            recorded = self.store.complete(job_id, self.instance, asset_id)
+        except Exception:
+            recorded = False
+        if not recorded:
+            self.events.append("publication_unrecorded")
+            raise PublicationUnrecorded("artifact published but completion not recorded")
+        return "completed"
+
+    def _record_failure(self, job_id: str, code: str) -> None:
+        try:
+            self.store.fail(job_id, self.instance, code)
+        except Exception:
+            self.events.append(f"record_failed:{code}")
 
     def run(self, *, max_steps: int | None = None, idle_sleep: Callable[[], None] = lambda: time.sleep(1.0)) -> int:
-        """The executor's main loop; returns the process exit code."""
+        """The executor's main loop; returns the process exit code. The executor lock is released
+        on every terminal path; a retained adapter's GPU lease is not (it ends with the process)."""
         try:
             self.start()
             steps = 0
@@ -225,5 +284,14 @@ class MediaExecutor:
             return EXIT_GPU_RETAINED
         except ArtifactSinkUnavailable:
             return EXIT_SINK_UNAVAILABLE
+        except PublicationUnrecorded:
+            return EXIT_UNRECORDED
         except ExecutorConfigError:
             return EXIT_CONFIG
+        finally:
+            self.release_lock()
+
+    def release_lock(self) -> None:
+        lock, self._lock = self._lock, None
+        if lock is not None:
+            lock.release()

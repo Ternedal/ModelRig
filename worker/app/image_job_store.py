@@ -78,6 +78,10 @@ class ImageJobStore:
         if not self.path.parent.is_dir():
             raise ImageJobError("job database parent directory does not exist")
         with self._db() as db:
+            # One write transaction spans creation, inspection and both migrations, so concurrent
+            # initialisers (several executors, the worker) serialise instead of racing to ALTER
+            # (#2318 review 4420958348).
+            db.execute("BEGIN IMMEDIATE")
             db.execute("""CREATE TABLE IF NOT EXISTS image_jobs (
                 id TEXT PRIMARY KEY, owner TEXT NOT NULL, prompt TEXT NOT NULL,
                 profile_id TEXT NOT NULL, params TEXT NOT NULL,

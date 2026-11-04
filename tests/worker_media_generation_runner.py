@@ -74,19 +74,23 @@ class RunnerTests(unittest.TestCase):
         media = volume / "media"
         media.mkdir()
         job_id = self.submit()
-        runner, _ = self.runner(lambda request: RenderedArtifact(PNG, "image/png"), ExternalMediaSink(media, volume))
         original_finish = self.jobs.finish
         def fail_completion(key, *, asset_id=None, error=None):
             if asset_id is not None:
                 raise OSError("simulated database failure")
             return original_finish(key, asset_id=asset_id, error=error)
+        sink = ExternalMediaSink(media, volume)
+        runner, _ = self.runner(lambda request: RenderedArtifact(PNG, "image/png"), sink)
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
             with patch.object(self.jobs, "finish", side_effect=fail_completion):
                 result = runner.run_one()
             items = list_gallery(media, verified_volume_root=volume)["items"]
-        self.assertEqual(result["state"], "failed")
-        self.assertEqual(self.state(job_id)["state"], "failed")
-        self.assertEqual(len(items), 1)
+        # #2318 6517442207: a durable artifact whose completion write failed is NOT an ordinary
+        # failure. The job stays running for reconciliation, and the asset is keyed by the job.
+        self.assertEqual(result["state"], "unrecorded")
+        self.assertEqual(self.state(job_id)["state"], "running")
+        self.assertEqual(result["asset_id"], sink.job_asset_id(job_id), "job-keyed publication")
+        self.assertEqual([item["id"] for item in items], [result["asset_id"]])
         self.assertEqual((media / (items[0]["id"] + ".png")).read_bytes(), PNG)
 
     def test_real_gallery_sink_end_to_end(self):

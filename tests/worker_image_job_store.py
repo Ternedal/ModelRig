@@ -179,6 +179,63 @@ class ExecutorProtocolTests(unittest.TestCase):
         self.assertEqual((row["state"], row["asset_id"], row["claimed_by"], row["cancel_requested"]),
                          ("completed", "asset", None, 0))
 
+    def test_concurrent_initialisers_serialise_the_migration(self):
+        """#2318 review 4420958348: two initialisers that both read the schema before either
+        migrates must not both ALTER. A barrier at the schema read makes the race deterministic."""
+        import threading
+        import app.image_job_store as module
+        legacy = str(Path(self.temp.name) / "racing.sqlite3")
+        with sqlite3.connect(legacy) as db:
+            db.execute("""CREATE TABLE image_jobs (id TEXT PRIMARY KEY, owner TEXT NOT NULL, prompt TEXT NOT NULL,
+                profile_id TEXT NOT NULL, params TEXT NOT NULL, state TEXT NOT NULL, created REAL NOT NULL,
+                updated REAL NOT NULL, asset_id TEXT, error TEXT)""")
+        barrier = threading.Barrier(2, timeout=1.0)
+        real_connect = sqlite3.connect
+
+        class AtSchemaRead:
+            def __init__(self, connection):
+                object.__setattr__(self, "_c", connection)
+
+            def __getattr__(self, name):
+                return getattr(self._c, name)
+
+            def __setattr__(self, name, value):
+                setattr(self._c, name, value)
+
+            def execute(self, sql, *args):
+                if sql.startswith("PRAGMA table_info"):
+                    try:
+                        barrier.wait()  # both initialisers meet here unless the first holds the write lock
+                    except threading.BrokenBarrierError:
+                        pass
+                return self._c.execute(sql, *args)
+
+            def __enter__(self):
+                self._c.__enter__()
+                return self
+
+            def __exit__(self, *exc):
+                return self._c.__exit__(*exc)
+
+        errors = []
+
+        def initialise():
+            try:
+                ImageJobStore(legacy)
+            except Exception as exc:  # noqa: BLE001 - recorded for the assertion
+                errors.append(f"{type(exc).__name__}: {exc}")
+
+        with patch.object(module.sqlite3, "connect", lambda *a, **k: AtSchemaRead(real_connect(*a, **k))):
+            threads = [threading.Thread(target=initialise) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(30)
+        self.assertEqual(errors, [], "both initialisers succeed; neither hits 'duplicate column'")
+        with sqlite3.connect(legacy) as db:
+            columns = [row[1] for row in db.execute("PRAGMA table_info(image_jobs)")]
+        self.assertEqual((columns.count("claimed_by"), columns.count("cancel_requested")), (1, 1))
+
     def test_claim_for_takes_only_the_listed_profiles_and_records_the_instance(self):
         other = self.job("sdxl-b")
         mine = self.job("sdxl-a")

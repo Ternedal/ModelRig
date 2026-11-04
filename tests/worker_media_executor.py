@@ -18,6 +18,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
 
 ROOT = Path(__file__).resolve().parents[1]
 for extra in (ROOT / "worker", ROOT / "tests", ROOT / "tests" / "support"):
@@ -37,7 +38,7 @@ from worker_staged_sink_conformance import ReferenceSink  # noqa: E402
 from app.gpu_lease import ExecutorAlreadyRunning, acquire_gpu_lease  # noqa: E402
 from app.image_job_store import ImageJobError, ImageJobStore  # noqa: E402
 from app.media_executor import (EXIT_DUPLICATE, EXIT_GPU_RETAINED, EXIT_SINK_UNAVAILABLE,  # noqa: E402
-                                ExecutorConfigError, MediaExecutor)
+                                EXIT_UNRECORDED, ExecutorConfigError, MediaExecutor)
 from app.media_generation_contract import GenerationCancelled  # noqa: E402
 
 GPU_A = "GPU-6a7f0c2e-1b2d-4c3e-8f9a-0123456789ab"
@@ -55,8 +56,10 @@ class Clock:
 class FakeImageAdapter:
     """Takes the real GPU lease, so exclusivity and release are real; no torch."""
 
-    def __init__(self, profile, *, lease_dir, gpu_uuid, close_ok=True, load_error=None, log=None, on_render=None):
+    def __init__(self, profile, *, lease_dir, gpu_uuid, close_ok=True, load_error=None, log=None, on_render=None,
+                 fail_after_acquire=None):
         self.on_render = on_render
+        self.fail_after_acquire = fail_after_acquire
         self.close_raises = close_ok == "raise"
         self.profile_id = profile.profile_id
         self.lease_dir, self.gpu_uuid, self.close_ok, self.load_error = lease_dir, gpu_uuid, close_ok, load_error
@@ -68,6 +71,9 @@ class FakeImageAdapter:
             raise self.load_error
         self.lease = acquire_gpu_lease(self.gpu_uuid, lease_dir=self.lease_dir)
         self.log.append(f"load:{self.profile_id}")
+        if self.fail_after_acquire:  # a partial load: the GPU is already held
+            # A fresh exception each time, so no shared traceback keeps this adapter alive.
+            raise type(self.fail_after_acquire)(*self.fail_after_acquire.args)
 
     def render(self, request, *, should_cancel=None):
         if self.on_render:
@@ -76,6 +82,8 @@ class FakeImageAdapter:
 
     def close(self):
         self.log.append(f"close:{self.profile_id}")
+        if self.lease is None and not self.close_raises:
+            return True  # never acquired anything: nothing to release
         if self.close_raises:
             raise RuntimeError("offload hook failed")  # lease still held by this adapter
         if not self.close_ok:
@@ -83,6 +91,22 @@ class FakeImageAdapter:
             return False
         self.lease.release()
         return True
+
+
+class JobKeyedMemorySink:
+    """Offers the job-keyed capability, like ExternalMediaSink."""
+
+    def __init__(self):
+        self.assets, self.calls = {}, []
+
+    def publish(self, data, extension):
+        raise AssertionError("a job-keyed sink must be published to by job")
+
+    def publish_and_register_for_job(self, job_key, data, extension):
+        self.calls.append(job_key)
+        asset_id = f"job-{job_key}"
+        self.assets[asset_id] = (data, extension)
+        return asset_id
 
 
 class MemorySink:
@@ -139,8 +163,7 @@ class ExecutorTests(unittest.TestCase):
                     ex.adapter.close()
                 except Exception:
                     pass
-            if ex._lock is not None:
-                os.close(ex._lock._fd)
+            ex.release_lock()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def image(self, profile_id="sdxl-a", devices=("cuda:0",)):
@@ -151,9 +174,11 @@ class ExecutorTests(unittest.TestCase):
         close_ok = kw.pop("close_ok", True)
         load_error = kw.pop("load_error", None)
         on_render = kw.pop("on_render", None)
+        fail_after_acquire = kw.pop("fail_after_acquire", None)
         factory = kw.pop("factory", None) or (lambda p: FakeImageAdapter(p, lease_dir=self.lease_dir, gpu_uuid=gpu,
                                                                          close_ok=close_ok, load_error=load_error,
-                                                                         log=self.log, on_render=on_render))
+                                                                         log=self.log, on_render=on_render,
+                                                                         fail_after_acquire=fail_after_acquire))
         ex = MediaExecutor(self.store, gpu_uuid=gpu, profiles={p.profile_id: p for p in profiles},
                            adapter_factory=factory, lease_dir=self.lease_dir, image_sink=kw.pop("image_sink", self.sink),
                            idle_unload_s=kw.pop("idle_unload_s", 60), clock=self.clock, **kw)
@@ -165,12 +190,12 @@ class ExecutorTests(unittest.TestCase):
     @staticmethod
     def crash(ex):
         """What the OS does when the process dies: its locks go."""
-        if ex.adapter is not None and ex.adapter.lease is not None and ex.adapter.lease.held:
-            ex.adapter.lease.release()
+        for adapter in [ex.adapter, *ex._retained]:
+            lease = getattr(adapter, "lease", None)
+            if lease is not None and lease.held:
+                lease.release()
         ex.adapter = None
-        if ex._lock is not None:
-            os.close(ex._lock._fd)
-            ex._lock = None
+        ex.release_lock()
 
     def submit(self, profile_id, owner="anders", **params):
         return self.store.submit(owner, "a red bicycle", profile_id=profile_id,
@@ -362,6 +387,143 @@ class ExecutorTests(unittest.TestCase):
         self.submit("sdxl-a")
         self.assertEqual(ex.step(), "completed", "free again: the next job runs")
 
+    # --- #2318 6516453287 P1: the executor lock is released on every terminal path ---------------
+    def test_run_releases_the_executor_lock_on_every_exit_path(self):
+        cases = {
+            "done": dict(),
+            "gpu retained": dict(load_error=GpuResourcesRetained("not proven free")),
+            "sink unavailable": dict(sink_down=True),
+            "publication unrecorded": dict(unrecorded=True),
+        }
+        expected = {"done": 0, "gpu retained": EXIT_GPU_RETAINED, "sink unavailable": EXIT_SINK_UNAVAILABLE,
+                    "publication unrecorded": EXIT_UNRECORDED}
+        for label, options in cases.items():
+            with self.subTest(label):
+                self.sink.available = not options.pop("sink_down", False)
+                unrecorded = options.pop("unrecorded", False)
+                ex = self.executor([self.image()], start=False, **options)
+                if label != "done":
+                    self.submit("sdxl-a")
+                if unrecorded:
+                    ex.store = Mock(wraps=self.store)
+                    ex.store.complete = Mock(return_value=False)
+                code = ex.run(max_steps=1, idle_sleep=lambda: None)
+                self.assertEqual(code, expected[label])
+                self.assertIsNone(ex._lock)
+                again = self.executor([self.image()], start=False)
+                again.start()  # same process, same GPU: the lock is free again
+                again.release_lock()
+                self.crash(ex)
+                self.sink.available = True
+
+    def test_run_after_start_is_a_config_error_and_still_releases_the_lock(self):
+        ex = self.executor([self.image()])
+        self.assertEqual(ex.run(max_steps=1, idle_sleep=lambda: None), 78)
+        self.assertIsNone(ex._lock)
+
+    # --- #2318 6516453287 P1: a failing database never masks the fatal GPU exit -----------------
+    def test_gpu_retained_still_exits_70_when_the_failure_cannot_be_recorded(self):
+        import sqlite3
+        ex = self.executor([self.image()], load_error=GpuResourcesRetained("not proven free"), start=False)
+        self.submit("sdxl-a")
+        ex.store = Mock(wraps=self.store)
+        ex.store.fail = Mock(side_effect=sqlite3.OperationalError("database is locked"))
+        self.assertEqual(ex.run(max_steps=1, idle_sleep=lambda: None), EXIT_GPU_RETAINED)
+        self.assertIn("record_failed:gpu_memory_retained", ex.events)
+
+    # --- #2318 6623359226 P1: a partial load never loses the GPU --------------------------------
+    def test_a_failed_load_that_proves_its_release_fails_the_job_and_the_executor_continues(self):
+        ex = self.executor([self.image()], fail_after_acquire=RuntimeError("weights corrupt"))
+        job = self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "failed")
+        self.assertEqual(self.state(job)["error"], "generation_failed")
+        self.assertTrue(lease_free(GPU_A, self.lease_dir), "close() released what load() took")
+        self.assertEqual(ex.events[-1], "failed_load:sdxl-a:True")
+
+    def test_a_failed_load_without_proven_release_is_fatal_and_nothing_more_is_claimed(self):
+        for close_ok in (False, "raise"):
+            with self.subTest(close_ok=close_ok):
+                ex = self.executor([self.image()], fail_after_acquire=RuntimeError("ComfyUI half-started"),
+                                   close_ok=close_ok, start=False)
+                first, second = self.submit("sdxl-a"), self.submit("sdxl-a")
+                self.assertEqual(ex.run(max_steps=3, idle_sleep=lambda: None), EXIT_GPU_RETAINED)
+                self.assertEqual(self.state(first)["error"], "gpu_memory_retained")
+                self.assertEqual(self.state(second)["state"], "queued", "no further claim after an unproven release")
+                self.assertFalse(lease_free(GPU_A, self.lease_dir), "the failed adapter keeps the GPU until exit")
+                self.assertTrue(ex._retained)
+                ex._retained[0].lease.release()  # what process exit would do
+                self.store.request_cancel(second, "anders")
+
+    def test_a_load_that_holds_the_gpu_and_reports_it_retained_keeps_it_until_exit(self):
+        import gc
+        ex = self.executor([self.image()], fail_after_acquire=GpuResourcesRetained("memory not proven free"),
+                           start=False)
+        job, later = self.submit("sdxl-a"), self.submit("sdxl-a")
+        self.assertEqual(ex.run(max_steps=3, idle_sleep=lambda: None), EXIT_GPU_RETAINED)
+        gc.collect()  # a dropped adapter would let its lease go here
+        self.assertFalse(lease_free(GPU_A, self.lease_dir), "the adapter is kept, so its lease is still held")
+        self.assertEqual((self.state(job)["error"], self.state(later)["state"]), ("gpu_memory_retained", "queued"))
+
+    # --- #2318 6517407242 / 6517442207: job-keyed publication and an unrecorded completion -------
+    def test_publication_is_job_keyed_when_the_sink_offers_it(self):
+        keyed = JobKeyedMemorySink()
+        ex = self.executor([self.image()], image_sink=keyed)
+        job = self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "completed")
+        self.assertEqual(keyed.calls, [job])
+        self.assertEqual(self.state(job)["asset_id"], f"job-{job}")
+
+    def test_a_durable_artifact_whose_completion_fails_stays_publishing_and_recovers_for_reconciliation(self):
+        import sqlite3
+        for failure in ("returns False", "raises"):
+            with self.subTest(failure):
+                keyed = JobKeyedMemorySink()
+                ex = self.executor([self.image()], image_sink=keyed, start=False)
+                job = self.submit("sdxl-a")
+                ex.store = Mock(wraps=self.store)
+                ex.store.complete = (Mock(return_value=False) if failure == "returns False"
+                                     else Mock(side_effect=sqlite3.OperationalError("disk I/O error")))
+                self.assertEqual(ex.run(max_steps=1, idle_sleep=lambda: None), EXIT_UNRECORDED)
+                self.assertEqual(self.state(job)["state"], "publishing", "never reported as generation_failed")
+                self.assertIn(f"job-{job}", keyed.assets, "the durable artifact is kept")
+                self.crash(ex)
+                restarted = self.executor([self.image()], image_sink=keyed)
+                self.assertEqual((self.state(job)["state"], self.state(job)["error"]),
+                                 ("failed", "interrupted during publication"))
+                restarted.release_lock()
+                restarted._lock = None
+
+    def test_a_publication_error_after_the_commit_point_is_recorded_as_such(self):
+        class Refusing(MemorySink):
+            def publish(self, data, extension):
+                raise ValueError("invalid_artifact_bytes")
+        ex = self.executor([self.image()], image_sink=Refusing())
+        job = self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "failed")
+        self.assertEqual(self.state(job)["error"], "publication_failed")
+
+    def test_restart_reconciliation_with_the_real_gallery_sink(self):
+        """End to end with ChatGPT's ExternalMediaSink and its read-only inspection (#2313)."""
+        from unittest.mock import patch
+        from app.media_gallery_store import ExternalMediaSink
+        from app.media_generation_reconciliation import inspect_generation_consistency
+        volume = Path(self.tmp)
+        media = volume / "media"
+        media.mkdir()
+        sink = ExternalMediaSink(media, volume)
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            ex = self.executor([self.image()], image_sink=sink, start=False)
+            job = self.submit("sdxl-a")
+            ex.store = Mock(wraps=self.store)
+            ex.store.complete = Mock(return_value=False)
+            self.assertEqual(ex.run(max_steps=1, idle_sleep=lambda: None), EXIT_UNRECORDED)
+            self.crash(ex)
+            restarted = self.executor([self.image()], image_sink=sink)
+            findings = {f["job_id"]: f for f in inspect_generation_consistency(self.store, sink)}
+            restarted.release_lock()
+        self.assertEqual(findings[job]["status"], "failed_with_indexed_artifact")
+        self.assertEqual(findings[job]["asset_id"], sink.job_asset_id(job))
+
     def test_config_is_checked_up_front(self):
         with self.assertRaises(ExecutorConfigError):
             self.executor([], start=False)
@@ -418,8 +580,7 @@ class VideoExecutorTests(unittest.TestCase):
 
     def tearDown(self):
         for ex in self.executors:
-            if ex._lock is not None:
-                os.close(ex._lock._fd)
+            ex.release_lock()
         for adapter in self.adapters:
             try:
                 adapter.close()
@@ -480,6 +641,22 @@ class VideoExecutorTests(unittest.TestCase):
         follow_up = self.submit()
         self.assertEqual(ex.step(), "completed", "the next job is not refused as 'queue not empty'")
         self.assertEqual(self.store.get(follow_up, "anders")["state"], "completed")
+
+    def test_video_adoption_is_job_keyed_when_the_staged_sink_offers_it(self):
+        class JobKeyedReference(ReferenceSink):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                self.keys = []
+
+            def adopt_for_job(self, handle, mime_type, job_key):
+                self.keys.append(job_key)
+                return self.adopt(handle, mime_type)
+        self.sink = JobKeyedReference(os.path.join(self.tmp, "keyed-sink"), max_bytes=64 * 1024 * 1024) \
+            if os.mkdir(os.path.join(self.tmp, "keyed-sink")) is None else None
+        ex = self.executor()
+        job = self.submit()
+        self.assertEqual(ex.step(), "completed")
+        self.assertEqual(self.sink.keys, [job])
 
     def test_a_cancel_after_render_to_returns_but_before_adopt_wins(self):
         ex = self.executor()

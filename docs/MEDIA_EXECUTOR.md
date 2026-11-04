@@ -32,6 +32,13 @@ Sources:
 | A GPU held by another lease-taker fails the job as `gpu_busy`; the executor continues | `step` | `test_a_gpu_held_by_another_lease_taker…` |
 | Stored errors are fixed codes, never exception text | `step` | `test_job_errors_are_fixed_codes_never_exception_text` |
 | `publishing` counts toward the owner's limit | `submit` | `test_publishing_counts_toward_the_owner_limit` |
+| Concurrent initialisers serialise the migration | `ImageJobStore.__init__` (`BEGIN IMMEDIATE` spans inspection and `ALTER`) | `test_concurrent_initialisers_serialise_the_migration` (barrier at the schema read) |
+| A failed load continues only if `close()` proves the release; otherwise the adapter is retained and the exit is 70. `GpuResourcesRetained` from `load()` is always fatal | `_adapter_for` | three partial-load tests |
+| Publication is job-keyed when the sink offers it (`JobKeyedArtifactSink`, `JobKeyedStagedSink`) | `step`, `GenerationJobRunner` | image, video and real `ExternalMediaSink` tests |
+| A durable artifact whose completion write fails stays `publishing`, exit 76, then `interrupted during publication` | `step` | `test_a_durable_artifact_whose_completion_fails…`, `test_restart_reconciliation_with_the_real_gallery_sink` |
+| A failure after the commit point is `publication_failed`, not `generation_failed` | `step` | `test_a_publication_error_after_the_commit_point…` |
+| The executor lock is released on every terminal path of `run()`; a retained adapter's GPU lease is not | `run`, `ExecutorLock.release` | `test_run_releases_the_executor_lock_on_every_exit_path` |
+| A failing database never replaces the fatal GPU exit | `_record_failure` | `test_gpu_retained_still_exits_70_when_the_failure_cannot_be_recorded` |
 
 ## Job states
 
@@ -53,13 +60,14 @@ The migration is additive: `claimed_by` and `cancel_requested`. The legacy API (
 | 70 | GPU memory not proven free | Restart (the OS has freed it) |
 | 73 | Another executor holds this GPU | Never restart in a loop |
 | 75 | Media volume unavailable | Wait until the volume verifies |
+| 76 | Publication not recorded (the artifact is durable; the job stays `publishing`) | Restart; recovery marks it `interrupted during publication` for the sink owner's reconciliation |
 | 78 | Configuration | Stop |
 
 ## Not in this slice
 
 - The process supervisor and the entry point. They need the production `ArtifactSink`, `StagedFileArtifactSink` and `VerifiedMediaVolume` (ChatGPT, #2313).
 - Routes for submit/get/cancel (ChatGPT).
-- Asset reconciliation after a crash while publishing (sink side).
+- Reconciliation itself: ChatGPT's read-only `inspect_generation_consistency` (#2313) classifies the recovered job. There is no automatic completion from file presence, and no inference retry.
 - G3 pinning: ComfyUI version and weight manifest.
 - Retiring `GenerationJobRunner`.
 - **Assumed, to be verified on the pinned diffusers in rig R5:** every allowlisted pipeline honours `callback_on_step_end` and `_interrupt`.

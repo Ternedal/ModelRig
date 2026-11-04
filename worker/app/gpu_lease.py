@@ -237,12 +237,24 @@ class ExecutorAlreadyRunning(RuntimeError):
 
 
 class ExecutorLock:
-    """Held for the life of the executor process; the OS releases it when the process ends."""
+    """Held while the executor runs; released explicitly by release() or by the OS at process exit."""
 
-    def __init__(self, gpu_uuid: str, fd: int, path: Path):
+    def __init__(self, gpu_uuid: str, fd: int | None, path: Path):
         self.gpu_uuid, self._fd, self.path = gpu_uuid, fd, path
 
-    def __del__(self) -> None:  # deliberately never released before process exit
+    @property
+    def held(self) -> bool:
+        return self._fd is not None
+
+    def release(self) -> None:
+        fd, self._fd = self._fd, None
+        if fd is not None:
+            try:
+                _unlock(fd)
+            finally:
+                os.close(fd)
+
+    def __del__(self) -> None:  # not released by garbage collection: only release() or process exit
         pass
 
 
