@@ -169,6 +169,29 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(self.jobs.get(stranded, "owner"), before)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_running_recorded_asset_conflict_is_reported_without_mutation(self, _mount):
+        job_id = self.submit_running()
+        self.sink.publish_and_register_for_job(job_id, b"image", ".png")
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET asset_id=? WHERE id=?", ("wrong-asset", job_id))
+        before = self.jobs.get(job_id, "owner")
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "running_asset_mismatch")
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_failed_recorded_asset_conflict_is_reported_without_mutation(self, _mount):
+        job_id = self.submit_running()
+        self.sink.publish_and_register_for_job(job_id, b"image", ".png")
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET state='failed',asset_id=? WHERE id=?",
+                       ("wrong-asset", job_id))
+        before = self.jobs.get(job_id, "owner")
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "failed_asset_mismatch")
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_running_with_published_unindexed_file_is_reported_without_mutation(self, _mount):
         job_id = self.submit_running()
         self.sink.publish_for_job(job_id, b"image", ".png")
