@@ -183,6 +183,17 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(self.jobs.get(job_id, "owner")["asset_id"], asset)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_completed_legacy_and_deterministic_receipts_are_conflict(self, _mount):
+        job_id = self.submit_running()
+        legacy = self.sink.publish(b"legacy", ".png")
+        self.sink.publish_and_register_for_job(job_id, b"new", ".png")
+        self.assertTrue(self.jobs.finish(job_id, asset_id=legacy))
+        before = self.jobs.get(job_id, "owner")
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "completed_legacy_and_job_artifact_conflict")
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_legacy_asset_id_with_path_separator_is_rejected(self, _mount):
         job_id = self.submit_running()
         self.assertTrue(self.jobs.finish(job_id, asset_id="../outside"))
