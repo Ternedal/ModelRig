@@ -201,6 +201,38 @@ class SourceImageTests(unittest.TestCase):
         self.assertTrue(reopened.owns_completed_asset("owner-a", asset_id))
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_legacy_database_upgrades_without_losing_completed_owner(self, _mount):
+        """Upgrade a real pre-G2 database with an existing completed image job."""
+        db_path = self.sink.volume_root / "legacy_jobs.sqlite"
+        with sqlite3.connect(db_path) as db:
+            db.execute("""CREATE TABLE image_jobs (
+                id TEXT PRIMARY KEY, owner TEXT NOT NULL, prompt TEXT NOT NULL,
+                profile_id TEXT NOT NULL, params TEXT NOT NULL,
+                state TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL,
+                asset_id TEXT, error TEXT)""")
+            db.execute(
+                "INSERT INTO image_jobs "
+                "(id, owner, prompt, profile_id, params, state, created, updated, asset_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("legacy-completed", "owner-a", "old prompt", "test", "{}",
+                 "completed", 1.0, 1.0, "legacy-image"),
+            )
+        upgraded = ImageJobStore(str(db_path))
+        with sqlite3.connect(db_path) as db:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(image_jobs)")}
+            self.assertTrue({"claimed_by", "cancel_requested"} <= columns)
+            self.assertEqual(
+                [row[2] for row in db.execute(
+                    "PRAGMA index_info(image_jobs_owner_asset_state)")],
+                ["owner", "asset_id", "state"],
+            )
+        self.assertTrue(upgraded.owns_completed_asset("owner-a", "legacy-image"))
+        self.assertFalse(upgraded.owns_completed_asset("owner-b", "legacy-image"))
+        self.assertTrue(ImageJobStore(str(db_path)).owns_completed_asset(
+            "owner-a", "legacy-image"
+        ))
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_owner_guard_refuses_unmounted_volume_after_authorization(self, _mount):
         jobs = ImageJobStore(str(self.sink.volume_root / "jobs.sqlite"))
         asset_id = self.sink.publish(PNG, ".png")
