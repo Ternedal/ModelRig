@@ -67,6 +67,10 @@ def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink,
                             info = path.lstat()
                         except FileNotFoundError:
                             status = "completed_legacy_missing_file"
+                        except OSError:
+                            # Permission errors, I/O faults and other failures
+                            # are not evidence that the legacy asset is valid.
+                            status = "completed_legacy_file_conflict"
                         else:
                             status = ("completed_legacy_indexed" if stat.S_ISREG(info.st_mode) and info.st_size == entry["size_bytes"]
                                       else "completed_legacy_file_conflict")
