@@ -175,6 +175,32 @@ class SourceImageTests(unittest.TestCase):
         self.assertEqual(read_owned_source_png(self.sink, jobs, "owner-a", asset_id), PNG)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_g2_migration_preserves_owner_index_and_completed_authorization(self, _mount):
+        """A G2-style schema upgrade must retain the owner lookup index."""
+        jobs = ImageJobStore(str(self.sink.volume_root / "jobs.sqlite"))
+        with sqlite3.connect(jobs.path) as db:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(image_jobs)")}
+            indexes = {row[1] for row in db.execute("PRAGMA index_list(image_jobs)")}
+            self.assertIn("claimed_by", columns)
+            self.assertIn("cancel_requested", columns)
+            self.assertIn("image_jobs_owner_asset_state", indexes)
+            index_columns = [
+                row[2] for row in db.execute(
+                    "PRAGMA index_info(image_jobs_owner_asset_state)"
+                )
+            ]
+            self.assertEqual(index_columns, ["owner", "asset_id", "state"])
+        asset_id = self.sink.publish(PNG, ".png")
+        created = jobs.submit("owner-a", "test prompt", profile_id="test")
+        self.assertEqual(jobs.claim()["id"], created["job_id"])
+        self.assertTrue(jobs.finish(created["job_id"], asset_id=asset_id))
+        self.assertTrue(jobs.owns_completed_asset("owner-a", asset_id))
+        self.assertFalse(jobs.owns_completed_asset("owner-b", asset_id))
+        # Reinitializing must be idempotent and must not lose completed rows.
+        reopened = ImageJobStore(str(jobs.path))
+        self.assertTrue(reopened.owns_completed_asset("owner-a", asset_id))
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_owner_guard_refuses_unmounted_volume_after_authorization(self, _mount):
         jobs = ImageJobStore(str(self.sink.volume_root / "jobs.sqlite"))
         asset_id = self.sink.publish(PNG, ".png")
