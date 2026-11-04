@@ -80,8 +80,14 @@ def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink,
             status = ("running_with_indexed_artifact" if receipt["indexed"]
                       else "running_with_unindexed_artifact")
         elif state == "publishing":
-            status = ("publishing_with_indexed_artifact" if receipt["indexed"]
-                      else "publishing_with_unindexed_artifact")
+            # The G2 commit point normally leaves asset_id unset until complete().
+            # If another writer has recorded a different ID, never treat the
+            # deterministic receipt as proof of a safe completion.
+            if recorded is not None and recorded != receipt["asset_id"]:
+                status = "publishing_asset_mismatch"
+            else:
+                status = ("publishing_with_indexed_artifact" if receipt["indexed"]
+                          else "publishing_with_unindexed_artifact")
         else:
             status = ("failed_with_indexed_artifact" if receipt["indexed"]
                       else "failed_with_unindexed_artifact")
