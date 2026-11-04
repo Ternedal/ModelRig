@@ -27,7 +27,9 @@ def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink,
     with jobs._db() as db:
         rows = db.execute(
             "SELECT id, state, asset_id FROM image_jobs "
-            "WHERE state IN ('running','publishing','completed','failed') ORDER BY created DESC,id DESC LIMIT ?"
+            "WHERE state IN ('running','publishing','completed','failed') "
+            "ORDER BY CASE WHEN state IN ('publishing','running') THEN 0 ELSE 1 END, "
+            "created DESC,id DESC LIMIT ?"
             , (limit,)
         ).fetchall()
     for row in rows:
