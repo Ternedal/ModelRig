@@ -6,11 +6,22 @@ Qualification only. It runs the real adapters in a separate process; it does not
 enable anything in the appliance, opens no route and reaches no network. Every
 output and report goes to --out, which must be on the verified media volume.
 
-  image  load the diffusers profile, render one PNG, check the lease from a second
-         process while loaded and after close()
-  video  start the supervised ComfyUI, render one MP4, report cleanup; --hold keeps
-         it loaded until the harness is killed (supervisor-kill test)
-  lease  report whether the GPU lease and the resident lock are free right now
+  image     load the diffusers profile, render one PNG, check the lease from a second
+            process while loaded and after close()
+  executor  the appliance path (G2b): submit one image job to a job DB on the media
+            volume, start the real entry point `python -m app.media_executor_main`,
+            and prove: job completed and published job-keyed to the gallery, a second
+            executor for the same GPU exits 73, idle unload frees the GPU while the
+            executor lives, and the lease is free after the executor is stopped
+  video     start the supervised ComfyUI, render one MP4, report cleanup; --hold keeps
+            it loaded until the harness is killed (supervisor-kill test). With
+            --expect-error a refusal at load() counts too (G3 pins: hash, lookup,
+            version), and ComfyUI must then not be running
+  lease     report whether the GPU lease and the resident lock are free right now
+  pins      write the pinned Wan profiles (G3): hash the given model files, read
+            ComfyUI's version from comfyui_version.py, and write wan21-t2v-qual,
+            wan21-t2v-deadline, and the negative wan21-badhash / wan21-badver.
+            Every profile is parsed by the real validator before it is written
 
 Exit code 0 = every check in the report passed; 1 = a check failed; 2 = usage.
 """
@@ -171,9 +182,20 @@ def run_video(args, report: Report) -> None:
     adapter = ComfyVideoAdapter(profile, supervisor=supervisor, template_dir=args.templates,
                                 output_directory=dirs["output"])
     report.data.update(profile=profile.profile_id, gpu_uuid=gpu_uuid, template_sha256=profile.backend_options.template_sha256,
-                       comfy_log=str(log))
+                       comfy_log=str(log), comfyui_version_pin=profile.backend_options.comfyui_version,
+                       weight_pins=[pin.path for pin in profile.backend_options.weights])
     started = time.monotonic()
-    adapter.load()
+    try:
+        adapter.load()
+    except Exception as exc:  # G3: a pinned profile may be refused before or right after ComfyUI starts
+        error = f"{type(exc).__name__}: {exc}"
+        if not args.expect_error:
+            raise
+        report.check("load() refused with the expected error", args.expect_error in error, error)
+        report.check("ComfyUI is not running after the refusal", not supervisor.running)
+        report.check("resident lock free after the refusal", not resident_is_held(gpu_uuid, lease_dir=lease_dir))
+        report.check("lease free for other processes after the refusal", lease_state(gpu_uuid, lease_dir) == "free")
+        return
     report.data["start_seconds"] = round(time.monotonic() - started, 1)
     proc = getattr(supervisor, "_proc", None)
     report.data["pids"] = {"harness": os.getpid(), "comfyui": getattr(proc, "pid", None)}
@@ -221,6 +243,130 @@ def run_video(args, report: Report) -> None:
     report.check("lease free for other processes after close", lease_state(gpu_uuid, lease_dir) == "free")
 
 
+def run_executor(args, report: Report) -> None:
+    """R5b: the real entry point, as modelrig-supervisor starts it (one executor, one GPU)."""
+    from app.image_job_store import ImageJobStore
+    from app.media_gallery_catalog import list_gallery
+    from app.media_gallery_store import ExternalMediaSink
+    profile, lease_dir, gpu_uuid = common(args)
+    if profile.modality != "image":
+        fail_usage("executor mode qualifies the image path (video waits for the staged sink)")
+    sink = ExternalMediaSink(args.media_root, args.volume_root)
+    try:
+        sink._root()  # the entry point checks the same thing first and would exit 75
+    except Exception as exc:
+        report.check("media volume and gallery root verified (ExternalMediaSink)", False, f"{type(exc).__name__}: {exc}")
+        return
+    report.check("media volume and gallery root verified (ExternalMediaSink)", True,
+                 {"volume_root": args.volume_root, "media_root": args.media_root})
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    db = Path(args.out) / f"jobs-{stamp}.sqlite3"  # prompts stay on the media volume, removed with $Out
+    env = dict(os.environ, PYTHONPATH=WORKER_PATH, PYTHONDONTWRITEBYTECODE="1", KALIV_MEDIA_EXECUTOR="1",
+               KALIV_MEDIA_JOB_DB=str(db), KALIV_MEDIA_ROOT=args.media_root,
+               KALIV_MEDIA_VOLUME_ROOT=args.volume_root, KALIV_MEDIA_PROFILE_DIR=args.profiles,
+               KALIV_MEDIA_IDLE_UNLOAD_S=str(int(args.idle_unload)))
+    command = [sys.executable, "-u", "-m", "app.media_executor_main", "--device", args.device]
+    report.data.update(profile=profile.profile_id, gpu_uuid=gpu_uuid, job_db=str(db), command=command[1:])
+
+    def start(name: str):
+        log = open(Path(args.out) / f"executor-{name}-{stamp}.log", "wb")
+        return subprocess.Popen(command, cwd=WORKER_PATH, env=env, stdout=log, stderr=subprocess.STDOUT), log
+
+    store = ImageJobStore(str(db))
+    width, height = parse_size(args.size)
+    job = store.submit("qual", args.prompt, profile_id=profile.profile_id,
+                       params={"width": width, "height": height, "steps": args.steps, "seed": args.seed})["job_id"]
+    report.data["job_id"] = job
+    first, first_log = start("first")
+    report.data["pids"] = {"harness": os.getpid(), "executor": first.pid}
+    try:
+        deadline, row, saw_busy = time.monotonic() + args.timeout, None, False
+        while time.monotonic() < deadline and first.poll() is None:
+            row = store.get(job, "qual")
+            if row["state"] in ("completed", "failed", "cancelled"):
+                break
+            saw_busy = saw_busy or lease_state(gpu_uuid, lease_dir) == "busy"
+            time.sleep(2)
+        row = store.get(job, "qual")
+        resident = lease_state(gpu_uuid, lease_dir)  # within the idle window the model stays loaded
+        report.check("the executor is still running after the job", first.poll() is None, first.poll())
+        report.check("job completed through the real entry point", row["state"] == "completed",
+                     {"state": row["state"], "error": row.get("error")})
+        report.check("GPU lease busy for other processes while the model is resident", resident == "busy",
+                     {"right_after_the_job": resident, "seen_busy_while_polling": saw_busy})
+        expected = sink.job_asset_id(job)
+        report.check("asset is job-keyed", row.get("asset_id") == expected, {"asset_id": row.get("asset_id"), "expected": expected})
+        evidence = sink.inspect_job_asset(job)
+        report.check("asset is a PNG on the media volume and indexed",
+                     bool(evidence) and evidence["extension"] == ".png" and evidence["indexed"], evidence)
+        listed = [item["id"] for item in list_gallery(args.media_root, verified_volume_root=args.volume_root)["items"]]
+        report.check("the gallery lists it", expected in listed)
+        second, second_log = start("second")
+        try:
+            code = second.wait(timeout=120)
+        except subprocess.TimeoutExpired:
+            second.kill()
+            code = "still running after 120 s"
+        second_log.close()
+        report.check("a second executor for the same GPU exits 73 and touches nothing", code == 73, code)
+        time.sleep(args.idle_unload + 20)
+        report.check("idle unload freed the GPU while the executor lives",
+                     first.poll() is None and lease_state(gpu_uuid, lease_dir) == "free",
+                     {"executor_exit": first.poll(), "idle_unload_s": args.idle_unload})
+    finally:
+        if first.poll() is None:
+            first.terminate()  # as the supervisor does on stop; Windows: TerminateProcess
+            try:
+                first.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                first.kill()
+        first_log.close()
+    report.check("lease free for other processes after the executor stopped", lease_state(gpu_uuid, lease_dir) == "free")
+
+
+def run_pins(args, report: Report) -> None:
+    import re
+    from app.media_generation_profiles import parse_profile
+    main_py = Path(args.comfy_main)
+    models = main_py.parent / "models"  # where ComfyUI reads them (ComfyLaunch.resolved_models_directory)
+    text = (main_py.parent / "comfyui_version.py").read_text(encoding="utf-8")
+    found = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', text)
+    if not found:
+        report.check("ComfyUI version read from comfyui_version.py", False)
+        return
+    version = found.group(1)
+    report.check("ComfyUI version read from comfyui_version.py", True, version)
+    pins = []
+    for rel in args.pin:
+        path = models / rel
+        pins.append({"path": rel, "sha256": sha256(path), "bytes": path.stat().st_size})
+    report.check("pinned files hashed", True, pins)
+    template = Path(args.templates) / "wan21-t2v-1.3b.json"
+    template_sha = sha256(template)
+
+    def profile(profile_id: str, *, seconds: int, port: int, version_pin: str, weights: list) -> dict:
+        return {"schema": "kaliv-media-profile/v1", "profile_id": profile_id, "modality": "video",
+                "tasks": ["text_to_video"], "backend": "comfyui", "pipeline": None,
+                "model_id": "Comfy-Org/Wan_2.1_ComfyUI_repackaged", "revision": args.revision,
+                "limits": {"max_prompt_chars": 500, "sizes": [[832, 480]], "max_steps": 30, "max_frames": 81},
+                "outputs": ["video/mp4"],
+                "resources": {"min_usable_gib": 8, "reserve_gib": 1.5, "devices": [args.device], "cpu_offload": False},
+                "qualification": "candidate", "license": "apache-2.0",
+                "backend_options": {"template_name": template.name, "template_sha256": template_sha, "fps": 16,
+                                    "max_render_seconds": seconds, "max_output_bytes": 536870912, "port": port,
+                                    "comfyui_version": version_pin, "weights": weights}}
+    flipped = [dict(pins[0], sha256=("1" if pins[0]["sha256"][0] == "0" else "0") + pins[0]["sha256"][1:])] + pins[1:]
+    profiles = {"wan21-t2v-qual": profile("wan21-t2v-qual", seconds=1800, port=18188, version_pin=version, weights=pins),
+                "wan21-t2v-deadline": profile("wan21-t2v-deadline", seconds=10, port=18189, version_pin=version, weights=pins),
+                "wan21-badhash": profile("wan21-badhash", seconds=1800, port=18188, version_pin=version, weights=flipped),
+                "wan21-badver": profile("wan21-badver", seconds=1800, port=18188, version_pin="0.0.0-not-this", weights=pins)}
+    for profile_id, data in profiles.items():
+        parse_profile(data)  # the real validator; raises before anything is written
+        (Path(args.profiles) / f"{profile_id}.json").write_text(json.dumps(data, indent=1), encoding="ascii")
+    report.check("profiles written and accepted by parse_profile", True, sorted(profiles))
+    report.data.update(comfyui_version=version, template_sha256=template_sha, revision=args.revision)
+
+
 def run_lease(args, report: Report) -> None:
     from app.gpu_lease import lease_dir_from_env, normalize_gpu_uuid, resident_is_held
     gpu_uuid = normalize_gpu_uuid(args.gpu_uuid)
@@ -232,7 +378,7 @@ def run_lease(args, report: Report) -> None:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("mode", choices=("image", "video", "lease"))
+    parser.add_argument("mode", choices=("image", "executor", "video", "lease", "pins"))
     parser.add_argument("--repo", required=True, help="ModelRig worktree at the qualified head")
     parser.add_argument("--out", required=True, help="report/output folder on the media volume")
     parser.add_argument("--profiles", help="operator profile folder")
@@ -253,6 +399,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--hold", action="store_true")
     parser.add_argument("--expect-error", help="the run must fail with an error containing this text")
     parser.add_argument("--gpu-uuid")
+    parser.add_argument("--media-root", help="executor: gallery folder on the media volume (KALIV_MEDIA_ROOT)")
+    parser.add_argument("--idle-unload", type=float, default=30.0, help="executor: KALIV_MEDIA_IDLE_UNLOAD_S")
+    parser.add_argument("--timeout", type=float, default=900.0, help="executor: seconds to wait for the job")
+    parser.add_argument("--pin", action="append", default=[], help="pins: a model file relative to models/ (repeat)")
+    parser.add_argument("--revision", help="pins: the Hugging Face revision of the repackaged weights")
     args = parser.parse_args(argv)
     global WORKER_PATH
     WORKER_PATH = str(Path(args.repo, "worker").resolve())
@@ -260,11 +411,16 @@ def main(argv: list[str]) -> int:
     out = Path(args.out)
     if not out.is_dir():
         fail_usage("--out must be an existing folder on the media volume")
-    if args.mode in ("image", "video") and not (args.profiles and args.profile):
+    if args.mode in ("image", "executor", "video") and not (args.profiles and args.profile):
         fail_usage("--profiles and --profile are required")
     if args.mode == "video" and not all((args.comfy_python, args.comfy_main, args.comfy_dirs, args.templates,
                                          args.volume_root)):
         fail_usage("video needs --comfy-python --comfy-main --comfy-dirs --templates --volume-root")
+    if args.mode == "executor" and not (args.volume_root and args.media_root):
+        fail_usage("executor needs --volume-root (the mounted volume, e.g. E:\\) and --media-root")
+    if args.mode == "pins" and not (args.comfy_main and args.templates and args.profiles and args.pin
+                                    and args.revision):
+        fail_usage("pins needs --comfy-main --templates --profiles --pin (repeat) --revision")
     if args.mode == "lease" and not args.gpu_uuid:
         fail_usage("lease needs --gpu-uuid")
     from app.media_generation_contract import ArtifactSinkUnavailable
@@ -277,7 +433,8 @@ def main(argv: list[str]) -> int:
     head = subprocess.run(["git", "-C", args.repo, "rev-parse", "HEAD"], capture_output=True, text=True)
     report.data["head"] = head.stdout.strip() or None
     try:
-        {"image": run_image, "video": run_video, "lease": run_lease}[args.mode](args, report)
+        {"image": run_image, "executor": run_executor, "video": run_video, "lease": run_lease,
+         "pins": run_pins}[args.mode](args, report)
     except SystemExit:
         raise
     except Exception as exc:
