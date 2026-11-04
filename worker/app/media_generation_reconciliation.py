@@ -48,7 +48,11 @@ def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink,
                 # Legacy random-ID publication needs its own indexed-file check;
                 # deterministic receipt absence cannot establish a missing file.
                 entry = indexed.get(recorded) if isinstance(recorded, str) else None
-                if not isinstance(recorded, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", recorded):
+                if receipt is not None:
+                    # Two distinct assets for one completed job require operator
+                    # review; neither receipt alone proves which output won.
+                    status = "completed_legacy_and_job_artifact_conflict"
+                elif not isinstance(recorded, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", recorded):
                     status = "completed_legacy_invalid_asset_id"
                 elif entry is None:
                     status = "completed_legacy_not_indexed"
