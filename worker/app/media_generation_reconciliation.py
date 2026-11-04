@@ -13,10 +13,17 @@ from .media_generation_contract import ArtifactSinkUnavailable
 from .media_gallery_catalog import GalleryUnavailable, _index
 
 
-def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink, *, limit: int = 100) -> list[dict]:
-    """Return at most ``limit`` deterministic findings without mutating stores."""
+def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink, *, limit: int = 100, offset: int = 0) -> list[dict]:
+    """Return a bounded read-only page, ordered by in-flight priority and age.
+
+    ``offset`` permits an operator to inspect older jobs instead of repeatedly
+    seeing only the first page. Pages are not a transactional snapshot: a
+    concurrent writer may shift rows between calls.
+    """
     if type(limit) is not int or not 1 <= limit <= 1000:
         raise ValueError("invalid_reconciliation_limit")
+    if type(offset) is not int or offset < 0 or offset > 1000000:
+        raise ValueError("invalid_reconciliation_offset")
     findings = []
     root = sink._root()
     index_path = root / "gallery-index.json"
@@ -29,8 +36,8 @@ def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink,
             "SELECT id, state, asset_id FROM image_jobs "
             "WHERE state IN ('running','publishing','completed','failed') "
             "ORDER BY CASE WHEN state IN ('publishing','running') THEN 0 ELSE 1 END, "
-            "created DESC,id DESC LIMIT ?"
-            , (limit,)
+            "created DESC,id DESC LIMIT ? OFFSET ?"
+            , (limit, offset)
         ).fetchall()
     for row in rows:
         job_id, state, recorded = row["id"], row["state"], row["asset_id"]
