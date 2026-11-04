@@ -100,19 +100,22 @@ def check_lookup_is_unambiguous(comfy_root: str | Path, models_directory: str | 
     and (c) follows links. A file-name match proves which file loads only if none of those can
     point it elsewhere (#2296 6636684138), so: no extra paths file, no links anywhere in the
     models tree, and no second file anywhere under it with a pinned name.
+
+    Names are compared case-insensitively: on the rig's Windows, a lookup of "wan.safetensors"
+    also opens "unet/WAN.safetensors" (#2328 review 4472405235, rig OS).
     """
     if Path(comfy_root, "extra_model_paths.yaml").exists() or Path(comfy_root, "extra_model_paths.yml").exists():
         raise WeightsMismatch("ComfyUI has extra model paths configured: lookups are not limited to the verified models directory")
     root = Path(models_directory)
     pinned = {pin.path: pin.path.rsplit("/", 1)[-1] for pin in pins}
-    names = set(pinned.values())
+    names = {name.casefold() for name in pinned.values()}
     for current, dirs, files in os.walk(root, followlinks=False):
         for entry in dirs + files:
             if os.path.islink(os.path.join(current, entry)):
                 raise WeightsMismatch(f"the models directory contains a link ComfyUI would follow: "
                                       f"{os.path.relpath(os.path.join(current, entry), root)}")
         for name in files:
-            if name in names:
+            if name.casefold() in names:
                 relative = os.path.relpath(os.path.join(current, name), root).replace(os.sep, "/")
                 if relative not in pinned:
                     raise WeightsMismatch(f"a second file named like a pinned weight would be found by ComfyUI: {relative}")

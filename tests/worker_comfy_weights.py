@@ -167,6 +167,19 @@ class VerifyWeightsTests(unittest.TestCase):
                     verify_weights(self.models, [self.pin], comfy_root=self.tmp)
                 Path(self.tmp, name).unlink()
 
+    def test_a_second_file_differing_only_in_case_is_refused(self):
+        # A Windows lookup of wan.safetensors would also open unet/WAN.safetensors.
+        (self.models / "unet").mkdir()
+        (self.models / "unet" / "WAN.safetensors").write_bytes(b"other weights")
+        with self.assertRaisesRegex(WeightsMismatch, "second file named like a pinned weight would be found by ComfyUI: unet/WAN.safetensors"):
+            verify_weights(self.models, [self.pin], comfy_root=self.tmp)
+        # And the other way round: an upper-case pin, a lower-case second file.
+        (self.models / "unet" / "WAN.safetensors").unlink()
+        self.file.rename(self.models / "diffusion_models" / "Wan.safetensors")
+        (self.models / "unet" / "wan.safetensors").write_bytes(b"other weights")
+        with self.assertRaisesRegex(WeightsMismatch, "would be found by ComfyUI: unet/wan.safetensors"):
+            verify_weights(self.models, [pin_for("diffusion_models/Wan.safetensors")], comfy_root=self.tmp)
+
     def test_a_second_file_with_a_pinned_name_is_refused(self):
         (self.models / "unet").mkdir()  # ComfyUI treats unet/ as an alias of diffusion_models/
         (self.models / "unet" / "wan.safetensors").write_bytes(b"other weights")

@@ -88,12 +88,16 @@ def _model_files(graph: Mapping[str, object]):
     Keyed on the VALUE, not the input name: loaders name their inputs freely
     (ckpt_name, unet_name, but also clip_name1/clip_name2 on DualCLIPLoader), so a
     name heuristic lets an unpinned file through (#2328 review 4472123690).
+
+    Detection is generous (case and surrounding whitespace ignored); the file name that is
+    then compared with the pins is the value EXACTLY as ComfyUI will receive it. " wan.safetensors"
+    is a different file from "wan.safetensors" and must not satisfy its pin (#2328 review 4472405235).
     """
     for node_id, node in graph.items():
         for input_name, value in node["inputs"].items():
             for text in _strings(value):
                 if text.strip().lower().endswith(MODEL_FILE_SUFFIXES):
-                    yield node_id, input_name, text.strip().replace("\\", "/").rsplit("/", 1)[-1]
+                    yield node_id, input_name, text.replace("\\", "/").rsplit("/", 1)[-1]
 
 
 def load_template(raw: bytes, expected_sha256: str, *, pinned_files=None) -> WorkflowTemplate:

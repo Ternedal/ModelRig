@@ -292,10 +292,11 @@ def _weight_pins(raw: object) -> tuple[WeightPin, ...]:
         if any(segment in (".", "..") or segment.strip(".") == "" for segment in path.split("/")):
             raise _fail("backend_options.weights path must not contain dot segments")
         name = path.rsplit("/", 1)[-1]
-        if path in paths or name in names:
+        # Case-insensitive: on Windows two pins differing only in case name the same file.
+        if path in paths or name.casefold() in names:
             raise _fail("backend_options.weights paths and file names must be unique")
         paths.add(path)
-        names.add(name)
+        names.add(name.casefold())
         pins.append(WeightPin(path=path, sha256=_string(item["sha256"], _SHA256, "backend_options.weights sha256"),
                               bytes=_strict_int(item["bytes"], 1, MAX_WEIGHT_BYTES, "backend_options.weights bytes")))
     return tuple(pins)

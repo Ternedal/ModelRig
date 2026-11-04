@@ -107,7 +107,7 @@ Design: #2296 6634996133. A `comfyui` profile may pin two things in `backend_opt
 A `rig-qualified` profile must pin both. Candidates may omit them.
 
 When pins are set:
-1. **Template binding.** `load_template` refuses a graph in which any input value, including one inside a list, names a model file that is not pinned. A model file is any string ending in an extension ComfyUI lists in a model folder, plus `.gguf`. The check is keyed on the value, not the input name, because `DualCLIPLoader` uses `clip_name1`/`clip_name2` (#2328 review 4472123690).
+1. **Template binding.** `load_template` refuses a graph in which any input value, including one inside a list, names a model file that is not pinned. A model file is any string ending in an extension ComfyUI lists in a model folder, plus `.gguf`. The check is keyed on the value, not the input name, because `DualCLIPLoader` uses `clip_name1`/`clip_name2` (#2328 review 4472123690). The name compared with the pins is the value exactly as ComfyUI receives it: ` wan.safetensors` is a different file and does not satisfy the pin for `wan.safetensors` (#2328 review 4472405235).
 2. **Weights.** `verify_weights` (`comfy_weights.py`) runs before the lease and before ComfyUI starts. Every pinned file must be a regular file, not a link, inside the models directory, of the pinned size, with the pinned SHA-256.
    - Files are opened non-blocking, so a FIFO is refused instead of hanging the executor, even one swapped in after the path check (#2328 review 4472123700). The cache is read the same way and written only to a new, exclusive temporary file.
    - **Where it looks.** The models directory is always `<main.py dir>/models`: the one ComfyUI reads, since no flag that moves it is allowlisted.
@@ -116,6 +116,7 @@ When pins are set:
    - `extra_model_paths.yaml`/`.yml` in ComfyUI's root;
    - any link in the models tree;
    - a second file anywhere under `models/` with a pinned name. This includes alias folders such as `unet/` for `diffusion_models/`.
+   - Names are compared case-insensitively, because on Windows a lookup of `wan.safetensors` also opens `WAN.safetensors`. Pins whose names differ only in case are refused.
 4. **Version.** The version is compared when ComfyUI is ready and before every job. A mismatch at start stops ComfyUI, so the lease is released. A mismatch before a job refuses that job before anything is submitted.
 
 **Stated limit:** an actor who rewrites a file and restores its size, inode and mtime defeats the cache. Such an actor can also edit the profile.

@@ -81,6 +81,10 @@ class TemplateTests(unittest.TestCase):
         # #2328 review 4472123690: DualCLIPLoader's clip_name1/clip_name2 do not end in "_name".
         base = ["diffusion_models/wan2.2_t2v_example.safetensors"]
         for inputs in ({"clip_name1": "clip_l.safetensors", "clip_name2": "t5xxl.safetensors", "type": "flux"},
+                       # #2328 review 4472405235: a distinct POSIX file must not satisfy the pin by stripping
+                       {"unet_name": " wan2.2_t2v_example.safetensors"},
+                       {"unet_name": "wan2.2_t2v_example.safetensors "},
+                       {"unet_name": "WAN2.2_T2V_EXAMPLE.safetensors"},
                        {"clip_name1": "CLIP_L.SAFETENSORS "},           # case and trailing space
                        {"model": "x\\nested\\upscaler.pt2"},           # any input name, Windows separators
                        {"files": ["a.txt", "lora.pkl"]}):               # inside a list

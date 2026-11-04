@@ -148,6 +148,7 @@ class ProfileParsingTests(unittest.TestCase):
             [dict(good, path="vae\\a.safetensors")], [dict(good, path="vae/./a.safetensors")],
             [dict(good, path="C:/a.safetensors")], [dict(good, sha256="AB" * 32)], [dict(good, bytes=0)],
             [dict(good, bytes=True)], [good, good], [good, dict(good, path="other/a.safetensors")],
+            [good, dict(good, path="other/A.safetensors")],  # the same file on Windows
             [dict(good, extra=1)], [good] * 17, "vae/a.safetensors",
         ]
         for entries in bad_entries:
