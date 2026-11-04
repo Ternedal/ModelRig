@@ -237,7 +237,9 @@ def run_contract() -> None:
         "\t\ts.mux.Handle(\"GET /api/v1/media/images/assets/{id}\", s.authMW(http.HandlerFunc(s.handleImageMedia)))\n"
         "\t}\n"
     )
-    image_route_source = (ROOT / image_route_path).read_text(encoding="utf-8")
+    image_route_source = (ROOT / image_route_path).read_bytes().decode("utf-8")
+    image_route_code = code_of(ROOT / image_route_path)
+    assert 's.mux.Handle("POST /api/v1/media/images/jobs"' in image_route_code
     if image_route_block in image_route_source:
         assert image_route_source.count(image_route_block) == 1
         prior_source = image_route_source.replace(image_route_block, "", 1)
