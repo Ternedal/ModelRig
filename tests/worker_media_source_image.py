@@ -92,8 +92,8 @@ class SourceImageTests(unittest.TestCase):
         end = _png_chunk(b"IEND", b"")
         bad_images = (
             sig + invalid_depth + idat + end,
-            sig + ihdr + idat + _png_chunk(b"tEXt", b"k\\x00v") + idat + end,
-            sig + ihdr + idat + _png_chunk(b"PLTE", b"\\x00\\x00\\x00") + end,
+            sig + ihdr + idat + _png_chunk(b"tEXt", b"k\x00v") + idat + end,
+            sig + ihdr + idat + _png_chunk(b"PLTE", bytes(3)) + end,
             sig + ihdr + _png_chunk(b"ABcD", b"") + idat + end,
             sig + ihdr + _png_chunk(b"1bad", b"") + idat + end,
         )
