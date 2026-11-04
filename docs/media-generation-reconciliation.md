@@ -13,23 +13,21 @@ generation from a file, mount external volumes, delete files or release work.
 
 ## Offline inspection
 
-Run from the repository root with `PYTHONPATH=worker`. The example is
-illustrative: replace both paths with the real paths on the worker machine.
+Run from the repository root using the **read-only** CLI. Replace the
+paths with actual paths on the worker machine:
 
-```python
-from app.image_job_store import ImageJobStore
-from app.media_gallery_store import ExternalMediaSink
-from app.media_generation_reconciliation import inspect_generation_consistency
-
-jobs = ImageJobStore("/path/to/jobs.sqlite")
-sink = ExternalMediaSink("/mounted-volume/media", "/mounted-volume")
-for offset in range(0, 1000001, 100):
-    page = inspect_generation_consistency(jobs, sink, limit=100, offset=offset)
-    for finding in page:
-        print(finding)
-    if len(page) < 100:
-        break
+```sh
+python3 scripts/media_reconcile.py \
+  --jobs-db /path/to/jobs.sqlite \
+  --volume-root /mounted-volume \
+  --media-root /mounted-volume/media \
+  --limit 100 --offset 0
 ```
+
+Each output line is a JSON finding. Increase `--offset` by `--limit`
+to inspect further pages. The CLI opens SQLite with `mode=ro` and avoids
+the schema-creating `ImageJobStore.__init__`; do **not** substitute the
+ordinary job-store constructor for a read-only forensic inspection.
 
 Paging is bounded and **not snapshot-consistent**. Concurrent changes may
 shift rows between pages. For exhaustive forensics, take a consistent
@@ -59,7 +57,7 @@ all G2 jobs can be reconciled by deterministic ID.
 
 ```sh
 PYTHONPATH=worker python3 tests/worker_media_generation_reconciliation.py
-PYTHONPATH=worker python3 tests/worker_media_generation_runner.py
+PYTHONPATH=worker python3 tests/workflow_media_reconcile_cli.py
 python3 scripts/current_state.py --check
 ```
 
