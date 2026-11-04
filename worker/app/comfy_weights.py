@@ -7,12 +7,18 @@ pinned size, and its SHA-256 must match. Together with the template binding in
 comfy_workflow_template (a pinned graph may only load pinned files), the graph
 that runs can only read pinned bytes.
 
-Hashing ~10 GB on every start is slow, so verified results may be cached in a
-JSON file keyed by (real path, st_dev, st_ino, size, mtime_ns): any change to
-the file re-hashes it. A cache that is missing or unreadable is ignored (a
-re-hash, never an acceptance). Stated limit: an actor who rewrites a file and
-restores its size and mtime under the same inode defeats the cache; such an
-actor can edit the profile as well. Stdlib only; nothing is imported from torch.
+Hashing ~10 GB on every start is slow, so an operator MAY opt in to caching
+verified results in a JSON file keyed by (real path, st_dev, st_ino, size,
+mtime_ns): any change to the file re-hashes it, and a cache that is missing or
+unreadable is ignored (a re-hash, never an acceptance). The default is no cache:
+every start re-hashes. Threat model for the cache: a trusted local filesystem.
+An actor who rewrites a file in place and restores its size and mtime under the
+same inode defeats the cache; such an actor can edit the profile as well.
+
+A matching hash only proves which file ComfyUI loads if its lookup cannot reach
+another file of the same name: check_lookup_is_unambiguous() refuses an
+extra_model_paths file, links in the models tree, and duplicate pinned names.
+Stdlib only; nothing is imported from torch.
 """
 from __future__ import annotations
 
@@ -63,12 +69,47 @@ def _store_cache(cache_path: str | None, entries: dict[str, str]) -> None:
             pass  # best-effort: a missing cache only costs a re-hash
 
 
-def verify_weights(models_directory: str | Path, pins: Iterable[WeightPin], *, cache_path: str | None = None) -> None:
-    """Raise WeightsMismatch unless every pinned file matches. Names the file, never its contents."""
+def check_lookup_is_unambiguous(comfy_root: str | Path, models_directory: str | Path, pins) -> None:
+    """ComfyUI must be able to find each pinned name in exactly one place: the pinned file.
+
+    ComfyUI (a) reads <root>/extra_model_paths.yaml on its own if it exists, (b) searches every
+    model folder recursively and treats some folders as aliases (unet/ for diffusion_models/),
+    and (c) follows links. A file-name match proves which file loads only if none of those can
+    point it elsewhere (#2296 6636684138), so: no extra paths file, no links anywhere in the
+    models tree, and no second file anywhere under it with a pinned name.
+    """
+    if Path(comfy_root, "extra_model_paths.yaml").exists() or Path(comfy_root, "extra_model_paths.yml").exists():
+        raise WeightsMismatch("ComfyUI has extra model paths configured: lookups are not limited to the verified models directory")
+    root = Path(models_directory)
+    pinned = {pin.path: pin.path.rsplit("/", 1)[-1] for pin in pins}
+    names = set(pinned.values())
+    for current, dirs, files in os.walk(root, followlinks=False):
+        for entry in dirs + files:
+            if os.path.islink(os.path.join(current, entry)):
+                raise WeightsMismatch(f"the models directory contains a link ComfyUI would follow: "
+                                      f"{os.path.relpath(os.path.join(current, entry), root)}")
+        for name in files:
+            if name in names:
+                relative = os.path.relpath(os.path.join(current, name), root).replace(os.sep, "/")
+                if relative not in pinned:
+                    raise WeightsMismatch(f"a second file named like a pinned weight would be found by ComfyUI: {relative}")
+
+
+def verify_weights(models_directory: str | Path, pins: Iterable[WeightPin], *, cache_path: str | None = None,
+                   comfy_root: str | Path | None = None) -> None:
+    """Raise WeightsMismatch unless every pinned file matches. Names the file, never its contents.
+
+    With comfy_root (ComfyUI's main.py directory), also proves the lookup is unambiguous.
+    The cache is an opt-in optimisation for a trusted local filesystem (see the module docstring);
+    without cache_path every file is re-hashed.
+    """
+    pins = tuple(pins)
     root = Path(models_directory)
     if not root.is_absolute() or root.is_symlink() or not root.is_dir():
         raise WeightsMismatch("models directory must be an existing absolute non-symlink directory")
     root = root.resolve(strict=True)
+    if comfy_root is not None:
+        check_lookup_is_unambiguous(comfy_root, root, pins)
     cache = _load_cache(cache_path)
     changed = False
     for pin in pins:

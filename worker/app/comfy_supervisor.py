@@ -105,13 +105,13 @@ class ComfyLaunch:
     temp_directory: str
     user_directory: str
     flags: tuple[str, ...] = ("--disable-auto-launch", "--disable-metadata")
-    # Where ComfyUI loads model files from; None means the stock <main.py dir>/models. The pinned
-    # weights (G3) are verified here before ComfyUI starts. No extra model paths are configured.
-    models_directory: str | None = None
 
     @property
     def resolved_models_directory(self) -> Path:
-        return Path(self.models_directory) if self.models_directory is not None else Path(self.main_py).parent / "models"
+        """Where ComfyUI loads model files from: always <main.py dir>/models. No flag can move it
+        (--base-directory and --extra-model-paths-config are not allowlisted), so the directory the
+        pinned weights are verified in (G3) is the one ComfyUI reads (#2296 6636684138)."""
+        return Path(self.main_py).parent / "models"
 
     def argv(self, resident_lock: str) -> list[str]:
         python = Path(self.python_executable)

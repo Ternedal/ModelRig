@@ -89,6 +89,31 @@ class VerifyWeightsTests(unittest.TestCase):
             verify_weights(self.models, [self.pin], cache_path=self.cache)
         self.assertEqual(reads, [], "unchanged file: no bytes read")
 
+    # --- the lookup ComfyUI performs must be unambiguous (#2296 6636684138) -----------------------
+    def test_an_unambiguous_lookup_passes(self):
+        verify_weights(self.models, [self.pin], comfy_root=self.tmp)
+
+    def test_an_extra_model_paths_file_is_refused(self):
+        for name in ("extra_model_paths.yaml", "extra_model_paths.yml"):
+            with self.subTest(name):
+                Path(self.tmp, name).write_text("x: 1\n")
+                with self.assertRaisesRegex(WeightsMismatch, "extra model paths"):
+                    verify_weights(self.models, [self.pin], comfy_root=self.tmp)
+                Path(self.tmp, name).unlink()
+
+    def test_a_second_file_with_a_pinned_name_is_refused(self):
+        (self.models / "unet").mkdir()  # ComfyUI treats unet/ as an alias of diffusion_models/
+        (self.models / "unet" / "wan.safetensors").write_bytes(b"other weights")
+        with self.assertRaisesRegex(WeightsMismatch, "second file named like a pinned weight would be found by ComfyUI: unet/wan.safetensors"):
+            verify_weights(self.models, [self.pin], comfy_root=self.tmp)
+
+    def test_links_anywhere_in_the_models_tree_are_refused(self):
+        elsewhere = Path(self.tmp, "elsewhere")
+        elsewhere.mkdir()
+        (self.models / "loras").symlink_to(elsewhere, target_is_directory=True)
+        with self.assertRaisesRegex(WeightsMismatch, "contains a link ComfyUI would follow: loras"):
+            verify_weights(self.models, [self.pin], comfy_root=self.tmp)
+
     def test_a_new_pin_is_not_satisfied_by_a_cache_entry_for_the_old_one(self):
         verify_weights(self.models, [self.pin], cache_path=self.cache)  # caches the real digest
         repinned = WeightPin(path=self.pin.path, sha256=hashlib.sha256(b"other" + DATA[5:]).hexdigest(),

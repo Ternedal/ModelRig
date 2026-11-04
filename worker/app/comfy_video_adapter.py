@@ -120,7 +120,9 @@ class ComfyVideoAdapter:
         template = load_template(self._read_template(), self.options.template_sha256,
                                  pinned_files=[pin.path for pin in pins] if pins else None)
         if pins:  # before ComfyUI starts: nothing unpinned is ever loaded (G3)
-            verify_weights(self.supervisor.launch.resolved_models_directory, pins, cache_path=self.weights_cache)
+            launch = self.supervisor.launch
+            verify_weights(launch.resolved_models_directory, pins, cache_path=self.weights_cache,
+                           comfy_root=Path(launch.main_py).parent)
         budget = self.supervisor.start()
         if not self._version_ok(budget):
             self.supervisor.stop()  # proven stop: the lease goes with ComfyUI

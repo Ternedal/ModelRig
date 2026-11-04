@@ -108,8 +108,14 @@ A `rig-qualified` profile must pin both. Candidates may omit them.
 
 When pins are set:
 1. **Template binding.** `load_template` refuses a graph whose loader inputs (`*_name` ending in a model suffix) name a file that is not pinned.
-2. **Weights.** `verify_weights` (`comfy_weights.py`) runs before the lease and before ComfyUI starts. Every pinned file must be a regular file, not a link, inside the models directory, of the pinned size, with the pinned SHA-256. Results may be cached by `(real path, st_dev, st_ino, size, mtime_ns)`. Any change re-hashes, and an unreadable or old-version cache is ignored.
-3. **Version.** The version is compared when ComfyUI is ready and before every job. A mismatch at start stops ComfyUI, so the lease is released. A mismatch before a job refuses that job before anything is submitted.
+2. **Weights.** `verify_weights` (`comfy_weights.py`) runs before the lease and before ComfyUI starts. Every pinned file must be a regular file, not a link, inside the models directory, of the pinned size, with the pinned SHA-256.
+   - **Where it looks.** The models directory is always `<main.py dir>/models`: the one ComfyUI reads, since no flag that moves it is allowlisted.
+   - **Caching is an opt-in** (`weights_cache`) for a trusted local filesystem, keyed by `(real path, st_dev, st_ino, size, mtime_ns)`. The default re-hashes on every start.
+3. **Lookup is unambiguous** (#2296 6636684138). A hash only proves which file loads if ComfyUI cannot find another one, so the start is refused if any of these is present:
+   - `extra_model_paths.yaml`/`.yml` in ComfyUI's root;
+   - any link in the models tree;
+   - a second file anywhere under `models/` with a pinned name. This includes alias folders such as `unet/` for `diffusion_models/`.
+4. **Version.** The version is compared when ComfyUI is ready and before every job. A mismatch at start stops ComfyUI, so the lease is released. A mismatch before a job refuses that job before anything is submitted.
 
 **Stated limit:** an actor who rewrites a file and restores its size, inode and mtime defeats the cache. Such an actor can also edit the profile.
 
