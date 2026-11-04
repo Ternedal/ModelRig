@@ -25,6 +25,7 @@ def validate_png_container(payload: bytes) -> None:
     pos = len(PNG_SIGNATURE)
     seen_ihdr = seen_idat = seen_iend = seen_plte = False
     idat_finished = False
+    has_idat_payload = False
     color_type = None
     bit_depth = None
     chunk_count = ancillary_bytes = 0
@@ -80,6 +81,7 @@ def validate_png_container(payload: bytes) -> None:
             if seen_iend:
                 raise InvalidSourcePng("png_data_after_end")
             seen_idat = True
+            has_idat_payload = has_idat_payload or length > 0
         elif kind == b"IEND":
             if length or not seen_idat or pos != len(payload):
                 raise InvalidSourcePng("invalid_png_end")
@@ -87,5 +89,7 @@ def validate_png_container(payload: bytes) -> None:
             break
         elif kind[0] & 0x20 == 0:
             raise InvalidSourcePng("unknown_critical_png_chunk")
+    if not has_idat_payload:
+        raise InvalidSourcePng("empty_png_image_data")
     if not seen_iend:
         raise InvalidSourcePng("missing_png_end")
