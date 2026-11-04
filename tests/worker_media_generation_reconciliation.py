@@ -98,6 +98,21 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(self.jobs.get(newer, "owner"), before)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_bounded_scan_prioritizes_stranded_job_over_newer_completed_job(self, _mount):
+        stranded = self.submit_running()
+        completed = self.submit_running()
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET state='publishing',created=? WHERE id=?",
+                       (100, stranded))
+            db.execute("UPDATE image_jobs SET state='completed',created=? WHERE id=?",
+                       (200, completed))
+        before = self.jobs.get(stranded, "owner")
+        report = inspect_generation_consistency(self.jobs, self.sink, limit=1)
+        self.assertEqual(report[0]["job_id"], stranded)
+        self.assertEqual(report[0]["status"], "publishing_without_job_artifact")
+        self.assertEqual(self.jobs.get(stranded, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_running_with_published_unindexed_file_is_reported_without_mutation(self, _mount):
         job_id = self.submit_running()
         self.sink.publish_for_job(job_id, b"image", ".png")
