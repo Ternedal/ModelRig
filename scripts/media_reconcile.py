@@ -65,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
         jobs = ReadOnlyImageJobStore(args.jobs_db)
         sink = ExternalMediaSink(args.media_root, args.volume_root)
         findings = inspect_generation_consistency(jobs, sink, limit=args.limit, offset=args.offset)
-    except (OSError, RuntimeError, ValueError) as exc:
+    except (OSError, RuntimeError, ValueError, sqlite3.DatabaseError) as exc:
         print(f"reconciliation unavailable: {exc}", file=sys.stderr)
         return 2
     for finding in findings:
