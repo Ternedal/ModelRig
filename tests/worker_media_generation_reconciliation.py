@@ -58,6 +58,18 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(self.jobs.get(job_id, "owner"), before)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_publishing_conflicting_recorded_asset_is_not_treated_as_recoverable(self, _mount):
+        job_id = self.submit_running()
+        self.sink.publish_and_register_for_job(job_id, b"image", ".png")
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET state='publishing',asset_id=? WHERE id=?",
+                       ("different-asset", job_id))
+        before = self.jobs.get(job_id, "owner")
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "publishing_asset_mismatch")
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_publishing_indexed_missing_file_is_conflict_without_mutation(self, _mount):
         job_id = self.submit_running()
         with self.jobs._db() as db:
