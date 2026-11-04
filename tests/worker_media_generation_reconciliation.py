@@ -31,6 +31,24 @@ class ReconciliationTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "invalid_reconciliation_limit"):
                     inspect_generation_consistency(self.jobs, self.sink, limit=limit)
 
+    def test_reconciliation_offset_rejects_invalid_values(self):
+        for offset in (-1, 1000001, True, 1.5, "1"):
+            with self.subTest(offset=offset):
+                with self.assertRaisesRegex(ValueError, "invalid_reconciliation_offset"):
+                    inspect_generation_consistency(self.jobs, self.sink, offset=offset)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_reconciliation_offset_reaches_older_jobs(self, _mount):
+        ids = [self.submit_running() for _ in range(3)]
+        with self.jobs._db() as db:
+            for index, job_id in enumerate(ids):
+                db.execute("UPDATE image_jobs SET created=? WHERE id=?",
+                           (100 + index, job_id))
+        pages = [inspect_generation_consistency(self.jobs, self.sink, limit=1, offset=n)
+                 for n in range(4)]
+        self.assertEqual([[entry["job_id"] for entry in page] for page in pages],
+                         [[ids[2]], [ids[1]], [ids[0]], []])
+
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_reconciliation_limit_caps_rows(self, _mount):
         for _ in range(3):
