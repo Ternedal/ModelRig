@@ -81,6 +81,26 @@ class TemplateTests(unittest.TestCase):
                       pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors", "loras/sub/extra.safetensors"])
         load_template(raw(), sha(raw()))  # no pins: no binding (candidate profiles)
 
+    def test_a_distinct_whitespace_named_file_cannot_satisfy_the_pin(self):
+        # Codex's reproduction (4472405235), as ChatGPT asked: two REAL files with different bytes,
+        # only the first pinned. The weights check passes (both files exist, the pinned one matches);
+        # the template that names the second is refused before anything starts.
+        from app.comfy_weights import verify_weights
+        from app.media_generation_profiles import WeightPin
+        with tempfile.TemporaryDirectory() as tmp:
+            models = Path(tmp, "models", "diffusion_models")
+            models.mkdir(parents=True)
+            Path(models, "wan2.2_t2v_example.safetensors").write_bytes(b"pinned bytes")
+            Path(models, " wan2.2_t2v_example.safetensors").write_bytes(b"never hashed")
+            pin = WeightPin("diffusion_models/wan2.2_t2v_example.safetensors",
+                            hashlib.sha256(b"pinned bytes").hexdigest(), len(b"pinned bytes"))
+            verify_weights(Path(tmp, "models"), [pin], comfy_root=tmp)
+            graph = copy.deepcopy(GRAPH)
+            graph["4"]["inputs"]["unet_name"] = " wan2.2_t2v_example.safetensors"
+            with self.assertRaisesRegex(GenerationError, "not pinned"):
+                load_template(raw(graph), sha(raw(graph)), pinned_files=[pin.path])
+            load_template(raw(), sha(raw()), pinned_files=[pin.path])  # the exact name is accepted
+
     def test_a_backslash_is_refused_because_it_means_different_files_per_platform(self):
         # #2328 review 4472675602: on POSIX "evil\\wan.safetensors" is one file name, not evil/ + wan.
         # (A value that does not END in a model extension is not a file ComfyUI lists, so it never loads.)
