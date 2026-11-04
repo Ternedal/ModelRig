@@ -29,9 +29,10 @@ to inspect further pages. The CLI opens SQLite with `mode=ro` and avoids
 the schema-creating `ImageJobStore.__init__`; do **not** substitute the
 ordinary job-store constructor for a read-only forensic inspection.
 
-Paging is bounded and **not snapshot-consistent**. Concurrent changes may
-shift rows between pages. For exhaustive forensics, take a consistent
-read-only copy of the job database while the writer is stopped.
+The CLI uses a single SQLite read snapshot across pages, so concurrent
+job writes cannot shift the job rows. The external media files and gallery
+index are outside that transaction and can still change during inspection.
+For cross-store forensics, stop publication and capture both stores together.
 
 ## Interpretation
 
