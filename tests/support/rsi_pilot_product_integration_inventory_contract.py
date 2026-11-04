@@ -242,7 +242,7 @@ def run_contract() -> None:
         assert image_route_source.count(image_route_block) == 1
         prior_source = image_route_source.replace(image_route_block, "", 1)
         prior_bytes = prior_source.encode("utf-8")
-        prior_header = f"blob {len(prior_bytes)}\\0".encode("ascii")
+        prior_header = f"blob {len(prior_bytes)}\0".encode("ascii")
         assert hashlib.sha1(prior_header + prior_bytes).hexdigest() == (
             "f9b646350c70900ec256387b7a7e544d2de3eb0b"
         ), "image pilot changed unrelated selected source"
