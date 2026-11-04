@@ -103,6 +103,10 @@ def check_lookup_is_unambiguous(comfy_root: str | Path, models_directory: str | 
 
     Names are compared case-insensitively: on the rig's Windows, a lookup of "wan.safetensors"
     also opens "unet/WAN.safetensors" (#2328 review 4472405235, rig OS).
+
+    No unpinned file may sit in models/embeddings: ComfyUI's tokenizer loads one for any
+    "embedding:<name>" in a text, extension or not (#2328 review 4472675615). The template and
+    bind() also refuse the reference; this keeps the guarantee independent of prompt parsing.
     """
     if Path(comfy_root, "extra_model_paths.yaml").exists() or Path(comfy_root, "extra_model_paths.yml").exists():
         raise WeightsMismatch("ComfyUI has extra model paths configured: lookups are not limited to the verified models directory")
@@ -114,7 +118,12 @@ def check_lookup_is_unambiguous(comfy_root: str | Path, models_directory: str | 
             if os.path.islink(os.path.join(current, entry)):
                 raise WeightsMismatch(f"the models directory contains a link ComfyUI would follow: "
                                       f"{os.path.relpath(os.path.join(current, entry), root)}")
+        in_embeddings = os.path.relpath(current, root).replace(os.sep, "/").split("/")[0].casefold() == "embeddings"
         for name in files:
+            if in_embeddings:
+                relative = os.path.relpath(os.path.join(current, name), root).replace(os.sep, "/")
+                if relative not in pinned:
+                    raise WeightsMismatch(f"an unpinned embedding could be loaded by a prompt: {relative}")
             if name.casefold() in names:
                 relative = os.path.relpath(os.path.join(current, name), root).replace(os.sep, "/")
                 if relative not in pinned:

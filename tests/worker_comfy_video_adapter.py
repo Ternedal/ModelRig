@@ -70,12 +70,44 @@ class TemplateTests(unittest.TestCase):
         with self.assertRaisesRegex(GenerationError, "not pinned"):
             load_template(raw(), sha(raw()), pinned_files=["diffusion_models/other.safetensors"])
         graph = copy.deepcopy(GRAPH)
-        graph["5"] = {"class_type": "LoraLoader", "inputs": {"lora_name": "sub\\extra.safetensors"}}
+        graph["5"] = {"class_type": "LoraLoader", "inputs": {"lora_name": "sub/extra.safetensors"}}
         with self.assertRaisesRegex(GenerationError, "not pinned"):
             load_template(raw(graph), sha(raw(graph)), pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors"])
+        # The value is the path inside the loader's folder: the basename alone is a different file.
+        with self.assertRaisesRegex(GenerationError, "not pinned"):
+            load_template(raw(graph), sha(raw(graph)),
+                          pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors", "loras/extra.safetensors"])
         load_template(raw(graph), sha(raw(graph)),
-                      pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors", "loras/extra.safetensors"])
+                      pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors", "loras/sub/extra.safetensors"])
         load_template(raw(), sha(raw()))  # no pins: no binding (candidate profiles)
+
+    def test_a_backslash_is_refused_because_it_means_different_files_per_platform(self):
+        # #2328 review 4472675602: on POSIX "evil\\wan.safetensors" is one file name, not evil/ + wan.
+        # (A value that does not END in a model extension is not a file ComfyUI lists, so it never loads.)
+        for value in ("evil\\wan2.2_t2v_example.safetensors", "\\wan2.2_t2v_example.safetensors"):
+            graph = copy.deepcopy(GRAPH)
+            graph["4"]["inputs"]["unet_name"] = value
+            with self.subTest(value=value), self.assertRaisesRegex(GenerationError, "not pinned"):
+                load_template(raw(graph), sha(raw(graph)),
+                              pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors",
+                                            "diffusion_models/evil/wan2.2_t2v_example.safetensors"])
+
+    def test_embeddings_cannot_be_loaded_under_pins(self):
+        # #2328 review 4472675615: "embedding:<name>" in any encoded text loads models/embeddings/<name>.
+        pins = ["diffusion_models/wan2.2_t2v_example.safetensors"]
+        graph = copy.deepcopy(GRAPH)
+        graph["5"] = {"class_type": "CLIPTextEncode", "inputs": {"text": "blurry, Embedding:badhands", "clip": ["8", 0]}}
+        with self.assertRaisesRegex(GenerationError, "references an embedding"):
+            load_template(raw(graph), sha(raw(graph)), pinned_files=pins)
+        load_template(raw(graph), sha(raw(graph)))  # candidates are not pinned
+        pinned = load_template(raw(), sha(raw()), pinned_files=pins)
+        for prompt in ("a kite embedding:unpinned", "(EMBEDDING:x:1.2) a kite", "embedding:x"):
+            with self.subTest(prompt=prompt), self.assertRaisesRegex(GenerationError, "embedding"):
+                pinned.bind(request(prompt=prompt), fps=16)
+        self.assertEqual(pinned.bind(request(prompt="an embedding of meaning"), fps=16)["6"]["inputs"]["text"],
+                         "an embedding of meaning", "the word alone is fine")
+        unpinned = load_template(raw(), sha(raw()))
+        self.assertEqual(unpinned.bind(request(prompt="embedding:x"), fps=16)["6"]["inputs"]["text"], "embedding:x")
 
     def test_the_binding_is_keyed_on_the_value_not_the_input_name(self):
         # #2328 review 4472123690: DualCLIPLoader's clip_name1/clip_name2 do not end in "_name".
@@ -683,6 +715,16 @@ class AdapterTests(unittest.TestCase):
             swapped.load()
         self.assertFalse(Path(self.state, "env.json").exists(), "ComfyUI never started")
         self.assertTrue(self.lease_is_free())
+
+    def test_a_prompt_embedding_under_pins_is_refused_before_anything_is_submitted(self):
+        root, pin = self._models()
+        adapter = self.adapter(profile=self.profile(weights=[pin]), comfy_root=root)
+        adapter.load()
+        with self.assertRaisesRegex(GenerationError, "may not reference an embedding"):
+            adapter.render_to(request(prompt="a kite embedding:unpinned"), io.BytesIO())
+        self.assertFalse(Path(self.state, "last_prompt.json").exists(), "nothing was submitted")
+        self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4", "the next job still runs")
+        adapter.close()
 
     def test_an_ambiguous_comfyui_lookup_is_refused_before_start(self):
         root, pin = self._models()

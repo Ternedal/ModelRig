@@ -167,6 +167,16 @@ class VerifyWeightsTests(unittest.TestCase):
                     verify_weights(self.models, [self.pin], comfy_root=self.tmp)
                 Path(self.tmp, name).unlink()
 
+    def test_an_unpinned_embedding_is_refused(self):
+        # #2328 review 4472675615: a prompt's "embedding:<name>" loads models/embeddings/<name>.
+        (self.models / "embeddings" / "sub").mkdir(parents=True)
+        (self.models / "embeddings" / "sub" / "unpinned.pt").write_bytes(b"tensor")
+        with self.assertRaisesRegex(WeightsMismatch, "unpinned embedding could be loaded by a prompt: embeddings/sub/unpinned.pt"):
+            verify_weights(self.models, [self.pin], comfy_root=self.tmp)
+        verify_weights(self.models, [self.pin])  # without comfy_root no lookup check (unit scope)
+        pinned = pin_for("embeddings/sub/unpinned.pt", b"tensor")
+        verify_weights(self.models, [self.pin, pinned], comfy_root=self.tmp)
+
     def test_a_second_file_differing_only_in_case_is_refused(self):
         # A Windows lookup of wan.safetensors would also open unet/WAN.safetensors.
         (self.models / "unet").mkdir()

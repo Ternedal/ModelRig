@@ -60,14 +60,23 @@ def _strings(value: object):
             yield from _strings(item)
 
 
+# ComfyUI's tokenizer loads models/embeddings/<name> for "embedding:<name>" in any text it
+# encodes, with or without an extension (comfy/sd1_clip.py). Under pins no such load is allowed.
+EMBEDDING_REFERENCE = "embedding:"
+
+
 @dataclass(frozen=True)
 class WorkflowTemplate:
     graph: Mapping[str, object]
     slots: Mapping[str, tuple[str, str]]  # marker -> (node id, input name)
     sha256: str
+    pinned: bool = False
 
     def bind(self, request: GenerationRequest, *, fps: int) -> dict:
         """A fresh graph with request values in the slots. The request must already be validated."""
+        if self.pinned and EMBEDDING_REFERENCE in request.prompt.casefold():
+            # The prompt enters the graph here, after load_template's checks (#2328 review 4472675615).
+            raise GenerationError("a prompt may not reference an embedding under a pinned profile")
         if request.task != "text_to_video":
             raise GenerationError("this template binds text_to_video only")
         seed = request.seed if request.seed is not None else secrets.randbelow(2**32)
@@ -83,26 +92,31 @@ class WorkflowTemplate:
 
 
 def _model_files(graph: Mapping[str, object]):
-    """(node id, input name, file name) for every input value that names a model file.
+    """(node id, input name, value) for every input value that names a model file.
 
     Keyed on the VALUE, not the input name: loaders name their inputs freely
     (ckpt_name, unet_name, but also clip_name1/clip_name2 on DualCLIPLoader), so a
     name heuristic lets an unpinned file through (#2328 review 4472123690).
 
-    Detection is generous (case and surrounding whitespace ignored); the file name that is
-    then compared with the pins is the value EXACTLY as ComfyUI will receive it. " wan.safetensors"
-    is a different file from "wan.safetensors" and must not satisfy its pin (#2328 review 4472405235).
+    Detection is generous (case and surrounding whitespace ignored); the value is then
+    compared with the pins EXACTLY as ComfyUI will receive it. " wan.safetensors" is a different
+    file from "wan.safetensors" and must not satisfy its pin (#2328 review 4472405235).
     """
     for node_id, node in graph.items():
         for input_name, value in node["inputs"].items():
             for text in _strings(value):
                 if text.strip().lower().endswith(MODEL_FILE_SUFFIXES):
-                    yield node_id, input_name, text.replace("\\", "/").rsplit("/", 1)[-1]
+                    yield node_id, input_name, text
 
 
 def load_template(raw: bytes, expected_sha256: str, *, pinned_files=None) -> WorkflowTemplate:
     """pinned_files: the profile's weights paths. When given, every model file the graph loads
-    must be one of them (G3, #2296 6634996133): a pinned graph can only load pinned bytes."""
+    must be one of them (G3, #2296 6634996133): a pinned graph can only load pinned bytes.
+
+    A loader names its file relative to its model folder, so a value must equal a pin's path
+    without the folder: pin "loras/sub/x.safetensors" is loaded as "sub/x.safetensors". Exactly,
+    and with "/" only -- a backslash is a separator on Windows but a file-name character on
+    POSIX, so "evil\\x.safetensors" is ambiguous and refused (#2328 review 4472675602)."""
     if not isinstance(expected_sha256, str) or not _SHA256.fullmatch(expected_sha256):
         raise _fail("pinned SHA-256 is malformed")
     if type(raw) is not bytes or not raw or len(raw) > MAX_TEMPLATE_BYTES:
@@ -147,8 +161,11 @@ def load_template(raw: bytes, expected_sha256: str, *, pinned_files=None) -> Wor
     if missing:
         raise _fail(f"missing slots {missing}")
     if pinned_files is not None:
-        pinned = {str(path).rsplit("/", 1)[-1] for path in pinned_files}
-        for node_id, input_name, name in _model_files(graph):
-            if name not in pinned:
+        loadable = {str(path).split("/", 1)[1] for path in pinned_files if "/" in str(path)}
+        for node_id, input_name, value in _model_files(graph):
+            if value not in loadable:  # pins cannot contain "\\", so a backslash never matches
                 raise _fail(f"node {node_id} loads a model file that is not pinned ({input_name})")
-    return WorkflowTemplate(graph=graph, slots=found, sha256=actual)
+        for node_id, node in graph.items():
+            if any(EMBEDDING_REFERENCE in text.casefold() for text in _strings(node["inputs"])):
+                raise _fail(f"node {node_id} references an embedding, which is not pinned")
+    return WorkflowTemplate(graph=graph, slots=found, sha256=actual, pinned=pinned_files is not None)
