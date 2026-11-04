@@ -30,6 +30,24 @@ class MediaReconcileCliTests(unittest.TestCase):
                     db.execute("CREATE TABLE diagnostic_mutation (id TEXT)")
             self.assertEqual(db_path.read_bytes(), before)
 
+    def test_corrupt_database_is_reported_without_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "corrupt.sqlite"
+            db_path.write_bytes(b"not a sqlite database")
+            with patch.object(cli, "ExternalMediaSink") as sink_class, \
+                 patch.object(cli, "inspect_generation_consistency") as inspect, \
+                 patch("sys.stderr"):
+                sink_class.return_value = object()
+                # Force a real read on the strict read-only connection.
+                def read_db(jobs, sink, **kwargs):
+                    with jobs._db() as db:
+                        db.execute("SELECT * FROM image_jobs").fetchall()
+                inspect.side_effect = read_db
+                code = cli.main(["--jobs-db", str(db_path),
+                                 "--volume-root", tmp, "--media-root", tmp])
+            self.assertEqual(code, 2)
+            self.assertEqual(db_path.read_bytes(), b"not a sqlite database")
+
     def test_missing_database_is_rejected_without_creation(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "missing.sqlite"
