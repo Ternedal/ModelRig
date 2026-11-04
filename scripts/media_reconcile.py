@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""Read-only JSONL inspection of generation jobs and external media receipts.
+
+This command never changes job state, files or the gallery index. It does not
+mount volumes or attempt automatic recovery.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "worker"))
+
+from app.image_job_store import ImageJobStore  # noqa: E402
+from app.media_gallery_store import ExternalMediaSink  # noqa: E402
+from app.media_generation_reconciliation import inspect_generation_consistency  # noqa: E402
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--jobs-db", required=True, type=Path,
+                        help="Existing jobs SQLite database (never created by this command)")
+    parser.add_argument("--volume-root", required=True, type=Path,
+                        help="Existing mounted external volume")
+    parser.add_argument("--media-root", required=True, type=Path,
+                        help="Gallery directory within the external volume")
+    parser.add_argument("--limit", type=int, default=100,
+                        help="Number of jobs per page (1..1000)")
+    parser.add_argument("--offset", type=int, default=0,
+                        help="Starting offset (0..1000000)")
+    args = parser.parse_args(argv)
+
+    # sqlite3.connect creates an absent DB; prevent a diagnostic from
+    # accidentally creating a fresh database and reporting no jobs.
+    if not args.jobs_db.is_file() or args.jobs_db.is_symlink():
+        parser.error("--jobs-db must refer to an existing regular file, not a symlink")
+    if not 1 <= args.limit <= 1000 or not 0 <= args.offset <= 1000000:
+        parser.error("invalid --limit or --offset")
+    try:
+        jobs = ImageJobStore(str(args.jobs_db))
+        sink = ExternalMediaSink(args.media_root, args.volume_root)
+        findings = inspect_generation_consistency(jobs, sink, limit=args.limit, offset=args.offset)
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"reconciliation unavailable: {exc}", file=sys.stderr)
+        return 2
+    for finding in findings:
+        print(json.dumps(finding, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
