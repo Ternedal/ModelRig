@@ -90,10 +90,10 @@ def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink,
             else:
                 status = "consistent"
         elif receipt is None:
-            if state == "publishing" and recorded is not None:
-                # A recorded asset reference with no deterministic receipt
-                # cannot be called an ordinary pre-publication state.
-                status = "publishing_recorded_asset_without_job_artifact"
+            if recorded is not None:
+                # Never hide an unexpected database asset reference merely
+                # because the deterministic file is absent.
+                status = state + "_recorded_asset_without_job_artifact"
             else:
                 status = ("publishing_without_job_artifact" if state == "publishing" else "no_job_artifact")
         elif state == "running":
