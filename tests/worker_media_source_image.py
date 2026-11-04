@@ -188,6 +188,13 @@ class SourceImageTests(unittest.TestCase):
                 read_owned_source_png(self.sink, jobs, "owner-a", asset_id)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_public_volume_availability_requires_existing_mount(self, _mount):
+        self.assertIsNone(self.sink.require_available())
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=False):
+            with self.assertRaises(ArtifactSinkUnavailable):
+                self.sink.require_available()
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_wrong_bytes_and_bad_ids_refused(self, _mount):
         asset_id = self.sink.publish(b"not png", ".png")
         with self.assertRaises(ArtifactSinkUnavailable):
