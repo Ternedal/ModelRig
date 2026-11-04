@@ -18,6 +18,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -539,6 +540,70 @@ class AdapterTests(unittest.TestCase):
                                 env=dict(os.environ, PYTHONPATH=str(contract.parents[2] / "worker")))
         self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
         self.assertIn("(0 failures)", result.stdout)
+
+    # --- G2 cooperative cancellation (#2296 6510332634) ------------------------------------------
+    def test_should_cancel_interrupts_comfyui_and_runs_the_normal_cleanup(self):
+        from app.media_generation_contract import GenerationCancelled
+        adapter = self.adapter(fake={"FAKE_COMFY_RENDER_SECONDS": "5"})
+        adapter.load()
+        deadline = time.monotonic() + 0.5
+        started = time.monotonic()
+        with self.assertRaises(GenerationCancelled):
+            adapter.render_to(request(), io.BytesIO(), should_cancel=lambda: time.monotonic() >= deadline)
+        self.assertLess(time.monotonic() - started, 3, "interrupted, not waited out")
+        self.assertEqual(adapter.last_cleanup.get("failed"), [], "cleanup ran and touched nothing it cannot prove")
+        self.assertTrue(adapter.supervisor.running, "ComfyUI stays resident for the next job")
+        self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4", "and it still renders")
+
+    def test_an_unconfirmed_drain_marks_the_adapter_for_restart(self):
+        """#2318 review 4469472651: a ComfyUI whose queue does not drain must take no further job."""
+        from unittest.mock import patch
+        from app.comfy_supervisor import ComfySupervisorError
+        from app.media_generation_contract import GenerationCancelled
+        import app.comfy_video_adapter as adapter_module
+
+        def stuck_queue(sup):
+            return False
+
+        def failing_check(sup):
+            raise ComfySupervisorError("queue check failed")
+
+        for label in ("queue never drains", "queue check fails", "interrupt fails"):
+            with self.subTest(label):
+                self.port = free_port()
+                adapter = self.adapter(fake={"FAKE_COMFY_RENDER_SECONDS": "5"})
+                adapter.load()
+                sup = adapter.supervisor
+                real_submit, real_queue, real_interrupt = sup.submit, sup.queue_is_empty, sup.interrupt
+                submitted = []
+
+                def submit(graph):
+                    submitted.append(1)
+                    return real_submit(graph)
+
+                def queue_is_empty():
+                    if not submitted:
+                        return real_queue()  # the pre-submit single-tenant check is real
+                    return stuck_queue(sup) if label == "queue never drains" else failing_check(sup)
+
+                def interrupt():
+                    if label == "interrupt fails":
+                        raise ComfySupervisorError("interrupt failed")
+                    return real_interrupt()
+
+                sup.submit, sup.queue_is_empty, sup.interrupt = submit, queue_is_empty, interrupt
+                start = time.monotonic()
+                try:
+                    with patch.object(adapter_module, "DRAIN_SECONDS", 0.3):
+                        with self.assertRaises(GenerationCancelled):
+                            adapter.render_to(request(), io.BytesIO(),
+                                              should_cancel=lambda: time.monotonic() - start > 0.3)
+                finally:
+                    sup.submit, sup.queue_is_empty, sup.interrupt = real_submit, real_queue, real_interrupt
+                self.assertTrue(adapter.needs_restart)
+                self.assertTrue(adapter.close(), "it can still be stopped and its lease released")
+                with self.assertRaisesRegex(GenerationError, "needs a restart"):
+                    adapter.load()
 
     def test_cleanup_never_masks_the_render_result_or_error(self):
         adapter = self.adapter(fake={"FAKE_COMFY_OUTPUT_MODE": "notmp4"})

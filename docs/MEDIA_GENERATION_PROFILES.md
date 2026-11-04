@@ -76,6 +76,9 @@ The placeholders above are rejected on purpose: a revision must be 40 lower-case
 
 ## Not in this slice
 
+The executor process that drives these adapters is described in `docs/MEDIA_EXECUTOR.md` (G2, default-off).
+
+
 - the executor process and its wiring to the media store (once `ArtifactSink` has an implementation on the gallery side);
 - image-to-image (it needs input bytes from the media store);
 - the Wan/ComfyUI video adapter (submit/poll), which uses the same lease;
