@@ -1,5 +1,6 @@
 """Contract tests for the read-only media reconciliation command."""
 import importlib.util
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -29,6 +30,31 @@ class MediaReconcileCliTests(unittest.TestCase):
                 with self.assertRaises(sqlite3.OperationalError):
                     db.execute("CREATE TABLE diagnostic_mutation (id TEXT)")
             self.assertEqual(db_path.read_bytes(), before)
+
+    def test_all_pages_aggregates_conflicts_and_outputs_every_row(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "jobs.sqlite"
+            sqlite3.connect(db_path).close()
+            pages = [
+                [{"job_id": "a", "status": "consistent"}],
+                [{"job_id": "b", "status": "media_conflict"}],
+                [],
+            ]
+            with patch.object(cli, "ExternalMediaSink"), \
+                 patch.object(cli, "inspect_generation_consistency",
+                              side_effect=pages) as inspect:
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    code = cli.main(["--jobs-db", str(db_path),
+                                     "--volume-root", tmp, "--media-root", tmp,
+                                     "--limit", "1", "--all", "--fail-on-conflict"])
+            self.assertEqual(code, 1)
+            self.assertEqual([json.loads(line)["job_id"] for line in
+                              output.getvalue().splitlines()], ["a", "b"])
+            self.assertEqual([call.kwargs["offset"] for call in inspect.call_args_list],
+                             [0, 1, 2])
 
     def test_conflict_exit_code_is_opt_in_and_preserves_jsonl(self):
         import contextlib
