@@ -8,6 +8,7 @@ the supervisor actually passed. The real supervisor drops FAKE_COMFY_* (not
 in its passthrough list); tests add them in a ComfySupervisor subclass.
 """
 import argparse
+import hashlib
 import json
 import os
 import signal
@@ -64,6 +65,13 @@ if os.environ.get("FAKE_COMFY_PREQUEUED") == "1":
 
 def _render(prompt_id: str) -> None:
     deadline = time.monotonic() + render_seconds
+    if os.environ.get("FAKE_COMFY_SWAP_INPUT") == "1":  # someone replaces the source image mid-job
+        for name in os.listdir(args.input_directory):
+            if name.startswith("kaliv-src-"):
+                incoming = os.path.join(args.input_directory, ".incoming")
+                with open(incoming, "wb") as fh:
+                    fh.write(b"someone else's image")
+                os.replace(incoming, os.path.join(args.input_directory, name))
     foreign = os.environ.get("FAKE_COMFY_FOREIGN_FILE")  # someone else drops a file mid-job
     while time.monotonic() < deadline:
         if foreign and not os.path.exists(os.path.join(args.output_directory, foreign)):
@@ -171,7 +179,22 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(body.get("prompt"), dict):
                 self._send({"error": "no prompt"}, 400)
                 return
+            # Like ComfyUI: LoadImage's file must exist in the input directory when the prompt is
+            # validated; record exactly what it would read (i2v tests compare the bytes).
+            seen = []
+            for node in body["prompt"].values():
+                if isinstance(node, dict) and node.get("class_type") == "LoadImage":
+                    name = node.get("inputs", {}).get("image")
+                    path = os.path.join(args.input_directory or "", str(name))
+                    if not args.input_directory or not os.path.isfile(path):
+                        self._send({"error": "prompt_outputs_failed_validation", "node_errors": {"image": "missing"}}, 400)
+                        return
+                    with open(path, "rb") as fh:
+                        data = fh.read()
+                    seen.append({"name": name, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)})
             if STATE:
+                with open(os.path.join(STATE, "loadimage.json"), "w") as fh:
+                    json.dump(seen, fh)
                 with open(os.path.join(STATE, "last_prompt.json"), "w") as fh:
                     json.dump(body, fh)
                 with open(os.path.join(STATE, "prompts.log"), "a") as fh:
