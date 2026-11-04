@@ -38,6 +38,8 @@ Rules
   If the completion write then fails, the job stays "publishing" (never
   "generation_failed") and the executor exits 76; recovery turns it into
   "interrupted during publication" for the sink owner's reconciliation.
+- An adapter that reports needs_restart (a ComfyUI whose interrupt did not drain) is
+  unloaded after the job, with the same proof rule, before anything else is claimed.
 - The executor lock is released on every terminal path of run(). The GPU lease of
   a retained adapter is not: it stays held until the process exits.
 - Bookkeeping writes on the fatal paths are best-effort: a failing database never
@@ -198,6 +200,14 @@ class MediaExecutor:
         if job is None:
             self.maybe_unload_idle()
             return "idle"
+        outcome = self._run_job(job)
+        if self.adapter is not None and getattr(self.adapter, "needs_restart", False):
+            # e.g. a cancelled ComfyUI whose queue did not drain: never give it another job.
+            self.events.append(f"restart:{self.adapter.profile_id}")
+            self._unload()  # close() must prove the release, otherwise this is fatal (exit 70)
+        return outcome
+
+    def _run_job(self, job: dict) -> str:
         job_id, profile = job["id"], self.profiles[job["profile_id"]]
         try:
             request = self._request(job, profile)

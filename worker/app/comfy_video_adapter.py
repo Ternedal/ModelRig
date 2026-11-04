@@ -88,6 +88,9 @@ class ComfyVideoAdapter:
         self.poll_s = float(poll_s)
         self._template: WorkflowTemplate | None = None
         self.last_cleanup: dict[str, list[str]] = {}
+        # True once an interrupt could not be confirmed drained: this ComfyUI must not take another
+        # job. The executor unloads (and so restarts) the adapter (#2318 review 4469472651).
+        self.needs_restart = False
 
     # --- lifecycle --------------------------------------------------------
     def _read_template(self) -> bytes:
@@ -109,6 +112,8 @@ class ComfyVideoAdapter:
     def load(self) -> None:
         if self._template is not None:
             raise GenerationError("adapter already loaded")
+        if self.needs_restart:
+            raise GenerationError("this adapter needs a restart: create a new one")
         template = load_template(self._read_template(), self.options.template_sha256)
         self.supervisor.start()
         self._template = template
@@ -269,20 +274,24 @@ class ComfyVideoAdapter:
 
     def _interrupt_and_drain(self) -> None:
         """Interrupt, then wait (bounded) until ComfyUI's queue is empty, so the next job on this
-        resident ComfyUI is not refused as "queue not empty" while the interrupt is still landing."""
+        resident ComfyUI is not refused as "queue not empty" while the interrupt is still landing.
+        If the drain cannot be confirmed (interrupt or queue check failed, or the deadline passed),
+        mark the adapter for a restart instead of letting it take more jobs."""
         try:
             self.supervisor.interrupt()
         except ComfySupervisorError:
-            return  # stop() interrupts again and terminates if needed
+            self.needs_restart = True
+            return
         until = time.monotonic() + DRAIN_SECONDS
         while time.monotonic() < until:
             try:
                 if self.supervisor.queue_is_empty():
                     return
             except ComfySupervisorError:
-                return
+                break
             time.sleep(self.poll_s)
-        _log.warning("comfy queue still busy %ss after an interrupt", DRAIN_SECONDS)
+        self.needs_restart = True
+        _log.warning("comfy queue not confirmed drained after an interrupt; the adapter needs a restart")
 
     def _delete_if_same(self, name: str, dev: int, ino: int, dir_fd: int | None) -> str:
         """Delete `name` only if it is still the file with (dev, ino); never delete anything else.

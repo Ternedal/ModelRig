@@ -642,6 +642,35 @@ class VideoExecutorTests(unittest.TestCase):
         self.assertEqual(ex.step(), "completed", "the next job is not refused as 'queue not empty'")
         self.assertEqual(self.store.get(follow_up, "anders")["state"], "completed")
 
+    def test_a_comfyui_whose_cancel_did_not_drain_is_restarted_before_the_next_job(self):
+        """#2318 review 4469472651: the stuck ComfyUI is unloaded (proven) and a fresh one takes the next job."""
+        from unittest.mock import patch
+        import app.comfy_video_adapter as adapter_module
+        ex = self.executor(render_seconds="5")
+        job = self.submit()
+        threading.Timer(0.5, lambda: self.store.request_cancel(job, "anders")).start()
+        real_factory, made = ex.adapter_factory, []
+
+        def factory(profile):
+            adapter = real_factory(profile)
+            made.append(adapter)
+            if len(made) == 1:  # only the first ComfyUI's queue refuses to drain after its interrupt
+                sup, submitted = adapter.supervisor, []
+                real_submit, real_queue = sup.submit, sup.queue_is_empty
+                sup.submit = lambda graph: (submitted.append(1), real_submit(graph))[1]
+                sup.queue_is_empty = lambda: real_queue() if not submitted else False
+            return adapter
+        ex.adapter_factory = factory
+        with patch.object(adapter_module, "DRAIN_SECONDS", 0.3):
+            self.assertEqual(ex.step(), "cancelled")
+        self.assertIsNone(ex.adapter, "unloaded: the stuck ComfyUI takes no further job")
+        self.assertIn("restart:wan-t2v", ex.events)
+        self.assertFalse(made[0].supervisor.running, "its ComfyUI was stopped")
+        follow_up = self.submit()
+        self.assertEqual(ex.step(), "completed", "a fresh ComfyUI renders the next job")
+        self.assertEqual(len(made), 2)
+        self.assertEqual(self.store.get(follow_up, "anders")["state"], "completed")
+
     def test_video_adoption_is_job_keyed_when_the_staged_sink_offers_it(self):
         class JobKeyedReference(ReferenceSink):
             def __init__(self, *a, **k):
