@@ -28,9 +28,29 @@ class ReadOnlyImageJobStore(ImageJobStore):
     def __init__(self, db_path: Path):
         self.path = db_path
         self._volume_guard = None
+        self._snapshot_connection = None
+
+    @contextmanager
+    def snapshot(self):
+        """Pin a single SQLite read transaction for all pagination queries."""
+        if self._snapshot_connection is not None:
+            raise RuntimeError("reconciliation_snapshot_already_active")
+        connection = sqlite3.connect(self.path.resolve().as_uri() + "?mode=ro",
+                                     uri=True, timeout=10)
+        connection.row_factory = sqlite3.Row
+        try:
+            connection.execute("BEGIN")
+            self._snapshot_connection = connection
+            yield
+        finally:
+            self._snapshot_connection = None
+            connection.close()
 
     @contextmanager
     def _db(self):
+        if self._snapshot_connection is not None:
+            yield self._snapshot_connection
+            return
         connection = sqlite3.connect(self.path.resolve().as_uri() + "?mode=ro",
                                      uri=True, timeout=10)
         connection.row_factory = sqlite3.Row
@@ -70,21 +90,23 @@ def main(argv: list[str] | None = None) -> int:
         sink = ExternalMediaSink(args.media_root, args.volume_root)
         offset = args.offset
         conflict = False
-        while True:
-            findings = inspect_generation_consistency(jobs, sink, limit=args.limit, offset=offset)
-            for finding in findings:
-                print(json.dumps(finding, sort_keys=True))
-                status = finding["status"]
-                # Benign pre-publication states and verified completed receipts
-                # are not alarms. Everything else warrants investigation.
-                if status not in {"consistent", "completed_legacy_indexed",
-                                  "no_job_artifact", "publishing_without_job_artifact"}:
-                    conflict = True
-            if not args.all or len(findings) < args.limit:
-                break
-            offset += args.limit
-            if offset > 1000000:
-                raise ValueError("reconciliation_page_limit_exceeded")
+        # Even a single-page inspection uses one pinned SQLite read snapshot.
+        with jobs.snapshot():
+            while True:
+                findings = inspect_generation_consistency(jobs, sink, limit=args.limit, offset=offset)
+                for finding in findings:
+                    print(json.dumps(finding, sort_keys=True))
+                    status = finding["status"]
+                    # Benign pre-publication states and verified completed receipts
+                    # are not alarms. Everything else warrants investigation.
+                    if status not in {"consistent", "completed_legacy_indexed",
+                                      "no_job_artifact", "publishing_without_job_artifact"}:
+                        conflict = True
+                if not args.all or len(findings) < args.limit:
+                    break
+                offset += args.limit
+                if offset > 1000000:
+                    raise ValueError("reconciliation_page_limit_exceeded")
     except (OSError, RuntimeError, ValueError, sqlite3.DatabaseError) as exc:
         print(f"reconciliation unavailable: {exc}", file=sys.stderr)
         return 2
