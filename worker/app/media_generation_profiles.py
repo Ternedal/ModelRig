@@ -59,7 +59,14 @@ _TOP_KEYS = frozenset({
 _COMFY_OPTION_KEYS = frozenset({
     "template_name", "template_sha256", "fps", "max_render_seconds", "max_output_bytes", "port",
 })
+_COMFY_OPTIONAL_KEYS = frozenset({"comfyui_version", "weights"})  # pins (G3, #2296 6634996133)
 _TEMPLATE_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}\.json")
+_COMFY_VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}")
+_WEIGHT_SEGMENT = r"[A-Za-z0-9_][A-Za-z0-9._-]{0,127}"
+_WEIGHT_PATH = re.compile(rf"{_WEIGHT_SEGMENT}(?:/{_WEIGHT_SEGMENT}){{0,3}}")
+_WEIGHT_KEYS = frozenset({"path", "sha256", "bytes"})
+MAX_WEIGHTS = 16
+MAX_WEIGHT_BYTES = 1 << 40
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 MAX_VIDEO_BYTES = 2 * 1024 ** 3
 _LIMIT_KEYS = frozenset({"max_prompt_chars", "sizes", "max_steps", "max_frames"})
@@ -83,6 +90,14 @@ class Resources:
 
 
 @dataclass(frozen=True)
+class WeightPin:
+    """One model file ComfyUI may load: its path under the models directory, SHA-256 and size."""
+    path: str
+    sha256: str
+    bytes: int
+
+
+@dataclass(frozen=True)
 class ComfyOptions:
     template_name: str
     template_sha256: str
@@ -90,6 +105,8 @@ class ComfyOptions:
     max_render_seconds: int
     max_output_bytes: int
     port: int
+    comfyui_version: str | None = None
+    weights: tuple[WeightPin, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -133,10 +150,11 @@ def _string(value: object, pattern: re.Pattern[str], name: str) -> str:
     return value
 
 
-def _exact_keys(obj: object, allowed: frozenset[str], name: str) -> Mapping[str, object]:
+def _exact_keys(obj: object, allowed: frozenset[str], name: str,
+                optional: frozenset[str] = frozenset()) -> Mapping[str, object]:
     if not isinstance(obj, dict):
         raise _fail(f"{name} must be an object")
-    unknown = set(obj) - allowed
+    unknown = set(obj) - allowed - optional
     missing = allowed - set(obj)
     if unknown:
         raise _fail(f"{name} has unknown keys {sorted(unknown)}")
@@ -236,7 +254,7 @@ def parse_profile(obj: object) -> ModelProfile:
     raw_options = data["backend_options"]
     backend_options = None
     if backend == "comfyui":
-        options = _exact_keys(raw_options, _COMFY_OPTION_KEYS, "backend_options")
+        options = _exact_keys(raw_options, _COMFY_OPTION_KEYS, "backend_options", optional=_COMFY_OPTIONAL_KEYS)
         name = _string(options["template_name"], _TEMPLATE_NAME, "backend_options.template_name")
         if ".." in name:
             raise _fail("backend_options.template_name must be a plain file name")
@@ -247,7 +265,12 @@ def parse_profile(obj: object) -> ModelProfile:
             max_render_seconds=_strict_int(options["max_render_seconds"], 10, 7200, "backend_options.max_render_seconds"),
             max_output_bytes=_strict_int(options["max_output_bytes"], 1024, MAX_VIDEO_BYTES, "backend_options.max_output_bytes"),
             port=_strict_int(options["port"], 1024, 65535, "backend_options.port"),
+            comfyui_version=(_string(options["comfyui_version"], _COMFY_VERSION, "backend_options.comfyui_version")
+                             if "comfyui_version" in options else None),
+            weights=_weight_pins(options["weights"]) if "weights" in options else (),
         )
+        if qualification == "rig-qualified" and (backend_options.comfyui_version is None or not backend_options.weights):
+            raise _fail("a rig-qualified comfyui profile must pin comfyui_version and weights")
     elif raw_options != {}:
         raise _fail("backend_options must be {} for the diffusers backend")
 
@@ -257,6 +280,26 @@ def parse_profile(obj: object) -> ModelProfile:
         outputs=frozenset(outputs), resources=resources, qualification=qualification, license=license_,
         backend_options=backend_options,
     )
+
+
+def _weight_pins(raw: object) -> tuple[WeightPin, ...]:
+    if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_WEIGHTS:
+        raise _fail(f"backend_options.weights must list 1..{MAX_WEIGHTS} files")
+    pins, paths, names = [], set(), set()
+    for entry in raw:
+        item = _exact_keys(entry, _WEIGHT_KEYS, "backend_options.weights entry")
+        path = _string(item["path"], _WEIGHT_PATH, "backend_options.weights path")
+        if any(segment in (".", "..") or segment.strip(".") == "" for segment in path.split("/")):
+            raise _fail("backend_options.weights path must not contain dot segments")
+        name = path.rsplit("/", 1)[-1]
+        # Case-insensitive: on Windows two pins differing only in case name the same file.
+        if path in paths or name.casefold() in names:
+            raise _fail("backend_options.weights paths and file names must be unique")
+        paths.add(path)
+        names.add(name.casefold())
+        pins.append(WeightPin(path=path, sha256=_string(item["sha256"], _SHA256, "backend_options.weights sha256"),
+                              bytes=_strict_int(item["bytes"], 1, MAX_WEIGHT_BYTES, "backend_options.weights bytes")))
+    return tuple(pins)
 
 
 def load_profile_dir(directory: str) -> dict[str, ModelProfile]:
