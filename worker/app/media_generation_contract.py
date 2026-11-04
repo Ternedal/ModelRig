@@ -25,6 +25,10 @@ class GenerationError(ValueError):
     """A request or artifact was refused. The message never contains a prompt."""
 
 
+class SourceImageUnavailable(GenerationError):
+    """One source image is absent, invalid or unauthorized; fail only this job."""
+
+
 class ArtifactSinkUnavailable(RuntimeError):
     """The sink cannot accept artifacts (for example the external volume is gone).
 
