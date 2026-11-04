@@ -53,6 +53,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Number of jobs per page (1..1000)")
     parser.add_argument("--offset", type=int, default=0,
                         help="Starting offset (0..1000000)")
+    parser.add_argument("--all", action="store_true",
+                        help="Scan all pages, stopping on the first incomplete page")
     parser.add_argument("--fail-on-conflict", action="store_true",
                         help="Exit 1 when findings require operator investigation")
     args = parser.parse_args(argv)
@@ -66,19 +68,26 @@ def main(argv: list[str] | None = None) -> int:
     try:
         jobs = ReadOnlyImageJobStore(args.jobs_db)
         sink = ExternalMediaSink(args.media_root, args.volume_root)
-        findings = inspect_generation_consistency(jobs, sink, limit=args.limit, offset=args.offset)
+        offset = args.offset
+        conflict = False
+        while True:
+            findings = inspect_generation_consistency(jobs, sink, limit=args.limit, offset=offset)
+            for finding in findings:
+                print(json.dumps(finding, sort_keys=True))
+                status = finding["status"]
+                # Benign pre-publication states and verified completed receipts
+                # are not alarms. Everything else warrants investigation.
+                if status not in {"consistent", "completed_legacy_indexed",
+                                  "no_job_artifact", "publishing_without_job_artifact"}:
+                    conflict = True
+            if not args.all or len(findings) < args.limit:
+                break
+            offset += args.limit
+            if offset > 1000000:
+                raise ValueError("reconciliation_page_limit_exceeded")
     except (OSError, RuntimeError, ValueError, sqlite3.DatabaseError) as exc:
         print(f"reconciliation unavailable: {exc}", file=sys.stderr)
         return 2
-    conflict = False
-    for finding in findings:
-        print(json.dumps(finding, sort_keys=True))
-        status = finding["status"]
-        # Benign pre-publication states and verified completed receipts are
-        # not alarms. Everything else warrants human investigation.
-        if status not in {"consistent", "completed_legacy_indexed",
-                          "no_job_artifact", "publishing_without_job_artifact"}:
-            conflict = True
     return 1 if args.fail_on_conflict and conflict else 0
 
 
