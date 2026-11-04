@@ -27,6 +27,14 @@ class ExternalMediaSink:
         except (GalleryUnavailable, OSError, RuntimeError) as exc:
             raise ArtifactSinkUnavailable("external_media_unavailable") from exc
 
+    def require_available(self) -> None:
+        """Fail closed unless the existing external media volume is verified.
+
+        This check never creates a directory or falls back to internal storage.
+        Callers must recheck immediately before subsequent filesystem I/O.
+        """
+        self._root()
+
     def job_asset_id(self, job_key: str) -> str:
         import hashlib
         import re
