@@ -31,6 +31,24 @@ class ReconciliationTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "invalid_reconciliation_limit"):
                     inspect_generation_consistency(self.jobs, self.sink, limit=limit)
 
+    def test_reconciliation_offset_rejects_invalid_values(self):
+        for offset in (-1, 1000001, True, 1.5, "1"):
+            with self.subTest(offset=offset):
+                with self.assertRaisesRegex(ValueError, "invalid_reconciliation_offset"):
+                    inspect_generation_consistency(self.jobs, self.sink, offset=offset)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_reconciliation_offset_reaches_older_jobs(self, _mount):
+        ids = [self.submit_running() for _ in range(3)]
+        with self.jobs._db() as db:
+            for index, job_id in enumerate(ids):
+                db.execute("UPDATE image_jobs SET created=? WHERE id=?",
+                           (100 + index, job_id))
+        pages = [inspect_generation_consistency(self.jobs, self.sink, limit=1, offset=n)
+                 for n in range(4)]
+        self.assertEqual([[entry["job_id"] for entry in page] for page in pages],
+                         [[ids[2]], [ids[1]], [ids[0]], []])
+
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_reconciliation_limit_caps_rows(self, _mount):
         for _ in range(3):
@@ -38,6 +56,155 @@ class ReconciliationTests(unittest.TestCase):
             self.jobs.claim()
         self.assertEqual(len(inspect_generation_consistency(self.jobs, self.sink, limit=2)), 2)
         self.assertEqual(len(inspect_generation_consistency(self.jobs, self.sink, limit=3)), 3)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_publishing_states_are_read_only_and_distinct(self, _mount):
+        job_id = self.submit_running()
+        # Simulate the forward-compatible G2 state on a real SQLite row.
+        # Do not use a mocked cursor: the actual SELECT must include publishing.
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET state='publishing' WHERE id=?", (job_id,))
+        before = self.jobs.get(job_id, "owner")
+        self.assertEqual(inspect_generation_consistency(self.jobs, self.sink)[0]["status"],
+                         "publishing_without_job_artifact")
+        self.sink.publish_for_job(job_id, b"image", ".png")
+        self.assertEqual(inspect_generation_consistency(self.jobs, self.sink)[0]["status"],
+                         "publishing_with_unindexed_artifact")
+        self.sink.publish_and_register_for_job(job_id, b"image", ".png")
+        self.assertEqual(inspect_generation_consistency(self.jobs, self.sink)[0]["status"],
+                         "publishing_with_indexed_artifact")
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_corrupt_gallery_index_fails_closed_without_job_mutation(self, _mount):
+        from app.media_generation_contract import ArtifactSinkUnavailable
+
+        job_id = self.submit_running()
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET state='publishing' WHERE id=?", (job_id,))
+        before = self.jobs.get(job_id, "owner")
+        (self.sink.media_root / "gallery-index.json").write_text(
+            '{"id":"a","id":"b"}', encoding="utf-8"
+        )
+        with self.assertRaisesRegex(ArtifactSinkUnavailable, "reconciliation_index_unavailable"):
+            inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_publishing_recorded_asset_without_file_is_not_ordinary_missing(self, _mount):
+        job_id = self.submit_running()
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET state='publishing',asset_id=? WHERE id=?",
+                       ("recorded-but-not-published", job_id))
+        before = self.jobs.get(job_id, "owner")
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "publishing_recorded_asset_without_job_artifact")
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_publishing_conflicting_recorded_asset_is_not_treated_as_recoverable(self, _mount):
+        job_id = self.submit_running()
+        self.sink.publish_and_register_for_job(job_id, b"image", ".png")
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET state='publishing',asset_id=? WHERE id=?",
+                       ("different-asset", job_id))
+        before = self.jobs.get(job_id, "owner")
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "publishing_asset_mismatch")
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_publishing_indexed_missing_file_is_conflict_without_mutation(self, _mount):
+        job_id = self.submit_running()
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET state='publishing' WHERE id=?", (job_id,))
+        asset = self.sink.publish_and_register_for_job(job_id, b"image", ".png")
+        before = self.jobs.get(job_id, "owner")
+        (self.sink.media_root / (asset + ".png")).unlink()
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "media_conflict")
+        self.assertEqual(report[0]["reason"], "job_asset_missing_but_indexed")
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_bounded_scan_prefers_newest_jobs(self, _mount):
+        older = self.submit_running()
+        newer = self.submit_running()
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET created = ? WHERE id = ?", (100, older))
+            db.execute("UPDATE image_jobs SET created = ? WHERE id = ?", (200, newer))
+            db.commit()
+        report = inspect_generation_consistency(self.jobs, self.sink, limit=1)
+        self.assertEqual([item["job_id"] for item in report], [newer])
+        self.assertNotEqual(older, newer)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_bounded_scan_includes_newer_stranded_publishing_job(self, _mount):
+        older = self.submit_running()
+        newer = self.submit_running()
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET created=? WHERE id=?", (100, older))
+            db.execute("UPDATE image_jobs SET created=?,state='publishing' WHERE id=?", (200, newer))
+        self.sink.publish_and_register_for_job(newer, b"image", ".png")
+        before = self.jobs.get(newer, "owner")
+        report = inspect_generation_consistency(self.jobs, self.sink, limit=1)
+        self.assertEqual(len(report), 1)
+        self.assertEqual(report[0]["job_id"], newer)
+        self.assertEqual(report[0]["status"], "publishing_with_indexed_artifact")
+        self.assertEqual(self.jobs.get(newer, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_bounded_scan_prioritizes_stranded_job_over_newer_completed_job(self, _mount):
+        stranded = self.submit_running()
+        completed = self.submit_running()
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET state='publishing',created=? WHERE id=?",
+                       (100, stranded))
+            db.execute("UPDATE image_jobs SET state='completed',created=? WHERE id=?",
+                       (200, completed))
+        before = self.jobs.get(stranded, "owner")
+        report = inspect_generation_consistency(self.jobs, self.sink, limit=1)
+        self.assertEqual(report[0]["job_id"], stranded)
+        self.assertEqual(report[0]["status"], "publishing_without_job_artifact")
+        self.assertEqual(self.jobs.get(stranded, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_orphaned_asset_reference_without_receipt_is_visible_for_running_and_failed(self, _mount):
+        for state in ("running", "failed"):
+            with self.subTest(state=state):
+                job_id = self.submit_running()
+                with self.jobs._db() as db:
+                    db.execute("UPDATE image_jobs SET state=?,asset_id=? WHERE id=?",
+                               (state, "recorded-without-file", job_id))
+                before = self.jobs.get(job_id, "owner")
+                report = inspect_generation_consistency(self.jobs, self.sink)
+                match = next(item for item in report if item["job_id"] == job_id)
+                self.assertEqual(match["status"],
+                                 state + "_recorded_asset_without_job_artifact")
+                self.assertEqual(self.jobs.get(job_id, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_running_recorded_asset_conflict_is_reported_without_mutation(self, _mount):
+        job_id = self.submit_running()
+        self.sink.publish_and_register_for_job(job_id, b"image", ".png")
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET asset_id=? WHERE id=?", ("wrong-asset", job_id))
+        before = self.jobs.get(job_id, "owner")
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "running_asset_mismatch")
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_failed_recorded_asset_conflict_is_reported_without_mutation(self, _mount):
+        job_id = self.submit_running()
+        self.sink.publish_and_register_for_job(job_id, b"image", ".png")
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET state='failed',asset_id=? WHERE id=?",
+                       ("wrong-asset", job_id))
+        before = self.jobs.get(job_id, "owner")
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "failed_asset_mismatch")
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_running_with_published_unindexed_file_is_reported_without_mutation(self, _mount):
@@ -72,6 +239,26 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(self.jobs.get(job_id, "owner")["asset_id"], asset)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_completed_legacy_and_deterministic_receipts_are_conflict(self, _mount):
+        job_id = self.submit_running()
+        legacy = self.sink.publish(b"legacy", ".png")
+        self.sink.publish_and_register_for_job(job_id, b"new", ".png")
+        self.assertTrue(self.jobs.finish(job_id, asset_id=legacy))
+        before = self.jobs.get(job_id, "owner")
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "completed_legacy_and_job_artifact_conflict")
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_legacy_asset_id_with_path_separator_is_rejected(self, _mount):
+        job_id = self.submit_running()
+        self.assertTrue(self.jobs.finish(job_id, asset_id="../outside"))
+        before = self.jobs.get(job_id, "owner")
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "completed_legacy_invalid_asset_id")
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_legacy_completed_jpeg_and_webp_are_indexed(self, _mount):
         # The new sink deliberately publishes PNG/MP4 only. Model older
         # producer-written assets directly; do not widen its write allowlist.
@@ -95,6 +282,24 @@ class ReconciliationTests(unittest.TestCase):
                 findings = inspect_generation_consistency(self.jobs, self.sink)
                 match = next(item for item in findings if item["job_id"] == job_id)
                 self.assertEqual(match["status"], "completed_legacy_indexed")
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_legacy_media_io_error_is_reported_as_conflict(self, _mount):
+        job_id = self.submit_running()
+        asset = self.sink.publish(b"image", ".png")
+        self.assertTrue(self.jobs.finish(job_id, asset_id=asset))
+        before = self.jobs.get(job_id, "owner")
+        original_lstat = Path.lstat
+
+        def unreadable_target(path, *args, **kwargs):
+            if path == self.sink.media_root / (asset + ".png"):
+                raise PermissionError("simulated media access failure")
+            return original_lstat(path, *args, **kwargs)
+
+        with patch.object(Path, "lstat", autospec=True, side_effect=unreadable_target):
+            report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "completed_legacy_file_conflict")
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_legacy_completed_job_with_deleted_file_is_flagged(self, _mount):
