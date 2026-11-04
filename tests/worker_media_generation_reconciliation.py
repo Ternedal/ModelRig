@@ -169,6 +169,21 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(self.jobs.get(stranded, "owner"), before)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_orphaned_asset_reference_without_receipt_is_visible_for_running_and_failed(self, _mount):
+        for state in ("running", "failed"):
+            with self.subTest(state=state):
+                job_id = self.submit_running()
+                with self.jobs._db() as db:
+                    db.execute("UPDATE image_jobs SET state=?,asset_id=? WHERE id=?",
+                               (state, "recorded-without-file", job_id))
+                before = self.jobs.get(job_id, "owner")
+                report = inspect_generation_consistency(self.jobs, self.sink)
+                match = next(item for item in report if item["job_id"] == job_id)
+                self.assertEqual(match["status"],
+                                 state + "_recorded_asset_without_job_artifact")
+                self.assertEqual(self.jobs.get(job_id, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_running_recorded_asset_conflict_is_reported_without_mutation(self, _mount):
         job_id = self.submit_running()
         self.sink.publish_and_register_for_job(job_id, b"image", ".png")
