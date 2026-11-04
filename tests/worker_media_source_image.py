@@ -104,6 +104,17 @@ class SourceImageTests(unittest.TestCase):
                     read_source_png(self.sink, asset_id)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_empty_idat_sequence_refused(self, _mount):
+        # A CRC-valid PNG with no compressed image bytes must fail closed.
+        sig = PNG[:8]
+        ihdr = _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+        empty = _png_chunk(b"IDAT", b"")
+        bad = sig + ihdr + empty + empty + _png_chunk(b"IEND", b"")
+        asset_id = self.sink.publish(bad, ".png")
+        with self.assertRaises(ArtifactSinkUnavailable):
+            read_source_png(self.sink, asset_id)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_png_metadata_and_palette_limits_refused(self, _mount):
         sig = PNG[:8]
         ihdr = _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
