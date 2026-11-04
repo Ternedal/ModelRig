@@ -48,7 +48,8 @@ class SourceImageTests(unittest.TestCase):
     def test_unindexed_png_refused(self, _mount):
         asset_id = "a" * 32
         (self.sink.media_root / (asset_id + ".png")).write_bytes(PNG)
-        with self.assertRaises(SourceImageUnavailable):
+        # No index at all is a storage/index outage, not a bad source asset.
+        with self.assertRaises(ArtifactSinkUnavailable):
             read_source_png(self.sink, asset_id)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
