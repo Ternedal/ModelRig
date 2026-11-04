@@ -370,6 +370,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_file_capabilities.py`
 - `tests/worker_file_capabilities_audit.py`
 - `tests/worker_file_capabilities_scope_authority.py`
+- `tests/worker_gallery_temporary_candidates.py`
 - `tests/worker_gpu_lease.py`
 - `tests/worker_hardening.py`
 - `tests/worker_hardening_stream_disconnect.py`
@@ -387,7 +388,9 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_kaliv_voicerig_physical_qualifier.py`
 - `tests/worker_media_executor.py`
 - `tests/worker_media_generation_profiles.py`
+- `tests/worker_media_generation_reconciliation.py`
 - `tests/worker_media_generation_runner.py`
+- `tests/worker_media_source_image.py`
 - `tests/worker_migrate.py`
 - `tests/worker_netguard.py`
 - `tests/worker_occurrence_ledger.py`
@@ -545,6 +548,11 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_kaliv_system_release_bind_consciousness.py`
 - `tests/workflow_kaliv_v1_rig_smoke.py`
 - `tests/workflow_kaliv_vr_renderer.py`
+- `tests/workflow_media_gallery_asset.py`
+- `tests/workflow_media_gallery_catalog.py`
+- `tests/workflow_media_gallery_index_writer.py`
+- `tests/workflow_media_gallery_range.py`
+- `tests/workflow_media_gallery_store.py`
 - `tests/workflow_media_generation_boundary.py`
 - `tests/workflow_milestone3_current_main.py`
 - `tests/workflow_milestone3_current_main_handoff.py`
