@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +19,26 @@ sys.path.insert(0, str(ROOT / "worker"))
 from app.image_job_store import ImageJobStore  # noqa: E402
 from app.media_gallery_store import ExternalMediaSink  # noqa: E402
 from app.media_generation_reconciliation import inspect_generation_consistency  # noqa: E402
+
+
+
+class ReadOnlyImageJobStore(ImageJobStore):
+    """Use SQLite URI mode=ro; bypass the mutating schema setup in __init__."""
+
+    def __init__(self, db_path: Path):
+        self.path = db_path
+        self._volume_guard = None
+
+    @contextmanager
+    def _db(self):
+        connection = sqlite3.connect(self.path.resolve().as_uri() + "?mode=ro",
+                                     uri=True, timeout=10)
+        connection.row_factory = sqlite3.Row
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -40,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     if not 1 <= args.limit <= 1000 or not 0 <= args.offset <= 1000000:
         parser.error("invalid --limit or --offset")
     try:
-        jobs = ImageJobStore(str(args.jobs_db))
+        jobs = ReadOnlyImageJobStore(args.jobs_db)
         sink = ExternalMediaSink(args.media_root, args.volume_root)
         findings = inspect_generation_consistency(jobs, sink, limit=args.limit, offset=args.offset)
     except (OSError, RuntimeError, ValueError) as exc:
