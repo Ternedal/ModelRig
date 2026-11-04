@@ -58,6 +58,21 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(self.jobs.get(job_id, "owner"), before)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_corrupt_gallery_index_fails_closed_without_job_mutation(self, _mount):
+        from app.media_generation_contract import ArtifactSinkUnavailable
+
+        job_id = self.submit_running()
+        with self.jobs._db() as db:
+            db.execute("UPDATE image_jobs SET state='publishing' WHERE id=?", (job_id,))
+        before = self.jobs.get(job_id, "owner")
+        (self.sink.media_root / "gallery-index.json").write_text(
+            '{"id":"a","id":"b"}', encoding="utf-8"
+        )
+        with self.assertRaisesRegex(ArtifactSinkUnavailable, "reconciliation_index_unavailable"):
+            inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_publishing_conflicting_recorded_asset_is_not_treated_as_recoverable(self, _mount):
         job_id = self.submit_running()
         self.sink.publish_and_register_for_job(job_id, b"image", ".png")
