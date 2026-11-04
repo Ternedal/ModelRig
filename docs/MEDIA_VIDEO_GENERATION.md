@@ -98,6 +98,21 @@ An actor with write access to the volume could delete files directly anyway.
   - A marker anywhere else refuses the template: inside a longer string, in a list, as an input name, as a class or in `_meta`.
 - A prompt can never become graph structure.
 
+## Version and weight pins (G3)
+
+Design: #2296 6634996133. A `comfyui` profile may pin two things in `backend_options`:
+- `comfyui_version`: the exact `system.comfyui_version` from `/system_stats`;
+- `weights`: up to 16 entries `{path, sha256, bytes}`, relative to ComfyUI's models directory.
+
+A `rig-qualified` profile must pin both. Candidates may omit them.
+
+When pins are set:
+1. **Template binding.** `load_template` refuses a graph whose loader inputs (`*_name` ending in a model suffix) name a file that is not pinned.
+2. **Weights.** `verify_weights` (`comfy_weights.py`) runs before the lease and before ComfyUI starts. Every pinned file must be a regular file, not a link, inside the models directory, of the pinned size, with the pinned SHA-256. Results may be cached by `(real path, st_dev, st_ino, size, mtime_ns)`. Any change re-hashes, and an unreadable or old-version cache is ignored.
+3. **Version.** The version is compared when ComfyUI is ready and before every job. A mismatch at start stops ComfyUI, so the lease is released. A mismatch before a job refuses that job before anything is submitted.
+
+**Stated limit:** an actor who rewrites a file and restores its size, inode and mtime defeats the cache. Such an actor can also edit the profile.
+
 ## Launch flags
 
 - Always: `--listen 127.0.0.1`.

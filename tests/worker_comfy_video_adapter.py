@@ -65,6 +65,18 @@ def request(**overrides) -> GenerationRequest:
 
 
 class TemplateTests(unittest.TestCase):
+    def test_a_pinned_template_may_only_load_pinned_model_files(self):
+        load_template(raw(), sha(raw()), pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors"])
+        with self.assertRaisesRegex(GenerationError, "not pinned"):
+            load_template(raw(), sha(raw()), pinned_files=["diffusion_models/other.safetensors"])
+        graph = copy.deepcopy(GRAPH)
+        graph["5"] = {"class_type": "LoraLoader", "inputs": {"lora_name": "sub\\extra.safetensors"}}
+        with self.assertRaisesRegex(GenerationError, "not pinned"):
+            load_template(raw(graph), sha(raw(graph)), pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors"])
+        load_template(raw(graph), sha(raw(graph)),
+                      pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors", "loras/extra.safetensors"])
+        load_template(raw(), sha(raw()))  # no pins: no binding (candidate profiles)
+
     def test_binds_values_into_a_fresh_graph(self):
         template = load_template(raw(), sha(raw()))
         bound = template.bind(request(), fps=16)
@@ -163,10 +175,11 @@ class AdapterTests(unittest.TestCase):
                                            limits={"max_prompt_chars": 200, "sizes": [[832, 480]],
                                                    "max_steps": 30, "max_frames": 81}))
 
-    def adapter(self, fake=None, profile=None, volume=None, **kwargs) -> ComfyVideoAdapter:
+    def adapter(self, fake=None, profile=None, volume=None, models=None, **kwargs) -> ComfyVideoAdapter:
         launch = ComfyLaunch(python_executable=sys.executable, main_py=str(FAKE_MAIN), port=self.port,
                              input_directory=self.dirs["input"], output_directory=self.dirs["output"],
-                             temp_directory=self.dirs["temp"], user_directory=self.dirs["user"])
+                             temp_directory=self.dirs["temp"], user_directory=self.dirs["user"],
+                             models_directory=models)
         env = {"FAKE_COMFY_STATE_DIR": self.state, **(fake or {})}
         sup = FakeSupervisor(fake_env=env, media_volume=volume, gpu_uuid=GPU, lease_dir=self.lease_dir, launch=launch,
                              reserve_gib=2, min_usable_gib=8, ready_timeout_s=15, stop_timeout_s=5, poll_s=0.05,
@@ -604,6 +617,57 @@ class AdapterTests(unittest.TestCase):
                 self.assertTrue(adapter.close(), "it can still be stopped and its lease released")
                 with self.assertRaisesRegex(GenerationError, "needs a restart"):
                     adapter.load()
+
+    # --- G3 pins (#2296 6634996133) --------------------------------------------------------------
+    def _models(self, data=b"wan weights" * 100):
+        models = Path(self.tmp, "models")
+        (models / "diffusion_models").mkdir(parents=True, exist_ok=True)
+        Path(models, "diffusion_models", "wan2.2_t2v_example.safetensors").write_bytes(data)
+        return str(models), {"path": "diffusion_models/wan2.2_t2v_example.safetensors",
+                             "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
+
+    def test_a_pinned_comfyui_version_must_match_at_start(self):
+        ok = self.adapter(fake={"FAKE_COMFY_VERSION": "0.3.68"}, profile=self.profile(comfyui_version="0.3.68"))
+        ok.load()
+        self.assertEqual(ok.render_to(request(), io.BytesIO()), "video/mp4")
+        ok.close()
+        self.port = free_port()
+        wrong = self.adapter(fake={"FAKE_COMFY_VERSION": "0.3.70"}, profile=self.profile(comfyui_version="0.3.68"))
+        with self.assertRaisesRegex(GenerationError, "version does not match"):
+            wrong.load()
+        self.assertFalse(wrong.supervisor.running, "stopped, not left running")
+        self.assertTrue(self.lease_is_free(), "and the lease went with it")
+
+    def test_a_version_change_under_a_resident_comfyui_refuses_the_next_job(self):
+        adapter = self.adapter(fake={"FAKE_COMFY_VERSION": "0.3.68"}, profile=self.profile(comfyui_version="0.3.68"))
+        adapter.load()
+        Path(self.state, "comfyui_version").write_text("0.4.0")
+        with self.assertRaisesRegex(GenerationError, "version does not match"):
+            adapter.render_to(request(), io.BytesIO())
+        self.assertFalse(Path(self.state, "last_prompt.json").exists(), "nothing was submitted")
+
+    def test_pinned_weights_are_verified_before_comfyui_starts(self):
+        models, pin = self._models()
+        good = self.adapter(profile=self.profile(weights=[pin]), models=models)
+        good.load()
+        self.assertEqual(good.render_to(request(), io.BytesIO()), "video/mp4")
+        good.close()
+        os.unlink(Path(self.state, "env.json"))
+        Path(models, "diffusion_models", "wan2.2_t2v_example.safetensors").write_bytes(b"swapped weights" * 73)
+        self.port = free_port()
+        swapped = self.adapter(profile=self.profile(weights=[pin]), models=models)
+        with self.assertRaisesRegex(GenerationError, "pinned model file"):
+            swapped.load()
+        self.assertFalse(Path(self.state, "env.json").exists(), "ComfyUI never started")
+        self.assertTrue(self.lease_is_free())
+
+    def test_a_template_that_loads_an_unpinned_file_is_refused_before_start(self):
+        models, pin = self._models()
+        other = dict(pin, path="diffusion_models/some_other.safetensors")
+        adapter = self.adapter(profile=self.profile(weights=[other]), models=models)
+        with self.assertRaisesRegex(GenerationError, "not pinned"):
+            adapter.load()
+        self.assertFalse(Path(self.state, "env.json").exists(), "ComfyUI never started")
 
     def test_cleanup_never_masks_the_render_result_or_error(self):
         adapter = self.adapter(fake={"FAKE_COMFY_OUTPUT_MODE": "notmp4"})

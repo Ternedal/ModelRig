@@ -105,6 +105,13 @@ class ComfyLaunch:
     temp_directory: str
     user_directory: str
     flags: tuple[str, ...] = ("--disable-auto-launch", "--disable-metadata")
+    # Where ComfyUI loads model files from; None means the stock <main.py dir>/models. The pinned
+    # weights (G3) are verified here before ComfyUI starts. No extra model paths are configured.
+    models_directory: str | None = None
+
+    @property
+    def resolved_models_directory(self) -> Path:
+        return Path(self.models_directory) if self.models_directory is not None else Path(self.main_py).parent / "models"
 
     def argv(self, resident_lock: str) -> list[str]:
         python = Path(self.python_executable)
@@ -137,6 +144,7 @@ class VramBudget:
     total_bytes: int
     free_bytes: int
     usable_bytes: int
+    comfyui_version: str | None = None  # system.comfyui_version, compared with the profile pin (G3)
 
 
 def _get_json(port: int, path: str, timeout_s: float, *, method: str = "GET",
@@ -182,7 +190,10 @@ def parse_vram_budget(stats: object, *, reserve_gib: float, min_usable_gib: floa
     if usable < int(min_usable_gib * GIB):
         raise ComfySupervisorError("insufficient free VRAM after reservation")
     name = device.get("name")
-    return VramBudget(name if isinstance(name, str) else "", total, free, usable)
+    system = stats.get("system")
+    version = system.get("comfyui_version") if isinstance(system, dict) else None
+    return VramBudget(name if isinstance(name, str) else "", total, free, usable,
+                      version if isinstance(version, str) else None)
 
 
 def _bounded(value: object, low: float, high: float, name: str) -> float:

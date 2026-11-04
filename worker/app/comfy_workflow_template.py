@@ -39,6 +39,7 @@ SLOTS: Mapping[str, tuple[str, frozenset[str]]] = {
 }
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+MODEL_FILE_SUFFIXES = (".safetensors", ".ckpt", ".pt", ".pth", ".bin", ".gguf", ".sft")
 
 
 def _fail(reason: str) -> GenerationError:
@@ -79,7 +80,18 @@ class WorkflowTemplate:
         return graph
 
 
-def load_template(raw: bytes, expected_sha256: str) -> WorkflowTemplate:
+def _model_files(graph: Mapping[str, object]):
+    """(node id, input name, file name) for every input that names a model file."""
+    for node_id, node in graph.items():
+        for input_name, value in node["inputs"].items():
+            if (input_name.endswith("_name") and isinstance(value, str)
+                    and value.lower().endswith(MODEL_FILE_SUFFIXES)):
+                yield node_id, input_name, value.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def load_template(raw: bytes, expected_sha256: str, *, pinned_files=None) -> WorkflowTemplate:
+    """pinned_files: the profile's weights paths. When given, every model file the graph loads
+    must be one of them (G3, #2296 6634996133): a pinned graph can only load pinned bytes."""
     if not isinstance(expected_sha256, str) or not _SHA256.fullmatch(expected_sha256):
         raise _fail("pinned SHA-256 is malformed")
     if type(raw) is not bytes or not raw or len(raw) > MAX_TEMPLATE_BYTES:
@@ -123,4 +135,9 @@ def load_template(raw: bytes, expected_sha256: str) -> WorkflowTemplate:
     missing = sorted(set(SLOTS) - set(found))
     if missing:
         raise _fail(f"missing slots {missing}")
+    if pinned_files is not None:
+        pinned = {str(path).rsplit("/", 1)[-1] for path in pinned_files}
+        for node_id, input_name, name in _model_files(graph):
+            if name not in pinned:
+                raise _fail(f"node {node_id} loads a model file that is not pinned ({input_name})")
     return WorkflowTemplate(graph=graph, slots=found, sha256=actual)

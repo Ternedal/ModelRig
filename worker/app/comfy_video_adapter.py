@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import BinaryIO, Callable
 
 from .comfy_supervisor import ComfyBusy, ComfySupervisor, ComfySupervisorError
+from .comfy_weights import verify_weights
 from .comfy_workflow_template import MAX_TEMPLATE_BYTES, WorkflowTemplate, load_template
 from .media_generation_contract import GenerationCancelled, GenerationError, GenerationRequest, RenderedArtifact
 from .media_generation_profiles import ModelProfile, validate_request
@@ -64,7 +65,7 @@ _log = logging.getLogger("kaliv.media.comfy")
 class ComfyVideoAdapter:
     def __init__(self, profile: ModelProfile, *, supervisor: ComfySupervisor, template_dir: str,
                  output_directory: str, poll_s: float = 1.0, settle_s: float = 0.5,
-                 settle_rounds: int = 10):
+                 settle_rounds: int = 10, weights_cache: str | None = None):
         if profile.backend != "comfyui" or profile.backend_options is None:
             raise GenerationError("ComfyVideoAdapter needs a comfyui profile")
         if supervisor.port != profile.backend_options.port:
@@ -86,6 +87,7 @@ class ComfyVideoAdapter:
         self.template_dir = template_dir
         self.output_directory = Path(output_directory)
         self.poll_s = float(poll_s)
+        self.weights_cache = weights_cache
         self._template: WorkflowTemplate | None = None
         self.last_cleanup: dict[str, list[str]] = {}
         # True once an interrupt could not be confirmed drained: this ComfyUI must not take another
@@ -114,9 +116,20 @@ class ComfyVideoAdapter:
             raise GenerationError("adapter already loaded")
         if self.needs_restart:
             raise GenerationError("this adapter needs a restart: create a new one")
-        template = load_template(self._read_template(), self.options.template_sha256)
-        self.supervisor.start()
+        pins = self.options.weights
+        template = load_template(self._read_template(), self.options.template_sha256,
+                                 pinned_files=[pin.path for pin in pins] if pins else None)
+        if pins:  # before ComfyUI starts: nothing unpinned is ever loaded (G3)
+            verify_weights(self.supervisor.launch.resolved_models_directory, pins, cache_path=self.weights_cache)
+        budget = self.supervisor.start()
+        if not self._version_ok(budget):
+            self.supervisor.stop()  # proven stop: the lease goes with ComfyUI
+            raise GenerationError("ComfyUI version does not match the profile pin")
         self._template = template
+
+    def _version_ok(self, budget) -> bool:
+        pin = self.options.comfyui_version
+        return pin is None or getattr(budget, "comfyui_version", None) == pin
 
     def close(self) -> bool:
         """Stop ComfyUI. True once it has exited and the lease is released."""
@@ -161,7 +174,8 @@ class ComfyVideoAdapter:
     def _render_and_hand_over(self, request: GenerationRequest, sink_file: BinaryIO, before: set[str],
                               owned: list, should_cancel: Callable[[], bool] | None = None) -> str:
         try:
-            self.supervisor.check_budget()
+            if not self._version_ok(self.supervisor.check_budget()):
+                raise GenerationError("ComfyUI version does not match the profile pin")
             if not self.supervisor.queue_is_empty():
                 raise GenerationError("ComfyUI queue is not empty: refusing to share it")
             prompt_id = self.supervisor.submit(self._template.bind(request, fps=self.options.fps))

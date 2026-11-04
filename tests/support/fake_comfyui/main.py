@@ -148,7 +148,11 @@ class Handler(BaseHTTPRequestHandler):
                 free = int(float(open(override).read()) * GIB)  # another process took VRAM
             device = {"name": "cuda:0 Fake GPU", "type": device_type, "index": 0,
                       "vram_total": vram_total, "vram_free": free}
-            self._send({"system": {"comfyui_version": "fake"}, "devices": [device] * devices})
+            version = os.environ.get("FAKE_COMFY_VERSION", "fake")
+            version_file = os.path.join(STATE, "comfyui_version") if STATE else ""
+            if version_file and os.path.exists(version_file):
+                version = open(version_file).read().strip()  # e.g. someone upgraded ComfyUI under us
+            self._send({"system": {"comfyui_version": version}, "devices": [device] * devices})
         elif self.path == "/queue":
             with lock:
                 self._send({"queue_running": [[0, pid] for pid in queue[:1]],
