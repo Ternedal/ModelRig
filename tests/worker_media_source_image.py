@@ -53,6 +53,14 @@ class SourceImageTests(unittest.TestCase):
             read_source_png(self.sink, asset_id)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_indexed_but_missing_file_is_source_refusal(self, _mount):
+        """An existing index with a missing asset is a per-job failure, not a mount outage."""
+        asset_id = self.sink.publish(PNG, ".png")
+        (self.sink.media_root / (asset_id + ".png")).unlink()
+        with self.assertRaises(SourceImageUnavailable):
+            read_source_png(self.sink, asset_id)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_symlink_source_refused(self, _mount):
         asset_id = self.sink.publish(PNG, ".png")
         path = self.sink.media_root / (asset_id + ".png")
