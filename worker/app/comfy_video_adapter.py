@@ -51,7 +51,7 @@ from pathlib import Path
 from typing import BinaryIO, Callable
 
 from .comfy_supervisor import ComfyBusy, ComfySupervisor, ComfySupervisorError
-from .comfy_weights import verify_weights
+from .comfy_weights import check_lookup_is_unambiguous, check_weights_unchanged, verify_weights
 from .comfy_workflow_template import MAX_TEMPLATE_BYTES, WorkflowTemplate, load_template
 from .media_generation_contract import GenerationCancelled, GenerationError, GenerationRequest, RenderedArtifact
 from .media_generation_profiles import ModelProfile, validate_request
@@ -93,6 +93,7 @@ class ComfyVideoAdapter:
         # True once an interrupt could not be confirmed drained: this ComfyUI must not take another
         # job. The executor unloads (and so restarts) the adapter (#2318 review 4469472651).
         self.needs_restart = False
+        self._verified_weights: tuple = ()
 
     # --- lifecycle --------------------------------------------------------
     def _read_template(self) -> bytes:
@@ -119,15 +120,34 @@ class ComfyVideoAdapter:
         pins = self.options.weights
         template = load_template(self._read_template(), self.options.template_sha256,
                                  pinned_files=[pin.path for pin in pins] if pins else None)
+        verified = ()
         if pins:  # before ComfyUI starts: nothing unpinned is ever loaded (G3)
             launch = self.supervisor.launch
-            verify_weights(launch.resolved_models_directory, pins, cache_path=self.weights_cache,
-                           comfy_root=Path(launch.main_py).parent)
+            verified = verify_weights(launch.resolved_models_directory, pins, cache_path=self.weights_cache,
+                                      comfy_root=Path(launch.main_py).parent)
         budget = self.supervisor.start()
         if not self._version_ok(budget):
             self.supervisor.stop()  # proven stop: the lease goes with ComfyUI
             raise GenerationError("ComfyUI version does not match the profile pin")
+        self._verified_weights = verified
         self._template = template
+
+    def _weights_still_verified(self) -> None:
+        """Before every job: the files hashed at load are still those files, and the lookup is
+        still unambiguous (no embedding or same-named file added since). ComfyUI reads weights
+        when a job runs, so a start-time check alone would leave the resident lifetime open.
+        A failure refuses the job before submit and marks this ComfyUI for a restart, which
+        re-verifies from scratch."""
+        pins = self.options.weights
+        if not pins:
+            return
+        launch = self.supervisor.launch
+        try:
+            check_weights_unchanged(launch.resolved_models_directory, self._verified_weights)
+            check_lookup_is_unambiguous(Path(launch.main_py).parent, launch.resolved_models_directory, pins)
+        except GenerationError:
+            self.needs_restart = True
+            raise
 
     def _version_ok(self, budget) -> bool:
         pin = self.options.comfyui_version
@@ -178,6 +198,7 @@ class ComfyVideoAdapter:
         try:
             if not self._version_ok(self.supervisor.check_budget()):
                 raise GenerationError("ComfyUI version does not match the profile pin")
+            self._weights_still_verified()
             if not self.supervisor.queue_is_empty():
                 raise GenerationError("ComfyUI queue is not empty: refusing to share it")
             prompt_id = self.supervisor.submit(self._template.bind(request, fps=self.options.fps))

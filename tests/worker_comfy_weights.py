@@ -19,7 +19,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "worker"))
 
 import app.comfy_weights as weights_module  # noqa: E402
-from app.comfy_weights import WeightsMismatch, verify_weights  # noqa: E402
+from app.comfy_weights import WeightsMismatch, check_weights_unchanged, verify_weights  # noqa: E402
 from app.media_generation_profiles import WeightPin  # noqa: E402
 
 DATA = b"\x00weights" * 4096
@@ -42,6 +42,40 @@ class VerifyWeightsTests(unittest.TestCase):
 
     def test_matching_files_pass(self):
         verify_weights(self.models, [self.pin])
+
+    # --- the files verified at start must still be those files before every job ----------------
+    def test_verify_returns_each_files_identity_and_a_later_change_is_caught(self):
+        verified = verify_weights(self.models, [self.pin])
+        info = os.lstat(self.file)
+        self.assertEqual(verified, ((self.pin.path, info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns),))
+        check_weights_unchanged(self.models, verified)
+        os.utime(self.file, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000))  # rewritten in place
+        with self.assertRaisesRegex(WeightsMismatch, "changed since it was verified: diffusion_models/wan.safetensors"):
+            check_weights_unchanged(self.models, verified)
+        os.utime(self.file, ns=(info.st_atime_ns, info.st_mtime_ns))
+        check_weights_unchanged(self.models, verified)
+        replacement = self.file.with_name("incoming")
+        replacement.write_bytes(DATA)  # the same bytes, but another file
+        os.utime(replacement, ns=(info.st_atime_ns, info.st_mtime_ns))
+        os.replace(replacement, self.file)
+        with self.assertRaisesRegex(WeightsMismatch, "changed since"):
+            check_weights_unchanged(self.models, verified)
+        self.file.unlink()
+        with self.assertRaisesRegex(WeightsMismatch, "changed since"):
+            check_weights_unchanged(self.models, verified)
+        self.file.mkdir()
+        with self.assertRaisesRegex(WeightsMismatch, "changed since"):
+            check_weights_unchanged(self.models, verified)
+
+    def test_a_cache_hit_also_returns_the_identity(self):
+        first = verify_weights(self.models, [self.pin], cache_path=self.cache)
+        self.assertEqual(verify_weights(self.models, [self.pin], cache_path=self.cache), first)
+
+    def test_the_identity_must_describe_the_hashed_file(self):
+        info = os.stat(self.file)
+        self.file.write_bytes(DATA + b"grown")  # changed between the hash and the identity
+        with self.assertRaisesRegex(WeightsMismatch, "changed while it was verified"):
+            weights_module._identity(self.file, self.pin.path, info)
 
     def test_a_flipped_byte_of_the_same_size_is_refused(self):
         self.file.write_bytes(DATA[:-1] + b"\x01")
@@ -101,11 +135,11 @@ class VerifyWeightsTests(unittest.TestCase):
 
     def test_an_oversized_cache_is_ignored(self):
         # Valid JSON followed by whitespace: only the size cap refuses it.
-        valid = json.dumps({"version": 1, "entries": {"k": "v"}})
+        valid = json.dumps({"version": 1, "entries": {"k": "ab" * 32}})
         Path(self.cache).write_text(valid + " " * weights_module.MAX_CACHE_BYTES)
         self.assertEqual(weights_module._load_cache(self.cache), {})
         Path(self.cache).write_text(valid)
-        self.assertEqual(weights_module._load_cache(self.cache), {"k": "v"})
+        self.assertEqual(weights_module._load_cache(self.cache), {"k": "ab" * 32})
 
     def test_a_directory_as_the_cache_is_ignored(self):
         os.mkdir(self.cache)
@@ -217,6 +251,16 @@ class VerifyWeightsTests(unittest.TestCase):
         os.utime(self.file, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000))
         with self.assertRaisesRegex(WeightsMismatch, "SHA-256"):
             verify_weights(self.models, [self.pin], cache_path=self.cache)
+
+    def test_a_malformed_cached_digest_is_a_miss_not_a_failure(self):
+        # #2328 review 4472955385: compare_digest raises TypeError on a non-ASCII string.
+        info = self.file.stat()
+        key = f"{self.file.resolve()}|{info.st_dev}|{info.st_ino}|{info.st_size}|{info.st_mtime_ns}"
+        for bad in ("\u00e9" * 64, self.pin.sha256.upper(), self.pin.sha256[:63], self.pin.sha256 + "0", 7, None):
+            with self.subTest(bad=str(bad)[:12]):
+                Path(self.cache).write_text(json.dumps({"version": 1, "entries": {key: bad}}))
+                self.assertEqual(weights_module._load_cache(self.cache), {})
+                verify_weights(self.models, [self.pin], cache_path=self.cache)  # re-hashed, still fine
 
     def test_a_corrupt_or_foreign_cache_never_accepts(self):
         Path(self.cache).write_text("{not json")

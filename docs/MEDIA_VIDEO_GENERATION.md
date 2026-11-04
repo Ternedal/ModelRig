@@ -121,7 +121,12 @@ When pins are set:
    - any link in the models tree;
    - a second file anywhere under `models/` with a pinned name. This includes alias folders such as `unet/` for `diffusion_models/`.
    - Names are compared case-insensitively, because on Windows a lookup of `wan.safetensors` also opens `WAN.safetensors`. Pins whose names differ only in case are refused.
-4. **Version.** The version is compared when ComfyUI is ready and before every job. A mismatch at start stops ComfyUI, so the lease is released. A mismatch before a job refuses that job before anything is submitted.
+4. **Before every job** (ComfyUI reads weights when a job runs, not when it starts), and before anything is submitted:
+   - each pinned path must still be the file that was hashed: same inode, size and mtime (`check_weights_unchanged`);
+   - the lookup check runs again, so an embedding or same-named file added since start is caught.
+
+   A failure refuses the job and marks ComfyUI for a restart, which re-verifies from scratch. Stated limit: a change between this check and ComfyUI's read needs write access to the models directory, which only the operator may have.
+5. **Version.** The version is compared when ComfyUI is ready and before every job. A mismatch at start stops ComfyUI, so the lease is released. A mismatch before a job refuses that job before anything is submitted.
 
 **Stated limit:** an actor who rewrites a file and restores its size, inode and mtime defeats the cache. Such an actor can also edit the profile.
 

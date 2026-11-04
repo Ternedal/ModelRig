@@ -736,6 +736,35 @@ class AdapterTests(unittest.TestCase):
         self.assertFalse(Path(self.state, "env.json").exists(), "ComfyUI never started")
         self.assertTrue(self.lease_is_free())
 
+    def test_a_weight_swapped_after_load_refuses_the_next_job_and_forces_a_restart(self):
+        # ComfyUI reads weights when a job runs: the start-time hash must still describe the file.
+        root, pin = self._models()
+        adapter = self.adapter(profile=self.profile(weights=[pin]), comfy_root=root)
+        adapter.load()
+        target = Path(root, "models", "diffusion_models", "wan2.2_t2v_example.safetensors")
+        incoming = target.with_name("incoming")
+        incoming.write_bytes(b"swapped weights" * 73)
+        os.replace(incoming, target)
+        with self.assertRaisesRegex(GenerationError, "changed since it was verified"):
+            adapter.render_to(request(), io.BytesIO())
+        self.assertFalse(Path(self.state, "last_prompt.json").exists(), "nothing was submitted")
+        self.assertTrue(adapter.needs_restart, "the executor restarts it, which re-verifies")
+        adapter.close()
+
+    def test_an_embedding_added_after_load_refuses_the_next_job(self):
+        root, pin = self._models()
+        adapter = self.adapter(profile=self.profile(weights=[pin]), comfy_root=root)
+        adapter.load()
+        self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
+        os.unlink(Path(self.state, "last_prompt.json"))
+        Path(root, "models", "embeddings").mkdir()
+        Path(root, "models", "embeddings", "late.pt").write_bytes(b"tensor")
+        with self.assertRaisesRegex(GenerationError, "unpinned embedding"):
+            adapter.render_to(request(), io.BytesIO())
+        self.assertFalse(Path(self.state, "last_prompt.json").exists(), "nothing was submitted")
+        self.assertTrue(adapter.needs_restart)
+        adapter.close()
+
     def test_a_prompt_embedding_under_pins_is_refused_before_anything_is_submitted(self):
         root, pin = self._models()
         adapter = self.adapter(profile=self.profile(weights=[pin]), comfy_root=root)

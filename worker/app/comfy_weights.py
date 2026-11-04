@@ -26,6 +26,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import stat
 from pathlib import Path
@@ -35,6 +36,7 @@ from .media_generation_contract import GenerationError
 from .media_generation_profiles import WeightPin
 
 CHUNK = 16 * 1024 * 1024
+_DIGEST = re.compile(r"[0-9a-f]{64}")  # a cached value is only ever compared if it is one
 CACHE_VERSION = 1
 MAX_CACHE_BYTES = 1024 * 1024
 # Non-blocking, so a FIFO (or a file swapped for one) cannot hang the open before fstat rejects
@@ -65,8 +67,10 @@ def _load_cache(cache_path: str | None) -> dict[str, str]:
             return {}
         data = json.loads(raw.decode("utf-8"))
         entries = data.get("entries") if data.get("version") == CACHE_VERSION else None
-        return {k: v for k, v in entries.items() if isinstance(k, str) and isinstance(v, str)} \
-            if isinstance(entries, dict) else {}
+        # Anything else is dropped, not compared: hmac.compare_digest raises on a non-ASCII
+        # string, which would turn a malformed cache into a failed load (#2328 review 4472955385).
+        return {k: v for k, v in entries.items() if isinstance(k, str) and isinstance(v, str)
+                and _DIGEST.fullmatch(v)} if isinstance(entries, dict) else {}
     except (OSError, ValueError, AttributeError):
         return {}
 
@@ -131,12 +135,15 @@ def check_lookup_is_unambiguous(comfy_root: str | Path, models_directory: str | 
 
 
 def verify_weights(models_directory: str | Path, pins: Iterable[WeightPin], *, cache_path: str | None = None,
-                   comfy_root: str | Path | None = None) -> None:
+                   comfy_root: str | Path | None = None) -> tuple[tuple[str, int, int, int, int], ...]:
     """Raise WeightsMismatch unless every pinned file matches. Names the file, never its contents.
 
     With comfy_root (ComfyUI's main.py directory), also proves the lookup is unambiguous.
     The cache is an opt-in optimisation for a trusted local filesystem (see the module docstring);
     without cache_path every file is re-hashed.
+
+    Returns the identity of each verified file, (path, st_dev, st_ino, size, mtime_ns), for
+    check_weights_unchanged(): ComfyUI reads weights when a job runs, not when it starts.
     """
     pins = tuple(pins)
     root = Path(models_directory)
@@ -147,6 +154,7 @@ def verify_weights(models_directory: str | Path, pins: Iterable[WeightPin], *, c
         check_lookup_is_unambiguous(comfy_root, root, pins)
     cache = _load_cache(cache_path)
     changed = False
+    verified: list[tuple[str, int, int, int, int]] = []
     for pin in pins:
         candidate = root / pin.path
         try:
@@ -168,6 +176,7 @@ def verify_weights(models_directory: str | Path, pins: Iterable[WeightPin], *, c
             key = f"{resolved}|{info.st_dev}|{info.st_ino}|{info.st_size}|{info.st_mtime_ns}"
             cached = cache.get(key)
             if cached is not None and hmac.compare_digest(cached, pin.sha256):
+                verified.append(_identity(candidate, pin.path, info))
                 continue
             digest = hashlib.sha256()
             while True:
@@ -183,7 +192,39 @@ def verify_weights(models_directory: str | Path, pins: Iterable[WeightPin], *, c
                 raise WeightsMismatch(f"pinned model file does not match its SHA-256: {pin.path}")
             cache[key] = actual
             changed = True
+            verified.append(_identity(candidate, pin.path, info))
         finally:
             os.close(fd)
     if changed:
         _store_cache(cache_path, cache)
+    return tuple(verified)
+
+
+def _identity(candidate: Path, path: str, info: os.stat_result) -> tuple[str, int, int, int, int]:
+    """The verified file's identity as os.lstat reports it -- the call check_weights_unchanged
+    repeats, so both sides come from the same API (on Windows fstat and lstat may differ in
+    how they report the file id). It must describe the file that was hashed."""
+    now = os.lstat(candidate)
+    if not stat.S_ISREG(now.st_mode) or (now.st_size, now.st_mtime_ns) != (info.st_size, info.st_mtime_ns):
+        raise WeightsMismatch(f"pinned model file changed while it was verified: {path}")
+    return (path, now.st_dev, now.st_ino, now.st_size, now.st_mtime_ns)
+
+
+def check_weights_unchanged(models_directory: str | Path, verified) -> None:
+    """Raise WeightsMismatch if a file verified at start is no longer the same file.
+
+    ComfyUI loads a model when the first job that needs it runs, so a start-time hash alone
+    leaves the whole resident lifetime open. Before every job each pinned path must still be a
+    regular file with the inode, size and mtime that were hashed: a rewrite, a replacement by
+    rename, or a deletion is caught without re-hashing. Stated limit: a change between this
+    check and ComfyUI's read, or one that restores size, inode and mtime, needs write access to
+    the models directory, which only the operator may have.
+    """
+    root = Path(models_directory)
+    for path, dev, ino, size, mtime_ns in verified:
+        try:
+            info = os.lstat(root / path)
+        except OSError:
+            raise WeightsMismatch(f"pinned model file changed since it was verified: {path}") from None
+        if not stat.S_ISREG(info.st_mode) or (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) != (dev, ino, size, mtime_ns):
+            raise WeightsMismatch(f"pinned model file changed since it was verified: {path}")
