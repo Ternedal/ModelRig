@@ -5,6 +5,8 @@ that inference completed; the caller must decide recovery policy separately.
 """
 from __future__ import annotations
 
+import re
+
 from .image_job_store import ImageJobStore
 from .media_gallery_store import ExternalMediaSink
 from .media_generation_contract import ArtifactSinkUnavailable
@@ -44,7 +46,9 @@ def inspect_generation_consistency(jobs: ImageJobStore, sink: ExternalMediaSink,
                 # Legacy random-ID publication needs its own indexed-file check;
                 # deterministic receipt absence cannot establish a missing file.
                 entry = indexed.get(recorded) if isinstance(recorded, str) else None
-                if entry is None:
+                if not isinstance(recorded, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", recorded):
+                    status = "completed_legacy_invalid_asset_id"
+                elif entry is None:
                     status = "completed_legacy_not_indexed"
                 else:
                     extension = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "video/mp4": ".mp4"}.get(entry["mime_type"])
