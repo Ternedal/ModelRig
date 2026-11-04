@@ -107,6 +107,15 @@ class SourceImageTests(unittest.TestCase):
                     read_source_png(self.sink, asset_id)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_empty_idat_sequence_refused(self, _mount):
+        """A structurally valid PNG without image data is a per-job refusal."""
+        ihdr = _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+        empty_png = PNG[:8] + ihdr + _png_chunk(b"IDAT", b"") + _png_chunk(b"IEND", b"")
+        asset_id = self.sink.publish(empty_png, ".png")
+        with self.assertRaises(SourceImageUnavailable):
+            read_source_png(self.sink, asset_id)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_png_metadata_and_palette_limits_refused(self, _mount):
         sig = PNG[:8]
         ihdr = _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
