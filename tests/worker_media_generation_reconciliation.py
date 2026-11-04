@@ -228,6 +228,24 @@ class ReconciliationTests(unittest.TestCase):
                 self.assertEqual(match["status"], "completed_legacy_indexed")
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_legacy_media_io_error_is_reported_as_conflict(self, _mount):
+        job_id = self.submit_running()
+        asset = self.sink.publish(b"image", ".png")
+        self.assertTrue(self.jobs.finish(job_id, asset_id=asset))
+        before = self.jobs.get(job_id, "owner")
+        original_lstat = Path.lstat
+
+        def unreadable_target(path, *args, **kwargs):
+            if path == self.sink.media_root / (asset + ".png"):
+                raise PermissionError("simulated media access failure")
+            return original_lstat(path, *args, **kwargs)
+
+        with patch.object(Path, "lstat", autospec=True, side_effect=unreadable_target):
+            report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "completed_legacy_file_conflict")
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_legacy_completed_job_with_deleted_file_is_flagged(self, _mount):
         job_id = self.submit_running()
         asset = self.sink.publish(b"image", ".png")
