@@ -201,6 +201,37 @@ class SourceImageTests(unittest.TestCase):
         self.assertTrue(reopened.owns_completed_asset("owner-a", asset_id))
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_g2_publishing_and_recovered_publication_never_authorize_source(self, _mount):
+        """A published file alone is insufficient until G2 commits completion."""
+        jobs = ImageJobStore(str(self.sink.volume_root / "publishing_jobs.sqlite"))
+        asset_id = self.sink.publish(PNG, ".png")
+        created = jobs.submit("owner-a", "test prompt", profile_id="test")
+        self.assertEqual(jobs.claim()["id"], created["job_id"])
+        # Model an executor after begin_publish: the bytes exist but the job
+        # has not committed the completed transition.
+        with sqlite3.connect(jobs.path) as db:
+            db.execute(
+                "UPDATE image_jobs SET state='publishing',asset_id=? WHERE id=?",
+                (asset_id, created["job_id"]),
+            )
+        self.assertFalse(jobs.owns_completed_asset("owner-a", asset_id))
+        with self.assertRaises(SourceImageUnavailable):
+            read_owned_source_png(self.sink, jobs, "owner-a", asset_id)
+        # A crash during publication leaves a failed row and an orphaned file;
+        # neither the rightful owner nor another owner may consume it as I2V.
+        with sqlite3.connect(jobs.path) as db:
+            db.execute(
+                "UPDATE image_jobs SET state='failed',"
+                "error='interrupted during publication' WHERE id=?",
+                (created["job_id"],),
+            )
+        for owner in ("owner-a", "owner-b"):
+            with self.subTest(owner=owner):
+                self.assertFalse(jobs.owns_completed_asset(owner, asset_id))
+                with self.assertRaises(SourceImageUnavailable):
+                    read_owned_source_png(self.sink, jobs, owner, asset_id)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_legacy_database_upgrades_without_losing_completed_owner(self, _mount):
         """Upgrade a real pre-G2 database with an existing completed image job."""
         db_path = self.sink.volume_root / "legacy_jobs.sqlite"
