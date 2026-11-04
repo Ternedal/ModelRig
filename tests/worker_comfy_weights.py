@@ -11,6 +11,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -46,6 +47,70 @@ class VerifyWeightsTests(unittest.TestCase):
         self.file.write_bytes(DATA[:-1] + b"\x01")
         with self.assertRaisesRegex(WeightsMismatch, "SHA-256: diffusion_models/wan.safetensors"):
             verify_weights(self.models, [self.pin])
+
+    def returns_promptly(self, fn):
+        """Run fn in a daemon thread; fail if it is still blocked after 10 s. Returns its exception."""
+        box = {}
+
+        def run():
+            try:
+                fn()
+            except BaseException as exc:  # noqa: BLE001 -- handed back to the test
+                box["exc"] = exc
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        thread.join(10)
+        self.assertFalse(thread.is_alive(), "blocked on a special file")
+        return box.get("exc")
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFOs")
+    def test_a_fifo_named_like_a_pinned_weight_is_refused_without_blocking(self):
+        # #2328 review 4472123700: a blocking open of a FIFO with no writer never returns.
+        self.file.unlink()
+        os.mkfifo(self.file)
+        exc = self.returns_promptly(lambda: verify_weights(self.models, [self.pin]))
+        self.assertIsInstance(exc, WeightsMismatch)
+        self.assertIn("not a regular file", str(exc))
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFOs")
+    def test_the_open_itself_cannot_block_so_a_late_swap_to_a_fifo_cannot_either(self):
+        fifo = Path(self.tmp, "swapped-in")
+        os.mkfifo(fifo)
+        self.assertIsNone(self.returns_promptly(lambda: os.close(os.open(fifo, weights_module._READ_FLAGS))))
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFOs")
+    def test_a_fifo_as_the_cache_is_ignored_and_replaced(self):
+        os.mkfifo(self.cache)
+        self.assertIsNone(self.returns_promptly(
+            lambda: verify_weights(self.models, [self.pin], cache_path=self.cache)))
+        self.assertTrue(Path(self.cache).is_file(), "the store replaced it with a regular cache file")
+        self.assertEqual(len(json.loads(Path(self.cache).read_text())["entries"]), 1)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFOs")
+    def test_the_cache_store_never_writes_through_something_already_there(self):
+        with patch.object(weights_module.secrets, "token_hex", return_value="deadbeef"):
+            os.mkfifo(f"{self.cache}.tmp-{os.getpid()}-deadbeef")
+            self.assertIsNone(self.returns_promptly(
+                lambda: verify_weights(self.models, [self.pin], cache_path=self.cache)))
+        self.assertFalse(Path(self.cache).exists(), "skipped, not written through the FIFO")
+
+    def test_a_leftover_temporary_from_an_earlier_process_does_not_stop_the_cache(self):
+        Path(f"{self.cache}.tmp-{os.getpid()}").write_text("left by a crash with a reused pid")
+        verify_weights(self.models, [self.pin], cache_path=self.cache)
+        self.assertEqual(len(json.loads(Path(self.cache).read_text())["entries"]), 1)
+
+    def test_an_oversized_cache_is_ignored(self):
+        # Valid JSON followed by whitespace: only the size cap refuses it.
+        valid = json.dumps({"version": 1, "entries": {"k": "v"}})
+        Path(self.cache).write_text(valid + " " * weights_module.MAX_CACHE_BYTES)
+        self.assertEqual(weights_module._load_cache(self.cache), {})
+        Path(self.cache).write_text(valid)
+        self.assertEqual(weights_module._load_cache(self.cache), {"k": "v"})
+
+    def test_a_directory_as_the_cache_is_ignored(self):
+        os.mkdir(self.cache)
+        verify_weights(self.models, [self.pin], cache_path=self.cache)  # re-hashes; the store fails quietly
+        self.assertEqual(weights_module._load_cache(self.cache), {})
 
     def test_wrong_size_missing_and_non_regular_are_refused(self):
         self.file.write_bytes(DATA + b"x")
@@ -87,7 +152,8 @@ class VerifyWeightsTests(unittest.TestCase):
         real_read = os.read
         with patch.object(weights_module.os, "read", lambda fd, n: reads.append(n) or real_read(fd, n)):
             verify_weights(self.models, [self.pin], cache_path=self.cache)
-        self.assertEqual(reads, [], "unchanged file: no bytes read")
+        # The cache file itself is now read with os.read too; weight files are read in CHUNKs.
+        self.assertEqual([n for n in reads if n == weights_module.CHUNK], [], "unchanged file: no weight bytes read")
 
     # --- the lookup ComfyUI performs must be unambiguous (#2296 6636684138) -----------------------
     def test_an_unambiguous_lookup_passes(self):

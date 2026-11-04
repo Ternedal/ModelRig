@@ -77,6 +77,23 @@ class TemplateTests(unittest.TestCase):
                       pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors", "loras/extra.safetensors"])
         load_template(raw(), sha(raw()))  # no pins: no binding (candidate profiles)
 
+    def test_the_binding_is_keyed_on_the_value_not_the_input_name(self):
+        # #2328 review 4472123690: DualCLIPLoader's clip_name1/clip_name2 do not end in "_name".
+        base = ["diffusion_models/wan2.2_t2v_example.safetensors"]
+        for inputs in ({"clip_name1": "clip_l.safetensors", "clip_name2": "t5xxl.safetensors", "type": "flux"},
+                       {"clip_name1": "CLIP_L.SAFETENSORS "},           # case and trailing space
+                       {"model": "x\\nested\\upscaler.pt2"},           # any input name, Windows separators
+                       {"files": ["a.txt", "lora.pkl"]}):               # inside a list
+            graph = copy.deepcopy(GRAPH)
+            graph["5"] = {"class_type": "DualCLIPLoader", "inputs": inputs}
+            with self.subTest(inputs=inputs), self.assertRaisesRegex(GenerationError, "not pinned"):
+                load_template(raw(graph), sha(raw(graph)), pinned_files=base)
+        graph = copy.deepcopy(GRAPH)
+        graph["5"] = {"class_type": "DualCLIPLoader",
+                      "inputs": {"clip_name1": "clip_l.safetensors", "clip_name2": "t5xxl.safetensors", "type": "flux"}}
+        load_template(raw(graph), sha(raw(graph)),
+                      pinned_files=base + ["text_encoders/clip_l.safetensors", "text_encoders/t5xxl.safetensors"])
+
     def test_binds_values_into_a_fresh_graph(self):
         template = load_template(raw(), sha(raw()))
         bound = template.bind(request(), fps=16)

@@ -39,7 +39,9 @@ SLOTS: Mapping[str, tuple[str, frozenset[str]]] = {
 }
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
-MODEL_FILE_SUFFIXES = (".safetensors", ".ckpt", ".pt", ".pth", ".bin", ".gguf", ".sft")
+# Every extension ComfyUI lists in a model folder (folder_paths.supported_pt_extensions), plus
+# .gguf. A string input ending in one of these is a model file, whatever the input is called.
+MODEL_FILE_SUFFIXES = (".safetensors", ".ckpt", ".pt", ".pt2", ".pth", ".bin", ".pkl", ".gguf", ".sft")
 
 
 def _fail(reason: str) -> GenerationError:
@@ -81,12 +83,17 @@ class WorkflowTemplate:
 
 
 def _model_files(graph: Mapping[str, object]):
-    """(node id, input name, file name) for every input that names a model file."""
+    """(node id, input name, file name) for every input value that names a model file.
+
+    Keyed on the VALUE, not the input name: loaders name their inputs freely
+    (ckpt_name, unet_name, but also clip_name1/clip_name2 on DualCLIPLoader), so a
+    name heuristic lets an unpinned file through (#2328 review 4472123690).
+    """
     for node_id, node in graph.items():
         for input_name, value in node["inputs"].items():
-            if (input_name.endswith("_name") and isinstance(value, str)
-                    and value.lower().endswith(MODEL_FILE_SUFFIXES)):
-                yield node_id, input_name, value.replace("\\", "/").rsplit("/", 1)[-1]
+            for text in _strings(value):
+                if text.strip().lower().endswith(MODEL_FILE_SUFFIXES):
+                    yield node_id, input_name, text.strip().replace("\\", "/").rsplit("/", 1)[-1]
 
 
 def load_template(raw: bytes, expected_sha256: str, *, pinned_files=None) -> WorkflowTemplate:

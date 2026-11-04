@@ -26,6 +26,7 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 import stat
 from pathlib import Path
 from typing import Iterable
@@ -35,6 +36,11 @@ from .media_generation_profiles import WeightPin
 
 CHUNK = 16 * 1024 * 1024
 CACHE_VERSION = 1
+MAX_CACHE_BYTES = 1024 * 1024
+# Non-blocking, so a FIFO (or a file swapped for one) cannot hang the open before fstat rejects
+# it (#2328 review 4472123700). Regular files ignore O_NONBLOCK. Windows has neither flag nor FIFOs.
+_READ_FLAGS = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+               | getattr(os, "O_BINARY", 0))
 
 
 class WeightsMismatch(GenerationError):
@@ -45,8 +51,19 @@ def _load_cache(cache_path: str | None) -> dict[str, str]:
     if cache_path is None:
         return {}
     try:
-        with open(cache_path, encoding="utf-8") as handle:
-            data = json.load(handle)
+        fd = os.open(cache_path, _READ_FLAGS)
+        try:  # a FIFO reads as empty and a directory raises: both end as "no cache"
+            raw = b""
+            while len(raw) <= MAX_CACHE_BYTES:
+                chunk = os.read(fd, MAX_CACHE_BYTES + 1 - len(raw))
+                if not chunk:
+                    break
+                raw += chunk
+        finally:
+            os.close(fd)
+        if len(raw) > MAX_CACHE_BYTES:
+            return {}
+        data = json.loads(raw.decode("utf-8"))
         entries = data.get("entries") if data.get("version") == CACHE_VERSION else None
         return {k: v for k, v in entries.items() if isinstance(k, str) and isinstance(v, str)} \
             if isinstance(entries, dict) else {}
@@ -57,9 +74,15 @@ def _load_cache(cache_path: str | None) -> dict[str, str]:
 def _store_cache(cache_path: str | None, entries: dict[str, str]) -> None:
     if cache_path is None:
         return
-    tmp = f"{cache_path}.tmp-{os.getpid()}"
+    tmp = f"{cache_path}.tmp-{os.getpid()}-{secrets.token_hex(4)}"
     try:
-        with open(tmp, "w", encoding="utf-8") as handle:
+        # O_EXCL: never write through something already there (a FIFO would block the open).
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_BINARY", 0), 0o600)
+    except OSError:
+        return  # best-effort: a missing cache only costs a re-hash
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump({"version": CACHE_VERSION, "entries": entries}, handle, sort_keys=True)
         os.replace(tmp, cache_path)
     except OSError:
@@ -121,7 +144,7 @@ def verify_weights(models_directory: str | Path, pins: Iterable[WeightPin], *, c
         if resolved != candidate or root not in resolved.parents:
             raise WeightsMismatch(f"pinned model file is a link or outside the models directory: {pin.path}")
         try:
-            fd = os.open(candidate, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+            fd = os.open(candidate, _READ_FLAGS)
         except OSError:
             raise WeightsMismatch(f"pinned model file cannot be opened safely: {pin.path}") from None
         try:
