@@ -73,7 +73,8 @@ class EntryPointTests(unittest.TestCase):
     def run_entry(self, env):
         """The real process, as the Go supervisor starts it: the exit code is what it sees."""
         return subprocess.run([sys.executable, "-m", "app.media_executor_main", "--device", "cuda:0"],
-                              env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(ROOT / "worker"), **env},
+                              env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(ROOT / "worker"),
+                                   "PYTHONDONTWRITEBYTECODE": "1", **env},
                               capture_output=True, text=True, timeout=60)
 
     def test_the_switch_is_required(self):
@@ -97,6 +98,9 @@ class EntryPointTests(unittest.TestCase):
             with self.subTest(change=change):
                 self.assertEqual(main(["--device", "cuda:0"], {**self.env, **change}), EXIT_CONFIG)
         self.assertEqual(main(["--device", "cuda:3"], self.env), EXIT_CONFIG, "no UUID for this device")
+        # The profile allows cuda:0, but only cuda:1 has a UUID: refused before the volume is even looked at.
+        self.assertEqual(main(["--device", "cuda:0"], {**self.env, "KALIV_GPU_DEVICE_UUIDS": f"cuda:1={GPU}"}),
+                         EXIT_CONFIG, "no UUID for the executor's own device")
 
     def test_no_enabled_profile_for_this_device_is_a_config_error(self):
         self.assertEqual(main(["--device", "cuda:1"], {**self.env, "KALIV_GPU_DEVICE_UUIDS": f"cuda:1={GPU}"}),
