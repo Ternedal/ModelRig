@@ -130,6 +130,15 @@ class ReconciliationTests(unittest.TestCase):
         self.assertEqual(self.jobs.get(job_id, "owner")["asset_id"], asset)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_legacy_asset_id_with_path_separator_is_rejected(self, _mount):
+        job_id = self.submit_running()
+        self.assertTrue(self.jobs.finish(job_id, asset_id="../outside"))
+        before = self.jobs.get(job_id, "owner")
+        report = inspect_generation_consistency(self.jobs, self.sink)
+        self.assertEqual(report[0]["status"], "completed_legacy_invalid_asset_id")
+        self.assertEqual(self.jobs.get(job_id, "owner"), before)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_legacy_completed_jpeg_and_webp_are_indexed(self, _mount):
         # The new sink deliberately publishes PNG/MP4 only. Model older
         # producer-written assets directly; do not widen its write allowlist.
