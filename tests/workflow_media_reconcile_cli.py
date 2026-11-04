@@ -30,6 +30,37 @@ class MediaReconcileCliTests(unittest.TestCase):
                     db.execute("CREATE TABLE diagnostic_mutation (id TEXT)")
             self.assertEqual(db_path.read_bytes(), before)
 
+    def test_conflict_exit_code_is_opt_in_and_preserves_jsonl(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "jobs.sqlite"
+            sqlite3.connect(db_path).close()
+            args = ["--jobs-db", str(db_path), "--volume-root", tmp,
+                    "--media-root", tmp]
+            with patch.object(cli, "ExternalMediaSink"), \
+                 patch.object(cli, "inspect_generation_consistency",
+                              return_value=[{"job_id": "j", "status": "media_conflict"}]):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(cli.main(args), 0)
+                self.assertEqual(len(output.getvalue().splitlines()), 1)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(cli.main(args + ["--fail-on-conflict"]), 1)
+
+    def test_consistent_receipt_does_not_trigger_conflict_exit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "jobs.sqlite"
+            sqlite3.connect(db_path).close()
+            with patch.object(cli, "ExternalMediaSink"), \
+                 patch.object(cli, "inspect_generation_consistency",
+                              return_value=[{"job_id": "j", "status": "consistent"}]), \
+                 patch("sys.stdout"):
+                self.assertEqual(cli.main(["--jobs-db", str(db_path),
+                                           "--volume-root", tmp,
+                                           "--media-root", tmp,
+                                           "--fail-on-conflict"]), 0)
+
     def test_corrupt_database_is_reported_without_traceback(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "corrupt.sqlite"
