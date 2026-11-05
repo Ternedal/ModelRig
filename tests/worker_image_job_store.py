@@ -166,6 +166,43 @@ class ExecutorProtocolTests(unittest.TestCase):
     def row(self, job_id, owner="anders"):
         return self.store.get(job_id, owner)
 
+    # --- G4 (Anders 5 Nov 2026): chat first, media waits for VRAM ---------------------------------
+    def claimed(self, instance=A1):
+        job = self.job()
+        self.assertEqual(self.store.claim_for(["sdxl-a"], instance)["id"], job)
+        return job
+
+    def test_a_deferred_job_is_queued_again_and_remembers_when_it_first_waited(self):
+        job = self.claimed()
+        self.assertEqual(self.store.defer(job, A1, max_wait_s=600, error="gpu_unavailable", now=1000.0), "requeued")
+        row = self.row(job)
+        self.assertEqual((row["state"], row["claimed_by"], row["deferred_since"]), ("queued", None, 1000.0))
+        self.assertEqual(self.store.claim_for(["sdxl-a"], A1)["id"], job, "claimable again")
+        self.assertEqual(self.store.defer(job, A1, max_wait_s=600, error="gpu_unavailable", now=1300.0), "requeued")
+        self.assertEqual(self.row(job)["deferred_since"], 1000.0, "the first deferral counts")
+
+    def test_a_job_that_waited_too_long_fails(self):
+        job = self.claimed()
+        self.store.defer(job, A1, max_wait_s=600, error="gpu_unavailable", now=1000.0)
+        self.store.claim_for(["sdxl-a"], A1)
+        self.assertEqual(self.store.defer(job, A1, max_wait_s=600, error="gpu_unavailable", now=1600.0), "expired")
+        row = self.row(job)
+        self.assertEqual((row["state"], row["error"]), ("failed", "gpu_unavailable"))
+
+    def test_a_cancel_requested_while_running_wins_over_requeueing(self):
+        job = self.claimed()
+        self.assertEqual(self.store.request_cancel(job, "anders"), "requested")
+        self.assertEqual(self.store.defer(job, A1, max_wait_s=600, error="gpu_unavailable"), "cancelled")
+        self.assertEqual(self.row(job)["state"], "cancelled", "never back in the queue to run anyway")
+
+    def test_only_the_claiming_instance_can_defer(self):
+        job = self.claimed()
+        self.assertEqual(self.store.defer(job, A2, max_wait_s=600, error="gpu_unavailable"), "gone")
+        self.assertEqual(self.row(job)["state"], "running")
+        for bad in ({"max_wait_s": -1, "error": "x"}, {"max_wait_s": "600", "error": "x"}, {"max_wait_s": 600, "error": ""}):
+            with self.subTest(bad=bad), self.assertRaises(ImageJobError):
+                self.store.defer(job, A1, **bad)
+
     def test_the_migration_adds_columns_to_an_existing_database_without_touching_rows(self):
         legacy = str(Path(self.temp.name) / "legacy.sqlite3")
         with sqlite3.connect(legacy) as db:

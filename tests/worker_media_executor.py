@@ -17,6 +17,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -561,6 +562,71 @@ time.sleep(60)
 """
 
 
+class VramWaitTests(unittest.TestCase):
+    """G4, Anders 5 Nov 2026: chat first, media waits. Too little free VRAM re-queues the job."""
+    setUp, tearDown = ExecutorTests.setUp, ExecutorTests.tearDown
+    image, submit = ExecutorTests.image, ExecutorTests.submit
+
+    def executor(self, short):
+        from app.image_gpu_admission import GpuMemoryShortage
+
+        def factory(profile):  # a fresh exception per load: Ollama holds the VRAM while short[0]
+            error = GpuMemoryShortage("insufficient free VRAM after reservation") if short[0] else None
+            return FakeImageAdapter(profile, lease_dir=self.lease_dir, gpu_uuid=GPU_A, load_error=error, log=self.log)
+        return ExecutorTests.executor(self, [self.image()], factory=factory)
+
+    def test_a_shortage_requeues_the_job_waits_then_runs_it_when_vram_frees(self):
+        short = [True]
+        ex = self.executor(short)
+        job = self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "deferred")
+        row = self.store.get(job, "anders")
+        self.assertEqual((row["state"], row["claimed_by"], row["error"]), ("queued", None, None), "not failed")
+        self.clock.now += 29
+        self.assertEqual(ex.step(), "idle", "no claim within the 30 s back-off")
+        self.assertEqual(self.store.get(job, "anders")["state"], "queued")
+        short[0] = False  # Ollama unloaded its model
+        self.clock.now += 1
+        self.assertEqual(ex.step(), "completed")
+        self.assertEqual(self.store.get(job, "anders")["state"], "completed")
+
+    def test_after_ten_minutes_of_waiting_the_job_fails_gpu_unavailable(self):
+        short = [True]
+        ex = self.executor(short)
+        job = self.submit("sdxl-a")
+        real_time = __import__("time").time
+        start = real_time()
+        with patch("app.image_job_store.time.time", side_effect=lambda: start + offset[0]):
+            offset = [0.0]
+            outcomes = []
+            for minute in range(0, 11):
+                offset[0] = minute * 60.0
+                self.clock.now += 60
+                outcomes.append(ex.step())
+        self.assertEqual(outcomes[:10], ["deferred"] * 10)
+        self.assertEqual(outcomes[10], "failed")
+        row = self.store.get(job, "anders")
+        self.assertEqual((row["state"], row["error"]), ("failed", "gpu_unavailable"))
+
+    def test_waiting_never_holds_the_gpu(self):
+        ex = self.executor([True])
+        self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "deferred")
+        self.assertIsNone(ex.adapter, "the refused load left nothing resident")
+        self.assertTrue(lease_free(GPU_A, self.lease_dir), "Ollama can have the GPU")
+
+    def test_other_failures_still_fail_at_once(self):
+        from app.image_gpu_admission import ImageGpuAdmissionError
+
+        def factory(profile):
+            return FakeImageAdapter(profile, lease_dir=self.lease_dir, gpu_uuid=GPU_A,
+                                    load_error=ImageGpuAdmissionError("GPU identity mismatch"), log=self.log)
+        ex = ExecutorTests.executor(self, [self.image()], factory=factory)
+        job = self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "failed")
+        self.assertEqual(self.store.get(job, "anders")["error"], "generation_failed")
+
+
 class VideoExecutorTests(unittest.TestCase):
     """Real ComfySupervisor + adapter + fake ComfyUI; ReferenceSink from the conformance suite."""
 
@@ -594,12 +660,16 @@ class VideoExecutorTests(unittest.TestCase):
             backend_options={"template_name": "wan-t2v.json", "template_sha256": sha(raw()), "fps": 16,
                              "max_render_seconds": 60, "max_output_bytes": 1024 * 1024, "port": self.port, **pins}))
 
-    def executor(self, render_seconds="0.2", **pins):
+    def executor_with_fake(self, fake_env):
+        return self.executor(extra_fake=fake_env)
+
+    def executor(self, render_seconds="0.2", extra_fake=None, **pins):
         def factory(profile):
             launch = ComfyLaunch(python_executable=sys.executable, main_py=str(FAKE_MAIN), port=self.port,
                                  input_directory=self.dirs["input"], output_directory=self.dirs["output"],
                                  temp_directory=self.dirs["temp"], user_directory=self.dirs["user"])
-            sup = FakeSupervisor(fake_env={"FAKE_COMFY_STATE_DIR": self.dirs["state"], "FAKE_COMFY_RENDER_SECONDS": render_seconds},
+            sup = FakeSupervisor(fake_env={"FAKE_COMFY_STATE_DIR": self.dirs["state"], "FAKE_COMFY_RENDER_SECONDS": render_seconds,
+                                           **(extra_fake or {})},
                                  media_volume=AnyExistingDirectory(), gpu_uuid=GPU_A, lease_dir=self.lease_dir, launch=launch,
                                  reserve_gib=2, min_usable_gib=8, ready_timeout_s=15, stop_timeout_s=5, poll_s=0.05,
                                  base_env={"PATH": os.environ.get("PATH", "")})
@@ -626,6 +696,25 @@ class VideoExecutorTests(unittest.TestCase):
         self.assertIn(row["asset_id"], self.sink.registry)
         self.assertEqual(os.listdir(self.sink.staging), [], "no staged leftovers")
         self.assertEqual(os.listdir(self.dirs["output"]), [], "ComfyUI's own output removed")
+
+    def test_a_comfyui_vram_shortage_at_start_requeues_and_frees_the_lease(self):
+        ex = self.executor_with_fake({"FAKE_COMFY_VRAM_FREE_GIB": "5"})  # Ollama holds the rest
+        job = self.submit()
+        self.assertEqual(ex.step(), "deferred")
+        self.assertEqual(self.store.get(job, "anders")["state"], "queued")
+        self.assertTrue(lease_free(GPU_A, self.lease_dir), "ComfyUI was stopped; the GPU is free")
+
+    def test_a_comfyui_vram_shortage_before_a_job_requeues_without_submitting(self):
+        ex = self.executor()
+        first = self.submit()
+        self.assertEqual(ex.step(), "completed")
+        Path(self.dirs["state"], "vram_free_gib").write_text("5")  # Ollama loaded a model meanwhile
+        submissions = Path(self.dirs["state"], "prompts.log").read_text().count("submitted")
+        job = self.submit()
+        self.assertEqual(ex.step(), "deferred")
+        self.assertEqual(self.store.get(job, "anders")["state"], "queued")
+        self.assertEqual(Path(self.dirs["state"], "prompts.log").read_text().count("submitted"), submissions)
+        self.assertEqual(self.store.get(first, "anders")["state"], "completed")
 
     def test_cancelling_a_running_video_interrupts_comfyui_and_publishes_nothing(self):
         ex = self.executor(render_seconds="5")

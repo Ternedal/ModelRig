@@ -41,12 +41,23 @@ Sources:
 | A ComfyUI whose interrupt is not confirmed drained (deadline, interrupt or queue check failed) sets `needs_restart`; the executor unloads it with proof before claiming again | `ComfyVideoAdapter._interrupt_and_drain`, `step` | `test_an_unconfirmed_drain_marks_the_adapter_for_restart`, `test_a_comfyui_whose_cancel_did_not_drain_is_restarted_before_the_next_job` |
 | A failing database never replaces the fatal GPU exit | `_record_failure` | `test_gpu_retained_still_exits_70_when_the_failure_cannot_be_recorded` |
 
+## Sharing the GPU with Ollama (G4)
+
+**Decision (Anders, 5 Nov 2026): chat first, media waits.** Ollama is outside the GPU lease and is never touched.
+- **When there is too little free VRAM**, the job goes back to `queued` with its claim cleared, instead of failing. This is checked by `inspect_cuda_budget` for diffusers, and by ComfyUI's `/system_stats` at start and before every job. Nothing has been submitted yet, and a refused load has proved its release.
+- **Back-off.** The executor claims nothing for `VRAM_RETRY_S` (30 s) and then tries again.
+- **Bound.** After `VRAM_MAX_WAIT_S` (10 min), counted from the job's first deferral (`deferred_since`), the job fails as `gpu_unavailable`.
+- **Cancel.** A cancel requested while the job was running wins: the job is `cancelled`, not requeued.
+- **Not waited for:** other admission failures (a missing GPU, an identity mismatch) still fail the job at once, and `gpu_busy` (another lease-taker) is unchanged.
+- **Media yields too:** the idle unload (`KALIV_MEDIA_IDLE_UNLOAD_S`, default 300 s) frees the GPU for chat.
+
 ## Job states
 
 ```
 queued --claim_for--> running --begin_publish--> publishing --complete--> completed
                       running/publishing --fail--> failed
                       running --finish_cancelled--> cancelled      (after request_cancel)
+                      running --defer (VRAM short)--> queued        (G4; failed "gpu_unavailable" after 10 min)
 recovery:  running    -> failed "interrupted by restart"
            publishing -> failed "interrupted during publication"   (an asset may exist: the sink reconciles)
 ```

@@ -57,8 +57,10 @@ import secrets
 import time
 from typing import Callable, Mapping
 
+from .comfy_supervisor import ComfyVramShortage
 from .diffusers_image_adapter import GpuResourcesRetained
 from .gpu_lease import ExecutorAlreadyRunning, GpuBusy, acquire_executor_lock, normalize_gpu_uuid
+from .image_gpu_admission import GpuMemoryShortage
 from .image_job_store import ImageJobStore
 from .media_generation_contract import (ArtifactSink, ArtifactSinkUnavailable, GenerationCancelled, GenerationError,
                                         GenerationRequest, JobKeyedArtifactSink, JobKeyedStagedSink,
@@ -71,6 +73,13 @@ PUBLICATION_FAILED = "publication_failed"
 REJECTED = "generation_request_rejected"
 GPU_RETAINED = "gpu_memory_retained"
 GPU_BUSY = "gpu_busy"
+GPU_UNAVAILABLE = "gpu_unavailable"  # VRAM stayed taken (by Ollama, typically) for VRAM_MAX_WAIT_S
+# G4, Anders 5 Nov 2026: chat first, media waits. Too little free VRAM puts the job back in the
+# queue; the executor claims again after VRAM_RETRY_S; after VRAM_MAX_WAIT_S of waiting it fails.
+# Ollama is never touched.
+VRAM_RETRY_S = 30.0
+VRAM_MAX_WAIT_S = 600.0
+_VRAM_SHORTAGE = (GpuMemoryShortage, ComfyVramShortage)
 _REQUEST_PARAMS = ("width", "height", "steps", "seed", "input_asset_id", "frames")
 
 
@@ -110,6 +119,7 @@ class MediaExecutor:
         self.instance = f"{self.gpu_uuid}:{secrets.token_hex(8)}"
         self.adapter = None
         self.last_used = clock()
+        self._claim_not_before = float("-inf")  # after a VRAM shortage: no claims until then
         self._lock = None
         self._retained: list = []  # adapters whose unload failed: kept alive (lease held) until exit
         self.events: list[str] = []  # lifecycle record for logs and tests; never prompt text
@@ -191,11 +201,15 @@ class MediaExecutor:
         return should_cancel
 
     def step(self) -> str:
-        """Claim and run at most one job. Returns idle, completed, failed, rejected or cancelled."""
+        """Claim and run at most one job. Returns idle, completed, failed, rejected, cancelled or
+        deferred (put back in the queue: too little free VRAM right now, G4)."""
         if self._lock is None:
             raise ExecutorConfigError("start() first: no claims without the executor lock")
         if self._retained:
             raise GpuResourcesRetained("an earlier unload failed; this executor must exit")
+        if self.clock() < self._claim_not_before:  # waiting for VRAM: claim nothing yet
+            self.maybe_unload_idle()
+            return "idle"
         job = self.store.claim_for(self.profiles, self.instance)
         if job is None:
             self.maybe_unload_idle()
@@ -254,6 +268,14 @@ class MediaExecutor:
         except GpuBusy:
             self.store.fail(job_id, self.instance, GPU_BUSY)
             return "failed"
+        except _VRAM_SHORTAGE:  # before anything was submitted; a failed load proved its release
+            self.last_used = self.clock()
+            outcome = self.store.defer(job_id, self.instance, max_wait_s=VRAM_MAX_WAIT_S, error=GPU_UNAVAILABLE)
+            self.events.append(f"vram_short:{outcome}")
+            if outcome == "requeued":
+                self._claim_not_before = self.clock() + VRAM_RETRY_S
+                return "deferred"
+            return "failed" if outcome == "expired" else outcome
         except Exception:
             self.last_used = self.clock()
             # Never persist exception text. After the commit point it is a publication failure.
