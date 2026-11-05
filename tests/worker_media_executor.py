@@ -636,13 +636,13 @@ class VideoExecutorTests(unittest.TestCase):
                 pass
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def profile(self):
+    def profile(self, **pins):
         return parse_profile(video_profile(
             tasks=["text_to_video"], limits={"max_prompt_chars": 200, "sizes": [[832, 480]], "max_steps": 30, "max_frames": 81},
             backend_options={"template_name": "wan-t2v.json", "template_sha256": sha(raw()), "fps": 16,
-                             "max_render_seconds": 60, "max_output_bytes": 1024 * 1024, "port": self.port}))
+                             "max_render_seconds": 60, "max_output_bytes": 1024 * 1024, "port": self.port, **pins}))
 
-    def executor(self, render_seconds="0.2"):
+    def executor(self, render_seconds="0.2", **pins):
         def factory(profile):
             launch = ComfyLaunch(python_executable=sys.executable, main_py=str(FAKE_MAIN), port=self.port,
                                  input_directory=self.dirs["input"], output_directory=self.dirs["output"],
@@ -655,7 +655,7 @@ class VideoExecutorTests(unittest.TestCase):
                                                    output_directory=self.dirs["output"], poll_s=0.05, settle_s=0.05)
             self.adapters.append(adapter)
             return adapter
-        profile = self.profile()
+        profile = self.profile(**pins)
         ex = MediaExecutor(self.store, gpu_uuid=GPU_A, profiles={profile.profile_id: profile},
                            adapter_factory=factory, lease_dir=self.lease_dir, video_sink=self.sink, cancel_poll_s=0.1)
         ex.start()
@@ -718,6 +718,15 @@ class VideoExecutorTests(unittest.TestCase):
         self.assertEqual(ex.step(), "completed", "a fresh ComfyUI renders the next job")
         self.assertEqual(len(made), 2)
         self.assertEqual(self.store.get(follow_up, "anders")["state"], "completed")
+
+    def test_a_comfyui_version_mismatch_fails_the_job_with_a_proven_stop_and_the_executor_continues(self):
+        ex = self.executor(comfyui_version="9.9.9")  # the fake reports "fake"
+        job = self.submit()
+        self.assertEqual(ex.step(), "failed")
+        self.assertEqual(self.store.get(job, "anders")["error"], "generation_failed")
+        self.assertIsNone(ex.adapter)
+        self.assertIn("failed_load:wan-t2v:True", ex.events, "close() proved the stop, so it continues")
+        self.assertEqual(ex.step(), "idle")
 
     def test_video_adoption_is_job_keyed_when_the_staged_sink_offers_it(self):
         class JobKeyedReference(ReferenceSink):

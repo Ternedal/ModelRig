@@ -65,6 +65,91 @@ def request(**overrides) -> GenerationRequest:
 
 
 class TemplateTests(unittest.TestCase):
+    def test_a_pinned_template_may_only_load_pinned_model_files(self):
+        load_template(raw(), sha(raw()), pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors"])
+        with self.assertRaisesRegex(GenerationError, "not pinned"):
+            load_template(raw(), sha(raw()), pinned_files=["diffusion_models/other.safetensors"])
+        graph = copy.deepcopy(GRAPH)
+        graph["5"] = {"class_type": "LoraLoader", "inputs": {"lora_name": "sub/extra.safetensors"}}
+        with self.assertRaisesRegex(GenerationError, "not pinned"):
+            load_template(raw(graph), sha(raw(graph)), pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors"])
+        # The value is the path inside the loader's folder: the basename alone is a different file.
+        with self.assertRaisesRegex(GenerationError, "not pinned"):
+            load_template(raw(graph), sha(raw(graph)),
+                          pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors", "loras/extra.safetensors"])
+        load_template(raw(graph), sha(raw(graph)),
+                      pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors", "loras/sub/extra.safetensors"])
+        load_template(raw(), sha(raw()))  # no pins: no binding (candidate profiles)
+
+    def test_a_distinct_whitespace_named_file_cannot_satisfy_the_pin(self):
+        # Codex's reproduction (4472405235), as ChatGPT asked: two REAL files with different bytes,
+        # only the first pinned. The weights check passes (both files exist, the pinned one matches);
+        # the template that names the second is refused before anything starts.
+        from app.comfy_weights import verify_weights
+        from app.media_generation_profiles import WeightPin
+        with tempfile.TemporaryDirectory() as tmp:
+            models = Path(tmp, "models", "diffusion_models")
+            models.mkdir(parents=True)
+            Path(models, "wan2.2_t2v_example.safetensors").write_bytes(b"pinned bytes")
+            Path(models, " wan2.2_t2v_example.safetensors").write_bytes(b"never hashed")
+            pin = WeightPin("diffusion_models/wan2.2_t2v_example.safetensors",
+                            hashlib.sha256(b"pinned bytes").hexdigest(), len(b"pinned bytes"))
+            verify_weights(Path(tmp, "models"), [pin], comfy_root=tmp)
+            graph = copy.deepcopy(GRAPH)
+            graph["4"]["inputs"]["unet_name"] = " wan2.2_t2v_example.safetensors"
+            with self.assertRaisesRegex(GenerationError, "not pinned"):
+                load_template(raw(graph), sha(raw(graph)), pinned_files=[pin.path])
+            load_template(raw(), sha(raw()), pinned_files=[pin.path])  # the exact name is accepted
+
+    def test_a_backslash_is_refused_because_it_means_different_files_per_platform(self):
+        # #2328 review 4472675602: on POSIX "evil\\wan.safetensors" is one file name, not evil/ + wan.
+        # (A value that does not END in a model extension is not a file ComfyUI lists, so it never loads.)
+        for value in ("evil\\wan2.2_t2v_example.safetensors", "\\wan2.2_t2v_example.safetensors"):
+            graph = copy.deepcopy(GRAPH)
+            graph["4"]["inputs"]["unet_name"] = value
+            with self.subTest(value=value), self.assertRaisesRegex(GenerationError, "not pinned"):
+                load_template(raw(graph), sha(raw(graph)),
+                              pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors",
+                                            "diffusion_models/evil/wan2.2_t2v_example.safetensors"])
+
+    def test_embeddings_cannot_be_loaded_under_pins(self):
+        # #2328 review 4472675615: "embedding:<name>" in any encoded text loads models/embeddings/<name>.
+        pins = ["diffusion_models/wan2.2_t2v_example.safetensors"]
+        graph = copy.deepcopy(GRAPH)
+        graph["5"] = {"class_type": "CLIPTextEncode", "inputs": {"text": "blurry, Embedding:badhands", "clip": ["8", 0]}}
+        with self.assertRaisesRegex(GenerationError, "references an embedding"):
+            load_template(raw(graph), sha(raw(graph)), pinned_files=pins)
+        load_template(raw(graph), sha(raw(graph)))  # candidates are not pinned
+        pinned = load_template(raw(), sha(raw()), pinned_files=pins)
+        for prompt in ("a kite embedding:unpinned", "(EMBEDDING:x:1.2) a kite", "embedding:x"):
+            with self.subTest(prompt=prompt), self.assertRaisesRegex(GenerationError, "embedding"):
+                pinned.bind(request(prompt=prompt), fps=16)
+        self.assertEqual(pinned.bind(request(prompt="an embedding of meaning"), fps=16)["6"]["inputs"]["text"],
+                         "an embedding of meaning", "the word alone is fine")
+        unpinned = load_template(raw(), sha(raw()))
+        self.assertEqual(unpinned.bind(request(prompt="embedding:x"), fps=16)["6"]["inputs"]["text"], "embedding:x")
+
+    def test_the_binding_is_keyed_on_the_value_not_the_input_name(self):
+        # #2328 review 4472123690: DualCLIPLoader's clip_name1/clip_name2 do not end in "_name".
+        base = ["diffusion_models/wan2.2_t2v_example.safetensors"]
+        for inputs in ({"clip_name1": "clip_l.safetensors", "clip_name2": "t5xxl.safetensors", "type": "flux"},
+                       # #2328 review 4472405235: a distinct POSIX file must not satisfy the pin by stripping
+                       {"unet_name": " wan2.2_t2v_example.safetensors"},
+                       {"unet_name": "wan2.2_t2v_example.safetensors "},
+                       {"unet_name": "WAN2.2_T2V_EXAMPLE.safetensors"},
+                       {"clip_name1": "CLIP_L.SAFETENSORS "},           # case and trailing space
+                       {"model": "x\\nested\\upscaler.pt2"},           # any input name, Windows separators
+                       {"files": ["a.txt", "lora.pkl"]}):               # inside a list
+            graph = copy.deepcopy(GRAPH)
+            graph["5"] = {"class_type": "DualCLIPLoader", "inputs": inputs}
+            with self.subTest(inputs=inputs), self.assertRaisesRegex(GenerationError, "not pinned"):
+                load_template(raw(graph), sha(raw(graph)), pinned_files=base)
+        graph = copy.deepcopy(GRAPH)
+        graph["5"] = {"class_type": "DualCLIPLoader",
+                      "inputs": {"clip_name1": "clip_l.safetensors", "clip_name2": "t5xxl.safetensors", "type": "flux"}}
+        load_template(raw(graph), sha(raw(graph)),
+                      pinned_files=base + ["text_encoders/clip_l.safetensors", "text_encoders/t5xxl.safetensors"])
+
     def test_binds_values_into_a_fresh_graph(self):
         template = load_template(raw(), sha(raw()))
         bound = template.bind(request(), fps=16)
@@ -163,8 +248,9 @@ class AdapterTests(unittest.TestCase):
                                            limits={"max_prompt_chars": 200, "sizes": [[832, 480]],
                                                    "max_steps": 30, "max_frames": 81}))
 
-    def adapter(self, fake=None, profile=None, volume=None, **kwargs) -> ComfyVideoAdapter:
-        launch = ComfyLaunch(python_executable=sys.executable, main_py=str(FAKE_MAIN), port=self.port,
+    def adapter(self, fake=None, profile=None, volume=None, comfy_root=None, **kwargs) -> ComfyVideoAdapter:
+        main_py = str(Path(comfy_root, "main.py")) if comfy_root else str(FAKE_MAIN)
+        launch = ComfyLaunch(python_executable=sys.executable, main_py=main_py, port=self.port,
                              input_directory=self.dirs["input"], output_directory=self.dirs["output"],
                              temp_directory=self.dirs["temp"], user_directory=self.dirs["user"])
         env = {"FAKE_COMFY_STATE_DIR": self.state, **(fake or {})}
@@ -604,6 +690,106 @@ class AdapterTests(unittest.TestCase):
                 self.assertTrue(adapter.close(), "it can still be stopped and its lease released")
                 with self.assertRaisesRegex(GenerationError, "needs a restart"):
                     adapter.load()
+
+    # --- G3 pins (#2296 6634996133) --------------------------------------------------------------
+    def _models(self, data=b"wan weights" * 100):
+        """A ComfyUI root of our own (the fake main.py plus models/), as on the rig."""
+        root = Path(self.tmp, "comfy-root")
+        (root / "models" / "diffusion_models").mkdir(parents=True, exist_ok=True)
+        shutil.copy(FAKE_MAIN, root / "main.py")
+        Path(root, "models", "diffusion_models", "wan2.2_t2v_example.safetensors").write_bytes(data)
+        return str(root), {"path": "diffusion_models/wan2.2_t2v_example.safetensors",
+                           "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
+
+    def test_a_pinned_comfyui_version_must_match_at_start(self):
+        ok = self.adapter(fake={"FAKE_COMFY_VERSION": "0.3.68"}, profile=self.profile(comfyui_version="0.3.68"))
+        ok.load()
+        self.assertEqual(ok.render_to(request(), io.BytesIO()), "video/mp4")
+        ok.close()
+        self.port = free_port()
+        wrong = self.adapter(fake={"FAKE_COMFY_VERSION": "0.3.70"}, profile=self.profile(comfyui_version="0.3.68"))
+        with self.assertRaisesRegex(GenerationError, "version does not match"):
+            wrong.load()
+        self.assertFalse(wrong.supervisor.running, "stopped, not left running")
+        self.assertTrue(self.lease_is_free(), "and the lease went with it")
+
+    def test_a_version_change_under_a_resident_comfyui_refuses_the_next_job(self):
+        adapter = self.adapter(fake={"FAKE_COMFY_VERSION": "0.3.68"}, profile=self.profile(comfyui_version="0.3.68"))
+        adapter.load()
+        Path(self.state, "comfyui_version").write_text("0.4.0")
+        with self.assertRaisesRegex(GenerationError, "version does not match"):
+            adapter.render_to(request(), io.BytesIO())
+        self.assertFalse(Path(self.state, "last_prompt.json").exists(), "nothing was submitted")
+
+    def test_pinned_weights_are_verified_before_comfyui_starts(self):
+        root, pin = self._models()
+        good = self.adapter(profile=self.profile(weights=[pin]), comfy_root=root)
+        good.load()
+        self.assertEqual(good.render_to(request(), io.BytesIO()), "video/mp4")
+        good.close()
+        os.unlink(Path(self.state, "env.json"))
+        Path(root, "models", "diffusion_models", "wan2.2_t2v_example.safetensors").write_bytes(b"swapped weights" * 73)
+        self.port = free_port()
+        swapped = self.adapter(profile=self.profile(weights=[pin]), comfy_root=root)
+        with self.assertRaisesRegex(GenerationError, "pinned model file"):
+            swapped.load()
+        self.assertFalse(Path(self.state, "env.json").exists(), "ComfyUI never started")
+        self.assertTrue(self.lease_is_free())
+
+    def test_a_weight_swapped_after_load_refuses_the_next_job_and_forces_a_restart(self):
+        # ComfyUI reads weights when a job runs: the start-time hash must still describe the file.
+        root, pin = self._models()
+        adapter = self.adapter(profile=self.profile(weights=[pin]), comfy_root=root)
+        adapter.load()
+        target = Path(root, "models", "diffusion_models", "wan2.2_t2v_example.safetensors")
+        incoming = target.with_name("incoming")
+        incoming.write_bytes(b"swapped weights" * 73)
+        os.replace(incoming, target)
+        with self.assertRaisesRegex(GenerationError, "changed since it was verified"):
+            adapter.render_to(request(), io.BytesIO())
+        self.assertFalse(Path(self.state, "last_prompt.json").exists(), "nothing was submitted")
+        self.assertTrue(adapter.needs_restart, "the executor restarts it, which re-verifies")
+        adapter.close()
+
+    def test_an_embedding_added_after_load_refuses_the_next_job(self):
+        root, pin = self._models()
+        adapter = self.adapter(profile=self.profile(weights=[pin]), comfy_root=root)
+        adapter.load()
+        self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
+        os.unlink(Path(self.state, "last_prompt.json"))
+        Path(root, "models", "embeddings").mkdir()
+        Path(root, "models", "embeddings", "late.pt").write_bytes(b"tensor")
+        with self.assertRaisesRegex(GenerationError, "unpinned embedding"):
+            adapter.render_to(request(), io.BytesIO())
+        self.assertFalse(Path(self.state, "last_prompt.json").exists(), "nothing was submitted")
+        self.assertTrue(adapter.needs_restart)
+        adapter.close()
+
+    def test_a_prompt_embedding_under_pins_is_refused_before_anything_is_submitted(self):
+        root, pin = self._models()
+        adapter = self.adapter(profile=self.profile(weights=[pin]), comfy_root=root)
+        adapter.load()
+        with self.assertRaisesRegex(GenerationError, "may not reference an embedding"):
+            adapter.render_to(request(prompt="a kite embedding:unpinned"), io.BytesIO())
+        self.assertFalse(Path(self.state, "last_prompt.json").exists(), "nothing was submitted")
+        self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4", "the next job still runs")
+        adapter.close()
+
+    def test_an_ambiguous_comfyui_lookup_is_refused_before_start(self):
+        root, pin = self._models()
+        Path(root, "extra_model_paths.yaml").write_text("comfyui:\n  base_path: /elsewhere\n")
+        adapter = self.adapter(profile=self.profile(weights=[pin]), comfy_root=root)
+        with self.assertRaisesRegex(GenerationError, "extra model paths"):
+            adapter.load()
+        self.assertFalse(Path(self.state, "env.json").exists(), "ComfyUI never started")
+
+    def test_a_template_that_loads_an_unpinned_file_is_refused_before_start(self):
+        root, pin = self._models()
+        other = dict(pin, path="diffusion_models/some_other.safetensors")
+        adapter = self.adapter(profile=self.profile(weights=[other]), comfy_root=root)
+        with self.assertRaisesRegex(GenerationError, "not pinned"):
+            adapter.load()
+        self.assertFalse(Path(self.state, "env.json").exists(), "ComfyUI never started")
 
     def test_cleanup_never_masks_the_render_result_or_error(self):
         adapter = self.adapter(fake={"FAKE_COMFY_OUTPUT_MODE": "notmp4"})
