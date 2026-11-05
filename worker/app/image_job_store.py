@@ -88,6 +88,8 @@ class ImageJobStore:
                 state TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL,
                 asset_id TEXT, error TEXT)""")
             db.execute("CREATE INDEX IF NOT EXISTS image_jobs_state ON image_jobs(state, created)")
+            db.execute("CREATE INDEX IF NOT EXISTS image_jobs_owner_asset_state "
+                       "ON image_jobs(owner, asset_id, state)")
             columns = {row[1] for row in db.execute("PRAGMA table_info(image_jobs)")}
             if "claimed_by" not in columns:  # additive migration, no data rewritten
                 db.execute("ALTER TABLE image_jobs ADD COLUMN claimed_by TEXT")
