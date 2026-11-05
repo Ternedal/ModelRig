@@ -11,7 +11,8 @@ import stat
 
 from .media_gallery_catalog import GalleryUnavailable, _ID, _index
 from .media_gallery_store import ExternalMediaSink
-from .media_generation_contract import ArtifactSinkUnavailable
+from .media_generation_contract import ArtifactSinkUnavailable, SourceImageUnavailable
+from .image_job_store import ImageJobStore
 from .media_source_png_validation import InvalidSourcePng, validate_png_container
 
 MAX_SOURCE_IMAGE_BYTES = 32 * 1024 * 1024
