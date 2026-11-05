@@ -54,6 +54,11 @@ class SourceImageTests(unittest.TestCase):
     def test_completed_owner_guard_on_main_g2(self, _mount):
         jobs = ImageJobStore(str(self.sink.volume_root / "owner_guard.sqlite"))
         asset_id = self.sink.publish(PNG, ".png")
+        with jobs._db() as db:
+            columns = [row[2] for row in db.execute(
+                "PRAGMA index_info(image_jobs_owner_asset_state)"
+            )]
+            self.assertEqual(columns, ["owner", "asset_id", "state"])
         created = jobs.submit("owner-a", "test prompt", profile_id="test")
         with self.assertRaises(SourceImageUnavailable):
             read_owned_source_png(self.sink, jobs, "owner-a", asset_id)
