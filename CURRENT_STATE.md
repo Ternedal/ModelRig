@@ -246,6 +246,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_comfy_resident_launcher.py`
 - `tests/worker_comfy_supervisor.py`
 - `tests/worker_comfy_video_adapter.py`
+- `tests/worker_comfy_weights.py`
 - `tests/worker_confirm_outbound_reads.py`
 - `tests/worker_confirmation_impact.py`
 - `tests/worker_consciousness_core_autonomous_checkpoint.py`
