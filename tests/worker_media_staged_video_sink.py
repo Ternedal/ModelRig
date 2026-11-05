@@ -178,13 +178,29 @@ class JobKeyedRules(unittest.TestCase):
         self.assertEqual(target.read_bytes(), MP4)
 
     def test_a_staged_name_swapped_before_adoption_is_refused_and_kept(self):
-        with self.assertRaisesRegex(ArtifactSinkUnavailable, "staged_video_changed"):
+        real_lstat = os.lstat
+        swapped = []
+
+        def other_file_at(path, *args, **kwargs):  # Windows: the name now reports another file
+            info = real_lstat(path, *args, **kwargs)
+            if swapped and Path(str(path)).name == swapped[0]:
+                fields = list(info[:10])
+                fields[1] += 1
+                return os.stat_result(fields)
+            return info
+        with self.assertRaisesRegex(ArtifactSinkUnavailable, "staged_video_changed"), \
+                patch.object(sink_module.os, "lstat", other_file_at):
             with self.sink.staged(".mp4") as output:
                 output.write(MP4)
                 name, = self.volume.temporaries()
-                intruder = self.volume.media / "intruder"
-                intruder.write_bytes(MP4)  # same bytes, another file
-                os.replace(intruder, self.volume.media / name)
+                if os.name == "nt":
+                    # A real replacement of a file that is open without delete sharing is refused
+                    # by Windows itself (#2347 review 4485170951); emulate what the name reports.
+                    swapped.append(name)
+                else:
+                    intruder = self.volume.media / "intruder"
+                    intruder.write_bytes(MP4)  # same bytes, another file
+                    os.replace(intruder, self.volume.media / name)
                 self.sink.adopt_for_job(output, "video/mp4", JOB)
         self.assertEqual(self.volume.indexed(), set())
         self.assertFalse((self.volume.media / f"{self.expected}.mp4").exists())
@@ -263,6 +279,44 @@ class JobKeyedRules(unittest.TestCase):
                 self.adopt()
         self.assertEqual(ExternalMediaSink(self.volume.media, self.volume.root).inspect_unindexed_assets(),
                          [f"{self.expected}.mp4"], "visible to the read-only inventory, never indexed")
+
+    def test_a_writer_that_fails_after_committing_the_index_does_not_unpublish(self):
+        # #2347 review 4485170944: register_asset replaced the index, then its lock cleanup raised.
+        real = sink_module.register_asset
+
+        def committed_then_failed(*args, **kwargs):
+            real(*args, **kwargs)
+            raise PermissionError(5, "lock cleanup failed")
+        with patch.object(sink_module, "register_asset", committed_then_failed):
+            asset_id = self.adopt()
+        self.assertEqual(asset_id, self.expected, "durably registered: reported as published")
+        self.assertEqual((self.volume.media / f"{asset_id}.mp4").read_bytes(), MP4, "never deleted")
+        self.assertEqual(self.volume.indexed(), {asset_id})
+        self.assertEqual(self.volume.temporaries(), [])
+
+    def test_an_unknowable_registration_keeps_the_asset_for_reconciliation(self):
+        def failed(*args, **kwargs):
+            raise OSError("index write failed")
+
+        def unreadable(root):
+            raise sink_module.GalleryUnavailable("invalid_index")
+        with patch.object(sink_module, "register_asset", failed), patch.object(sink_module, "_index", unreadable):
+            (self.volume.media / "gallery-index.json").write_text("[]")  # present, but cannot be read
+            with self.assertRaisesRegex(ArtifactSinkUnavailable, "gallery_registration_unknown_asset_kept"):
+                self.adopt()
+        self.assertTrue((self.volume.media / f"{self.expected}.mp4").exists(), "kept: it may be indexed")
+
+    def test_a_conflicting_row_for_the_id_is_not_taken_as_ours(self):
+        def failed(*args, **kwargs):
+            raise OSError("index write failed")
+
+        def other_row(root):
+            return [{"id": self.expected, "kind": "video", "mime_type": "video/mp4", "size_bytes": 1}]
+        with patch.object(sink_module, "register_asset", failed), patch.object(sink_module, "_index", other_row):
+            (self.volume.media / "gallery-index.json").write_text("[]")
+            with self.assertRaisesRegex(ArtifactSinkUnavailable, "gallery_registration_unknown_asset_kept"):
+                self.adopt()
+        self.assertTrue((self.volume.media / f"{self.expected}.mp4").exists())
 
     def test_no_write_reaches_the_published_file_after_adoption(self):
         with self.sink.staged(".mp4") as output:

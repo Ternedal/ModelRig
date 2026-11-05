@@ -45,7 +45,7 @@ import secrets
 import stat
 from pathlib import Path
 
-from .media_gallery_catalog import GalleryUnavailable
+from .media_gallery_catalog import GalleryUnavailable, _index
 from .media_gallery_index_writer import register_asset
 from .media_gallery_store import ExternalMediaSink
 from .media_generation_contract import ArtifactSinkUnavailable, MAX_ARTIFACT_BYTES
@@ -203,6 +203,15 @@ class ExternalStagedVideoSink:
             # Close first: on Windows an open descriptor without delete sharing blocks the
             # removal of every name of that file, the new link included (#2347 review 4485110252).
             self._close(ticket)
+            # The writer can fail AFTER it committed the index (e.g. removing its lock), so the
+            # exception alone does not say whether the row exists (#2347 review 4485170944).
+            state = self._index_state(asset_id, ticket.written)
+            if state is True:  # durably registered: the asset is published, keep and report it
+                ticket.adopted = True
+                self._remove_if_ours(ticket.path, ticket.dev, ticket.ino)
+                return asset_id
+            if state is None:  # unknowable: never delete what may be indexed; reconcile instead
+                raise ArtifactSinkUnavailable("gallery_registration_unknown_asset_kept") from exc
             if created and not self._remove_if_ours(destination, ticket.dev, ticket.ino):
                 # The rollback did not happen: an unindexed asset is left for the read-only
                 # inventory (ExternalMediaSink.inspect_unindexed_assets) -- say so, never succeed.
@@ -214,6 +223,22 @@ class ExternalStagedVideoSink:
         return asset_id
 
     # --- helpers ----------------------------------------------------------------------------
+    def _index_state(self, asset_id: str, size: int):
+        """True if the gallery index holds exactly this video row, False if it holds no row for
+        the id, None if that cannot be established (unreadable index, conflicting row, no volume)."""
+        try:
+            root = self._media._root()
+            index = root / "gallery-index.json"
+            entries = _index(root) if index.exists() or index.is_symlink() else []
+        except (ArtifactSinkUnavailable, GalleryUnavailable, OSError, ValueError):
+            return None
+        row = next((item for item in entries if item.get("id") == asset_id), None)
+        if row is None:
+            return False
+        if (row.get("kind"), row.get("mime_type"), row.get("size_bytes")) == ("video", MIME_TYPE, size):
+            return True
+        return None
+
     def _same_content(self, destination: Path, ticket: _Ticket) -> bool:
         """An idempotent retry: the existing destination is a regular file with our exact bytes."""
         if destination.is_symlink():
