@@ -1,0 +1,144 @@
+"""Contract tests for the read-only media reconciliation command."""
+import importlib.util
+import json
+import sqlite3
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location("media_reconcile_cli", ROOT / "scripts" / "media_reconcile.py")
+cli = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(cli)
+
+
+class MediaReconcileCliTests(unittest.TestCase):
+    def test_read_only_store_cannot_write_or_create_schema(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "jobs.sqlite"
+            with sqlite3.connect(db_path) as db:
+                db.execute("CREATE TABLE image_jobs (id TEXT)")
+                db.execute("INSERT INTO image_jobs VALUES ('original')")
+            before = db_path.read_bytes()
+            store = cli.ReadOnlyImageJobStore(db_path)
+            with store._db() as db:
+                self.assertEqual(db.execute("SELECT id FROM image_jobs").fetchone()[0],
+                                 "original")
+                with self.assertRaises(sqlite3.OperationalError):
+                    db.execute("INSERT INTO image_jobs VALUES ('new')")
+                with self.assertRaises(sqlite3.OperationalError):
+                    db.execute("CREATE TABLE diagnostic_mutation (id TEXT)")
+            self.assertEqual(db_path.read_bytes(), before)
+
+    def test_snapshot_keeps_stable_rows_across_external_commits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "jobs.sqlite"
+            with sqlite3.connect(db_path) as db:
+                db.execute("PRAGMA journal_mode=WAL")
+                db.execute("CREATE TABLE image_jobs (id TEXT PRIMARY KEY)")
+                db.executemany("INSERT INTO image_jobs VALUES (?)", [("a",), ("b",)])
+            store = cli.ReadOnlyImageJobStore(db_path)
+            with store.snapshot():
+                with store._db() as db:
+                    first = [row[0] for row in db.execute(
+                        "SELECT id FROM image_jobs ORDER BY id").fetchall()]
+                with sqlite3.connect(db_path) as writer:
+                    writer.execute("INSERT INTO image_jobs VALUES ('c')")
+                with store._db() as db:
+                    second = [row[0] for row in db.execute(
+                        "SELECT id FROM image_jobs ORDER BY id").fetchall()]
+            self.assertEqual(first, ["a", "b"])
+            self.assertEqual(second, first)
+            with store._db() as db:
+                self.assertEqual([row[0] for row in db.execute(
+                    "SELECT id FROM image_jobs ORDER BY id").fetchall()],
+                    ["a", "b", "c"])
+
+    def test_all_pages_aggregates_conflicts_and_outputs_every_row(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "jobs.sqlite"
+            sqlite3.connect(db_path).close()
+            pages = [
+                [{"job_id": "a", "status": "consistent"}],
+                [{"job_id": "b", "status": "media_conflict"}],
+                [],
+            ]
+            with patch.object(cli, "ExternalMediaSink"), \
+                 patch.object(cli, "inspect_generation_consistency",
+                              side_effect=pages) as inspect:
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    code = cli.main(["--jobs-db", str(db_path),
+                                     "--volume-root", tmp, "--media-root", tmp,
+                                     "--limit", "1", "--all", "--fail-on-conflict"])
+            self.assertEqual(code, 1)
+            self.assertEqual([json.loads(line)["job_id"] for line in
+                              output.getvalue().splitlines()], ["a", "b"])
+            self.assertEqual([call.kwargs["offset"] for call in inspect.call_args_list],
+                             [0, 1, 2])
+
+    def test_conflict_exit_code_is_opt_in_and_preserves_jsonl(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "jobs.sqlite"
+            sqlite3.connect(db_path).close()
+            args = ["--jobs-db", str(db_path), "--volume-root", tmp,
+                    "--media-root", tmp]
+            with patch.object(cli, "ExternalMediaSink"), \
+                 patch.object(cli, "inspect_generation_consistency",
+                              return_value=[{"job_id": "j", "status": "media_conflict"}]):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(cli.main(args), 0)
+                self.assertEqual(len(output.getvalue().splitlines()), 1)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(cli.main(args + ["--fail-on-conflict"]), 1)
+
+    def test_consistent_receipt_does_not_trigger_conflict_exit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "jobs.sqlite"
+            sqlite3.connect(db_path).close()
+            with patch.object(cli, "ExternalMediaSink"), \
+                 patch.object(cli, "inspect_generation_consistency",
+                              return_value=[{"job_id": "j", "status": "consistent"}]), \
+                 patch("sys.stdout"):
+                self.assertEqual(cli.main(["--jobs-db", str(db_path),
+                                           "--volume-root", tmp,
+                                           "--media-root", tmp,
+                                           "--fail-on-conflict"]), 0)
+
+    def test_corrupt_database_is_reported_without_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "corrupt.sqlite"
+            db_path.write_bytes(b"not a sqlite database")
+            with patch.object(cli, "ExternalMediaSink") as sink_class, \
+                 patch.object(cli, "inspect_generation_consistency") as inspect, \
+                 patch("sys.stderr"):
+                sink_class.return_value = object()
+                # Force a real read on the strict read-only connection.
+                def read_db(jobs, sink, **kwargs):
+                    with jobs._db() as db:
+                        db.execute("SELECT * FROM image_jobs").fetchall()
+                inspect.side_effect = read_db
+                code = cli.main(["--jobs-db", str(db_path),
+                                 "--volume-root", tmp, "--media-root", tmp])
+            self.assertEqual(code, 2)
+            self.assertEqual(db_path.read_bytes(), b"not a sqlite database")
+
+    def test_missing_database_is_rejected_without_creation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "missing.sqlite"
+            with patch("sys.stderr"):
+                with self.assertRaises(SystemExit) as error:
+                    cli.main(["--jobs-db", str(db_path),
+                              "--volume-root", tmp, "--media-root", tmp])
+            self.assertEqual(error.exception.code, 2)
+            self.assertFalse(db_path.exists())
+
+
+if __name__ == "__main__":
+    unittest.main()
