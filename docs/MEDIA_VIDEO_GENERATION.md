@@ -95,6 +95,7 @@ An actor with write access to the volume could delete files directly anyway.
 - The template is operator-installed API-format JSON, and the profile pins its SHA-256.
 - Seven value slots: `__KALIV_VIDEO_{PROMPT,WIDTH,HEIGHT,FPS,FRAMES,STEPS,SEED}__`.
   - Each must appear exactly once, as a whole input value, under allowlisted input names.
+  - An eighth, `__KALIV_VIDEO_IMAGE__`, is optional and decides the template's task; see "Image-to-video, the generator side" below.
   - A marker anywhere else refuses the template: inside a longer string, in a list, as an input name, as a class or in `_meta`.
 - A prompt can never become graph structure.
 
