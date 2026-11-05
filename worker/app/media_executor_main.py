@@ -33,7 +33,7 @@ import time
 from pathlib import Path
 from typing import Callable, Mapping
 
-from .gpu_lease import GpuLeaseError, device_uuid_map, lease_dir_from_env, parse_cuda_device
+from .gpu_lease import GpuLeaseError, check_lease_dir, device_uuid_map, lease_dir_from_env, parse_cuda_device
 from .image_job_store import ImageJobError, ImageJobStore
 from .media_executor import EXIT_CONFIG, EXIT_SINK_UNAVAILABLE, ExecutorConfigError, MediaExecutor
 from .media_gallery_store import ExternalMediaSink
@@ -75,6 +75,7 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
         index = parse_cuda_device(device)
         gpu_uuid = device_uuid_map(env).get(index)
         lease_dir = lease_dir_from_env(env)
+        check_lease_dir(lease_dir)  # relative, missing, symlinked or writable by others: 78, not exit 1 later
     except GpuLeaseError as exc:
         raise ExecutorConfigError(str(exc)) from None
     if gpu_uuid is None:
@@ -90,9 +91,12 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
     if not mine:
         raise ExecutorConfigError(f"no enabled profile allows {device}")
     sink = ExternalMediaSink(media_root, volume_root)
-    sink._root()  # ArtifactSinkUnavailable now (exit 75) rather than at the first job
     try:
-        store = ImageJobStore(job_db)
+        # The volume is verified before the job database is first touched (the store's constructor
+        # calls the guard first: exit 75, nothing created) and again before EVERY later access, so a
+        # volume that goes away while the executor runs stops it before it claims another job,
+        # instead of rendering one it cannot publish (#2337 review 4477083808).
+        store = ImageJobStore(job_db, volume_guard=sink._root)
     except ImageJobError as exc:
         raise ExecutorConfigError(str(exc)) from None
     try:
@@ -118,7 +122,11 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
         print("media executor: the external media volume is not available", file=sys.stderr)
         return EXIT_SINK_UNAVAILABLE
     poll = min(max(args.poll_seconds, 0.1), 30.0)
-    return executor.run(idle_sleep=lambda: time.sleep(poll))
+    try:
+        return executor.run(idle_sleep=lambda: time.sleep(poll))
+    except GpuLeaseError as exc:  # the lease directory became unusable: configuration, not a crash
+        print(f"media executor: GPU lease configuration refused: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
 
 
 if __name__ == "__main__":

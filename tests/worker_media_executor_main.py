@@ -93,6 +93,45 @@ class EntryPointTests(unittest.TestCase):
             self.assertEqual(main(["--device", "cuda:0"], missing_parent), EXIT_CONFIG)
         self.assertFalse((self.tmp / "no-such-dir").exists(), "a missing directory is never created")
 
+    def test_an_unusable_lease_directory_is_a_config_error_not_a_crash(self):
+        # #2337 review 4477083816: it used to pass configuration and fail at the first lock (exit 1,
+        # restarted forever). Each case must be 78, which the supervisor never restarts.
+        (self.tmp / "open-lease").mkdir()
+        os.chmod(self.tmp / "open-lease", 0o777)
+        (self.tmp / "lease-link").symlink_to(self.tmp / "lease")
+        for value in ("relative/lease", str(self.tmp / "no-such-lease"), str(self.tmp / "lease-link"),
+                      str(self.tmp / "open-lease")):
+            with self.subTest(value=value), patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+                self.assertEqual(main(["--device", "cuda:0"], {**self.env, "KALIV_GPU_LEASE_DIR": value}), EXIT_CONFIG)
+        result = self.run_entry({**self.env, "KALIV_GPU_LEASE_DIR": "relative/lease"})  # the real process
+        self.assertEqual(result.returncode, EXIT_CONFIG, result.stderr)
+
+    def test_a_lease_error_from_the_running_executor_is_78(self):
+        class Breaks:
+            def run(self, **kwargs):
+                from app.gpu_lease import GpuLeaseError
+                raise GpuLeaseError("lease directory must not be group- or world-writable")
+        with patch("app.media_executor_main.build_from_env", return_value=Breaks()):
+            self.assertEqual(main(["--device", "cuda:0"], self.env), EXIT_CONFIG)
+
+    def test_a_volume_lost_while_running_stops_the_executor_before_the_next_claim(self):
+        # #2337 review 4477083808: the volume is checked before every job-database access.
+        from app.image_job_store import ImageJobStore
+        mounted = [True]
+        with patch("app.media_gallery_catalog.os.path.ismount", side_effect=lambda p: mounted[0]):
+            store = ImageJobStore(self.env["KALIV_MEDIA_JOB_DB"])
+            executor = build_from_env("cuda:0", self.env,
+                                      adapter_factory=lambda p: FakeAdapter(p, self.env["KALIV_GPU_LEASE_DIR"]))
+            jobs = []
+
+            def unplug_while_idle():  # the executor started and went idle; then a job arrives and the disk goes
+                jobs.append(store.submit("anders", "a red bicycle", profile_id="sdxl-a",
+                                         params={"width": 1024, "height": 1024, "steps": 20})["job_id"])
+                mounted[0] = False
+            self.assertEqual(executor.run(max_steps=3, idle_sleep=unplug_while_idle), EXIT_SINK_UNAVAILABLE)
+        self.assertEqual(len(jobs), 1, "it was running (one idle tick) before the volume went")
+        self.assertEqual(store.get(jobs[0], "anders")["state"], "queued", "not claimed, not rendered")
+
     def test_gpu_configuration_is_required(self):
         for change in ({"KALIV_GPU_DEVICE_UUIDS": ""}, {"CUDA_DEVICE_ORDER": ""}, {"KALIV_GPU_LEASE_DIR": ""}):
             with self.subTest(change=change):

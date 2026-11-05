@@ -78,7 +78,7 @@ Each executor runs in the supervisor's process tree (a Windows Job Object), so s
 
 The supervisor reads them the way the children see them: the env file (`modelrig.env`) wins over its own environment.
 
-The entry point checks the configuration before it touches anything. The volume is verified before the job database is opened, and a missing directory is never created.
+The entry point checks the configuration before it touches anything, including the GPU lease directory: one that is relative, missing, a symlink or writable by others is exit 78, not a crash. The volume is verified before the job database is first opened and again before every later database access, so a volume that goes away while the executor runs stops it (exit 75) before it claims another job (#2337 reviews 4477083816, 4477083808). A missing directory is never created.
 
 ## Exit codes and the supervisor's policy
 
