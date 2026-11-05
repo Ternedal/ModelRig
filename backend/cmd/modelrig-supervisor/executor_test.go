@@ -402,3 +402,27 @@ func TestExecutorChild_ARunningExecutorIsNeverBouncedForHealth(t *testing.T) {
 		t.Fatalf("a live executor was restarted: %v (fails %d)", restarted, fails[e.name()])
 	}
 }
+
+// The shipped example documents the executor but must leave it off: a copied example file
+// never starts a GPU process.
+func TestExecutorConfig_TheShippedEnvExampleKeepsItOff(t *testing.T) {
+	env, err := loadEnvFile(filepath.Join("..", "..", "..", "deploy", "modelrig.env.example"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err := executorConfigFrom(env, noEnv); cfg != nil || err != nil {
+		t.Fatalf("the example must keep the media executor off: %+v %v", cfg, err)
+	}
+	// ...and every documented executor variable is present (commented out) in it.
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "deploy", "modelrig.env.example"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{executorSwitchEnv, executorDevicesEnv, executorPythonEnv, executorAppDirEnv,
+		"KALIV_MEDIA_JOB_DB", "KALIV_MEDIA_VOLUME_ROOT", "KALIV_MEDIA_ROOT", "KALIV_MEDIA_PROFILE_DIR",
+		"KALIV_GPU_LEASE_DIR", "KALIV_GPU_DEVICE_UUIDS", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"} {
+		if !strings.Contains(string(raw), "# "+key+"=") {
+			t.Errorf("%s is not documented (commented out) in deploy/modelrig.env.example", key)
+		}
+	}
+}
