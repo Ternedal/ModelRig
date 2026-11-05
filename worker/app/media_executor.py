@@ -73,6 +73,7 @@ GPU_RETAINED = "gpu_memory_retained"
 GPU_BUSY = "gpu_busy"
 SOURCE_UNAVAILABLE = "source_image_unavailable"  # the job's source image: absent, invalid or not the owner's
 _REQUEST_PARAMS = ("width", "height", "steps", "seed", "input_asset_id", "frames")
+PURGE_INTERVAL_S = 3600.0  # prompt retention runs at start, then at most hourly while idle
 
 
 class ExecutorConfigError(RuntimeError):
@@ -117,6 +118,7 @@ class MediaExecutor:
         self.instance = f"{self.gpu_uuid}:{secrets.token_hex(8)}"
         self.adapter = None
         self.last_used = clock()
+        self._next_purge = clock()
         self._lock = None
         self._retained: list = []  # adapters whose unload failed: kept alive (lease held) until exit
         self.events: list[str] = []  # lifecycle record for logs and tests; never prompt text
@@ -129,7 +131,17 @@ class MediaExecutor:
         self._lock = acquire_executor_lock(self.gpu_uuid, lease_dir=self.lease_dir)  # ExecutorAlreadyRunning
         recovered = self.store.recover_gpu(self.gpu_uuid, self.instance)
         self.events.append(f"recovered:{recovered}")
+        self.purge_prompts()
         return recovered
+
+    def purge_prompts(self) -> None:
+        """Prompt retention (PROMPT_RETENTION_S), at start and then at most once an hour while
+        idle. Best effort: a failure is recorded and retried later, never fatal to the GPU work."""
+        self._next_purge = self.clock() + PURGE_INTERVAL_S
+        try:
+            self.events.append(f"purged:{self.store.purge_prompts()}")
+        except Exception as exc:
+            self.events.append(f"purge_failed:{type(exc).__name__}")
 
     def _unload(self) -> None:
         adapter, self.adapter = self.adapter, None
@@ -311,6 +323,8 @@ class MediaExecutor:
             while max_steps is None or steps < max_steps:
                 steps += 1
                 if self.step() == "idle":
+                    if self.clock() >= self._next_purge:
+                        self.purge_prompts()
                     idle_sleep()
             self.shutdown()
             return EXIT_DONE
