@@ -12,7 +12,15 @@ output and report goes to --out, which must be on the verified media volume.
             volume, start the real entry point `python -m app.media_executor_main`,
             and prove: job completed and published job-keyed to the gallery, a second
             executor for the same GPU exits 73, idle unload frees the GPU while the
-            executor lives, and the lease is free after the executor is stopped
+            executor lives, and the lease is free after the executor is stopped.
+            Then prompt retention (#2340) on this volume with this Python's SQLite:
+            purged, and the prompt text is in neither the job DB nor its WAL nor
+            the executor logs
+  chatfirst G4, Anders' decision "chat first, media waits" (#2341), with a real Ollama
+            model holding the VRAM: the job is re-queued instead of failing, nothing
+            media stays on the GPU while it waits, Ollama keeps its model; then the
+            operator unloads Ollama and the same job completes. With --expect-expiry
+            nobody unloads Ollama and the job must fail gpu_unavailable after 10 min
   video     start the supervised ComfyUI, render one MP4, report cleanup; --hold keeps
             it loaded until the harness is killed (supervisor-kill test). With
             --expect-error a refusal at load() counts too (G3 pins: hash, lookup,
@@ -314,13 +322,141 @@ def run_executor(args, report: Report) -> None:
                      first.poll() is None and lease_state(gpu_uuid, lease_dir) == "free",
                      {"executor_exit": first.poll(), "idle_unload_s": args.idle_unload})
     finally:
-        if first.poll() is None:
-            first.terminate()  # as the supervisor does on stop; Windows: TerminateProcess
-            try:
-                first.wait(timeout=60)
-            except subprocess.TimeoutExpired:
-                first.kill()
+        stop(first)
         first_log.close()
+    report.check("lease free for other processes after the executor stopped", lease_state(gpu_uuid, lease_dir) == "free")
+    check_retention(store, db, args.prompt, Path(args.out).glob(f"executor-*-{stamp}.log"), report)
+
+
+def stop(proc) -> None:
+    if proc.poll() is None:
+        proc.terminate()  # as the supervisor does on stop; Windows: TerminateProcess
+        try:
+            proc.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+def check_retention(store, db: Path, prompt: str, logs, report: Report) -> None:
+    """#2340 on the rig: this Python's SQLite on this volume. A window of 0 purges every finished job
+    now; the 30-day default is the same code path with another cutoff."""
+    import sqlite3
+    needle = prompt.encode("utf-8")
+    files = lambda: [p for p in (db, Path(str(db) + "-wal")) if p.exists()]
+    report.data["sqlite_version"] = sqlite3.sqlite_version
+    before = any(needle in p.read_bytes() for p in files())
+    try:
+        purged = store.purge_prompts(older_than_s=0)
+    except Exception as exc:
+        report.check("retention: purge_prompts ran (secure_delete supported, scrub paid)", False,
+                     f"{type(exc).__name__}: {exc}")
+        return
+    report.check("retention: purge_prompts ran (secure_delete supported, scrub paid)", purged >= 1,
+                 {"purged": purged, "prompt_was_in_the_file_before": before})
+    left = [str(p) for p in files() if needle in p.read_bytes()]
+    report.check("retention: the prompt text is in neither the job DB nor its WAL", left == [], left)
+    in_logs = [str(p) for p in logs if needle in p.read_bytes()]
+    report.check("the prompt text is in no executor log", in_logs == [], in_logs)
+
+
+def free_vram_mib(gpu_uuid: str):
+    """Evidence only: nvidia-smi's free memory for this GPU, or None if it cannot be read."""
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=uuid,memory.free", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    for line in out.splitlines():
+        uuid, _, free = line.partition(",")
+        if uuid.strip() == gpu_uuid:
+            try:
+                return int(free.strip())
+            except ValueError:
+                return None
+    return None
+
+
+def ollama_ps():
+    """Evidence only: `ollama ps` output, or None if Ollama's CLI is not there."""
+    try:
+        return subprocess.run(["ollama", "ps"], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def run_chatfirst(args, report: Report) -> None:
+    """R12: G4 with a real Ollama model holding the VRAM (the operator loads it before the run)."""
+    from app.image_job_store import ImageJobStore
+    from app.media_gallery_store import ExternalMediaSink
+    profile, lease_dir, gpu_uuid = common(args)
+    if profile.modality != "image":
+        fail_usage("chatfirst qualifies the image path")
+    sink = ExternalMediaSink(args.media_root, args.volume_root)
+    sink._root()
+    need_mib = int((profile.resources.min_usable_gib + profile.resources.reserve_gib) * 1024)
+    free = free_vram_mib(gpu_uuid)
+    ps = ollama_ps()
+    report.data.update(profile=profile.profile_id, gpu_uuid=gpu_uuid, free_vram_mib_before=free,
+                       profile_needs_mib=need_mib, ollama_ps_before=ps)
+    report.check("precondition: free VRAM is below what the profile needs (Ollama holds it)",
+                 free is None or free < need_mib, {"free_mib": free, "needs_mib": need_mib})
+    if args.ollama_model:
+        report.check("precondition: Ollama has the model loaded", ps is not None and args.ollama_model in ps, ps)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    db = Path(args.out) / f"jobs-chatfirst-{stamp}.sqlite3"
+    env = dict(os.environ, PYTHONPATH=WORKER_PATH, PYTHONDONTWRITEBYTECODE="1", KALIV_MEDIA_EXECUTOR="1",
+               KALIV_MEDIA_JOB_DB=str(db), KALIV_MEDIA_ROOT=args.media_root,
+               KALIV_MEDIA_VOLUME_ROOT=args.volume_root, KALIV_MEDIA_PROFILE_DIR=args.profiles,
+               KALIV_MEDIA_IDLE_UNLOAD_S=str(int(args.idle_unload)))
+    store = ImageJobStore(str(db))
+    width, height = parse_size(args.size)
+    job = store.submit("qual", args.prompt, profile_id=profile.profile_id,
+                       params={"width": width, "height": height, "steps": args.steps, "seed": args.seed})["job_id"]
+    report.data["job_id"] = job
+    log = open(Path(args.out) / f"executor-chatfirst-{stamp}.log", "wb")
+    executor = subprocess.Popen([sys.executable, "-u", "-m", "app.media_executor_main", "--device", args.device],
+                                cwd=WORKER_PATH, env=env, stdout=log, stderr=subprocess.STDOUT)
+    report.data["pids"] = {"harness": os.getpid(), "executor": executor.pid}
+    try:
+        deadline, row = time.monotonic() + 180, None
+        while time.monotonic() < deadline and executor.poll() is None:
+            row = store.get(job, "qual")
+            if row.get("deferred_since") is not None or row["state"] in ("completed", "failed", "cancelled"):
+                break
+            time.sleep(1)
+        row = store.get(job, "qual")
+        report.check("the job was put back in the queue, not failed",
+                     row["state"] in ("queued", "running") and row.get("deferred_since") is not None
+                     and row.get("error") is None,
+                     {"state": row["state"], "error": row.get("error"), "deferred_since": row.get("deferred_since")})
+        report.check("the executor keeps running while the job waits", executor.poll() is None, executor.poll())
+        report.check("nothing media holds the GPU while the job waits", lease_state(gpu_uuid, lease_dir) == "free")
+        if args.ollama_model:
+            ps = ollama_ps()
+            report.check("Ollama still has its model (media never touched it)",
+                         ps is not None and args.ollama_model in ps, ps)
+        if args.expect_expiry:
+            limit = time.monotonic() + 600 + 120
+            while time.monotonic() < limit and store.get(job, "qual")["state"] != "failed":
+                time.sleep(5)
+            row = store.get(job, "qual")
+            report.check("after 10 minutes of waiting the job failed gpu_unavailable",
+                         (row["state"], row.get("error")) == ("failed", "gpu_unavailable"),
+                         {"state": row["state"], "error": row.get("error")})
+        else:
+            unload = f"ollama stop {args.ollama_model}" if args.ollama_model else "unload the Ollama model"
+            print(f"ACTION: within {int(args.wait_timeout)} s, in another window: {unload}", flush=True)
+            limit = time.monotonic() + args.wait_timeout
+            while time.monotonic() < limit and store.get(job, "qual")["state"] not in ("completed", "failed", "cancelled"):
+                time.sleep(2)
+            row = store.get(job, "qual")
+            report.check("once VRAM was free the same job completed",
+                         row["state"] == "completed" and row.get("asset_id") == sink.job_asset_id(job),
+                         {"state": row["state"], "error": row.get("error"), "asset_id": row.get("asset_id"),
+                          "free_vram_mib_after": free_vram_mib(gpu_uuid)})
+    finally:
+        stop(executor)
+        log.close()
     report.check("lease free for other processes after the executor stopped", lease_state(gpu_uuid, lease_dir) == "free")
 
 
@@ -378,7 +514,7 @@ def run_lease(args, report: Report) -> None:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("mode", choices=("image", "executor", "video", "lease", "pins"))
+    parser.add_argument("mode", choices=("image", "executor", "chatfirst", "video", "lease", "pins"))
     parser.add_argument("--repo", required=True, help="ModelRig worktree at the qualified head")
     parser.add_argument("--out", required=True, help="report/output folder on the media volume")
     parser.add_argument("--profiles", help="operator profile folder")
@@ -404,6 +540,10 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--timeout", type=float, default=900.0, help="executor: seconds to wait for the job")
     parser.add_argument("--pin", action="append", default=[], help="pins: a model file relative to models/ (repeat)")
     parser.add_argument("--revision", help="pins: the Hugging Face revision of the repackaged weights")
+    parser.add_argument("--ollama-model", help="chatfirst: the Ollama model holding the VRAM (checked with `ollama ps`)")
+    parser.add_argument("--wait-timeout", type=float, default=540.0,
+                        help="chatfirst: seconds to wait for the operator to unload Ollama (below the 600 s expiry)")
+    parser.add_argument("--expect-expiry", action="store_true", help="chatfirst: nobody unloads Ollama; expect gpu_unavailable")
     args = parser.parse_args(argv)
     global WORKER_PATH
     WORKER_PATH = str(Path(args.repo, "worker").resolve())
@@ -411,13 +551,13 @@ def main(argv: list[str]) -> int:
     out = Path(args.out)
     if not out.is_dir():
         fail_usage("--out must be an existing folder on the media volume")
-    if args.mode in ("image", "executor", "video") and not (args.profiles and args.profile):
+    if args.mode in ("image", "executor", "chatfirst", "video") and not (args.profiles and args.profile):
         fail_usage("--profiles and --profile are required")
     if args.mode == "video" and not all((args.comfy_python, args.comfy_main, args.comfy_dirs, args.templates,
                                          args.volume_root)):
         fail_usage("video needs --comfy-python --comfy-main --comfy-dirs --templates --volume-root")
-    if args.mode == "executor" and not (args.volume_root and args.media_root):
-        fail_usage("executor needs --volume-root (the mounted volume, e.g. E:\\) and --media-root")
+    if args.mode in ("executor", "chatfirst") and not (args.volume_root and args.media_root):
+        fail_usage(f"{args.mode} needs --volume-root (the mounted volume, e.g. E:\\) and --media-root")
     if args.mode == "pins" and not (args.comfy_main and args.templates and args.profiles and args.pin
                                     and args.revision):
         fail_usage("pins needs --comfy-main --templates --profiles --pin (repeat) --revision")
@@ -433,8 +573,8 @@ def main(argv: list[str]) -> int:
     head = subprocess.run(["git", "-C", args.repo, "rev-parse", "HEAD"], capture_output=True, text=True)
     report.data["head"] = head.stdout.strip() or None
     try:
-        {"image": run_image, "executor": run_executor, "video": run_video, "lease": run_lease,
-         "pins": run_pins}[args.mode](args, report)
+        {"image": run_image, "executor": run_executor, "chatfirst": run_chatfirst, "video": run_video,
+         "lease": run_lease, "pins": run_pins}[args.mode](args, report)
     except SystemExit:
         raise
     except Exception as exc:
