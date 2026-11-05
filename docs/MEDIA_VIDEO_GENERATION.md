@@ -3,7 +3,8 @@
 **Status:** default-off and not wired into the worker. Nothing has been proven on the rig.
 **Ownership (6490545753):**
 - Claude owns the supervisor, the adapter, the template binding and the profiles.
-- ChatGPT owns the storage side (`StagedFileArtifactSink`), the gallery and the routes.
+- ChatGPT owns the storage side (`ExternalMediaSink`, the gallery index), the gallery and the routes.
+- The staged video sink (`ExternalStagedVideoSink`) is Claude's by Anders' work order 6667100037. It composes ChatGPT's storage code without changing it (6667142387).
 
 Design: #2296 6493077060. Prototype findings: 6493971744. Resident lock: 6495721654 and 6496114257. Seam: 6494148463.
 
@@ -89,6 +90,23 @@ An actor with write access to the volume could delete files directly anyway.
 - a swapped-in file survives;
 - the restore never overwrites;
 - an open file is not captured.
+
+## Staged video sink (`ExternalStagedVideoSink`, not wired)
+
+`worker/app/media_staged_video_sink.py` implements the seam (`StagedFileArtifactSink` + `JobKeyedStagedSink`) on the verified external volume. **Nothing constructs it yet.** The executor entry point still refuses video profiles (exit 78) until G1 (the production `VerifiedMediaVolume`), #2339 and a physical rig test are in.
+
+- **Reuses ChatGPT's code unchanged:** `ExternalMediaSink._root()` (volume and root), `job_asset_id()` (the same id an image of the same job would get) and `register_asset()` (the gallery index).
+- **Staging.** `staged(".mp4")` verifies the root, then creates `.kaliv-<16 hex>.tmp` in the media root (`O_EXCL`, `O_NOFOLLOW`, `0600`). That is the sink's own temporary naming, so its read-only temp inventory lists a crash leftover. The handle has `write`/`flush` only, and bytes past `max_bytes` are not written.
+- **Adoption.** `adopt_for_job` / `adopt` take one attempt per live handle: `video/mp4` only, 12 bytes to `max_bytes`, `ftyp` at bytes 4–8. Then:
+  - fsync, a root re-check, and the staged name must still be this sink's file at the written size;
+  - a sibling `.png` is a conflict;
+  - an existing destination with identical bytes is an idempotent retry; anything else at that name, including a symlink, is a conflict;
+  - otherwise `os.link` (atomic, never overwrites), and the new name must be our file;
+  - then `register_asset`. If it fails, only the link this call made is removed.
+  - On success the descriptor is closed at once (the published file shares its inode) and the staged name is removed.
+- **Leaving the context** removes the staged name if it is still ours. With the volume no longer verified, it touches nothing.
+- **No logging.**
+- **Stated limit:** the identity checks and the unlink are separate calls, so an actor with write access to the media root could race them. The media root is operator-only (R1's ACL).
 
 ## Template rules
 
