@@ -26,10 +26,12 @@ Rules (tests/worker_media_staged_video_sink.py, plus the seam's conformance suit
     * an existing destination with identical bytes is an idempotent retry (same id);
       different bytes, or anything that is not a regular file, is a conflict;
     * otherwise os.link() -- atomic, never overwrites -- and the new name must be our file;
-    * register_asset(); if it fails, the link THIS call created is removed (identity-checked)
-      and nothing is reported as published.
-  On success the descriptor is closed at once (the published file shares its inode) and the
-  staged name is removed.
+    * register_asset(). If it raises, the index decides: our exact row means published
+      (the writer can fail after committing); otherwise nothing is reported as published and
+      the asset is KEPT unindexed (never unlinked: another adoption may be indexing it) for
+      ExternalMediaSink.inspect_unindexed_assets and an identical retry.
+  The descriptor is closed at once (the published file shares its inode) and the staged name
+  is removed. This module never unlinks anything but its own staged name.
 - Leaving the context always removes the staged name if it is still this sink's file; with the
   volume no longer verified it touches nothing.
 - No logging at all: no prompt, path or job key ever leaves this module except in exceptions
@@ -206,50 +208,26 @@ class ExternalStagedVideoSink:
             # The writer can fail AFTER it committed the index (e.g. removing its lock), so the
             # exception alone does not say whether the row exists (#2347 review 4485170944).
             state = self._index_state(asset_id, ticket.written)
-            if state is False and created:
-                # Decide and roll back only while holding the gallery's own registration lock: an
-                # identical adoption of the same job may be registering this very link right now
-                # (#2347 review 4485232710). Inode ownership alone does not make the rollback safe.
-                state = self._rollback_under_registration_lock(root, destination, asset_id, ticket)
             if state is True:  # durably registered: the asset is published, keep and report it
                 ticket.adopted = True
                 self._remove_if_ours(ticket.path, ticket.dev, ticket.ino)
                 return asset_id
-            if state is None:  # unknowable: never delete what may be indexed; reconcile instead
+            # Never roll the published name back. register_asset validates the file BEFORE it
+            # takes its lock, so an identical adoption of the same job can have validated this very
+            # file and be about to index it: any unlink here could leave a row without a file
+            # (#2347 reviews 4485232710, 4485290339). The asset stays unindexed -- invisible in the
+            # gallery, listed by ExternalMediaSink.inspect_unindexed_assets for reconciliation, and
+            # adopted by an identical retry -- exactly as ExternalMediaSink.publish_and_register_for_job
+            # leaves an image whose registration failed.
+            if state is None:
                 raise ArtifactSinkUnavailable("gallery_registration_unknown_asset_kept") from exc
-            if state == "left":
-                # The rollback did not happen: an unindexed asset is left for the read-only
-                # inventory (ExternalMediaSink.inspect_unindexed_assets) -- say so, never succeed.
-                raise ArtifactSinkUnavailable("gallery_registration_failed_asset_left_unindexed") from exc
-            raise ArtifactSinkUnavailable("gallery_registration_failed") from exc
+            raise ArtifactSinkUnavailable("gallery_registration_failed_asset_left_unindexed") from exc
         ticket.adopted = True
         self._close(ticket)  # the published file shares this inode: no write may follow
         self._remove_if_ours(ticket.path, ticket.dev, ticket.ino)
         return asset_id
 
     # --- helpers ----------------------------------------------------------------------------
-    def _rollback_under_registration_lock(self, root: Path, destination: Path, asset_id: str, ticket: _Ticket):
-        """Take the gallery index writer's lock (same file, same O_EXCL protocol, never stolen),
-        re-read the index and remove our link only if there is still no row for it.
-        Returns True (published meanwhile), None (lock busy or index unknowable: keep the asset),
-        False (rolled back) or "left" (no row, but the link could not be removed)."""
-        lock = root / ".gallery-index.lock"
-        try:
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0), 0o600)
-        except OSError:
-            return None  # a registration is in progress (or a stale lock): it may index this asset
-        try:
-            mine = os.fstat(fd)
-        finally:
-            os.close(fd)
-        try:
-            state = self._index_state(asset_id, ticket.written)
-            if state is not False:
-                return state
-            return False if self._remove_if_ours(destination, ticket.dev, ticket.ino) else "left"
-        finally:
-            self._remove_if_ours(lock, mine.st_dev, mine.st_ino)
-
     def _index_state(self, asset_id: str, size: int):
         """True if the gallery index holds exactly this video row, False if it holds no row for
         the id, None if that cannot be established (unreadable index, conflicting row, no volume)."""
@@ -314,23 +292,19 @@ class ExternalStagedVideoSink:
             fd, ticket.fd = ticket.fd, None
             os.close(fd)
 
-    def _remove_if_ours(self, path: Path, dev: int, ino: int) -> bool:
-        """Unlink path only if it is still the given file, on the still verified volume.
-        True when that file no longer has this name; False when it was left in place."""
+    def _remove_if_ours(self, path: Path, dev: int, ino: int) -> None:
+        """Unlink path only if it is still the given file, on the still verified volume. Only ever
+        called for this sink's own staged name."""
         try:
             self._media._root()
         except ArtifactSinkUnavailable:
-            return False  # unmounted or replaced: touch nothing on whatever is there now
+            return  # unmounted or replaced: touch nothing on whatever is there now
         try:
             info = os.lstat(path)
-        except FileNotFoundError:
-            return True
         except OSError:
-            return False
-        if not stat.S_ISREG(info.st_mode) or (info.st_dev, info.st_ino) != (dev, ino):
-            return True  # the name is another file now: ours is not there, and theirs is kept
-        try:
-            os.unlink(path)
-        except OSError:
-            return False  # left for the read-only inventories; never reported as published
-        return True
+            return
+        if stat.S_ISREG(info.st_mode) and (info.st_dev, info.st_ino) == (dev, ino):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass  # left for the read-only temp inventory; never reported as published

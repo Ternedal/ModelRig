@@ -102,7 +102,11 @@ An actor with write access to the volume could delete files directly anyway.
   - a sibling `.png` is a conflict;
   - an existing destination with identical bytes is an idempotent retry; anything else at that name, including a symlink, is a conflict;
   - otherwise `os.link` (atomic, never overwrites), and the new name must be our file;
-  - then `register_asset`. If it fails, only the link this call made is removed.
+  - then `register_asset`. If it raises, the index decides:
+    - our exact row means the writer failed after committing, so the asset is published;
+    - otherwise nothing is reported as published, and the asset is **kept** unindexed, never unlinked. `register_asset` validates the file before it takes its lock, so an identical adoption may be about to index it (#2347 reviews 4485232710, 4485290339).
+    - The kept asset is listed by `inspect_unindexed_assets` for reconciliation, and an identical retry adopts it. This matches what `publish_and_register_for_job` does with an image.
+  - This module never unlinks anything except its own staged name.
   - On success the descriptor is closed at once (the published file shares its inode) and the staged name is removed.
 - **Leaving the context** removes the staged name if it is still ours. With the volume no longer verified, it touches nothing.
 - **No logging.**

@@ -219,24 +219,24 @@ class JobKeyedRules(unittest.TestCase):
         self.volume.mounted = True
         self.assertEqual(len(self.volume.temporaries()), 1, "left for the read-only inventory, not touched")
 
-    def test_a_failed_registration_removes_only_the_link_this_call_made(self):
+    def test_a_failed_registration_keeps_the_asset_unindexed_and_says_so(self):
         def failing(*args, **kwargs):
             raise OSError("index write failed")
         with patch.object(sink_module, "register_asset", failing):
-            with self.assertRaisesRegex(ArtifactSinkUnavailable, "gallery_registration_failed"):
+            with self.assertRaisesRegex(ArtifactSinkUnavailable, "gallery_registration_failed_asset_left_unindexed"):
                 self.adopt()
-        self.assertFalse((self.volume.media / f"{self.expected}.mp4").exists())
+        destination = self.volume.media / f"{self.expected}.mp4"
+        self.assertEqual(destination.read_bytes(), MP4, "kept: never unlinked")
+        self.assertEqual(self.volume.indexed(), set(), "not published: invisible in the gallery")
+        self.assertEqual(ExternalMediaSink(self.volume.media, self.volume.root).inspect_unindexed_assets(),
+                         [f"{self.expected}.mp4"], "listed for reconciliation")
         self.assertEqual(self.volume.temporaries(), [])
-        # A retry whose destination already existed (a crash after the link) keeps that file.
-        first = self.adopt()
-        self.volume.media.joinpath("gallery-index.json").unlink()  # as if the index write was lost
-        with patch.object(sink_module, "register_asset", failing):
-            with self.assertRaises(ArtifactSinkUnavailable):
-                self.adopt()
-        self.assertTrue((self.volume.media / f"{first}.mp4").exists(), "a pre-existing asset is never removed")
+        # An identical retry adopts it.
+        self.assertEqual(self.adopt(sink=self.volume.sink(max_bytes=4096)), self.expected)
+        self.assertEqual(self.volume.indexed(), {self.expected})
 
-    def test_a_failed_registration_closes_the_descriptor_before_the_rollback(self):
-        # #2347 review 4485110252: on Windows an open descriptor blocks deleting the new link.
+    def test_a_failed_registration_still_cleans_the_staged_name_under_windows_rules(self):
+        # #2347 review 4485110252: on Windows an open descriptor blocks deleting any name of the file.
         # Stand in for that platform rule everywhere: unlinking a file whose descriptor is open fails.
         open_inodes = {}
         real_open, real_close, real_unlink = os.open, os.close, os.unlink
@@ -259,26 +259,9 @@ class JobKeyedRules(unittest.TestCase):
             raise OSError("index write failed")
         with patch.object(sink_module.os, "open", tracking_open), patch.object(sink_module.os, "close", tracking_close), \
                 patch.object(sink_module.os, "unlink", windows_like_unlink), patch.object(sink_module, "register_asset", failing):
-            with self.assertRaisesRegex(ArtifactSinkUnavailable, "^gallery_registration_failed$"):
-                self.adopt()
-        self.assertFalse((self.volume.media / f"{self.expected}.mp4").exists(), "rolled back")
-        self.assertEqual(self.volume.temporaries(), [])
-
-    def test_a_rollback_that_cannot_happen_is_reported_as_such(self):
-        real_unlink = os.unlink
-
-        def refuse_the_destination(path, *args, **kwargs):
-            if str(path).endswith(".mp4"):
-                raise PermissionError(5, "Access is denied")
-            return real_unlink(path, *args, **kwargs)
-
-        def failing(*args, **kwargs):
-            raise OSError("index write failed")
-        with patch.object(sink_module.os, "unlink", refuse_the_destination), patch.object(sink_module, "register_asset", failing):
             with self.assertRaisesRegex(ArtifactSinkUnavailable, "gallery_registration_failed_asset_left_unindexed"):
                 self.adopt()
-        self.assertEqual(ExternalMediaSink(self.volume.media, self.volume.root).inspect_unindexed_assets(),
-                         [f"{self.expected}.mp4"], "visible to the read-only inventory, never indexed")
+        self.assertEqual(self.volume.temporaries(), [], "the staged name is removed once the descriptor is closed")
 
     def test_a_writer_that_fails_after_committing_the_index_does_not_unpublish(self):
         # #2347 review 4485170944: register_asset replaced the index, then its lock cleanup raised.
@@ -328,7 +311,7 @@ class JobKeyedRules(unittest.TestCase):
             lock.write_bytes(b"")  # the other adoption is inside register_asset
             raise sink_module.GalleryUnavailable("gallery_index_locked")
         with patch.object(sink_module, "register_asset", other_adopter_holds_the_lock):
-            with self.assertRaisesRegex(ArtifactSinkUnavailable, "gallery_registration_unknown_asset_kept"):
+            with self.assertRaisesRegex(ArtifactSinkUnavailable, "gallery_registration_failed_asset_left_unindexed"):
                 self.adopt()
         self.assertTrue(lock.exists(), "the other registration's lock is not ours to remove")
         destination = self.volume.media / f"{self.expected}.mp4"
@@ -338,24 +321,30 @@ class JobKeyedRules(unittest.TestCase):
         self.assertEqual(self.volume.indexed(), {self.expected})
         self.assertEqual(destination.read_bytes(), MP4, "the successful caller's asset exists")
 
-    def test_the_rollback_holds_and_then_releases_the_registration_lock(self):
-        lock = self.volume.media / ".gallery-index.lock"
-        seen = []
-        real_index_state = ExternalStagedVideoSink._index_state
+    def test_a_failed_adoption_unlinks_nothing_but_its_own_staged_name(self):
+        # #2347 review 4485290339: an identical retry may have validated the file inside
+        # register_asset and be about to take the lock; any unlink of the published name could
+        # leave it indexing a missing file. The sink therefore never unlinks the published name.
+        unlinked = []
+        real_unlink = os.unlink
+        real_register = sink_module.register_asset
+        retry_validated = []
 
-        def spy(sink, asset_id, size):
-            seen.append(lock.exists())
-            return real_index_state(sink, asset_id, size)
+        def recording_unlink(path, *args, **kwargs):
+            unlinked.append(Path(str(path)).name)
+            return real_unlink(path, *args, **kwargs)
 
-        def failed(*args, **kwargs):
-            raise OSError("index write failed")
-        with patch.object(sink_module, "register_asset", failed), \
-                patch.object(ExternalStagedVideoSink, "_index_state", spy):
-            with self.assertRaisesRegex(ArtifactSinkUnavailable, "^gallery_registration_failed$"):
+        def creator_fails(*args, **kwargs):
+            retry_validated.append((self.volume.media / f"{self.expected}.mp4").exists())  # the retry checked it
+            raise sink_module.GalleryUnavailable("gallery_index_locked")
+        with patch.object(sink_module.os, "unlink", recording_unlink), \
+                patch.object(sink_module, "register_asset", creator_fails):
+            with self.assertRaises(ArtifactSinkUnavailable):
                 self.adopt()
-        self.assertEqual(seen, [False, True], "checked once without, then again under the lock")
-        self.assertFalse(lock.exists(), "released")
-        self.assertFalse((self.volume.media / f"{self.expected}.mp4").exists(), "rolled back")
+        self.assertEqual(retry_validated, [True])
+        self.assertTrue(all(name.startswith(".kaliv-") and name.endswith(".tmp") for name in unlinked), unlinked)
+        real_register(self.volume.media, self.volume.root, self.expected, ".mp4", len(MP4))  # the retry commits
+        self.assertEqual((self.volume.media / f"{self.expected}.mp4").read_bytes(), MP4, "its row has its file")
 
     def test_no_write_reaches_the_published_file_after_adoption(self):
         with self.sink.staged(".mp4") as output:
