@@ -47,7 +47,7 @@ class SourceImageTests(unittest.TestCase):
     def test_unindexed_png_refused(self, _mount):
         asset_id = "a" * 32
         (self.sink.media_root / (asset_id + ".png")).write_bytes(PNG)
-        with self.assertRaises(ArtifactSinkUnavailable):
+        with self.assertRaises(SourceImageUnavailable):
             read_source_png(self.sink, asset_id)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
@@ -123,11 +123,11 @@ class SourceImageTests(unittest.TestCase):
             path.symlink_to(target)
         except (OSError, NotImplementedError):
             self.skipTest("symlinks unavailable")
-        with self.assertRaises(ArtifactSinkUnavailable):
+        with self.assertRaises(SourceImageUnavailable):
             read_source_png(self.sink, asset_id)
         # Windows lacks O_NOFOLLOW; static symlinks must still fail closed.
         with patch.object(os, "O_NOFOLLOW", 0, create=True):
-            with self.assertRaises(ArtifactSinkUnavailable):
+            with self.assertRaises(SourceImageUnavailable):
                 read_source_png(self.sink, asset_id)
         self.assertEqual(target.read_bytes(), PNG)
 
@@ -144,13 +144,13 @@ class SourceImageTests(unittest.TestCase):
         oversized = (PNG[:8] + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 9000, 1, 8, 2, 0, 0, 0))
                      + PNG[33:])
         asset_id = self.sink.publish(oversized, ".png")
-        with self.assertRaises(ArtifactSinkUnavailable):
+        with self.assertRaises(SourceImageUnavailable):
             read_source_png(self.sink, asset_id)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_wrong_bytes_and_bad_ids_refused(self, _mount):
         asset_id = self.sink.publish(b"not png", ".png")
-        with self.assertRaises(ArtifactSinkUnavailable):
+        with self.assertRaises(SourceImageUnavailable):
             read_source_png(self.sink, asset_id)
         for bad in ("../secret", "", None, True):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
