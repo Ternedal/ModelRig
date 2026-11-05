@@ -6,6 +6,7 @@ ModelRig #2296: every job names a profile_id; the volume guard is any callable
 (the media store is ChatGPT's slice, so this test uses its own exception).
 """
 import tempfile
+import time
 import sqlite3
 from unittest.mock import patch
 import unittest
@@ -308,6 +309,72 @@ class ExecutorProtocolTests(unittest.TestCase):
             self.store.submit("anders", "y", profile_id="sdxl-a", max_owner_active=1)
         self.store.complete(job, A1, "asset")
         self.store.submit("anders", "y", profile_id="sdxl-a", max_owner_active=1)
+
+
+class PromptRetentionTests(unittest.TestCase):
+    """Anders' decision (5 Nov 2026): the prompt of a finished job is blanked after 30 days."""
+    DAY = 24 * 3600
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.db = str(Path(self.temp.name) / "jobs.sqlite3")
+        self.store = ImageJobStore(self.db)
+
+    def job(self, state, prompt):
+        job_id = self.store.submit("anders", prompt, profile_id="test-profile", max_owner_active=16)["job_id"]
+        with sqlite3.connect(self.db) as db:  # set the state directly: this tests retention, not transitions
+            db.execute("UPDATE image_jobs SET state=?, asset_id=? WHERE id=?",
+                       (state, "a" * 32 if state == "completed" else None, job_id))
+        return job_id
+
+    def prompts(self):
+        with sqlite3.connect(self.db) as db:
+            return dict(db.execute("SELECT state, prompt FROM image_jobs").fetchall())
+
+    def test_the_default_is_thirty_days(self):
+        from app.image_job_store import PROMPT_RETENTION_S
+        self.assertEqual(PROMPT_RETENTION_S, 30 * self.DAY)
+
+    def test_only_finished_jobs_older_than_the_window_lose_their_prompt(self):
+        ids = {state: self.job(state, f"prompt of the {state} job")
+               for state in ("queued", "running", "publishing", "completed", "failed", "cancelled")}
+        self.assertEqual(self.store.purge_prompts(now=time.time() + 29 * self.DAY), 0, "inside the window")
+        self.assertEqual(self.store.purge_prompts(now=time.time() + 31 * self.DAY), 3)
+        prompts = self.prompts()
+        for state in ("completed", "failed", "cancelled"):
+            self.assertEqual(prompts[state], "", state)
+        for state in ("queued", "running", "publishing"):
+            self.assertEqual(prompts[state], f"prompt of the {state} job", "still needed")
+        row = self.store.get(ids["completed"], "anders")
+        self.assertEqual((row["state"], row["asset_id"]), ("completed", "a" * 32), "the row itself stays")
+        self.assertEqual(self.store.purge_prompts(now=time.time() + 31 * self.DAY), 0, "idempotent")
+
+    def test_the_old_text_is_not_left_in_the_database_file(self):
+        # Some SQLite builds have secure_delete on by default, others not: start every connection
+        # with it OFF, so only the store's own PRAGMA can remove the old text from the file.
+        real_connect = sqlite3.connect
+
+        def off_by_default(*args, **kwargs):
+            connection = real_connect(*args, **kwargs)
+            connection.execute("PRAGMA secure_delete=OFF")
+            return connection
+        marker = "kaliv-retention-probe-7f3a91"
+        with patch("app.image_job_store.sqlite3.connect", off_by_default):
+            for i in range(3):
+                self.job("queued", f"neighbour {i} " + "x" * 40)
+            self.job("completed", f"a bicycle {marker} " + "m" * 100)
+            for i in range(3):
+                self.job("queued", f"neighbour after {i} " + "y" * 40)
+            self.assertIn(marker.encode(), Path(self.db).read_bytes())
+            self.store.purge_prompts(now=time.time() + 31 * self.DAY)
+        self.assertNotIn(marker.encode(), Path(self.db).read_bytes(), "secure_delete overwrote it")
+
+    def test_the_window_must_be_a_non_negative_number_of_seconds(self):
+        for bad in (-1, "30", True, None):
+            with self.subTest(bad=bad), self.assertRaises(ImageJobError):
+                self.store.purge_prompts(older_than_s=bad)
+        self.assertEqual(self.store.purge_prompts(older_than_s=0), 0)
 
 
 if __name__ == "__main__":

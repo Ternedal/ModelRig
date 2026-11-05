@@ -69,6 +69,13 @@ def _encode_params(params: object) -> str:
     return encoded
 
 
+# Prompt retention (Anders, 5 Nov 2026, #2296 risk 8.1): the prompt of a finished job is
+# blanked 30 days after it finished. The row stays (id, owner, state, asset, error), so the
+# gallery and the audit trail still resolve; only the user's text goes.
+PROMPT_RETENTION_S = 30 * 24 * 3600
+_FINISHED = ("completed", "failed", "cancelled")
+
+
 class ImageJobStore:
     def __init__(self, db_path: str, *, volume_guard: Callable[[], None] | None = None):
         self._volume_guard = volume_guard
@@ -106,6 +113,20 @@ class ImageJobStore:
                 yield connection
         finally:
             connection.close()
+
+    def purge_prompts(self, *, older_than_s: float = PROMPT_RETENTION_S, now: float | None = None) -> int:
+        """Blank the prompt of every finished job whose last update is older than older_than_s.
+        Returns how many prompts were blanked. secure_delete makes SQLite overwrite the old text
+        in the database file instead of leaving it in freed space. Queued, running and publishing
+        jobs keep their prompt: it is still needed."""
+        if type(older_than_s) not in (int, float) or older_than_s < 0:
+            raise ImageJobError("invalid retention")
+        cutoff = (time.time() if now is None else now) - older_than_s
+        with self._db() as db:
+            db.execute("PRAGMA secure_delete=ON")
+            return db.execute(
+                f"UPDATE image_jobs SET prompt='' WHERE state IN ({','.join('?' * len(_FINISHED))}) "
+                "AND updated < ? AND prompt != ''", (*_FINISHED, cutoff)).rowcount
 
     def submit(self, owner: str, prompt: str, *, profile_id: str, params: dict | None = None,
                max_queued: int = 16, max_owner_active: int = 3) -> dict:

@@ -53,6 +53,15 @@ recovery:  running    -> failed "interrupted by restart"
 
 The migration is additive: `claimed_by` and `cancel_requested`. The legacy API (`claim`/`finish`/`cancel`/`recover_interrupted`) still serves `GenerationJobRunner`.
 
+## Prompt retention
+
+**Decision (Anders, 5 Nov 2026):** a finished job's prompt is blanked 30 days after it finished.
+- **Finished** means `completed`, `failed` or `cancelled`. Queued, running and publishing jobs keep their prompt, because it is still needed.
+- **What stays.** The row stays: id, owner, state, asset and error. The gallery and the audit trail still resolve; only the user's text goes. An empty prompt means "purged", because `submit` never accepts an empty one.
+- **How.** `ImageJobStore.purge_prompts()` runs with `PRAGMA secure_delete=ON`, so SQLite overwrites the old text in the database file instead of leaving it in freed space. Some builds have that on by default; the store does not rely on it.
+- **When.** The executor runs it at start and then at most once an hour while idle. A failure is recorded and retried, and is never fatal to GPU work.
+- **Stated limit.** Copies outside the database file, such as filesystem journals, backups and SSD remapping, are out of reach of SQLite. Prompts never go to logs.
+
 ## Exit codes
 
 | Code | Meaning | Supervisor policy (next slice) |
