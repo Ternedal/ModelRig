@@ -65,6 +65,18 @@ func superviseOnce(children []child, fails map[string]int, maxFails int, restart
 	for _, c := range children {
 		if !c.running() {
 			fails[c.name()] = 0
+			// A child may hold its own restart back (an executor that exited with
+			// a never-restart code, or is inside its back-off). Optional, like
+			// exitNote, so the worker, the server and the fakes are unaffected.
+			if h, ok := c.(interface{ restartHeld() (bool, string) }); ok {
+				held, why := h.restartHeld()
+				if why != "" {
+					log.Printf("supervisor: %s %s", c.name(), why)
+				}
+				if held {
+					continue
+				}
+			}
 			// Read this BEFORE restart(), which clears it for the new child.
 			note := exitNoteOf(c)
 			if err := c.restart(); err != nil {
@@ -115,6 +127,7 @@ func superviseOnce(children []child, fails map[string]int, maxFails int, restart
 type procChild struct {
 	label     string
 	exePath   string
+	args      []string
 	workDir   string
 	healthURL string
 	logPath   string
@@ -132,9 +145,15 @@ type procChild struct {
 	alive bool
 	// What a bare "restarted" line could never tell you: which process was
 	// started, and how the previous one ended.
-	startedPID   int
-	lastExit     string
-	startedAt    time.Time
+	startedPID int
+	lastExit   string
+	startedAt  time.Time
+	// runs counts successful starts; lastCode and exitedAt describe how run
+	// number `runs` ended (valid once alive is false). The executor's restart
+	// policy is keyed on the exit code, so it is recorded, not just the text.
+	runs         int
+	lastCode     int
+	exitedAt     time.Time
 	ready        bool
 	startupGrace time.Duration
 }
@@ -201,7 +220,7 @@ func (p *procChild) restart() error {
 	if err != nil {
 		return fmt.Errorf("open log: %w", err)
 	}
-	cmd := exec.Command(p.exePath)
+	cmd := exec.Command(p.exePath, p.args...)
 	cmd.Dir = p.workDir
 	if len(p.extraEnv) > 0 {
 		cmd.Env = append(os.Environ(), p.extraEnv...)
@@ -218,6 +237,7 @@ func (p *procChild) restart() error {
 	p.lastExit = ""
 	p.startedAt = time.Now()
 	p.ready = false
+	p.runs++
 	// Adopt immediately, so anything the child spawns is already inside the job.
 	if err := p.tree.adopt(cmd.Process); err != nil {
 		log.Printf("supervisor: %s not adopted into the process tree: %v", p.label, err)
@@ -231,10 +251,16 @@ func (p *procChild) restart() error {
 		if err != nil {
 			note = err.Error()
 		}
+		code := -1 // killed by a signal, or no state: not a code the policy knows
+		if cmd.ProcessState != nil {
+			code = cmd.ProcessState.ExitCode()
+		}
 		p.mu.Lock()
 		if p.cmd == cmd { // still the current child, not one we already replaced
 			p.alive = false
 			p.lastExit = fmt.Sprintf("pid %d: %s", cmd.Process.Pid, note)
+			p.lastCode = code
+			p.exitedAt = time.Now()
 		}
 		p.mu.Unlock()
 		f.Close()
@@ -342,10 +368,28 @@ func main() {
 		log.Printf("initial server start failed: %v (the loop will retry)", err)
 	}
 
+	// Media executors (default off). A refused configuration starts none and is
+	// logged; the worker and the server are supervised either way.
+	executors, err := executorsFrom(childEnv, os.Getenv, *logDir, *logMB, tree)
+	if err != nil {
+		log.Printf("media executor: configuration refused, no executor started: %v", err)
+	}
+	for _, e := range executors {
+		log.Printf("starting %s: %s %v (in %s)", e.name(), e.p.exePath, e.p.args, e.p.workDir)
+		if err := e.restart(); err != nil {
+			log.Printf("initial %s start failed: %v (the loop will retry)", e.name(), err)
+		}
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
 	children := []child{worker, server}
+	stopOrder := []*procChild{server, worker}
+	for _, e := range executors {
+		children = append(children, e)
+		stopOrder = append([]*procChild{e.p}, stopOrder...)
+	}
 	fails := map[string]int{}
 	res := &resourceState{minFreeGB: *minFreeGB, vramWarnPct: *vramPct, cooldown: *resEvery, timeout: 3 * time.Second}
 	hbPath := filepath.Join(*logDir, "supervisor-heartbeat")
@@ -358,7 +402,7 @@ func main() {
 		select {
 		case <-ctx.Done():
 			log.Printf("stopping; killing children")
-			for _, c := range []*procChild{server, worker} {
+			for _, c := range stopOrder {
 				c.mu.Lock()
 				if c.cmd != nil && c.cmd.Process != nil {
 					_ = c.cmd.Process.Kill()
