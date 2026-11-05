@@ -269,9 +269,14 @@ class MediaExecutor:
             self.store.fail(job_id, self.instance, GPU_BUSY)
             return "failed"
         except _VRAM_SHORTAGE:  # before anything was submitted; a failed load proved its release
-            self.last_used = self.clock()
             outcome = self.store.defer(job_id, self.instance, max_wait_s=VRAM_MAX_WAIT_S, error=GPU_UNAVAILABLE)
             self.events.append(f"vram_short:{outcome}")
+            if self.adapter is not None:
+                # The shortage came from a resident model's pre-job check: chat first means media
+                # gives the GPU back while it waits, not only when idle_unload_s expires (which
+                # the retries would keep postponing). The job is requeued first, so a failed
+                # unload (exit 70) never strands it (#2341 review 4477938515).
+                self._unload()
             if outcome == "requeued":
                 self._claim_not_before = self.clock() + VRAM_RETRY_S
                 return "deferred"

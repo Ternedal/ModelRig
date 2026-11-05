@@ -615,6 +615,55 @@ class VramWaitTests(unittest.TestCase):
         self.assertIsNone(ex.adapter, "the refused load left nothing resident")
         self.assertTrue(lease_free(GPU_A, self.lease_dir), "Ollama can have the GPU")
 
+    def test_a_shortage_on_a_resident_model_unloads_it_before_waiting(self):
+        # Codex 4477938515: the first job loaded the model; the next one's pre-job check is short.
+        from app.image_gpu_admission import GpuMemoryShortage
+        short = [False]
+
+        class Resident(FakeImageAdapter):
+            def render(self, request, *, should_cancel=None):
+                if short[0]:
+                    raise GpuMemoryShortage("insufficient free VRAM after reservation")
+                return super().render(request, should_cancel=should_cancel)
+
+        def factory(profile):
+            return Resident(profile, lease_dir=self.lease_dir, gpu_uuid=GPU_A, log=self.log)
+        ex = ExecutorTests.executor(self, [self.image()], factory=factory)
+        self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "completed")
+        self.assertFalse(lease_free(GPU_A, self.lease_dir), "resident after the first job")
+        short[0] = True  # Ollama loaded a model meanwhile
+        job = self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "deferred")
+        self.assertIsNone(ex.adapter, "unloaded at once, not after idle_unload_s")
+        self.assertTrue(lease_free(GPU_A, self.lease_dir), "the GPU is free while the job waits")
+        self.assertEqual(self.store.get(job, "anders")["state"], "queued")
+        short[0] = False
+        self.clock.now += 30
+        self.assertEqual(ex.step(), "completed", "reloaded when VRAM is back")
+
+    def test_a_resident_model_that_cannot_prove_its_unload_is_fatal_but_the_job_stays_queued(self):
+        from app.image_gpu_admission import GpuMemoryShortage
+        short = [False]
+
+        class Resident(FakeImageAdapter):
+            def render(self, request, *, should_cancel=None):
+                if short[0]:
+                    raise GpuMemoryShortage("insufficient free VRAM after reservation")
+                return super().render(request, should_cancel=should_cancel)
+
+        def factory(profile):
+            return Resident(profile, lease_dir=self.lease_dir, gpu_uuid=GPU_A, close_ok=False, log=self.log)
+        ex = ExecutorTests.executor(self, [self.image()], factory=factory)
+        self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "completed")
+        short[0] = True
+        job = self.submit("sdxl-a")
+        with self.assertRaises(GpuResourcesRetained):
+            ex.step()
+        row = self.store.get(job, "anders")
+        self.assertEqual((row["state"], row["claimed_by"]), ("queued", None), "requeued before the unload")
+
     def test_other_failures_still_fail_at_once(self):
         from app.image_gpu_admission import ImageGpuAdmissionError
 
@@ -715,6 +764,9 @@ class VideoExecutorTests(unittest.TestCase):
         self.assertEqual(self.store.get(job, "anders")["state"], "queued")
         self.assertEqual(Path(self.dirs["state"], "prompts.log").read_text().count("submitted"), submissions)
         self.assertEqual(self.store.get(first, "anders")["state"], "completed")
+        # Codex 4477938515: the resident ComfyUI is stopped at once, with a proven release.
+        self.assertIsNone(ex.adapter)
+        self.assertTrue(lease_free(GPU_A, self.lease_dir), "ComfyUI stopped; the GPU is free while the job waits")
 
     def test_cancelling_a_running_video_interrupts_comfyui_and_publishes_nothing(self):
         ex = self.executor(render_seconds="5")

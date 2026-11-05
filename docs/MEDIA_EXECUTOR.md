@@ -45,6 +45,7 @@ Sources:
 
 **Decision (Anders, 5 Nov 2026): chat first, media waits.** Ollama is outside the GPU lease and is never touched.
 - **When there is too little free VRAM**, the job goes back to `queued` with its claim cleared, instead of failing. This is checked by `inspect_cuda_budget` for diffusers, and by ComfyUI's `/system_stats` at start and before every job. Nothing has been submitted yet, and a refused load has proved its release.
+- **Nothing resident while waiting.** If the shortage came from a model that was already loaded (ComfyUI's pre-job check), the executor unloads it at once, with the usual proven release, instead of waiting for the idle unload. The job is requeued first, so a failed unload (exit 70) never strands it. (Codex 4477938515.)
 - **Back-off.** The executor claims nothing for `VRAM_RETRY_S` (30 s) and then tries again.
 - **Bound.** After `VRAM_MAX_WAIT_S` (10 min), counted from the job's first deferral (`deferred_since`), the job fails as `gpu_unavailable`.
 - **Cancel.** A cancel requested while the job was running wins: the job is `cancelled`, not requeued.
