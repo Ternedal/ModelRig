@@ -33,7 +33,12 @@ output and report goes to --out, which must be on the verified media volume.
             --template and --task (e.g. the Wan 2.2 TI2V-5B image_to_video one).
             Every profile is parsed by the real validator before it is written
             video with --task image_to_video: --source-png (a PNG on the media volume) is
-            the source image; ComfyUI's input folder must be empty again afterwards
+            the source image; ComfyUI's input folder must be empty again afterwards.
+            video --cancel-after S --expect-error Cancelled: the owner cancels S seconds
+            into the render; ComfyUI is interrupted and nothing of the job is left
+  remount   the external volume goes away under a running executor: it must exit 75
+            without claiming the queued job; once the volume is back, a new executor
+            completes that job. The operator takes the disk offline and back online
 
 Exit code 0 = every check in the report passed; 1 = a check failed; 2 = usage.
 """
@@ -229,9 +234,15 @@ def run_video(args, report: Report) -> None:
     target = Path(args.out) / f"video-{time.strftime('%Y%m%d-%H%M%S')}.mp4"
     started = time.monotonic()
     error = None
+    cancel = None
+    if args.cancel_after is not None:
+        cancel = lambda: time.monotonic() - started > args.cancel_after  # noqa: E731  (the owner's cancel)
     try:
         with open(target, "wb") as sink:
-            mime = adapter.render_to(request, sink, source_png=source) if source else adapter.render_to(request, sink)
+            options = {"should_cancel": cancel} if cancel else {}
+            if source:
+                options["source_png"] = source
+            mime = adapter.render_to(request, sink, **options)
     except Exception as exc:  # recorded by type and our own message; ComfyUI's text is never propagated
         error = f"{type(exc).__name__}: {exc}"
         mime = None
@@ -472,6 +483,71 @@ def run_chatfirst(args, report: Report) -> None:
     report.check("lease free for other processes after the executor stopped", lease_state(gpu_uuid, lease_dir) == "free")
 
 
+def run_remount(args, report: Report) -> None:
+    """R14: the external volume goes away under a running executor, then comes back."""
+    from app.image_job_store import ImageJobStore
+    from app.media_gallery_store import ExternalMediaSink
+    profile, lease_dir, gpu_uuid = common(args)
+    if profile.modality != "image":
+        fail_usage("remount qualifies the image path")
+    sink = ExternalMediaSink(args.media_root, args.volume_root)
+    sink._root()
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    db = Path(args.out) / f"jobs-remount-{stamp}.sqlite3"
+    env = dict(os.environ, PYTHONPATH=WORKER_PATH, PYTHONDONTWRITEBYTECODE="1", KALIV_MEDIA_EXECUTOR="1",
+               KALIV_MEDIA_JOB_DB=str(db), KALIV_MEDIA_ROOT=args.media_root,
+               KALIV_MEDIA_VOLUME_ROOT=args.volume_root, KALIV_MEDIA_PROFILE_DIR=args.profiles,
+               KALIV_MEDIA_IDLE_UNLOAD_S=str(int(args.idle_unload)))
+    command = [sys.executable, "-u", "-m", "app.media_executor_main", "--device", args.device, "--poll-seconds", "1"]
+    report.data.update(profile=profile.profile_id, gpu_uuid=gpu_uuid, exit_codes={})
+    first = subprocess.Popen(command, cwd=WORKER_PATH, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        time.sleep(5)
+        report.check("the executor is running and idle on the verified volume", first.poll() is None, first.poll())
+        print(f"ACTION: within {int(args.wait_timeout)} s, take the media volume offline "
+              "(unplug it, or Set-Disk -Number <n> -IsOffline $true)", flush=True)
+        limit = time.monotonic() + args.wait_timeout
+        while time.monotonic() < limit and first.poll() is None:
+            time.sleep(1)
+        code = first.poll()
+        report.data["exit_codes"]["volume_gone"] = code
+        report.check("the executor exited 75 (media volume unavailable) and was not restarted by itself",
+                     code == 75, code)
+    finally:
+        stop(first)
+    report.check("lease free while the volume is gone", lease_state(gpu_uuid, lease_dir) == "free")
+    print(f"ACTION: within {int(args.wait_timeout)} s, bring the media volume back "
+          "(plug it in, or Set-Disk -Number <n> -IsOffline $false)", flush=True)
+    limit, back = time.monotonic() + args.wait_timeout, False
+    while time.monotonic() < limit and not back:
+        try:
+            sink._root()
+            back = True
+        except Exception:
+            time.sleep(2)
+    report.check("the volume verifies again", back)
+    if not back:
+        return
+    store = ImageJobStore(str(db), volume_guard=sink._root)
+    width, height = parse_size(args.size)
+    job = store.submit("qual", args.prompt, profile_id=profile.profile_id,
+                       params={"width": width, "height": height, "steps": args.steps, "seed": args.seed})["job_id"]
+    second = subprocess.Popen(command, cwd=WORKER_PATH, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        limit = time.monotonic() + args.timeout
+        while time.monotonic() < limit and store.get(job, "qual")["state"] not in ("completed", "failed", "cancelled"):
+            if second.poll() is not None:
+                break
+            time.sleep(2)
+        row = store.get(job, "qual")
+        report.check("after the volume came back, a new executor completed the job",
+                     row["state"] == "completed" and row.get("asset_id") == sink.job_asset_id(job),
+                     {"state": row["state"], "error": row.get("error"), "executor_exit": second.poll()})
+    finally:
+        stop(second)
+    report.check("lease free after the executor stopped", lease_state(gpu_uuid, lease_dir) == "free")
+
+
 def run_pins(args, report: Report) -> None:
     import re
     from app.media_generation_profiles import parse_profile
@@ -545,7 +621,7 @@ def run_lease(args, report: Report) -> None:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("mode", choices=("image", "executor", "chatfirst", "video", "lease", "pins"))
+    parser.add_argument("mode", choices=("image", "executor", "chatfirst", "remount", "video", "lease", "pins"))
     parser.add_argument("--repo", required=True, help="ModelRig worktree at the qualified head")
     parser.add_argument("--out", required=True, help="report/output folder on the media volume")
     parser.add_argument("--profiles", help="operator profile folder")
@@ -583,6 +659,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--wait-timeout", type=float, default=540.0,
                         help="chatfirst: seconds to wait for the operator to unload Ollama (below the 600 s expiry)")
     parser.add_argument("--expect-expiry", action="store_true", help="chatfirst: nobody unloads Ollama; expect gpu_unavailable")
+    parser.add_argument("--cancel-after", type=float, help="video: the owner cancels this many seconds into the render")
     args = parser.parse_args(argv)
     global WORKER_PATH
     WORKER_PATH = str(Path(args.repo, "worker").resolve())
@@ -590,12 +667,12 @@ def main(argv: list[str]) -> int:
     out = Path(args.out)
     if not out.is_dir():
         fail_usage("--out must be an existing folder on the media volume")
-    if args.mode in ("image", "executor", "chatfirst", "video") and not (args.profiles and args.profile):
+    if args.mode in ("image", "executor", "chatfirst", "remount", "video") and not (args.profiles and args.profile):
         fail_usage("--profiles and --profile are required")
     if args.mode == "video" and not all((args.comfy_python, args.comfy_main, args.comfy_dirs, args.templates,
                                          args.volume_root)):
         fail_usage("video needs --comfy-python --comfy-main --comfy-dirs --templates --volume-root")
-    if args.mode in ("executor", "chatfirst") and not (args.volume_root and args.media_root):
+    if args.mode in ("executor", "chatfirst", "remount") and not (args.volume_root and args.media_root):
         fail_usage(f"{args.mode} needs --volume-root (the mounted volume, e.g. E:\\) and --media-root")
     if args.mode == "pins" and not (args.comfy_main and args.templates and args.profiles and args.pin
                                     and args.revision):
@@ -614,8 +691,8 @@ def main(argv: list[str]) -> int:
     head = subprocess.run(["git", "-C", args.repo, "rev-parse", "HEAD"], capture_output=True, text=True)
     report.data["head"] = head.stdout.strip() or None
     try:
-        {"image": run_image, "executor": run_executor, "chatfirst": run_chatfirst, "video": run_video,
-         "lease": run_lease, "pins": run_pins}[args.mode](args, report)
+        {"image": run_image, "executor": run_executor, "chatfirst": run_chatfirst, "remount": run_remount,
+         "video": run_video, "lease": run_lease, "pins": run_pins}[args.mode](args, report)
     except SystemExit:
         raise
     except Exception as exc:
