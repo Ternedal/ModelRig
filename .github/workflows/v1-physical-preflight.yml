@@ -1,0 +1,27 @@
+name: v1-physical-preflight
+on:
+  pull_request:
+    paths:
+      - 'scripts/kaliv_v1_physical_preflight.py'
+      - 'tests/test_kaliv_v1_physical_preflight.py'
+      - 'scripts/kaliv_v1_preflight.ps1'
+      - 'scripts/kaliv_v1_hardware_smoke.py'
+      - 'tests/test_kaliv_v1_hardware_smoke.py'
+      - '.github/workflows/v1-physical-preflight.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preflight-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run fail-closed preflight contract tests
+        run: python -m unittest discover -s tests -p 'test_kaliv_v1_physical_preflight.py' -v
+      - name: Test hardware inventory contract
+        run: python -m unittest discover -s tests -p 'test_kaliv_v1_hardware_smoke.py' -v
+      - name: Compile physical campaign scripts
+        run: python -m py_compile scripts/kaliv_v1_physical_preflight.py scripts/kaliv_v1_hardware_smoke.py
