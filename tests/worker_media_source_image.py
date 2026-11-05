@@ -136,7 +136,7 @@ class SourceImageTests(unittest.TestCase):
         for bad in (PNG[:-5], PNG[:-12], PNG[:8] + b"junk", PNG[:-1] + bytes([PNG[-1] ^ 1])):
             with self.subTest(length=len(bad)):
                 asset_id = self.sink.publish(bad, ".png")
-                with self.assertRaises(ArtifactSinkUnavailable):
+                with self.assertRaises(SourceImageUnavailable):
                     read_source_png(self.sink, asset_id)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
