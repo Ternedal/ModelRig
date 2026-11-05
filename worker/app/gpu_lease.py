@@ -155,6 +155,12 @@ def _check_lease_dir(lease_dir: object) -> Path:
     return directory
 
 
+def check_lease_dir(lease_dir: str) -> None:
+    """Raise GpuLeaseError unless lease_dir passes the check every lock acquisition makes.
+    Lets a caller refuse a bad configuration up front instead of at its first lock."""
+    _check_lease_dir(lease_dir)
+
+
 class GpuLease:
     def __init__(self, gpu_uuid: str, fd: int, path: Path):
         self.gpu_uuid = gpu_uuid

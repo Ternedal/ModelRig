@@ -1,9 +1,10 @@
 # Media executor (G2 of #2296)
 
-**Status:** default-off and not wired.
-- Nothing imports `worker/app/media_executor.py`.
-- No process starts it, and there is no route.
-- Activation needs the production sinks and verifier (ChatGPT), a process supervisor (next slice) and the rig pack (#2296 6509723614).
+**Status:** default-off.
+- The API worker never imports `worker/app/media_executor.py` (boundary test).
+- With G2b the appliance's Go `modelrig-supervisor` can start one executor per GPU, but only when `KALIV_MEDIA_EXECUTOR=1` and the configuration below is complete. Off by default; a refused configuration starts nothing.
+- Images only, published job-keyed through `ExternalMediaSink`. Video is refused (exit 78) until a staged video sink exists.
+- Activation on the rig needs the rig pack (#2296 6509723614) and Anders' go.
 
 Sources:
 - Design: #2296 6510332634.
@@ -53,20 +54,52 @@ recovery:  running    -> failed "interrupted by restart"
 
 The migration is additive: `claimed_by` and `cancel_requested`. The legacy API (`claim`/`finish`/`cancel`/`recover_interrupted`) still serves `GenerationJobRunner`.
 
-## Exit codes
+## Starting it (G2b, #2296 6636146026)
 
-| Code | Meaning | Supervisor policy (next slice) |
+`modelrig-supervisor` starts, per device, after the worker and the server:
+
+```
+<KALIV_MEDIA_EXECUTOR_PYTHON> -u -m app.media_executor_main --device cuda:N     (working directory: KALIV_MEDIA_EXECUTOR_APP_DIR)
+```
+
+Each executor runs in the supervisor's process tree (a Windows Job Object), so stopping the supervisor stops it. Its output goes to `logs/executor-cudaN.log`, size-rotated like the worker's.
+
+| Variable | Read by | Meaning |
 |---|---|---|
-| 0 | Done | — |
-| 70 | GPU memory not proven free | Restart (the OS has freed it) |
-| 73 | Another executor holds this GPU | Never restart in a loop |
-| 75 | Media volume unavailable | Wait until the volume verifies |
-| 76 | Publication not recorded (the artifact is durable; the job stays `publishing`) | Restart; recovery marks it `interrupted during publication` for the sink owner's reconciliation |
-| 78 | Configuration | Stop |
+| `KALIV_MEDIA_EXECUTOR=1` | supervisor, executor | Master switch. Any other value is off. |
+| `KALIV_MEDIA_EXECUTOR_DEVICES` | supervisor | `cuda:0` or `cuda:0,cuda:1`; at most 8, no duplicates |
+| `KALIV_MEDIA_EXECUTOR_PYTHON` | supervisor | Absolute path of the media environment's `python.exe` (torch and diffusers are not in the frozen worker) |
+| `KALIV_MEDIA_EXECUTOR_APP_DIR` | supervisor | Absolute path of the directory that contains `app/media_executor_main.py` |
+| `KALIV_MEDIA_JOB_DB` | executor, routes | Absolute path of the job SQLite |
+| `KALIV_MEDIA_ROOT`, `KALIV_MEDIA_VOLUME_ROOT` | executor, gallery | Media directory and the verified volume root (`ExternalMediaSink`) |
+| `KALIV_MEDIA_PROFILE_DIR` | executor | Operator profile directory |
+| `KALIV_MEDIA_IDLE_UNLOAD_S` | executor | Optional; default 300 |
+| `KALIV_MEDIA_PROFILES_ENABLED`, `KALIV_MEDIA_ALLOW_CANDIDATE_PROFILES`, `KALIV_GPU_LEASE_DIR`, `KALIV_GPU_DEVICE_UUIDS`, `CUDA_DEVICE_ORDER`, `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE` | executor | Existing |
+
+The supervisor reads them the way the children see them: the env file (`modelrig.env`) wins over its own environment.
+
+The entry point checks the configuration before it touches anything, including the GPU lease directory: one that is relative, missing, a symlink or writable by others is exit 78, not a crash. The volume is verified before the job database is first opened and again before every later database access, so a volume that goes away while the executor runs stops it (exit 75) before it claims another job (#2337 reviews 4477083816, 4477083808). A diffusers profile also requires `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` at configuration time: without them it is exit 78 and the queue is untouched, instead of every claimed job failing at load (#2337 review 4477167705). An existing job database must be a regular SQLite file: a directory, a link (which could lead off the volume), a FIFO or a file that is not SQLite is exit 78 (#2337 review 4477759300); a locked database stays a transient exit 1. A missing directory is never created.
+
+## Exit codes and the supervisor's policy
+
+`executorRestartPolicy` in `backend/cmd/modelrig-supervisor/executor.go`; every code is unit-tested, and real child processes prove that the code the policy sees is the code the child gave.
+
+| Code | Meaning | Policy |
+|---|---|---|
+| 0 | Done | Not restarted until the supervisor restarts |
+| 70 | GPU memory not proven free | Restart after 5 s (the OS has freed it with the process) |
+| 73 | Another executor holds this GPU | **Never** restarted; logged once |
+| 75 | Media volume unavailable (also: not there at start) | Restart after 30 s; the executor re-verifies on every start |
+| 76 | Publication not recorded (the artifact is durable; the job stays `publishing`) | Restart after 5 s; recovery marks it `interrupted during publication` for the sink owner's reconciliation |
+| 78 | Configuration refused (including the switch off) | **Never** restarted; logged once |
+| other, or killed | Crash | Restart after 5 s |
+
+Every restartable code doubles its delay for each exit in a row, capped at 5 minutes. A run of at least 5 minutes resets the streak. An executor has no HTTP endpoint: alive is healthy, so it is never restarted for health.
 
 ## Not in this slice
 
-- The process supervisor and the entry point. They need the production `ArtifactSink`, `StagedFileArtifactSink` and `VerifiedMediaVolume` (ChatGPT, #2313).
+- Video through the executor: it needs ChatGPT's staged video sink (`JobKeyedStagedSink`).
+- A public "verify the volume" method on `ExternalMediaSink`: the entry point calls its `_root()` at start so a missing volume is exit 75 before anything is opened (ChatGPT owns the sink).
 - Routes for submit/get/cancel (ChatGPT).
 - Reconciliation itself: ChatGPT's read-only `inspect_generation_consistency` (#2313) classifies the recovered job. There is no automatic completion from file presence, and no inference retry.
 - G3 pinning: ComfyUI version and weight manifest.
