@@ -1,7 +1,5 @@
 """Offline regressions for the read-only image source seam."""
 import os
-import sqlite3
-from unittest.mock import patch
 import struct
 import tempfile
 import unittest
@@ -12,7 +10,7 @@ from unittest.mock import patch
 from app.media_gallery_store import ExternalMediaSink
 from app.media_source_image import read_source_png, read_owned_source_png
 from app.image_job_store import ImageJobStore
-from app.media_generation_contract import ArtifactSinkUnavailable
+from app.media_generation_contract import ArtifactSinkUnavailable, SourceImageUnavailable
 
 
 def _png_chunk(kind: bytes, payload: bytes) -> bytes:
