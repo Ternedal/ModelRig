@@ -66,6 +66,17 @@ recovery:  running    -> failed "interrupted by restart"
 
 The migration is additive: `claimed_by` and `cancel_requested`. The legacy API (`claim`/`finish`/`cancel`/`recover_interrupted`) still serves `GenerationJobRunner`.
 
+## Prompt retention
+
+**Decision (Anders, 5 Nov 2026):** a finished job's prompt is blanked 30 days after it finished.
+- **Finished** means `completed`, `failed` or `cancelled`. Queued, running and publishing jobs keep their prompt, because it is still needed.
+- **What stays.** The row stays: id, owner, state, asset and error. The gallery and the audit trail still resolve; only the user's text goes. An empty prompt means "purged", because `submit` never accepts an empty one.
+- **How.** Every store connection turns on `PRAGMA secure_delete` before it writes, and refuses to work if the build ignores it. That matters for more than the purge: a state transition can move a row and free the old copy of its prompt, and with secure_delete off that copy would stay readable in free space where no later `UPDATE` reaches it (Codex 4477941179). Some builds have it on by default; the store does not rely on that.
+- **Scrub.** A purge that blanked anything owes a scrub, and so does the first open of a database created before this version. `purge_prompts()` pays an owed scrub with `VACUUM`, which rebuilds the file with no free space left. The rebuild uses an in-memory temp database (`temp_store=MEMORY`), so no copy goes to the system temp directory. The debt is a counter in `image_jobs_scrub`, committed in the same transaction as the blanking, so a failed `VACUUM` is retried on the next call.
+- **When.** The executor runs it at start and then at most once an hour while idle. A failure is recorded and retried, and is never fatal to GPU work.
+- **WAL.** If the database is in WAL mode (another connection may switch it), the old pages live on in the `-wal` file until a checkpoint. After a purge the store runs `wal_checkpoint(TRUNCATE)`, which also empties that file. In the default rollback-journal mode this is a no-op.
+- **Stated limit, no promise of physical erasure.** SQLite cannot reach copies outside the database and WAL files: backups, filesystem snapshots, deleted rollback journals (including the one a `VACUUM` writes in rollback-journal mode) and SSD remapping. A checkpoint can also be blocked by a long-lived reader; the next hourly purge retries. Prompts never go to logs.
+
 ## Starting it (G2b, #2296 6636146026)
 
 `modelrig-supervisor` starts, per device, after the worker and the server:

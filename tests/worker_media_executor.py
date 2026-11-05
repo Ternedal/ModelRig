@@ -12,6 +12,7 @@ import io
 import json
 import os
 import shutil
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -674,6 +675,51 @@ class VramWaitTests(unittest.TestCase):
         job = self.submit("sdxl-a")
         self.assertEqual(ex.step(), "failed")
         self.assertEqual(self.store.get(job, "anders")["error"], "generation_failed")
+
+class PromptRetentionExecutorTests(unittest.TestCase):
+    """The executor applies the retention at start and then at most hourly while idle."""
+    setUp, tearDown = ExecutorTests.setUp, ExecutorTests.tearDown
+    executor, image, submit = ExecutorTests.executor, ExecutorTests.image, ExecutorTests.submit
+
+    def old_finished_job(self, prompt="an old prompt"):
+        job = self.store.submit("anders", prompt, profile_id="sdxl-a", max_owner_active=16)["job_id"]
+        with sqlite3.connect(self.store.path) as db:
+            db.execute("UPDATE image_jobs SET state='completed', asset_id=?, updated=? WHERE id=?",
+                       ("a" * 32, time.time() - 31 * 24 * 3600, job))
+        return job
+
+    def prompt(self, job):
+        with sqlite3.connect(self.store.path) as db:
+            return db.execute("SELECT prompt FROM image_jobs WHERE id=?", (job,)).fetchone()[0]
+
+    def test_start_blanks_old_prompts(self):
+        job = self.old_finished_job()
+        ex = self.executor([self.image()])
+        self.assertEqual(self.prompt(job), "")
+        self.assertIn("purged:1", ex.events)
+
+    def test_then_at_most_hourly_while_idle(self):
+        ex = self.executor([self.image()], start=False)
+        seen = []
+
+        def idle():  # every idle tick is half an hour; an old job appears after the first one
+            seen.append(self.prompt(late[0]) if late else None)
+            self.clock.now += 1800
+            if not late:
+                late.append(self.old_finished_job("appeared later"))
+        late = []
+        self.assertEqual(ex.run(max_steps=3, idle_sleep=idle), 0)
+        # t0: start purges; t0+30 min: still there; t0+60 min: the idle check purges it.
+        self.assertEqual(seen, [None, "appeared later", ""])
+        self.assertEqual([e for e in ex.events if e.startswith("purged")], ["purged:0", "purged:1"])
+
+    def test_a_failing_purge_is_recorded_and_never_fatal(self):
+        with patch.object(self.store, "purge_prompts", side_effect=sqlite3.OperationalError("database is locked")):
+            ex = self.executor([self.image()])
+            job = self.submit("sdxl-a")
+            self.assertEqual(ex.step(), "completed")
+        self.assertIn("purge_failed:OperationalError", ex.events)
+        self.assertEqual(self.store.get(job, "anders")["state"], "completed")
 
 
 class VideoExecutorTests(unittest.TestCase):
