@@ -80,3 +80,15 @@ def read_source_png(sink: ExternalMediaSink, asset_id: str) -> bytes:
         raise ArtifactSinkUnavailable("source_image_read_failed") from exc
     finally:
         os.close(fd)
+
+
+def read_owned_source_png(sink: ExternalMediaSink, jobs: ImageJobStore,
+                          authenticated_owner: str, asset_id: str) -> bytes:
+    """Read a completed PNG owned by a verified principal, never a client owner.
+
+    Check ownership before touching the external gallery to avoid exposing
+    other owners' asset existence or media volume status.
+    """
+    if not jobs.owns_completed_asset(authenticated_owner, asset_id):
+        raise SourceImageUnavailable("source_image_not_authorized")
+    return read_source_png(sink, asset_id)
