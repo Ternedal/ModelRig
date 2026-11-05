@@ -44,7 +44,9 @@ class _Volume:
     """A real directory that stands in for the mounted external volume."""
 
     def __init__(self, test: unittest.TestCase):
-        self.root = Path(tempfile.mkdtemp())
+        # Canonical spelling: the gallery's root check refuses a path that resolves differently,
+        # and on the Windows runner TEMP is an 8.3 short name (C:\\Users\\RUNNER~1\\...).
+        self.root = Path(tempfile.mkdtemp()).resolve()
         test.addCleanup(shutil.rmtree, self.root, True)
         self.media = self.root / "media"
         self.media.mkdir()
