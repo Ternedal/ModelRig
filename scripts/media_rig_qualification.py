@@ -29,7 +29,11 @@ output and report goes to --out, which must be on the verified media volume.
   pins      write the pinned Wan profiles (G3): hash the given model files, read
             ComfyUI's version from comfyui_version.py, and write wan21-t2v-qual,
             wan21-t2v-deadline, and the negative wan21-badhash / wan21-badver.
+            With --profile-id it writes that one pinned profile instead, for
+            --template and --task (e.g. the Wan 2.2 TI2V-5B image_to_video one).
             Every profile is parsed by the real validator before it is written
+            video with --task image_to_video: --source-png (a PNG on the media volume) is
+            the source image; ComfyUI's input folder must be empty again afterwards
 
 Exit code 0 = every check in the report passed; 1 = a check failed; 2 = usage.
 """
@@ -215,14 +219,19 @@ def run_video(args, report: Report) -> None:
         while True:
             time.sleep(3600)
     width, height = parse_size(args.size)
-    request = GenerationRequest(profile_id=profile.profile_id, task="text_to_video", prompt=args.prompt,
-                                width=width, height=height, steps=args.steps, seed=args.seed, frames=args.frames)
+    source = None
+    if args.task == "image_to_video":
+        source = Path(args.source_png).read_bytes()
+        report.data["source_png"] = {"path": args.source_png, "bytes": len(source), "sha256": hashlib.sha256(source).hexdigest()}
+    request = GenerationRequest(profile_id=profile.profile_id, task=args.task, prompt=args.prompt,
+                                width=width, height=height, steps=args.steps, seed=args.seed, frames=args.frames,
+                                input_asset_id=hashlib.sha256(source).hexdigest()[:32] if source else None)
     target = Path(args.out) / f"video-{time.strftime('%Y%m%d-%H%M%S')}.mp4"
     started = time.monotonic()
     error = None
     try:
         with open(target, "wb") as sink:
-            mime = adapter.render_to(request, sink)
+            mime = adapter.render_to(request, sink, source_png=source) if source else adapter.render_to(request, sink)
     except Exception as exc:  # recorded by type and our own message; ComfyUI's text is never propagated
         error = f"{type(exc).__name__}: {exc}"
         mime = None
@@ -240,6 +249,9 @@ def run_video(args, report: Report) -> None:
     report.check("cleanup removed only this job's file and kept nothing it cannot prove",
                  not adapter.last_cleanup.get("failed") and not adapter.last_cleanup.get("kept_replaced"),
                  adapter.last_cleanup)
+    if source is not None:
+        staged = sorted(os.listdir(dirs["input"]))
+        report.check("ComfyUI input folder is empty again (the staged source image was removed)", staged == [], staged)
     left = sorted(os.listdir(dirs["output"]))
     if args.expect_error:  # a write that lands after a timeout interrupt is a stated limit: recorded, not failed
         report.check("ComfyUI output root after the failed job (late writes are reported as untracked)", True, left)
@@ -477,8 +489,27 @@ def run_pins(args, report: Report) -> None:
         path = models / rel
         pins.append({"path": rel, "sha256": sha256(path), "bytes": path.stat().st_size})
     report.check("pinned files hashed", True, pins)
-    template = Path(args.templates) / "wan21-t2v-1.3b.json"
+    template = Path(args.templates) / (args.template or "wan21-t2v-1.3b.json")
     template_sha = sha256(template)
+    if args.profile_id:  # one pinned profile for --template / --task
+        width, height = parse_size(args.size)
+        data = {"schema": "kaliv-media-profile/v1", "profile_id": args.profile_id, "modality": "video",
+                "tasks": [args.task], "backend": "comfyui", "pipeline": None,
+                "model_id": args.model_id, "revision": args.revision,
+                "limits": {"max_prompt_chars": 500, "sizes": [[width, height]], "max_steps": 30,
+                           "max_frames": args.max_frames},
+                "outputs": ["video/mp4"],
+                "resources": {"min_usable_gib": 8, "reserve_gib": 1.5, "devices": [args.device], "cpu_offload": False},
+                "qualification": "candidate", "license": "apache-2.0",
+                "backend_options": {"template_name": template.name, "template_sha256": template_sha, "fps": args.fps,
+                                    "max_render_seconds": 3600, "max_output_bytes": 536870912, "port": 18190,
+                                    "comfyui_version": version, "weights": pins}}
+        parse_profile(data)  # the real validator, including the pinned template binding at load time
+        (Path(args.profiles) / f"{args.profile_id}.json").write_text(json.dumps(data, indent=1), encoding="ascii")
+        report.check("profile written and accepted by parse_profile", True, args.profile_id)
+        report.data.update(comfyui_version=version, template_sha256=template_sha, revision=args.revision,
+                           task=args.task)
+        return
 
     def profile(profile_id: str, *, seconds: int, port: int, version_pin: str, weights: list) -> dict:
         return {"schema": "kaliv-media-profile/v1", "profile_id": profile_id, "modality": "video",
@@ -525,6 +556,14 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--steps", type=int, default=20)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--frames", type=int, default=33)
+    parser.add_argument("--task", default="text_to_video", choices=("text_to_video", "image_to_video"),
+                        help="video/pins: the task (image_to_video needs --source-png for video)")
+    parser.add_argument("--source-png", help="video: the source PNG for image_to_video (on the media volume)")
+    parser.add_argument("--template", help="pins: template file name in --templates (default wan21-t2v-1.3b.json)")
+    parser.add_argument("--profile-id", help="pins: write only this one pinned profile")
+    parser.add_argument("--model-id", default="Comfy-Org/Wan_2.1_ComfyUI_repackaged", help="pins: Hugging Face repo")
+    parser.add_argument("--fps", type=int, default=16, help="pins --profile-id: frames per second")
+    parser.add_argument("--max-frames", type=int, default=81, help="pins --profile-id: limit")
     parser.add_argument("--comfy-python")
     parser.add_argument("--comfy-main")
     parser.add_argument("--comfy-dirs", help="folder on the media volume for ComfyUI input/output/temp/user")
@@ -561,6 +600,8 @@ def main(argv: list[str]) -> int:
     if args.mode == "pins" and not (args.comfy_main and args.templates and args.profiles and args.pin
                                     and args.revision):
         fail_usage("pins needs --comfy-main --templates --profiles --pin (repeat) --revision")
+    if args.mode == "video" and args.task == "image_to_video" and not args.source_png:
+        fail_usage("video --task image_to_video needs --source-png")
     if args.mode == "lease" and not args.gpu_uuid:
         fail_usage("lease needs --gpu-uuid")
     from app.media_generation_contract import ArtifactSinkUnavailable
