@@ -289,11 +289,17 @@ check(
     # and hazmat/primitives/asymmetric/ed25519.py are byte-identical between the
     # sdists; the only source change is a clippy allow in serialization.rs, and
     # the changelog's only entry is wheels rebuilt with OpenSSL 4.0.2.
-    worker_requirements.count("cryptography==50.0.1") == 1,
+    # Reviewed 5/11/2026 for the 50.0.1 -> 50.0.2 move (#2332): the same two files are
+    # byte-identical between the PyPI sdists (sha256 verified against the PyPI JSON);
+    # the source changes are PyO3 0.29.0 -> 0.29.2 (Cargo.lock), a no-op
+    # `use openssl_sys as _;` in cryptography-cffi, version metadata and a 3.15
+    # classifier; the changelog: wheels on OpenSSL 4.0.3, abi3t wheels for 3.15+,
+    # PyO3 0.29.2 (Cygwin/MSYS2 builds).
+    worker_requirements.count("cryptography==50.0.2") == 1,
     "the CI/runtime environment pins the reviewed Ed25519 implementation exactly once",
 )
 check(
-    pyproject.count('"cryptography==50.0.1"') == 1,
+    pyproject.count('"cryptography==50.0.2"') == 1,
     "the DevControl package metadata pins the same Ed25519 implementation",
 )
 
