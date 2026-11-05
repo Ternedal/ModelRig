@@ -241,6 +241,9 @@ class MediaExecutor:
             try:
                 source_png = self.source_reader(job["owner"], request.input_asset_id)
             except SourceImageUnavailable:
+                # Recording it is a store access, and the production store checks the media volume
+                # first (G2b): a volume lost mid-read (EIO) becomes exit 75 here, never a blamed
+                # asset -- deliberately store.fail, not the swallowing _record_failure (#2339 P3).
                 self.store.fail(job_id, self.instance, SOURCE_UNAVAILABLE)
                 return "failed"
             except ValueError:

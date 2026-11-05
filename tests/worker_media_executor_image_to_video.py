@@ -165,6 +165,39 @@ class ImageToVideoExecutorTests(unittest.TestCase):
         self.assertEqual(calls, [])
 
 
+class VolumeVersusAssetTests(unittest.TestCase):
+    """#2339 review note (ChatGPT 6666214754, P3): an EIO while reading the source because the
+    volume went away must not be recorded as a per-asset "source_image_unavailable". In
+    production the job store is opened with the media volume as its guard (G2b,
+    media_executor_main), and recording the failure is a store access: the guard turns it into
+    ArtifactSinkUnavailable (exit 75), the job stays for recovery, and nothing blames the asset."""
+    setUp, tearDown = ImageToVideoExecutorTests.setUp, ImageToVideoExecutorTests.tearDown
+    i2v_executor, real_factory, submit = (ImageToVideoExecutorTests.i2v_executor, ImageToVideoExecutorTests.real_factory,
+                                          ImageToVideoExecutorTests.submit)
+
+    def test_a_volume_lost_mid_read_is_exit_75_not_a_missing_asset(self):
+        from app.image_job_store import ImageJobStore
+        mounted = [True]
+
+        def volume_guard():
+            if not mounted[0]:
+                raise ArtifactSinkUnavailable("external_media_unavailable")
+        self.store = ImageJobStore(self.store.path, volume_guard=volume_guard)  # as media_executor_main opens it
+
+        def reader(owner, asset):  # the read fails with EIO because the disk went away
+            mounted[0] = False
+            raise SourceImageUnavailable("source_image_read_failed")
+        ex, loads = self.i2v_executor(reader)
+        job = self.submit()
+        with self.assertRaises(ArtifactSinkUnavailable):
+            ex.step()
+        self.assertEqual(loads, [], "no GPU work")
+        mounted[0] = True
+        row = self.store.get(job, "anders")
+        self.assertEqual((row["state"], row["error"]), ("running", None), "left for recovery, the asset is not blamed")
+        ex.release_lock()
+
+
 class RealReaderTests(unittest.TestCase):
     """The production seam end to end: ChatGPT's read_owned_source_png over the real gallery sink and
     the real job store -- the source must be a completed asset of the same owner."""
