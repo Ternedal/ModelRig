@@ -55,11 +55,14 @@ def _absolute(env: Mapping[str, str], name: str) -> str:
     return value
 
 
-def default_adapter_factory(device: str, lease_dir: str) -> Callable[[ModelProfile], object]:
+OFFLINE_FLAGS = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")  # what DiffusersImageAdapter.load() requires
+
+
+def default_adapter_factory(device: str, lease_dir: str, env: Mapping[str, str]) -> Callable[[ModelProfile], object]:
     def factory(profile: ModelProfile):
         if profile.backend == "diffusers":
             from .diffusers_image_adapter import DiffusersImageAdapter
-            return DiffusersImageAdapter(profile, device=device, lease_dir=lease_dir)
+            return DiffusersImageAdapter(profile, device=device, lease_dir=lease_dir, env=env)
         raise ExecutorConfigError(f"{profile.profile_id}: backend {profile.backend} is not served by this executor yet")
     return factory
 
@@ -90,6 +93,10 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
     mine = {pid: p for pid, p in profiles.items() if device in p.resources.devices}
     if not mine:
         raise ExecutorConfigError(f"no enabled profile allows {device}")
+    if any(p.backend == "diffusers" for p in mine.values()) and any(env.get(f) != "1" for f in OFFLINE_FLAGS):
+        # The adapter refuses to load without them; checked here so a missing setting is exit 78
+        # and leaves the queue untouched, instead of failing every claimed job (#2337 review 4477167705).
+        raise ExecutorConfigError(f"{' and '.join(f + '=1' for f in OFFLINE_FLAGS)} are required (never a download)")
     sink = ExternalMediaSink(media_root, volume_root)
     try:
         # The volume is verified before the job database is first touched (the store's constructor
@@ -104,7 +111,7 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
     except ValueError:
         raise ExecutorConfigError(f"{IDLE_ENV} must be a number of seconds") from None
     return MediaExecutor(store, gpu_uuid=gpu_uuid, lease_dir=lease_dir, profiles=mine,
-                         adapter_factory=adapter_factory or default_adapter_factory(device, lease_dir),
+                         adapter_factory=adapter_factory or default_adapter_factory(device, lease_dir, env),
                          image_sink=sink, video_sink=None, idle_unload_s=idle)
 
 
