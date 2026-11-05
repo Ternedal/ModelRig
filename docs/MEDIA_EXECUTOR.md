@@ -80,6 +80,22 @@ The supervisor reads them the way the children see them: the env file (`modelrig
 
 The entry point checks the configuration before it touches anything. The volume is verified before the job database is opened, and a missing directory is never created.
 
+## Image-to-video (seam #2339)
+
+- **Configuration.** A profile that lists `image_to_video` needs `source_reader(owner, asset_id) -> bytes`; without it the executor refuses with `ExecutorConfigError`. In production the reader is ChatGPT's `read_owned_source_png`, which authorizes the owner before any gallery I/O.
+- **When the source is read.** Once per job, **before any GPU work**. The owner is the claimed row's (the routes took it from the authenticated pairing), never anything in the request parameters; an `owner` parameter is refused as unknown.
+- **Failures:**
+
+  | Reader outcome | Job | Executor |
+  |---|---|---|
+  | `SourceImageUnavailable` | `failed: source_image_unavailable` | continues |
+  | `ValueError` (a malformed id) | `failed: generation_request_rejected` | continues |
+  | anything other than non-empty `bytes` | `failed: source_image_unavailable` | continues |
+  | `ArtifactSinkUnavailable` (the volume) | stays `running`, then recovery fails it as interrupted by restart | exit 75 |
+
+- **The bytes** go to `ComfyVideoAdapter.render_to(source_png=...)`. See `docs/MEDIA_VIDEO_GENERATION.md` for the bounded decode, the exclusive staging and the cleanup.
+- **Not wired in the entry point yet.** Video through `media_executor_main` still waits on ChatGPT's staged video sink.
+
 ## Exit codes and the supervisor's policy
 
 `executorRestartPolicy` in `backend/cmd/modelrig-supervisor/executor.go`; every code is unit-tested, and real child processes prove that the code the policy sees is the code the child gave.

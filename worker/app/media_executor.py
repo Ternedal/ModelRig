@@ -62,7 +62,7 @@ from .gpu_lease import ExecutorAlreadyRunning, GpuBusy, acquire_executor_lock, n
 from .image_job_store import ImageJobStore
 from .media_generation_contract import (ArtifactSink, ArtifactSinkUnavailable, GenerationCancelled, GenerationError,
                                         GenerationRequest, JobKeyedArtifactSink, JobKeyedStagedSink,
-                                        RenderedArtifact, StagedFileArtifactSink)
+                                        RenderedArtifact, SourceImageUnavailable, StagedFileArtifactSink)
 from .media_generation_profiles import ModelProfile, validate_request
 
 EXIT_DONE, EXIT_GPU_RETAINED, EXIT_DUPLICATE, EXIT_SINK_UNAVAILABLE, EXIT_UNRECORDED, EXIT_CONFIG = 0, 70, 73, 75, 76, 78
@@ -71,6 +71,7 @@ PUBLICATION_FAILED = "publication_failed"
 REJECTED = "generation_request_rejected"
 GPU_RETAINED = "gpu_memory_retained"
 GPU_BUSY = "gpu_busy"
+SOURCE_UNAVAILABLE = "source_image_unavailable"  # the job's source image: absent, invalid or not the owner's
 _REQUEST_PARAMS = ("width", "height", "steps", "seed", "input_asset_id", "frames")
 
 
@@ -87,6 +88,7 @@ class MediaExecutor:
                  profiles: Mapping[str, ModelProfile], adapter_factory: Callable[[ModelProfile], object],
                  image_sink: ArtifactSink | None = None, video_sink: StagedFileArtifactSink | None = None,
                  idle_unload_s: float = 300.0, cancel_poll_s: float = 1.0,
+                 source_reader: Callable[[str, str], bytes] | None = None,
                  clock: Callable[[], float] = time.monotonic):
         if not isinstance(store, ImageJobStore):
             raise ExecutorConfigError("store must be an ImageJobStore")
@@ -97,6 +99,8 @@ class MediaExecutor:
                 raise ExecutorConfigError(f"{profile.profile_id}: video needs a StagedFileArtifactSink (no bytes fallback)")
             if profile.modality == "image" and not isinstance(image_sink, ArtifactSink):
                 raise ExecutorConfigError(f"{profile.profile_id}: image needs an ArtifactSink")
+            if "image_to_video" in profile.tasks and source_reader is None:
+                raise ExecutorConfigError(f"{profile.profile_id}: image_to_video needs the owner-gated source reader")
         if type(idle_unload_s) not in (int, float) or not 1 <= idle_unload_s <= 86400:
             raise ExecutorConfigError("idle_unload_s must be 1..86400")
         if type(cancel_poll_s) not in (int, float) or not 0.05 <= cancel_poll_s <= 60:
@@ -106,6 +110,9 @@ class MediaExecutor:
         self.lease_dir = lease_dir
         self.profiles = dict(profiles)
         self.adapter_factory, self.image_sink, self.video_sink = adapter_factory, image_sink, video_sink
+        # source_reader(owner, asset_id) -> PNG bytes. In production ChatGPT's read_owned_source_png:
+        # it authorizes the owner before any gallery I/O (#2296 6651187815).
+        self.source_reader = source_reader
         self.idle_unload_s, self.cancel_poll_s, self.clock = float(idle_unload_s), float(cancel_poll_s), clock
         self.instance = f"{self.gpu_uuid}:{secrets.token_hex(8)}"
         self.adapter = None
@@ -214,13 +221,32 @@ class MediaExecutor:
         except (GenerationError, ValueError, TypeError, KeyError):
             self.store.fail(job_id, self.instance, REJECTED)
             return "rejected"
+        source_png = None
+        if request.task == "image_to_video":
+            # Before any GPU work. The owner is the claimed row's, which the routes took from the
+            # authenticated pairing -- never from request parameters. An asset-level refusal fails
+            # this job only; ArtifactSinkUnavailable (the volume) propagates: exit 75, job recovered.
+            try:
+                source_png = self.source_reader(job["owner"], request.input_asset_id)
+            except SourceImageUnavailable:
+                self.store.fail(job_id, self.instance, SOURCE_UNAVAILABLE)
+                return "failed"
+            except ValueError:
+                self.store.fail(job_id, self.instance, REJECTED)
+                return "rejected"
+            if type(source_png) is not bytes or not source_png:
+                self.store.fail(job_id, self.instance, SOURCE_UNAVAILABLE)
+                return "failed"
         publishing = False
         try:
             adapter = self._adapter_for(profile)
             should_cancel = self._cancel_check(job_id)
             if profile.modality == "video":
                 with self.video_sink.staged(".mp4") as out:
-                    mime = adapter.render_to(request, out, should_cancel=should_cancel)
+                    if source_png is not None:
+                        mime = adapter.render_to(request, out, should_cancel=should_cancel, source_png=source_png)
+                    else:
+                        mime = adapter.render_to(request, out, should_cancel=should_cancel)
                     if not self.store.begin_publish(job_id, self.instance):
                         raise GenerationCancelled("cancelled before publication")  # staged file is removed
                     publishing = True
