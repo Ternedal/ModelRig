@@ -100,6 +100,14 @@ class ImageJobStore:
                 db.execute("ALTER TABLE image_jobs ADD COLUMN claimed_by TEXT")
             if "cancel_requested" not in columns:
                 db.execute("ALTER TABLE image_jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")
+            # A database written before every connection had secure_delete on may hold old prompt
+            # text in free space (a state update can move a row and free its old copy without
+            # zeroing it). The first time this version opens it, a scrub is owed; purge_prompts
+            # pays it with a VACUUM (#2340 review 4477941179).
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='image_jobs_scrub'").fetchone() is None:
+                db.execute("CREATE TABLE image_jobs_scrub (id INTEGER PRIMARY KEY CHECK (id = 1), "
+                           "owed INTEGER NOT NULL)")
+                db.execute("INSERT INTO image_jobs_scrub (id, owed) VALUES (1, 1)")
 
     @contextmanager
     def _db(self):
@@ -108,6 +116,14 @@ class ImageJobStore:
         connection = sqlite3.connect(self.path, timeout=10)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout=10000")
+        # On every connection, before any write: a state transition may move a row and free the
+        # old copy of its prompt; with secure_delete off that copy stays readable in free space
+        # and the later purge cannot reach it (#2340 review 4477941179). Fail closed if the
+        # build ignores the pragma.
+        row = connection.execute("PRAGMA secure_delete=ON").fetchone()
+        if row is None or row[0] != 1:
+            connection.close()
+            raise ImageJobError("SQLite secure_delete is unavailable")
         try:
             with connection:
                 yield connection
@@ -116,17 +132,23 @@ class ImageJobStore:
 
     def purge_prompts(self, *, older_than_s: float = PROMPT_RETENTION_S, now: float | None = None) -> int:
         """Blank the prompt of every finished job whose last update is older than older_than_s.
-        Returns how many prompts were blanked. secure_delete makes SQLite overwrite the old text
-        in the database file instead of leaving it in freed space. Queued, running and publishing
-        jobs keep their prompt: it is still needed."""
+        Returns how many prompts were blanked. secure_delete (on for every connection, see _db)
+        makes SQLite overwrite the old text in the database file instead of leaving it in freed
+        space. Queued, running and publishing jobs keep their prompt: it is still needed.
+
+        A purge that blanked anything also owes a scrub, and an owed scrub is paid here with a
+        VACUUM, which rebuilds the file without any free space. With secure_delete on everywhere
+        that is a second layer; for a database written before that, it is the only one."""
         if type(older_than_s) not in (int, float) or older_than_s < 0:
             raise ImageJobError("invalid retention")
         cutoff = (time.time() if now is None else now) - older_than_s
         with self._db() as db:
-            db.execute("PRAGMA secure_delete=ON")
             purged = db.execute(
                 f"UPDATE image_jobs SET prompt='' WHERE state IN ({','.join('?' * len(_FINISHED))}) "
                 "AND updated < ? AND prompt != ''", (*_FINISHED, cutoff)).rowcount
+            if purged:  # same transaction: a blanking is never committed without its scrub owed
+                db.execute("UPDATE image_jobs_scrub SET owed = owed + 1 WHERE id = 1")
+        self._scrub_if_owed()
         # In WAL mode the old pages live on in the -wal file until a checkpoint copies the
         # overwritten pages back; TRUNCATE also empties it. Run on every call, not only when
         # something was purged, so a checkpoint a reader blocked last time is retried.
@@ -135,6 +157,20 @@ class ImageJobStore:
             if str(db.execute("PRAGMA journal_mode").fetchone()[0]).lower() == "wal":
                 db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         return purged
+
+    def _scrub_if_owed(self) -> None:
+        with self._db() as db:
+            owed = db.execute("SELECT owed FROM image_jobs_scrub WHERE id = 1").fetchone()[0]
+        if not owed:
+            return
+        with self._db() as db:
+            # VACUUM builds the new file in SQLite's temp database first; keep that in memory so
+            # no copy of the prompts is written to the system temp directory (the internal disk).
+            db.execute("PRAGMA temp_store=MEMORY")
+            db.execute("VACUUM")
+        with self._db() as db:
+            # Clear only what this scrub covered: a purge that committed meanwhile owes its own.
+            db.execute("UPDATE image_jobs_scrub SET owed = 0 WHERE id = 1 AND owed = ?", (owed,))
 
     def submit(self, owner: str, prompt: str, *, profile_id: str, params: dict | None = None,
                max_queued: int = 16, max_owner_active: int = 3) -> dict:

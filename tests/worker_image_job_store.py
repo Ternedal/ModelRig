@@ -390,6 +390,125 @@ class PromptRetentionTests(unittest.TestCase):
             self.store.purge_prompts(now=time.time() + 31 * self.DAY)
         self.assertNotIn(marker.encode(), files(), "neither the database nor its WAL keeps the old text")
 
+    @staticmethod
+    def secure_delete_off_by_default():
+        """Some SQLite builds have secure_delete on by default, others not: start every connection
+        with it OFF, so only the store's own PRAGMAs can keep old text out of the file."""
+        real_connect = sqlite3.connect
+
+        def off_by_default(*args, **kwargs):
+            connection = real_connect(*args, **kwargs)
+            connection.execute("PRAGMA secure_delete=OFF")
+            return connection
+        return patch("app.image_job_store.sqlite3.connect", off_by_default)
+
+    def test_every_store_connection_has_secure_delete_on(self):
+        with self.secure_delete_off_by_default(), self.store._db() as db:
+            self.assertEqual(db.execute("PRAGMA secure_delete").fetchone()[0], 1)
+
+    def test_a_build_that_ignores_secure_delete_is_refused(self):
+        real_connect = sqlite3.connect
+
+        class Ignoring:
+            def __init__(self, connection):
+                self.connection = connection
+
+            def execute(self, sql, *args):
+                if sql.replace(" ", "").upper().startswith("PRAGMASECURE_DELETE"):
+                    return self.connection.execute("SELECT 0")
+                return self.connection.execute(sql, *args)
+
+            def __getattr__(self, name):
+                return getattr(self.connection, name)
+
+            def __setattr__(self, name, value):
+                if name == "connection":
+                    object.__setattr__(self, name, value)
+                else:
+                    setattr(self.connection, name, value)
+        with patch("app.image_job_store.sqlite3.connect", lambda *a, **k: Ignoring(real_connect(*a, **k))):
+            with self.assertRaisesRegex(ImageJobError, "secure_delete"):
+                self.store.get("x", "anders")
+
+    def test_real_transitions_leave_no_old_prompt_text_after_the_purge(self):
+        # Codex 4477941179: 16 jobs, ~500-character prompts, the normal submit -> claim_for ->
+        # begin_publish -> complete path; with secure_delete only during the purge, half the
+        # markers survived in free space.
+        markers = [f"kaliv-transition-probe-{i:02d}-c9e1" for i in range(16)]
+        instance = A1
+        with self.secure_delete_off_by_default():
+            for i, marker in enumerate(markers):
+                job = self.store.submit("anders", f"{marker} " + "p" * 480, profile_id="test-profile",
+                                        max_owner_active=16)["job_id"]
+                self.assertEqual(self.store.claim_for(["test-profile"], instance)["id"], job)
+                if i % 4 == 3:
+                    self.assertTrue(self.store.fail(job, instance, "generation_failed"))
+                else:
+                    self.assertTrue(self.store.begin_publish(job, instance))
+                    self.assertTrue(self.store.complete(job, instance, f"{i:032x}"))
+            self.assertEqual(self.store.purge_prompts(now=time.time() + 31 * self.DAY), 16)
+        data = Path(self.db).read_bytes()
+        self.assertEqual([m for m in markers if m.encode() in data], [])
+
+    def test_a_database_written_before_this_version_is_scrubbed_on_the_first_purge(self):
+        # The old text sits only in free space and every prompt is already blank, so the purge
+        # itself blanks nothing: only the scrub owed on first open can remove it.
+        legacy = str(Path(self.temp.name) / "legacy.sqlite3")
+        marker = "kaliv-legacy-probe-5d20"
+        with sqlite3.connect(legacy) as db:
+            db.execute("PRAGMA secure_delete=OFF")
+            db.execute("""CREATE TABLE image_jobs (
+                id TEXT PRIMARY KEY, owner TEXT NOT NULL, prompt TEXT NOT NULL,
+                profile_id TEXT NOT NULL, params TEXT NOT NULL,
+                state TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL,
+                asset_id TEXT, error TEXT)""")
+            for i in range(8):
+                db.execute("INSERT INTO image_jobs VALUES (?, 'anders', ?, 'test-profile', '{}', 'completed', 0, 0, ?, NULL)",
+                           (f"{i:032x}", f"{marker} {i} " + "q" * 400, f"{i:032x}"))
+        with sqlite3.connect(legacy) as db:
+            db.execute("PRAGMA secure_delete=OFF")
+            db.execute("UPDATE image_jobs SET prompt=''")
+        self.assertIn(marker.encode(), Path(legacy).read_bytes(), "the residue this test is about")
+        store = ImageJobStore(legacy)
+        self.assertEqual(store.purge_prompts(now=time.time() + 31 * self.DAY), 0, "nothing left to blank")
+        self.assertNotIn(marker.encode(), Path(legacy).read_bytes())
+        with sqlite3.connect(legacy) as db:
+            self.assertEqual(db.execute("SELECT owed FROM image_jobs_scrub").fetchone()[0], 0, "paid")
+        self.assertEqual(store.get(f"{0:032x}", "anders")["state"], "completed", "the rows stay")
+
+    def owed(self):
+        with sqlite3.connect(self.db) as db:
+            return db.execute("SELECT owed FROM image_jobs_scrub").fetchone()[0]
+
+    def test_a_failed_scrub_stays_owed_and_is_paid_on_the_next_call(self):
+        self.assertEqual(self.store.purge_prompts(), 0)
+        self.assertEqual(self.owed(), 0, "the first-open scrub is paid")
+        self.store.submit("anders", "a red bicycle", profile_id="test-profile")
+        with sqlite3.connect(self.db) as db:
+            db.execute("UPDATE image_jobs SET state='completed', asset_id=?", ("a" * 32,))
+        with patch.object(ImageJobStore, "_scrub_if_owed", side_effect=sqlite3.OperationalError("locked")):
+            with self.assertRaises(sqlite3.OperationalError):
+                self.store.purge_prompts(now=time.time() + 31 * self.DAY)
+        self.assertGreater(self.owed(), 0, "the blanking committed together with its debt")
+        self.assertEqual(self.store.purge_prompts(now=time.time() + 31 * self.DAY), 0)
+        self.assertEqual(self.owed(), 0)
+
+    def test_the_scrub_keeps_its_temp_database_in_memory(self):
+        statements = []
+        real_connect = sqlite3.connect
+
+        def recording(*args, **kwargs):
+            connection = real_connect(*args, **kwargs)
+            connection.set_trace_callback(statements.append)
+            return connection
+        with patch("app.image_job_store.sqlite3.connect", recording):
+            self.store.purge_prompts()
+            vacuum = statements.index("VACUUM")
+            self.assertIn("PRAGMA temp_store=MEMORY", statements[:vacuum])
+            statements.clear()
+            self.store.purge_prompts()
+        self.assertNotIn("VACUUM", statements, "nothing owed, no rebuild")
+
     def test_the_window_must_be_a_non_negative_number_of_seconds(self):
         for bad in (-1, "30", True, None):
             with self.subTest(bad=bad), self.assertRaises(ImageJobError):
