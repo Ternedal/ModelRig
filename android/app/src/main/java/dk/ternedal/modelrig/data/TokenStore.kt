@@ -269,6 +269,60 @@ class TokenStore(context: Context) {
         get() = prefs.getString("cloud_system", DEFAULT_SYSTEM)?.ifBlank { DEFAULT_SYSTEM } ?: DEFAULT_SYSTEM
         set(v) { prefs.edit().putString("cloud_system", v).apply() }
 
+
+    // ---- KalivHub display mirror (strict opt-in, off by default) ----
+    /** LAN endpoint only; never accept a hostname/public URL. */
+    val hubMirrorEndpoint: String?
+        get() = prefs.getString("hub_mirror_endpoint", null)
+
+    /** Independent display-only HMAC key. Not the ModelRig pairing token. */
+    val hubMirrorSecretStatus: StoredCredentialRead
+        get() = StoredCredentialReader.read(
+            prefs.getString("hub_mirror_secret_enc", null),
+            Crypto::decrypt,
+        )
+
+    val hubMirrorSecret: String?
+        get() = (hubMirrorSecretStatus as? StoredCredentialRead.Ready)?.value
+
+    val hubMirrorEnabled: Boolean
+        get() = prefs.getBoolean("hub_mirror_enabled", false)
+
+    /** Bumped whenever mirror consent or pairing changes to invalidate queued turns. */
+    val hubMirrorGeneration: Long
+        get() = prefs.getLong("hub_mirror_generation", 0L)
+
+    /**
+     * Persist url, encrypted secret and opt-in as one transaction.
+     * Disabling must always succeed even with an invalid or undecryptable key.
+     * A generation bump invalidates pending display deliveries from old consent.
+     */
+    fun saveHubMirrorConfig(url: String, newSecret: String?, enabled: Boolean): Boolean {
+        val nextGeneration = hubMirrorGeneration + 1L
+        if (!enabled) {
+            return prefs.edit()
+                .putBoolean("hub_mirror_enabled", false)
+                .putLong("hub_mirror_generation", nextGeneration)
+                .commit()
+        }
+
+        val normalizedUrl = dk.ternedal.modelrig.net.HubMirrorClient.endpoint(url)
+            ?: return false
+        val supplied = newSecret?.trim().orEmpty()
+        val usableSecret = supplied.ifEmpty { hubMirrorSecret.orEmpty() }
+        if (usableSecret.length < 32) return false
+        if (supplied.isNotEmpty() && supplied.length < 32) return false
+        val ciphertext = if (supplied.isNotEmpty()) {
+            try { Crypto.encrypt(supplied) } catch (_: Exception) { return false }
+        } else null
+        return prefs.edit().apply {
+            putString("hub_mirror_endpoint", normalizedUrl)
+            if (ciphertext != null) putString("hub_mirror_secret_enc", ciphertext)
+            putBoolean("hub_mirror_enabled", true)
+            putLong("hub_mirror_generation", nextGeneration)
+        }.commit()
+    }
+
     val hasRig: Boolean get() = rigCredentialStatus is StoredCredentialRead.Ready
     val hasCloud: Boolean get() = cloudCredentialStatus is StoredCredentialRead.Ready
 

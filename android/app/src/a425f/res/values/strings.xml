@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Test-build label only. Production Kaliv resources remain unchanged. -->
+    <string name="app_name">Kaliv TEST · Nest Hub</string>
+</resources>
