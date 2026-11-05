@@ -91,6 +91,29 @@ class SourceImageTests(unittest.TestCase):
                 read_owned_source_png(self.sink, jobs, "owner-a", asset_id)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_failed_and_cancelled_jobs_never_grant_source_access(self, _mount):
+        """An orphaned published PNG is not proof of job ownership."""
+        jobs = ImageJobStore(str(self.sink.volume_root / "incomplete_jobs.sqlite"))
+        asset_id = self.sink.publish(PNG, ".png")
+        failed = jobs.submit("owner-a", "failed", profile_id="test")
+        self.assertEqual(jobs.claim()["id"], failed["job_id"])
+        self.assertTrue(jobs.finish(failed["job_id"], error="generation_failed"))
+        cancelled = jobs.submit("owner-a", "cancelled", profile_id="test")
+        self.assertTrue(jobs.cancel(cancelled["job_id"], "owner-a"))
+        # Even if stale or corrupt rows reference an existing PNG, only
+        # completed jobs may authorize a source read.
+        with jobs._db() as db:
+            db.execute(
+                "UPDATE image_jobs SET asset_id=? WHERE id IN (?,?)",
+                (asset_id, failed["job_id"], cancelled["job_id"]),
+            )
+        for owner in ("owner-a", "owner-b"):
+            with self.subTest(owner=owner):
+                self.assertFalse(jobs.owns_completed_asset(owner, asset_id))
+                with self.assertRaises(SourceImageUnavailable):
+                    read_owned_source_png(self.sink, jobs, owner, asset_id)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_symlink_source_refused(self, _mount):
         asset_id = self.sink.publish(PNG, ".png")
         path = self.sink.media_root / (asset_id + ".png")
