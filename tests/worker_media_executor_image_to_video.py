@@ -165,5 +165,45 @@ class ImageToVideoExecutorTests(unittest.TestCase):
         self.assertEqual(calls, [])
 
 
+class RealReaderTests(unittest.TestCase):
+    """The production seam end to end: ChatGPT's read_owned_source_png over the real gallery sink and
+    the real job store -- the source must be a completed asset of the same owner."""
+    setUp, tearDown = ImageToVideoExecutorTests.setUp, ImageToVideoExecutorTests.tearDown
+    i2v_executor, real_factory, submit = (ImageToVideoExecutorTests.i2v_executor, ImageToVideoExecutorTests.real_factory,
+                                          ImageToVideoExecutorTests.submit)
+
+    def completed_image(self, sink, owner):
+        """A finished image job of `owner`, published job-keyed into the gallery, as the executor does."""
+        job = self.store.submit(owner, "a red bicycle", profile_id="sdxl-a", max_owner_active=16)["job_id"]
+        instance = base.GPU_A + ":" + "e" * 16
+        self.assertEqual(self.store.claim_for(["sdxl-a"], instance)["id"], job)
+        self.assertTrue(self.store.begin_publish(job, instance))
+        asset = sink.publish_and_register_for_job(job, png(), ".png")
+        self.assertTrue(self.store.complete(job, instance, asset))
+        return asset
+
+    def test_the_owners_own_completed_image_drives_the_video_and_anothers_does_not(self):
+        from unittest.mock import patch
+        from app.media_gallery_store import ExternalMediaSink
+        from app.media_source_image import read_owned_source_png
+        volume = Path(self.tmp, "volume")
+        (volume / "media").mkdir(parents=True)
+        with patch("app.media_gallery_catalog.os.path.ismount", side_effect=lambda p: Path(p) == volume):
+            sink = ExternalMediaSink(str(volume / "media"), str(volume))
+            asset = self.completed_image(sink, "anders")
+            ex, loads = self.i2v_executor(lambda owner, asset_id: read_owned_source_png(sink, self.store, owner, asset_id))
+            mine = self.submit(owner="anders", asset=asset)
+            self.assertEqual(ex.step(), "completed")
+            seen = json.loads(Path(self.dirs["state"], "loadimage.json").read_text())
+            self.assertEqual(seen[0]["sha256"], hashlib.sha256(png()).hexdigest())
+            theirs = self.submit(owner="eve", asset=asset)  # eve names anders' asset
+            self.assertEqual(ex.step(), "failed")
+            unknown = self.submit(owner="anders", asset="f" * 32)
+            self.assertEqual(ex.step(), "failed")
+        self.assertEqual(self.store.get(mine, "anders")["state"], "completed")
+        self.assertEqual(self.store.get(theirs, "eve")["error"], "source_image_unavailable")
+        self.assertEqual(self.store.get(unknown, "anders")["error"], "source_image_unavailable")
+
+
 if __name__ == "__main__":
     unittest.main()
