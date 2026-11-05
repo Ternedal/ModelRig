@@ -69,6 +69,18 @@ class SourceImageTests(unittest.TestCase):
             read_owned_source_png(self.sink, jobs, "owner-a", asset_id)
         self.assertTrue(jobs.complete(created["job_id"], instance, asset_id))
         self.assertEqual(read_owned_source_png(self.sink, jobs, "owner-a", asset_id), PNG)
+        # Neither malformed principals nor asset IDs may reach gallery IO.
+        for invalid_owner in (None, "", True, 123, "owner-b"):
+            with self.subTest(owner=invalid_owner):
+                self.assertFalse(jobs.owns_completed_asset(invalid_owner, asset_id))
+                with self.assertRaises(SourceImageUnavailable):
+                    read_owned_source_png(self.sink, jobs, invalid_owner, asset_id)
+        for invalid_asset in (None, "", True, "../secret", "a" * 129):
+            with self.subTest(asset=invalid_asset):
+                self.assertFalse(jobs.owns_completed_asset("owner-a", invalid_asset))
+                with self.assertRaises(SourceImageUnavailable):
+                    read_owned_source_png(self.sink, jobs, "owner-a", invalid_asset)
+        self.assertFalse(jobs.owns_completed_asset("owner-b", asset_id))
         with patch.object(self.sink, "_root", side_effect=AssertionError(
             "unauthorized owner must not access gallery"
         )):
