@@ -1,5 +1,7 @@
 """Offline regressions for the read-only image source seam."""
 import os
+import sqlite3
+from unittest.mock import patch
 import struct
 import tempfile
 import unittest
@@ -8,7 +10,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.media_gallery_store import ExternalMediaSink
-from app.media_source_image import read_source_png
+from app.media_source_image import read_source_png, read_owned_source_png
+from app.image_job_store import ImageJobStore
 from app.media_generation_contract import ArtifactSinkUnavailable
 
 
@@ -48,6 +51,29 @@ class SourceImageTests(unittest.TestCase):
         (self.sink.media_root / (asset_id + ".png")).write_bytes(PNG)
         with self.assertRaises(ArtifactSinkUnavailable):
             read_source_png(self.sink, asset_id)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_completed_owner_guard_on_main_g2(self, _mount):
+        jobs = ImageJobStore(str(self.sink.volume_root / "owner_guard.sqlite"))
+        asset_id = self.sink.publish(PNG, ".png")
+        created = jobs.submit("owner-a", "test prompt", profile_id="test")
+        with self.assertRaises(SourceImageUnavailable):
+            read_owned_source_png(self.sink, jobs, "owner-a", asset_id)
+        instance = "GPU-00000000-0000-0000-0000-000000000001:0123456789abcdef"
+        self.assertEqual(jobs.claim_for(["test"], instance)["id"], created["job_id"])
+        self.assertTrue(jobs.begin_publish(created["job_id"], instance))
+        with self.assertRaises(SourceImageUnavailable):
+            read_owned_source_png(self.sink, jobs, "owner-a", asset_id)
+        self.assertTrue(jobs.complete(created["job_id"], instance, asset_id))
+        self.assertEqual(read_owned_source_png(self.sink, jobs, "owner-a", asset_id), PNG)
+        with patch.object(self.sink, "_root", side_effect=AssertionError(
+            "unauthorized owner must not access gallery"
+        )):
+            with self.assertRaises(SourceImageUnavailable):
+                read_owned_source_png(self.sink, jobs, "owner-b", asset_id)
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=False):
+            with self.assertRaises(ArtifactSinkUnavailable):
+                read_owned_source_png(self.sink, jobs, "owner-a", asset_id)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_symlink_source_refused(self, _mount):
