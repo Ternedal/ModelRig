@@ -60,7 +60,8 @@ The migration is additive: `claimed_by` and `cancel_requested`. The legacy API (
 - **What stays.** The row stays: id, owner, state, asset and error. The gallery and the audit trail still resolve; only the user's text goes. An empty prompt means "purged", because `submit` never accepts an empty one.
 - **How.** `ImageJobStore.purge_prompts()` runs with `PRAGMA secure_delete=ON`, so SQLite overwrites the old text in the database file instead of leaving it in freed space. Some builds have that on by default; the store does not rely on it.
 - **When.** The executor runs it at start and then at most once an hour while idle. A failure is recorded and retried, and is never fatal to GPU work.
-- **Stated limit.** Copies outside the database file, such as filesystem journals, backups and SSD remapping, are out of reach of SQLite. Prompts never go to logs.
+- **WAL.** If the database is in WAL mode (another connection may switch it), the old pages live on in the `-wal` file until a checkpoint. After a purge the store runs `wal_checkpoint(TRUNCATE)`, which also empties that file. In the default rollback-journal mode this is a no-op.
+- **Stated limit, no promise of physical erasure.** SQLite cannot reach copies outside the database and WAL files: backups, filesystem snapshots, journals and SSD remapping. A checkpoint can also be blocked by a long-lived reader; the next hourly purge retries. Prompts never go to logs.
 
 ## Exit codes
 

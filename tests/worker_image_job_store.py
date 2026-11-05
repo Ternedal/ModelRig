@@ -370,6 +370,26 @@ class PromptRetentionTests(unittest.TestCase):
             self.store.purge_prompts(now=time.time() + 31 * self.DAY)
         self.assertNotIn(marker.encode(), Path(self.db).read_bytes(), "secure_delete overwrote it")
 
+    def test_in_wal_mode_the_old_text_is_not_left_in_the_wal_file_either(self):
+        # Another connection (a route, a tool) may have switched the database to WAL.
+        with sqlite3.connect(self.db) as db:
+            self.assertEqual(db.execute("PRAGMA journal_mode=WAL").fetchone()[0], "wal")
+        marker = "kaliv-wal-probe-41c2"
+        real_connect = sqlite3.connect
+
+        def off_by_default(*args, **kwargs):
+            connection = real_connect(*args, **kwargs)
+            connection.execute("PRAGMA secure_delete=OFF")
+            return connection
+        keep_open = sqlite3.connect(self.db)  # a reader that keeps the WAL from being removed on close
+        self.addCleanup(keep_open.close)
+        with patch("app.image_job_store.sqlite3.connect", off_by_default):
+            self.job("completed", f"a bicycle {marker} " + "m" * 100)
+            files = lambda: b"".join(Path(p).read_bytes() for p in (self.db, self.db + "-wal") if Path(p).exists())
+            self.assertIn(marker.encode(), files())
+            self.store.purge_prompts(now=time.time() + 31 * self.DAY)
+        self.assertNotIn(marker.encode(), files(), "neither the database nor its WAL keeps the old text")
+
     def test_the_window_must_be_a_non_negative_number_of_seconds(self):
         for bad in (-1, "30", True, None):
             with self.subTest(bad=bad), self.assertRaises(ImageJobError):

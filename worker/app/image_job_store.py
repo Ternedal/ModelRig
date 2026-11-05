@@ -124,9 +124,17 @@ class ImageJobStore:
         cutoff = (time.time() if now is None else now) - older_than_s
         with self._db() as db:
             db.execute("PRAGMA secure_delete=ON")
-            return db.execute(
+            purged = db.execute(
                 f"UPDATE image_jobs SET prompt='' WHERE state IN ({','.join('?' * len(_FINISHED))}) "
                 "AND updated < ? AND prompt != ''", (*_FINISHED, cutoff)).rowcount
+        # In WAL mode the old pages live on in the -wal file until a checkpoint copies the
+        # overwritten pages back; TRUNCATE also empties it. Run on every call, not only when
+        # something was purged, so a checkpoint a reader blocked last time is retried.
+        # (No-op in rollback-journal mode.)
+        with self._db() as db:
+            if str(db.execute("PRAGMA journal_mode").fetchone()[0]).lower() == "wal":
+                db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        return purged
 
     def submit(self, owner: str, prompt: str, *, profile_id: str, params: dict | None = None,
                max_queued: int = 16, max_owner_active: int = 3) -> dict:
