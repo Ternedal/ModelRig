@@ -1,4 +1,21 @@
-# Physical validation campaign — 2.0.13
+# Physical validation campaign — 2.0.13 (historical)
+
+> **HISTORICAL RUNBOOK — NOT RELEASE AUTHORITY FOR FROZEN V1 2.0.14.**
+>
+> This document contains preserved 2.0.11/2.0.13 appliance lifecycle
+> commands and a 2.0.14 invariant. Its version-sensitive Stage A/Stage B,
+> signed-release, updater and rollback instructions **must not be executed**
+> against the current V1 2.0.14 software-freeze as written. In particular,
+> **do not create `v2.0.11` or run the old 2.0.10→2.0.11 updater chain**
+> as current V1 evidence. These are historical instructions, not a new
+> qualification recipe. Use the current candidate-bound [V1 physical campaign
+> #2025](https://github.com/Ternedal/ModelRig/issues/2025), [system release
+> convergence #1994](https://github.com/Ternedal/ModelRig/issues/1994), and
+> [version drift tracker #2107](https://github.com/Ternedal/ModelRig/issues/2107)
+> to select the relevant exact-revision physical procedures. Until all ten
+> independent canonical gates qualify, `release_ready=false` and
+> `production_activation=false`. This notice is documentation-only; it does
+> not authorize an updater, release tag, merge, or production activation.
 
 Denne runbook samler de fysiske Prove-opgaver for ModelRig 2.0.13. En
 upubliceret kandidat starter i `STAGED_PHYSICAL_PROMOTION.md`. Releasefasens
