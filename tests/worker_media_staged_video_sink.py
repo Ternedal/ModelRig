@@ -11,6 +11,7 @@ The mount check is the only thing patched (os.path.ismount in the gallery catalo
 gallery's own tests do; everything else is the real filesystem.
 
 Run: PYTHONPATH=worker python3 tests/worker_media_staged_video_sink.py
+The Windows gate runs the same file on NTFS (hard links, file ids, the index lock).
 """
 from __future__ import annotations
 
@@ -165,7 +166,10 @@ class JobKeyedRules(unittest.TestCase):
     def test_a_symlink_at_the_destination_is_a_conflict_and_is_not_followed(self):
         target = self.volume.root / "elsewhere.mp4"
         target.write_bytes(MP4)  # even with identical bytes behind it
-        (self.volume.media / f"{self.expected}.mp4").symlink_to(target)
+        try:
+            (self.volume.media / f"{self.expected}.mp4").symlink_to(target)
+        except OSError:  # Windows without the symlink privilege
+            self.skipTest("symlinks cannot be created here")
         with self.assertRaisesRegex(ArtifactSinkUnavailable, "asset_job_conflict"):
             self.adopt()
         self.assertEqual(self.volume.indexed(), set())
