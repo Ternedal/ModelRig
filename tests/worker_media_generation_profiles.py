@@ -120,6 +120,46 @@ class ProfileParsingTests(unittest.TestCase):
             with self.subTest(diffusers_options=options), self.assertRaises(GenerationError):
                 parse_profile(image_profile(backend_options=options))
 
+    # --- G3 pins (#2296 6634996133) --------------------------------------------------------------
+    def _options(self, **extra):
+        options = dict(video_profile()["backend_options"])
+        options.update(extra)
+        return options
+
+    def test_comfyui_pins_are_optional_for_candidates_and_parsed(self):
+        weights = [{"path": "diffusion_models/wan.safetensors", "sha256": "ab" * 32, "bytes": 123}]
+        profile = parse_profile(video_profile(backend_options=self._options(comfyui_version="0.3.68", weights=weights)))
+        self.assertEqual(profile.backend_options.comfyui_version, "0.3.68")
+        self.assertEqual(profile.backend_options.weights[0].path, "diffusion_models/wan.safetensors")
+        self.assertEqual(parse_profile(video_profile()).backend_options.weights, (), "existing profiles stay valid")
+
+    def test_a_rig_qualified_comfyui_profile_must_pin_both(self):
+        weights = [{"path": "vae/wan_2.1_vae.safetensors", "sha256": "cd" * 32, "bytes": 9}]
+        for options in (self._options(), self._options(comfyui_version="0.3.68"), self._options(weights=weights)):
+            with self.subTest(options=sorted(options)), self.assertRaisesRegex(GenerationError, "must pin"):
+                parse_profile(video_profile(qualification="rig-qualified", backend_options=options))
+        parse_profile(video_profile(qualification="rig-qualified",
+                                    backend_options=self._options(comfyui_version="0.3.68", weights=weights)))
+
+    def test_weight_pins_are_strict(self):
+        good = {"path": "vae/a.safetensors", "sha256": "ab" * 32, "bytes": 1}
+        bad_entries = [
+            [], [dict(good, path="../a.safetensors")], [dict(good, path="/abs/a.safetensors")],
+            [dict(good, path="vae\\a.safetensors")], [dict(good, path="vae/./a.safetensors")],
+            [dict(good, path="C:/a.safetensors")], [dict(good, sha256="AB" * 32)], [dict(good, bytes=0)],
+            [dict(good, bytes=True)], [good, good], [good, dict(good, path="other/a.safetensors")],
+            [good, dict(good, path="other/A.safetensors")],  # the same file on Windows
+            [dict(good, extra=1)], [good] * 17, "vae/a.safetensors",
+        ]
+        for entries in bad_entries:
+            with self.subTest(entries=str(entries)[:60]), self.assertRaises(GenerationError):
+                parse_profile(video_profile(backend_options=self._options(weights=entries)))
+        for version in ("", " 0.3", "0.3/../x", "x" * 65, 3):
+            with self.subTest(version=version), self.assertRaises(GenerationError):
+                parse_profile(video_profile(backend_options=self._options(comfyui_version=version)))
+        with self.assertRaisesRegex(GenerationError, "unknown keys"):
+            parse_profile(video_profile(backend_options=self._options(models="x")))
+
     def test_revision_must_be_pinned(self):
         for revision in ("", "main", "v1.0", FAKE_REV[:39], FAKE_REV.upper(), None, 123):
             with self.subTest(revision=revision), self.assertRaises(GenerationError):
