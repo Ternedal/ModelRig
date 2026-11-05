@@ -95,6 +95,38 @@ class EntryPointTests(unittest.TestCase):
             self.assertEqual(main(["--device", "cuda:0"], missing_parent), EXIT_CONFIG)
         self.assertFalse((self.tmp / "no-such-dir").exists(), "a missing directory is never created")
 
+    def test_a_job_database_that_is_not_a_regular_sqlite_file_is_78_not_a_crash(self):
+        # #2337 review 4477759300: a directory raised sqlite3.OperationalError, exit 1, restarted forever.
+        (self.tmp / "state" / "a-directory").mkdir()
+        real = self.tmp / "state" / "real.sqlite3"
+        __import__("sqlite3").connect(real).close()
+        (self.tmp / "state" / "a-link").symlink_to(real)
+        os.mkfifo(self.tmp / "state" / "a-fifo")
+        (self.tmp / "state" / "not-sqlite").write_bytes(b"not a database " * 100)
+        import threading
+        for name in ("a-directory", "a-link", "a-fifo", "not-sqlite"):
+            with self.subTest(name=name), patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+                env = {**self.env, "KALIV_MEDIA_JOB_DB": str(self.tmp / "state" / name)}
+                codes = []  # in a thread: SQLite opening a FIFO blocks, and a test must fail, not hang
+                worker = threading.Thread(target=lambda: codes.append(main(["--device", "cuda:0"], env)), daemon=True)
+                worker.start()
+                worker.join(10)
+                self.assertEqual(codes, [EXIT_CONFIG], "refused promptly")
+        self.assertEqual((self.tmp / "state" / "not-sqlite").read_bytes(), b"not a database " * 100, "untouched")
+
+    def test_an_unmounted_volume_is_75_before_the_job_database_is_inspected(self):
+        env = {**self.env, "KALIV_MEDIA_JOB_DB": str(self.tmp / "state")}  # would be 78 if inspected
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=False):
+            self.assertEqual(main(["--device", "cuda:0"], env), EXIT_SINK_UNAVAILABLE)
+
+    def test_a_locked_database_is_not_a_configuration_error(self):
+        # Transient: exit 1, which the supervisor restarts with back-off; 78 would stop it for good.
+        import sqlite3
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True), \
+                patch("app.media_executor_main.ImageJobStore", side_effect=sqlite3.OperationalError("database is locked")):
+            with self.assertRaises(sqlite3.OperationalError):
+                main(["--device", "cuda:0"], self.env)
+
     def test_an_unusable_lease_directory_is_a_config_error_not_a_crash(self):
         # #2337 review 4477083816: it used to pass configuration and fail at the first lock (exit 1,
         # restarted forever). Each case must be 78, which the supervisor never restarts.
