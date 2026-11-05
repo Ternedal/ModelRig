@@ -318,6 +318,45 @@ class JobKeyedRules(unittest.TestCase):
                 self.adopt()
         self.assertTrue((self.volume.media / f"{self.expected}.mp4").exists())
 
+    def test_a_concurrent_identical_adoption_that_holds_the_lock_is_never_undermined(self):
+        # #2347 review 4485232710: the creator's registration fails because an identical adoption
+        # of the same job holds the gallery lock and is registering the creator's link right now.
+        lock = self.volume.media / ".gallery-index.lock"
+        real = sink_module.register_asset
+
+        def other_adopter_holds_the_lock(*args, **kwargs):
+            lock.write_bytes(b"")  # the other adoption is inside register_asset
+            raise sink_module.GalleryUnavailable("gallery_index_locked")
+        with patch.object(sink_module, "register_asset", other_adopter_holds_the_lock):
+            with self.assertRaisesRegex(ArtifactSinkUnavailable, "gallery_registration_unknown_asset_kept"):
+                self.adopt()
+        self.assertTrue(lock.exists(), "the other registration's lock is not ours to remove")
+        destination = self.volume.media / f"{self.expected}.mp4"
+        self.assertTrue(destination.exists(), "kept: the other adoption may be indexing it")
+        lock.unlink()  # the other adoption commits
+        real(self.volume.media, self.volume.root, self.expected, ".mp4", len(MP4))
+        self.assertEqual(self.volume.indexed(), {self.expected})
+        self.assertEqual(destination.read_bytes(), MP4, "the successful caller's asset exists")
+
+    def test_the_rollback_holds_and_then_releases_the_registration_lock(self):
+        lock = self.volume.media / ".gallery-index.lock"
+        seen = []
+        real_index_state = ExternalStagedVideoSink._index_state
+
+        def spy(sink, asset_id, size):
+            seen.append(lock.exists())
+            return real_index_state(sink, asset_id, size)
+
+        def failed(*args, **kwargs):
+            raise OSError("index write failed")
+        with patch.object(sink_module, "register_asset", failed), \
+                patch.object(ExternalStagedVideoSink, "_index_state", spy):
+            with self.assertRaisesRegex(ArtifactSinkUnavailable, "^gallery_registration_failed$"):
+                self.adopt()
+        self.assertEqual(seen, [False, True], "checked once without, then again under the lock")
+        self.assertFalse(lock.exists(), "released")
+        self.assertFalse((self.volume.media / f"{self.expected}.mp4").exists(), "rolled back")
+
     def test_no_write_reaches_the_published_file_after_adoption(self):
         with self.sink.staged(".mp4") as output:
             output.write(MP4)

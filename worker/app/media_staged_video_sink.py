@@ -206,13 +206,18 @@ class ExternalStagedVideoSink:
             # The writer can fail AFTER it committed the index (e.g. removing its lock), so the
             # exception alone does not say whether the row exists (#2347 review 4485170944).
             state = self._index_state(asset_id, ticket.written)
+            if state is False and created:
+                # Decide and roll back only while holding the gallery's own registration lock: an
+                # identical adoption of the same job may be registering this very link right now
+                # (#2347 review 4485232710). Inode ownership alone does not make the rollback safe.
+                state = self._rollback_under_registration_lock(root, destination, asset_id, ticket)
             if state is True:  # durably registered: the asset is published, keep and report it
                 ticket.adopted = True
                 self._remove_if_ours(ticket.path, ticket.dev, ticket.ino)
                 return asset_id
             if state is None:  # unknowable: never delete what may be indexed; reconcile instead
                 raise ArtifactSinkUnavailable("gallery_registration_unknown_asset_kept") from exc
-            if created and not self._remove_if_ours(destination, ticket.dev, ticket.ino):
+            if state == "left":
                 # The rollback did not happen: an unindexed asset is left for the read-only
                 # inventory (ExternalMediaSink.inspect_unindexed_assets) -- say so, never succeed.
                 raise ArtifactSinkUnavailable("gallery_registration_failed_asset_left_unindexed") from exc
@@ -223,6 +228,28 @@ class ExternalStagedVideoSink:
         return asset_id
 
     # --- helpers ----------------------------------------------------------------------------
+    def _rollback_under_registration_lock(self, root: Path, destination: Path, asset_id: str, ticket: _Ticket):
+        """Take the gallery index writer's lock (same file, same O_EXCL protocol, never stolen),
+        re-read the index and remove our link only if there is still no row for it.
+        Returns True (published meanwhile), None (lock busy or index unknowable: keep the asset),
+        False (rolled back) or "left" (no row, but the link could not be removed)."""
+        lock = root / ".gallery-index.lock"
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0), 0o600)
+        except OSError:
+            return None  # a registration is in progress (or a stale lock): it may index this asset
+        try:
+            mine = os.fstat(fd)
+        finally:
+            os.close(fd)
+        try:
+            state = self._index_state(asset_id, ticket.written)
+            if state is not False:
+                return state
+            return False if self._remove_if_ours(destination, ticket.dev, ticket.ino) else "left"
+        finally:
+            self._remove_if_ours(lock, mine.st_dev, mine.st_ino)
+
     def _index_state(self, asset_id: str, size: int):
         """True if the gallery index holds exactly this video row, False if it holds no row for
         the id, None if that cannot be established (unreadable index, conflicting row, no volume)."""
