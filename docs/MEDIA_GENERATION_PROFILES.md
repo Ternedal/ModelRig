@@ -33,6 +33,9 @@ The lease is held for as long as the model is loaded: budget, load, inference an
 ## GPU lease
 
 - `KALIV_GPU_LEASE_DIR` is an existing absolute, non-symlink, **local** directory, not on removable media, so the lease works while the media volume is missing.
+  - **Who may change it.** It must be owned by the process user, and nobody else may add, replace, delete or re-permission a lock file. On POSIX that is the owner and mode check.
+  - **On Windows** the owner and DACL are read through a directory handle that never follows a junction (`lease_dir_acl_windows`). Owner: the process user, SYSTEM or Administrators. Any other principal may at most list, traverse and read attributes. Inherit-only grants count, because they reach the lock files. Anything else is `GpuLeaseError`, which the entry point reports as exit 78. (Gap G5, #2296.)
+  - **Shapes.** A new folder under `%LOCALAPPDATA%` passes as it is. A folder under `C:\` needs `icacls <dir> /inheritance:r /grant:r "*<your SID>:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F"`, because `C:\` gives Authenticated Users Modify on everything below it.
   - On POSIX it must be owned by the running user and not group- or world-writable.
   - On Windows its ACLs are not checked by this code; that is a stated limit.
 - Lock files are named after the GPU UUID (`GPU-….lock`), not after a CUDA index, which can change with `CUDA_VISIBLE_DEVICES` or ordering.
