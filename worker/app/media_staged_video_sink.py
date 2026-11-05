@@ -200,8 +200,13 @@ class ExternalStagedVideoSink:
         try:
             register_asset(self._media.media_root, self._media.volume_root, asset_id, EXTENSION, ticket.written)
         except (GalleryUnavailable, OSError, ValueError) as exc:
-            if created:
-                self._remove_if_ours(destination, ticket.dev, ticket.ino)
+            # Close first: on Windows an open descriptor without delete sharing blocks the
+            # removal of every name of that file, the new link included (#2347 review 4485110252).
+            self._close(ticket)
+            if created and not self._remove_if_ours(destination, ticket.dev, ticket.ino):
+                # The rollback did not happen: an unindexed asset is left for the read-only
+                # inventory (ExternalMediaSink.inspect_unindexed_assets) -- say so, never succeed.
+                raise ArtifactSinkUnavailable("gallery_registration_failed_asset_left_unindexed") from exc
             raise ArtifactSinkUnavailable("gallery_registration_failed") from exc
         ticket.adopted = True
         self._close(ticket)  # the published file shares this inode: no write may follow
@@ -257,20 +262,23 @@ class ExternalStagedVideoSink:
             fd, ticket.fd = ticket.fd, None
             os.close(fd)
 
-    def _remove_if_ours(self, path: Path, dev: int, ino: int) -> None:
-        """Unlink path only if it is still the given file, on the still verified volume."""
+    def _remove_if_ours(self, path: Path, dev: int, ino: int) -> bool:
+        """Unlink path only if it is still the given file, on the still verified volume.
+        True when that file no longer has this name; False when it was left in place."""
         try:
             self._media._root()
         except ArtifactSinkUnavailable:
-            return  # unmounted or replaced: touch nothing on whatever is there now
+            return False  # unmounted or replaced: touch nothing on whatever is there now
         try:
             info = os.lstat(path)
         except FileNotFoundError:
-            return
+            return True
         except OSError:
-            return
-        if stat.S_ISREG(info.st_mode) and (info.st_dev, info.st_ino) == (dev, ino):
-            try:
-                os.unlink(path)
-            except OSError:
-                pass  # left for the read-only temp inventory; never reported as published
+            return False
+        if not stat.S_ISREG(info.st_mode) or (info.st_dev, info.st_ino) != (dev, ino):
+            return True  # the name is another file now: ours is not there, and theirs is kept
+        try:
+            os.unlink(path)
+        except OSError:
+            return False  # left for the read-only inventories; never reported as published
+        return True

@@ -217,6 +217,51 @@ class JobKeyedRules(unittest.TestCase):
                 self.adopt()
         self.assertTrue((self.volume.media / f"{first}.mp4").exists(), "a pre-existing asset is never removed")
 
+    def test_a_failed_registration_closes_the_descriptor_before_the_rollback(self):
+        # #2347 review 4485110252: on Windows an open descriptor blocks deleting the new link.
+        # Stand in for that platform rule everywhere: unlinking a file whose descriptor is open fails.
+        open_inodes = {}
+        real_open, real_close, real_unlink = os.open, os.close, os.unlink
+
+        def tracking_open(path, flags, mode=0o777, **kwargs):
+            fd = real_open(path, flags, mode, **kwargs)
+            open_inodes[fd] = os.fstat(fd).st_ino
+            return fd
+
+        def tracking_close(fd):
+            open_inodes.pop(fd, None)
+            return real_close(fd)
+
+        def windows_like_unlink(path, *args, **kwargs):
+            if os.lstat(path).st_ino in open_inodes.values():
+                raise PermissionError(32, "The process cannot access the file because it is being used")
+            return real_unlink(path, *args, **kwargs)
+
+        def failing(*args, **kwargs):
+            raise OSError("index write failed")
+        with patch.object(sink_module.os, "open", tracking_open), patch.object(sink_module.os, "close", tracking_close), \
+                patch.object(sink_module.os, "unlink", windows_like_unlink), patch.object(sink_module, "register_asset", failing):
+            with self.assertRaisesRegex(ArtifactSinkUnavailable, "^gallery_registration_failed$"):
+                self.adopt()
+        self.assertFalse((self.volume.media / f"{self.expected}.mp4").exists(), "rolled back")
+        self.assertEqual(self.volume.temporaries(), [])
+
+    def test_a_rollback_that_cannot_happen_is_reported_as_such(self):
+        real_unlink = os.unlink
+
+        def refuse_the_destination(path, *args, **kwargs):
+            if str(path).endswith(".mp4"):
+                raise PermissionError(5, "Access is denied")
+            return real_unlink(path, *args, **kwargs)
+
+        def failing(*args, **kwargs):
+            raise OSError("index write failed")
+        with patch.object(sink_module.os, "unlink", refuse_the_destination), patch.object(sink_module, "register_asset", failing):
+            with self.assertRaisesRegex(ArtifactSinkUnavailable, "gallery_registration_failed_asset_left_unindexed"):
+                self.adopt()
+        self.assertEqual(ExternalMediaSink(self.volume.media, self.volume.root).inspect_unindexed_assets(),
+                         [f"{self.expected}.mp4"], "visible to the read-only inventory, never indexed")
+
     def test_no_write_reaches_the_published_file_after_adoption(self):
         with self.sink.staged(".mp4") as output:
             output.write(MP4)
