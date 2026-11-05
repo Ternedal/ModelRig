@@ -1,0 +1,69 @@
+{
+  "schema": "modelrig/vendored-source/v1",
+  "provenance": {
+    "repository": "https://github.com/Ternedal/VisionRig",
+    "sha": "66ea9bfce1c4d219e4bac1d85324a0e6e3f042e5",
+    "upstream_roots": [
+      "clients/kaliv-producer-core/src/main/kotlin",
+      "clients/kaliv-android-producer/library/src/main/kotlin"
+    ],
+    "synced_by": "scripts/sync_visionrig_producer.py"
+  },
+  "license": {
+    "spdx": "MIT",
+    "file": "LICENSE-VisionRig",
+    "sha256": "ba741676de4c4caed6643f725595748d5a57f96555fc6d7b8ccd0d7b334d6de9"
+  },
+  "files": [
+    {
+      "upstream": "clients/kaliv-android-producer/library/src/main/kotlin/dk/kaliv/visionrig/android/CameraXEncodedCapture.kt",
+      "destination": "src/main/kotlin/dk/kaliv/visionrig/android/CameraXEncodedCapture.kt",
+      "sha256": "411d85372a5417a0011bc051efce084d6e39569b7fa96b5e997da9d6d5b47e1d"
+    },
+    {
+      "upstream": "clients/kaliv-android-producer/library/src/main/kotlin/dk/kaliv/visionrig/android/KalivAndroidProducerSession.kt",
+      "destination": "src/main/kotlin/dk/kaliv/visionrig/android/KalivAndroidProducerSession.kt",
+      "sha256": "c82c61928b647be803a0a093a92ce3273485e5256e67cb63518c5d78788fc875"
+    },
+    {
+      "upstream": "clients/kaliv-producer-core/src/main/kotlin/dk/kaliv/visionrig/producer/Capabilities.kt",
+      "destination": "src/main/kotlin/dk/kaliv/visionrig/producer/Capabilities.kt",
+      "sha256": "b44795b5562d5d813e3ca517e4ee192225929d4cdb7f2235edc0d780ba4666c5"
+    },
+    {
+      "upstream": "clients/kaliv-producer-core/src/main/kotlin/dk/kaliv/visionrig/producer/DurableProducerState.kt",
+      "destination": "src/main/kotlin/dk/kaliv/visionrig/producer/DurableProducerState.kt",
+      "sha256": "4f02dfe14c8ee30e69c996f3dbaacbb60e5976d9e0ee6015bd2eba42595a022e"
+    },
+    {
+      "upstream": "clients/kaliv-producer-core/src/main/kotlin/dk/kaliv/visionrig/producer/Models.kt",
+      "destination": "src/main/kotlin/dk/kaliv/visionrig/producer/Models.kt",
+      "sha256": "930d9e6b823ccf5d8806523abb1b32997bc6f46327444d7619ab9bf6094ac16b"
+    },
+    {
+      "upstream": "clients/kaliv-producer-core/src/main/kotlin/dk/kaliv/visionrig/producer/ProducerControlLoop.kt",
+      "destination": "src/main/kotlin/dk/kaliv/visionrig/producer/ProducerControlLoop.kt",
+      "sha256": "0862e1a6e9cebb9f9e3aa597e177f22b665c5fbef799d855da2da095704bebd4"
+    },
+    {
+      "upstream": "clients/kaliv-producer-core/src/main/kotlin/dk/kaliv/visionrig/producer/ProducerRunController.kt",
+      "destination": "src/main/kotlin/dk/kaliv/visionrig/producer/ProducerRunController.kt",
+      "sha256": "0a0efd11c88b7735a0e56c944c31475443fcf845caff718e23cf9bebdbcd4132"
+    },
+    {
+      "upstream": "clients/kaliv-producer-core/src/main/kotlin/dk/kaliv/visionrig/producer/ProducerRunner.kt",
+      "destination": "src/main/kotlin/dk/kaliv/visionrig/producer/ProducerRunner.kt",
+      "sha256": "a557d75d01379b7c8ec15f015dec81d1263293861f87a4312ee578f668daf57d"
+    },
+    {
+      "upstream": "clients/kaliv-producer-core/src/main/kotlin/dk/kaliv/visionrig/producer/ProducerStateIdentity.kt",
+      "destination": "src/main/kotlin/dk/kaliv/visionrig/producer/ProducerStateIdentity.kt",
+      "sha256": "c819b2b3ecae8ff0f2aac1ea8e8fe27c463d0f6999cc4d76ef8908e17597a6a6"
+    },
+    {
+      "upstream": "clients/kaliv-producer-core/src/main/kotlin/dk/kaliv/visionrig/producer/VisionRigGatewayClient.kt",
+      "destination": "src/main/kotlin/dk/kaliv/visionrig/producer/VisionRigGatewayClient.kt",
+      "sha256": "3021300ae029aeeddf6eeb2f31b0cd3379d52bcfb017afec9e15dcff838d5b64"
+    }
+  ]
+}

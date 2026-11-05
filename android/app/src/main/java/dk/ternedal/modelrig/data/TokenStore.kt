@@ -280,6 +280,43 @@ class TokenStore(context: Context) {
         prefs.edit().remove("cloud_key_enc").commit()
     }
 
+    // ---- VisionRig (phone camera as sensor source, ModelRig #2275) ----
+    // Its own gateway and producer token, encrypted like the rig token. Never
+    // the ModelRig token. The camera opt-in is per device and off by default.
+
+    val visionRigGatewayUrl: String?
+        get() = prefs.getString("visionrig_gateway_url", null)
+
+    val visionRigCredentialStatus: StoredCredentialRead
+        get() = prefs.getString("visionrig_token_enc", null)
+            ?.let { StoredCredentialReader.read(it, Crypto::decrypt) }
+            ?: StoredCredentialRead.Missing
+
+    /** Gateway URL and encrypted token land together or not at all. */
+    fun saveVisionRigConnection(url: String, token: String): Boolean =
+        CredentialPersistence.commitEncrypted(token, Crypto::encrypt) { encrypted ->
+            val editor = prefs.edit()
+                .putString("visionrig_gateway_url", url)
+                .putString("visionrig_token_enc", encrypted)
+            editor.commit()
+        }
+
+    val visionRigCameraOptIn: Boolean
+        get() = prefs.getBoolean("visionrig_camera_opt_in", false)
+
+    fun setVisionRigCameraOptIn(on: Boolean): Boolean = CredentialPersistence.commit {
+        prefs.edit().putBoolean("visionrig_camera_opt_in", on).commit()
+    }
+
+    /** Forgets the gateway, its token and the camera opt-in. */
+    fun clearVisionRig(): Boolean = CredentialPersistence.commit {
+        prefs.edit()
+            .remove("visionrig_gateway_url")
+            .remove("visionrig_token_enc")
+            .remove("visionrig_camera_opt_in")
+            .commit()
+    }
+
     fun clear(): Boolean = CredentialPersistence.commit {
         prefs.edit().clear().commit()
     }
