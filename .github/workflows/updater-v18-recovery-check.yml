@@ -1,0 +1,83 @@
+name: updater-v18-recovery-check
+on:
+  workflow_dispatch:
+    inputs:
+      probe_legacy:
+        description: Also run the archived v16 self-update diagnostic against the public GitHub API
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - scripts/Recover-UpdaterV2018.ps1
+      - tests/updater_recovery_windows.ps1
+      - .github/workflows/updater-v18-recovery-check.yml
+      - backend/cmd/modelrig-updater/self_update*.go
+  push:
+    branches: [main, fix/updater-self-replacement-20261020]
+    paths:
+      - scripts/Recover-UpdaterV2018.ps1
+      - tests/updater_recovery_windows.ps1
+      - .github/workflows/updater-v18-recovery-check.yml
+      - backend/cmd/modelrig-updater/self_update*.go
+permissions:
+  contents: read
+  attestations: read
+jobs:
+  replacement-helper:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+      - name: Real replacement process, sharing violation retry and durable failure log
+        shell: pwsh
+        working-directory: backend
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @('cmd/modelrig-updater/self_update.go', 'cmd/modelrig-updater/self_update_process_windows.go', 'cmd/modelrig-updater/self_update_process_windows_test.go', 'cmd/modelrig-updater/self_update_test.go')
+          $unformatted = @(gofmt -l @files)
+          if ($LASTEXITCODE -ne 0) { throw 'Go formatting check could not run' }
+          if ($unformatted.Count -gt 0) { gofmt -d @files }
+          go test -v ./cmd/modelrig-updater -count=1 -timeout=5m
+          if ($LASTEXITCODE -ne 0) { throw 'Native replacement helper tests failed' }
+          if ($unformatted.Count -gt 0) { throw "Unformatted Go files: $unformatted" }
+  released-updater-recovery:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    env:
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify actual published updater assets and their release-bound provenance
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assets = Join-Path $env:RUNNER_TEMP 'signed-updater-assets'
+          foreach ($item in @(@{Tag='v2.0.16'; Commit='c984f64345fbbcb079b12ee3e7295deb4075d9dc'}, @{Tag='v2.0.18'; Commit='5d535a8d391f25677c0e3d85e82eb8a9360c796b'})) {
+            $directory = Join-Path $assets $item.Tag
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+            gh release download $item.Tag --repo Ternedal/ModelRig --pattern modelrig-updater-windows-x64.exe --pattern SHA256SUMS.txt --dir $directory
+            if ($LASTEXITCODE -ne 0) { throw 'Published updater download failed' }
+            $exe = Join-Path $directory 'modelrig-updater-windows-x64.exe'
+            $line = @(Get-Content (Join-Path $directory 'SHA256SUMS.txt') | Where-Object { $_ -match '^[0-9a-f]{64}  modelrig-updater-windows-x64\.exe$' })
+            if ($line.Count -ne 1 -or (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant() -cne $line[0].Substring(0,64)) { throw 'Published updater checksum mismatch' }
+            gh attestation verify $exe --repo Ternedal/ModelRig --source-digest $item.Commit --source-ref ('refs/tags/' + $item.Tag) --signer-workflow Ternedal/ModelRig/.github/workflows/build-and-release.yml
+            if ($LASTEXITCODE -ne 0) { throw 'Release-bound updater provenance failed' }
+          }
+      - name: Native sharing-lock reproduction and recovery safety checks
+        run: |
+          $probe = '${{ inputs.probe_legacy }}' -eq 'true'
+          & .\tests\updater_recovery_windows.ps1 -AssetRoot (Join-Path $env:RUNNER_TEMP 'signed-updater-assets') -ProbeReleasedV16:$probe
+          if ($LASTEXITCODE -ne 0) { throw 'Native updater recovery checks failed' }
