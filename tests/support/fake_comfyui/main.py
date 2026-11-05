@@ -185,11 +185,14 @@ class Handler(BaseHTTPRequestHandler):
             for node in body["prompt"].values():
                 if isinstance(node, dict) and node.get("class_type") == "LoadImage":
                     name = node.get("inputs", {}).get("image")
-                    path = os.path.join(args.input_directory or "", str(name))
-                    if not args.input_directory or not os.path.isfile(path):
+                    # Resolve the name against a listing of the input directory, so the path that
+                    # is opened comes from the directory itself, never from the request.
+                    entries = {entry.name: entry.path for entry in os.scandir(args.input_directory)
+                               if entry.is_file(follow_symlinks=False)} if args.input_directory else {}
+                    if not isinstance(name, str) or name not in entries:
                         self._send({"error": "prompt_outputs_failed_validation", "node_errors": {"image": "missing"}}, 400)
                         return
-                    with open(path, "rb") as fh:
+                    with open(entries[name], "rb") as fh:
                         data = fh.read()
                     seen.append({"name": name, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)})
             if STATE:

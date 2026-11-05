@@ -242,8 +242,7 @@ class ComfyVideoAdapter:
                 raise GenerationError("ComfyUI queue is not empty: refusing to share it")
             source_file = None
             if source_png is not None:
-                staged.append(self._stage_source(source_png))  # recorded before anything can fail
-                source_file = staged[0][0]
+                source_file = self._stage_source(source_png, staged)  # records itself before any write
             prompt_id = self.supervisor.submit(self._template.bind(request, fps=self.options.fps,
                                                                    source_file=source_file))
             outputs = self._wait(prompt_id, should_cancel)
@@ -411,10 +410,14 @@ class ComfyVideoAdapter:
         except OSError:
             return f"kept:{quarantine}"  # its name was taken meanwhile: left, unharmed, and reported
 
-    def _stage_source(self, data: bytes) -> tuple[str, int, int]:
+    def _stage_source(self, data: bytes, staged: list) -> str:
         """Create the job's source image in ComfyUI's input directory: exclusively, on the
-        verified volume, flushed. Returns (name, st_dev, st_ino) as os.stat reports it -- the call
-        the cleanup repeats, so both sides of the identity check use the same API."""
+        verified volume, flushed. Appends (name, st_dev, st_ino) to `staged` right after the
+        exclusive create and BEFORE any fallible write, so the caller's cleanup always sees it
+        (#2346 review 4484574398). The identity is the created file's own (fstat), checked
+        against the name with os.stat -- the call the cleanup repeats -- before it is recorded
+        and again after the write: a file swapped in meanwhile is refused and never submitted,
+        and the cleanup keeps it instead of deleting it as job-owned (#2346 review 4484574409)."""
         directory = Path(self.supervisor.launch.input_directory)
         self.supervisor.media_volume.require(str(directory))  # right before the write
         name = f"kaliv-src-{secrets.token_hex(8)}.png"
@@ -422,6 +425,11 @@ class ComfyVideoAdapter:
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
         fd = os.open(path, flags, 0o600)
         try:
+            created = os.fstat(fd)
+            named = os.stat(path, follow_symlinks=False)
+            if not stat.S_ISREG(named.st_mode) or (named.st_dev, named.st_ino) != (created.st_dev, created.st_ino):
+                raise GenerationError("the staged source image was replaced while it was created")
+            staged.append((name, created.st_dev, created.st_ino))  # recorded before anything can fail
             view = memoryview(data)
             while view:
                 view = view[os.write(fd, view):]
@@ -429,9 +437,10 @@ class ComfyVideoAdapter:
         finally:
             os.close(fd)
         info = os.stat(path, follow_symlinks=False)
-        if not stat.S_ISREG(info.st_mode) or info.st_size != len(data):
+        if (not stat.S_ISREG(info.st_mode) or (info.st_dev, info.st_ino) != (created.st_dev, created.st_ino)
+                or info.st_size != len(data)):
             raise GenerationError("the staged source image changed while it was written")
-        return name, info.st_dev, info.st_ino
+        return name
 
     def _remove_staged_source(self, name: str, dev: int, ino: int) -> None:
         """Remove the staged source only if it is still the file this job created."""

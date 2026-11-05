@@ -251,6 +251,56 @@ class ImageToVideoAdapterTests(unittest.TestCase):
                 self.assertRaisesRegex(GenerationError, "changed while it was written"):
             adapter.render_to(i2v_request(), io.BytesIO(), source_png=png())
         self.assertFalse(self.submitted())
+        self.assertEqual(os.listdir(self.dirs["input"]), [], "the refused source is still cleaned up")
+
+    def test_a_failed_write_after_the_create_still_removes_the_source(self):
+        # #2346 review 4484574398: the identity used to be recorded only after the write, so a
+        # failing write or fsync left the private source image behind with no cleanup report.
+        adapter = self.loaded()
+
+        def broken_fsync(fd):
+            raise OSError(5, "Input/output error")
+        with patch.object(adapter_module.os, "fsync", broken_fsync), self.assertRaises(OSError):
+            adapter.render_to(i2v_request(), io.BytesIO(), source_png=png())
+        self.assertEqual(os.listdir(self.dirs["input"]), [], "removed although staging failed")
+        self.assertEqual(adapter.last_cleanup["source"], "removed")
+        self.assertFalse(self.submitted())
+
+    def test_a_same_size_file_swapped_in_during_the_write_is_refused_and_kept(self):
+        # #2346 review 4484574409: the identity came from the name after the write, so a same-size
+        # replacement was submitted as the source and then deleted as job-owned.
+        adapter = self.loaded()
+        source = png()
+        real_fsync = os.fsync
+
+        def swap_during_fsync(fd):
+            real_fsync(fd)
+            ours, = [n for n in os.listdir(self.dirs["input"]) if n.startswith("kaliv-src-")]
+            intruder = Path(self.dirs["input"], "intruder.tmp")
+            intruder.write_bytes(b"X" * len(source))  # same size, another file
+            os.replace(intruder, Path(self.dirs["input"], ours))
+        with patch.object(adapter_module.os, "fsync", swap_during_fsync), \
+                self.assertRaisesRegex(GenerationError, "changed while it was written"):
+            adapter.render_to(i2v_request(), io.BytesIO(), source_png=source)
+        self.assertFalse(self.submitted(), "never submitted as the source")
+        left = os.listdir(self.dirs["input"])
+        self.assertEqual(len(left), 1)
+        self.assertEqual(Path(self.dirs["input"], left[0]).read_bytes(), b"X" * len(source), "kept, not deleted")
+        self.assertTrue(adapter.last_cleanup["source"].startswith("kept"), adapter.last_cleanup["source"])
+
+    def test_a_file_swapped_in_right_after_the_create_is_refused_before_any_write(self):
+        adapter = self.loaded()
+        real_fstat = os.fstat
+
+        def other_identity(fd):
+            info = real_fstat(fd)
+            fields = list(info[:10])
+            fields[1] += 1  # st_ino: the name now points at another file than the one created
+            return os.stat_result(fields)
+        with patch.object(adapter_module.os, "fstat", other_identity), \
+                self.assertRaisesRegex(GenerationError, "replaced while it was created"):
+            adapter.render_to(i2v_request(), io.BytesIO(), source_png=png())
+        self.assertFalse(self.submitted())
 
     def test_the_profile_must_list_the_templates_task(self):
         t2v_on_i2v = self.adapter(profile=self.i2v_profile(tasks=("text_to_video",)))
