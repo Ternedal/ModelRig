@@ -28,12 +28,14 @@ from __future__ import annotations
 
 import argparse
 import os
+import sqlite3
+import stat
 import sys
 import time
 from pathlib import Path
 from typing import Callable, Mapping
 
-from .gpu_lease import GpuLeaseError, device_uuid_map, lease_dir_from_env, parse_cuda_device
+from .gpu_lease import GpuLeaseError, check_lease_dir, device_uuid_map, lease_dir_from_env, parse_cuda_device
 from .image_job_store import ImageJobError, ImageJobStore
 from .media_executor import EXIT_CONFIG, EXIT_SINK_UNAVAILABLE, ExecutorConfigError, MediaExecutor
 from .media_gallery_store import ExternalMediaSink
@@ -55,11 +57,29 @@ def _absolute(env: Mapping[str, str], name: str) -> str:
     return value
 
 
-def default_adapter_factory(device: str, lease_dir: str) -> Callable[[ModelProfile], object]:
+def _check_job_db(path: str) -> None:
+    """An existing job database must be a regular file. A directory, a link (which could lead off
+    the verified volume) or a FIFO (which SQLite would block on) is a configuration error: exit 78,
+    never a crash the supervisor restarts (#2337 review 4477759300). A missing file is fine: the
+    store creates it, and refuses a missing parent itself."""
+    try:
+        mode = os.lstat(path).st_mode
+    except (FileNotFoundError, NotADirectoryError):
+        return
+    except PermissionError:
+        raise ExecutorConfigError(f"{JOB_DB_ENV} cannot be inspected (permission denied)") from None
+    if not stat.S_ISREG(mode):
+        raise ExecutorConfigError(f"{JOB_DB_ENV} must be a regular file, not a directory, link or device")
+
+
+OFFLINE_FLAGS = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")  # what DiffusersImageAdapter.load() requires
+
+
+def default_adapter_factory(device: str, lease_dir: str, env: Mapping[str, str]) -> Callable[[ModelProfile], object]:
     def factory(profile: ModelProfile):
         if profile.backend == "diffusers":
             from .diffusers_image_adapter import DiffusersImageAdapter
-            return DiffusersImageAdapter(profile, device=device, lease_dir=lease_dir)
+            return DiffusersImageAdapter(profile, device=device, lease_dir=lease_dir, env=env)
         raise ExecutorConfigError(f"{profile.profile_id}: backend {profile.backend} is not served by this executor yet")
     return factory
 
@@ -75,6 +95,7 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
         index = parse_cuda_device(device)
         gpu_uuid = device_uuid_map(env).get(index)
         lease_dir = lease_dir_from_env(env)
+        check_lease_dir(lease_dir)  # relative, missing, symlinked or writable by others: 78, not exit 1 later
     except GpuLeaseError as exc:
         raise ExecutorConfigError(str(exc)) from None
     if gpu_uuid is None:
@@ -89,18 +110,31 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
     mine = {pid: p for pid, p in profiles.items() if device in p.resources.devices}
     if not mine:
         raise ExecutorConfigError(f"no enabled profile allows {device}")
+    if any(p.backend == "diffusers" for p in mine.values()) and any(env.get(f) != "1" for f in OFFLINE_FLAGS):
+        # The adapter refuses to load without them; checked here so a missing setting is exit 78
+        # and leaves the queue untouched, instead of failing every claimed job (#2337 review 4477167705).
+        raise ExecutorConfigError(f"{' and '.join(f + '=1' for f in OFFLINE_FLAGS)} are required (never a download)")
     sink = ExternalMediaSink(media_root, volume_root)
-    sink._root()  # ArtifactSinkUnavailable now (exit 75) rather than at the first job
+    # The volume is verified before the job database is first looked at (exit 75, nothing
+    # inspected or created) and again before EVERY later access, so a volume that goes away while
+    # the executor runs stops it before it claims another job, instead of rendering one it cannot
+    # publish (#2337 review 4477083808).
+    sink._root()
+    _check_job_db(job_db)
     try:
-        store = ImageJobStore(job_db)
+        store = ImageJobStore(job_db, volume_guard=sink._root)
     except ImageJobError as exc:
         raise ExecutorConfigError(str(exc)) from None
+    except sqlite3.DatabaseError as exc:
+        if getattr(exc, "sqlite_errorname", None) != "SQLITE_NOTADB":
+            raise  # e.g. locked: transient, so exit 1 and the supervisor's back-off restart
+        raise ExecutorConfigError(f"{JOB_DB_ENV} is not a SQLite database") from None
     try:
         idle = float(env.get(IDLE_ENV, "300"))
     except ValueError:
         raise ExecutorConfigError(f"{IDLE_ENV} must be a number of seconds") from None
     return MediaExecutor(store, gpu_uuid=gpu_uuid, lease_dir=lease_dir, profiles=mine,
-                         adapter_factory=adapter_factory or default_adapter_factory(device, lease_dir),
+                         adapter_factory=adapter_factory or default_adapter_factory(device, lease_dir, env),
                          image_sink=sink, video_sink=None, idle_unload_s=idle)
 
 
@@ -118,7 +152,11 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
         print("media executor: the external media volume is not available", file=sys.stderr)
         return EXIT_SINK_UNAVAILABLE
     poll = min(max(args.poll_seconds, 0.1), 30.0)
-    return executor.run(idle_sleep=lambda: time.sleep(poll))
+    try:
+        return executor.run(idle_sleep=lambda: time.sleep(poll))
+    except GpuLeaseError as exc:  # the lease directory became unusable: configuration, not a crash
+        print(f"media executor: GPU lease configuration refused: {exc}", file=sys.stderr)
+        return EXIT_CONFIG
 
 
 if __name__ == "__main__":
