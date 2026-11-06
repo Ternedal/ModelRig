@@ -114,7 +114,7 @@ The entry point checks the configuration before it touches anything, including t
   | `SourceImageUnavailable` | `failed: source_image_unavailable` | continues |
   | `ValueError` (a malformed id) | `failed: generation_request_rejected` | continues |
   | anything other than non-empty `bytes` | `failed: source_image_unavailable` | continues |
-  | `ArtifactSinkUnavailable` (the volume) | stays `running`, then recovery fails it as interrupted by restart | exit 75 |
+  | `ArtifactSinkUnavailable` (the volume) | stays `running`, then recovery fails it as interrupted by restart (`interrupted_by_restart` once the wiring lands) | exit 75 |
 
 - **The bytes** go to `ComfyVideoAdapter.render_to(source_png=...)`. See `docs/MEDIA_VIDEO_GENERATION.md` for the bounded decode, the exclusive staging and the cleanup.
 - **Not wired in the entry point yet.** Video through `media_executor_main` still waits on ChatGPT's staged video sink.
