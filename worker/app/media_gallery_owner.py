@@ -39,6 +39,16 @@ def list_owned_gallery(jobs, authenticated_owner: str, root_path: str | Path, *,
                 break
         else:
             raise GalleryBadRequest("unknown_cursor")
-    page = owned[start:start + limit]
+    # A thumbnail can point at a separate indexed asset. Never disclose its ID
+    # or URL unless that referenced asset is independently completed for owner.
+    # Avoid modifying the catalog's cached/index objects in place.
+    page = []
+    for entry in owned[start:start + limit]:
+        safe = dict(entry)
+        thumb = safe.get("thumbnail_id")
+        if thumb is not None and not jobs.owns_completed_asset(authenticated_owner, thumb):
+            safe["thumbnail_id"] = None
+            safe["thumbnail_url"] = None
+        page.append(safe)
     next_cursor = page[-1]["id"] if start + limit < len(owned) and page else None
     return {"schema": "kaliv-media-gallery/v1", "items": page, "next_cursor": next_cursor}
