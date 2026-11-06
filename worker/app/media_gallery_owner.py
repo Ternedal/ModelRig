@@ -68,6 +68,8 @@ def open_owned_asset(jobs, authenticated_owner: str, root_path: str | Path,
     if (not isinstance(authenticated_owner, str) or not authenticated_owner
             or not isinstance(asset_id, str) or not _ID.fullmatch(asset_id)):
         raise GalleryAssetNotFound("unknown_asset")
+    if verified_volume_root is None:
+        raise GalleryUnavailable("verified_volume_required")
     if not jobs.owns_completed_asset(authenticated_owner, asset_id):
         raise GalleryAssetNotFound("unknown_asset")
     return open_asset(root_path, verified_volume_root, asset_id)
