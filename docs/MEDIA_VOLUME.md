@@ -2,7 +2,7 @@
 
 The verified media volume is where generated media is **published**: the gallery, its index and every staged file. `worker/app/media_volume.py` is the production check for it. `MountedMediaVolume` implements the `VerifiedMediaVolume` protocol in `media_generation_contract`.
 
-**Generation happens elsewhere (Anders, 6 Nov 2026, #2275).** ComfyUI's working folders and the job database live in a private work area on the internal disk. A finished file is copied into a staged file on this volume, checked, and published to the gallery in one atomic step; only then is the copy on the internal disk removed. So nothing partial is ever visible in the gallery. That work area is a separate check, added with the wiring; this module does not cover it.
+**Generation happens elsewhere (Anders, 6 Nov 2026, #2275).** ComfyUI's working folders and the job database live in a private work area on the internal disk. A finished file is checked and copied into a staged file on this volume, and synced; only then is the copy on the internal disk removed, and the staged file is published to the gallery in one atomic step. So nothing partial is ever visible in the gallery. That work area is a separate check, added with the wiring; this module does not cover it.
 
 **Status: it exists but is not wired in yet.** Nothing calls it; wiring it into the executor is a separate PR. Video stays default-off, and `media_executor_main` keeps exit 78 for video until that PR and the rig evidence are in.
 
