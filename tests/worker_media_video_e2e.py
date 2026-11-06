@@ -59,6 +59,7 @@ from app.media_generation_profiles import parse_profile  # noqa: E402
 from app.media_source_image import read_owned_source_png  # noqa: E402
 from app.media_staged_video_sink import ExternalStagedVideoSink  # noqa: E402
 from app.media_volume import MARKER_NAME, MountedMediaVolume  # noqa: E402
+from app.media_recovery_inventory import recovery_inventory  # noqa: E402
 from app.media_repair import reconcile, remove_stale_temp, remove_work_file  # noqa: E402
 from app.media_work_area import PrivateWorkArea  # noqa: E402
 import worker_media_volume as g1  # noqa: E402  (module import: its test classes must not run here)
@@ -161,7 +162,7 @@ class VideoPipelineEndToEnd(unittest.TestCase):
 
         store, image_sink = self.store, self.image_sink
         ex = MediaExecutor(store, gpu_uuid=GPU, profiles={profile.profile_id: profile}, adapter_factory=factory,
-                           lease_dir=self.lease_dir, video_sink=self.video_sink, cancel_poll_s=0.1,
+                           lease_dir=self.lease_dir, video_sink=self.video_sink, cancel_poll_s=0.1, volume_root=self.root,
                            source_reader=lambda owner, asset: read_owned_source_png(image_sink, store, owner, asset))
         self.executors.append(ex)
         return ex
@@ -238,6 +239,9 @@ class VideoPipelineEndToEnd(unittest.TestCase):
         self.assertEqual(list(self.gallery()), [source])
         self.stop_all()
         self.assert_nothing_orphaned()
+        inventory = recovery_inventory(self.image_sink, os.path.join(self.job_dir, "jobs.sqlite3"),
+                                       work_area=self.work_area, output_dir=self.comfy["output"], lease_dir=self.lease_dir)
+        self.assertEqual((inventory["jobs"], inventory["unattributed"]), ([], []), "cancelled: nothing left")
         self.assert_lease_free()
 
     def test_volume_lost_mid_render_is_exit_75_and_the_restart_recovers(self):
@@ -308,38 +312,55 @@ class VideoPipelineEndToEnd(unittest.TestCase):
             pass
         self.assertTrue(wait_gone(comfy, 10))
         self.assertIn(self.store.get(job, "anders")["state"], ("running", "publishing"), "nobody recorded an outcome")
-        # Time passes before the operator looks: every leftover is older than C6's minimum age.
-        hours_ago = time.time() - 7 * 3600
-        for top in (self.media, *self.comfy.values()):
-            for dirpath, _, files in os.walk(top):
-                for name in files:
-                    os.utime(os.path.join(dirpath, name), (hours_ago, hours_ago), follow_symlinks=False)
+        self.age_everything()  # time passes before the operator looks: older than C6's minimum age
         return job, source
 
-    def restart_and_report(self, job, source):
-        """The next process: recovery fails the job; nothing reaches the gallery; C6 sees the rest."""
+    def restart_and_report(self, job, source, *, unindexed=0):
+        """The next process: recovery fails the job; nothing reaches the gallery; C6 sees the rest.
+        Returns C6's report and its recovery inventory, with this job's inventory entry."""
         self.boot()
         ex = self.executor()
         self.assertEqual(ex.start(), 1, "the interrupted job is recovered")
         self.assertEqual(self.store.get(job, "anders")["state"], "failed")
         self.assertEqual(list(self.gallery()), [source], "nothing partial or unrecorded is visible")
-        self.assertEqual(self.image_sink.inspect_unindexed_assets(), [], "and nothing was published unindexed")
+        self.assertEqual(len(self.image_sink.inspect_unindexed_assets()), unindexed, "published but unindexed")
         ex.release_lock()
-        return reconcile(self.image_sink, os.path.join(self.job_dir, "jobs.sqlite3"), lease_dir=self.lease_dir,
-                         work_area=self.work_area,
-                         work_dirs=[self.comfy["input"], self.comfy["output"], self.comfy["temp"]])
+        db = os.path.join(self.job_dir, "jobs.sqlite3")
+        report = reconcile(self.image_sink, db, lease_dir=self.lease_dir, work_area=self.work_area,
+                           work_dirs=[self.comfy["input"], self.comfy["output"], self.comfy["temp"]])
+        inventory = recovery_inventory(self.image_sink, db, work_area=self.work_area,
+                                       output_dir=self.comfy["output"], lease_dir=self.lease_dir)
+        self.assertEqual(inventory["status"], "ok")
+        entries = {e["job_id"]: e for e in inventory["jobs"]}
+        self.assertIn(job, entries, inventory)
+        self.assertEqual(entries[job]["source"], "present", "the source's recorded SHA-256 still matches")
+        return report, entries[job]
+
+    def age_everything(self):
+        hours_ago = time.time() - 7 * 3600
+        for top in (self.media, *self.comfy.values()):
+            for dirpath, _, files in os.walk(top):
+                for name in files:
+                    os.utime(os.path.join(dirpath, name), (hours_ago, hours_ago), follow_symlinks=False)
 
     @unittest.skipUnless(hasattr(os, "fork"), "needs fork to die without running cleanup")
     def test_a_crash_during_the_copy_leaves_nothing_visible_and_c6_finds_every_leftover(self):
-        def die_halfway(adapter, source, sink_file):
-            data = Path(source).read_bytes()
-            sink_file.write(data[:len(data) // 2])
+        from app.media_staged_video_sink import _StagedVideoWriter
+        real_write, calls = _StagedVideoWriter.write, []
+
+        def die_halfway(writer, data):  # the header went through; the process dies mid-chunk
+            calls.append(len(data))
+            if len(calls) == 1:
+                return real_write(writer, data)
+            real_write(writer, bytes(data)[:len(data) // 2])
             os._exit(0)
 
-        job, source = self.crash_at("app.comfy_video_adapter.ComfyVideoAdapter._copy_validated", die_halfway)
-        report = self.restart_and_report(job, source)
+        job, source = self.crash_at("app.media_staged_video_sink._StagedVideoWriter.write", die_halfway)
+        report, entry = self.restart_and_report(job, source)
         temp = report["stale_temporary_files"]
         self.assertEqual(len(temp), 1, "the partial staged copy on the volume")
+        self.assertEqual((entry["classification"], entry["stage"]), ("interrupted_copy", "copying"))
+        self.assertEqual((entry["staged"]["status"], entry["staged"]["name"]), ("partial", temp[0]["name"]))
         work = {(os.path.basename(f["directory"]), f["kind"]) for f in report["work_area_residue"]}
         self.assertEqual(work, {("output", "file"), ("input", "file")}, "the render and the staged source on C:")
         self.assertEqual(report["unindexed_assets"], [])
@@ -367,7 +388,9 @@ class VideoPipelineEndToEnd(unittest.TestCase):
         finished = os.listdir(self.comfy["output"])
         self.assertEqual(len(finished), 1, "publish first, then delete: the finished render is still on C:")
         self.assertEqual(os.listdir(self.comfy["input"]), [], "the staged source (only an input) is gone")
-        report = self.restart_and_report(job, source)
+        report, entry = self.restart_and_report(job, source)
+        self.assertEqual(entry["classification"], "crash_after_sync_before_publication")
+        self.assertEqual(entry["staged"]["status"], "complete")
         self.assertEqual([(os.path.basename(f["directory"]), f["path"]) for f in report["work_area_residue"]],
                          [("output", finished[0])])
         temp = report["stale_temporary_files"]
@@ -388,11 +411,78 @@ class VideoPipelineEndToEnd(unittest.TestCase):
         self.assertEqual(len(kept), 1, "never deleted before it was published")
         self.assertEqual(self.adapters[-1].last_cleanup["kept_for_recovery"], kept)
         self.stop_all()
-        hours_ago = time.time() - 7 * 3600
-        os.utime(os.path.join(self.comfy["output"], kept[0]), (hours_ago, hours_ago))
-        report = self.restart_and_report(job, source)
+        self.age_everything()
+        report, entry = self.restart_and_report(job, source)
         self.assertEqual([f["path"] for f in report["work_area_residue"]], kept)
         self.assertEqual(report["stale_temporary_files"], [], "the sink removed its own staged name")
+        self.assertEqual(entry["classification"], "publication_failed")
+
+    # -- failure injection on the real sink, adapter and work area (ChatGPT 6689780350 P2) --------
+
+    def run_failing(self, target, effect):
+        source = self.owned_source()
+        job = self.submit_video(source)
+        ex = self.executor()
+        with patch(target, side_effect=effect):
+            self.assertEqual(ex.run(max_steps=1), EXIT_SINK_UNAVAILABLE)
+        kept = os.listdir(self.comfy["output"])
+        self.assertEqual(len(kept), 1, "the finished render is kept until it is published")
+        self.assertEqual(self.adapters[-1].last_cleanup["kept_for_recovery"], kept)
+        self.stop_all()
+        self.age_everything()
+        return job, source
+
+    def test_a_failed_sync_on_the_volume_keeps_the_finished_render(self):
+        job, source = self.run_failing("app.media_staged_video_sink._StagedVideoWriter.sync",
+                                       ArtifactSinkUnavailable("staged_video_unavailable"))
+        report, entry = self.restart_and_report(job, source)
+        self.assertEqual(report["stale_temporary_files"], [], "the sink removed its staged name")
+        self.assertEqual((entry["classification"], entry["stage"]), ("interrupted_copy", "copying"),
+                         "the copy never became durable")
+
+    def test_a_failed_gallery_registration_keeps_the_render_and_shows_nothing(self):
+        job, source = self.run_failing("app.media_staged_video_sink.register_asset", OSError("index write failed"))
+        report, entry = self.restart_and_report(job, source, unindexed=1)
+        self.assertEqual(entry["classification"], "published_unindexed")
+        self.assertEqual(entry["asset"]["indexed"], False)
+        self.assertNotIn(entry["asset"]["asset_id"], self.gallery(), "invisible in the gallery")
+
+    def test_a_failed_source_cleanup_still_publishes_and_reports_the_source(self):
+        source = self.owned_source()
+        job = self.submit_video(source)
+        ex = self.executor()
+        ex.start()
+        with patch("app.comfy_video_adapter.ComfyVideoAdapter._remove_staged_source",
+                   side_effect=OSError("source cleanup failed")):
+            self.assertEqual(ex.step(), "completed")
+        row = self.store.get(job, "anders")
+        self.assertIn(row["asset_id"], self.gallery())
+        self.assertEqual(os.listdir(self.comfy["output"]), [], "published, then removed from C:")
+        self.assertTrue(self.adapters[-1].last_cleanup["source"].startswith("failed"))
+        left = os.listdir(self.comfy["input"])
+        self.assertEqual(len(left), 1, "the staged source stays, and is reported")
+        self.stop_all()
+        self.age_everything()
+        report = reconcile(self.image_sink, os.path.join(self.job_dir, "jobs.sqlite3"), lease_dir=self.lease_dir,
+                           work_area=self.work_area, work_dirs=[self.comfy["input"]])
+        self.assertEqual([f["path"] for f in report["work_area_residue"]], left)
+
+    def test_the_render_is_still_on_c_while_the_gallery_index_is_written(self):
+        from app.media_staged_video_sink import register_asset as real_register
+        seen = []
+
+        def watching(*args):
+            seen.append(sorted(os.listdir(self.comfy["output"])))
+            return real_register(*args)
+        source = self.owned_source()
+        job = self.submit_video(source)
+        ex = self.executor()
+        ex.start()
+        with patch("app.media_staged_video_sink.register_asset", side_effect=watching):
+            self.assertEqual(ex.step(), "completed")
+        self.assertEqual([len(s) for s in seen], [1], "on C: until the index row is written")
+        self.assertEqual(os.listdir(self.comfy["output"]), [])
+        self.assertIn(self.store.get(job, "anders")["asset_id"], self.gallery())
 
 
 if __name__ == "__main__":
