@@ -25,11 +25,19 @@ class GenerationError(ValueError):
     """A request or artifact was refused. The message never contains a prompt."""
 
 
+class SourceImageUnavailable(GenerationError):
+    """The source image is absent, invalid or not authorized for this job."""
+
+
+class GenerationCancelled(GenerationError):
+    """The job's owner cancelled it while it was rendering; nothing is published."""
+
+
 class ArtifactSinkUnavailable(RuntimeError):
     """The sink cannot accept artifacts (for example the external volume is gone).
 
     This is a fatal safety event for an executor: stop, do not fall back to
-    another disk, and leave the job for recover_interrupted().
+    another disk, and leave the job for recovery (recover_gpu() at the next start).
     """
 
 
@@ -99,6 +107,25 @@ class StagedFileArtifactSink(Protocol):
     def staged(self, extension: str) -> ContextManager[BinaryIO]: ...
 
     def adopt(self, handle: BinaryIO, mime_type: str) -> str: ...
+
+
+@runtime_checkable
+class JobKeyedArtifactSink(Protocol):
+    """Optional capability: publication keyed by the job id (ExternalMediaSink, #2313).
+
+    The asset id is derived from job_key, so a retry after an interrupted completion
+    finds the same asset and reconciliation can correlate job and artifact. Generators
+    use it whenever a sink offers it, and fall back to publish() otherwise.
+    """
+
+    def publish_and_register_for_job(self, job_key: str, data: bytes, extension: str) -> str: ...
+
+
+@runtime_checkable
+class JobKeyedStagedSink(Protocol):
+    """Optional capability for staged video: adopt keyed by the job id (proposed, #2318 6633945476)."""
+
+    def adopt_for_job(self, handle: BinaryIO, mime_type: str, job_key: str) -> str: ...
 
 
 @runtime_checkable

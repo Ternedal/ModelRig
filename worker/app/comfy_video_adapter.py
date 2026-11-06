@@ -48,22 +48,24 @@ import secrets
 import stat
 import time
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Callable
 
-from .comfy_supervisor import ComfyBusy, ComfySupervisor, ComfySupervisorError
+from .comfy_supervisor import ComfyBusy, ComfySupervisor, ComfySupervisorError, ComfyVramShortage
+from .comfy_weights import check_lookup_is_unambiguous, check_weights_unchanged, verify_weights
 from .comfy_workflow_template import MAX_TEMPLATE_BYTES, WorkflowTemplate, load_template
-from .media_generation_contract import GenerationError, GenerationRequest, RenderedArtifact
+from .media_generation_contract import GenerationCancelled, GenerationError, GenerationRequest, RenderedArtifact
 from .media_generation_profiles import ModelProfile, validate_request
 
 MIME = "video/mp4"
 COPY_CHUNK = 1024 * 1024
+DRAIN_SECONDS = 30  # how long an interrupted job may take to leave ComfyUI's queue
 _log = logging.getLogger("kaliv.media.comfy")
 
 
 class ComfyVideoAdapter:
     def __init__(self, profile: ModelProfile, *, supervisor: ComfySupervisor, template_dir: str,
                  output_directory: str, poll_s: float = 1.0, settle_s: float = 0.5,
-                 settle_rounds: int = 10):
+                 settle_rounds: int = 10, weights_cache: str | None = None):
         if profile.backend != "comfyui" or profile.backend_options is None:
             raise GenerationError("ComfyVideoAdapter needs a comfyui profile")
         if supervisor.port != profile.backend_options.port:
@@ -85,8 +87,13 @@ class ComfyVideoAdapter:
         self.template_dir = template_dir
         self.output_directory = Path(output_directory)
         self.poll_s = float(poll_s)
+        self.weights_cache = weights_cache
         self._template: WorkflowTemplate | None = None
         self.last_cleanup: dict[str, list[str]] = {}
+        # True once an interrupt could not be confirmed drained: this ComfyUI must not take another
+        # job. The executor unloads (and so restarts) the adapter (#2318 review 4469472651).
+        self.needs_restart = False
+        self._verified_weights: tuple = ()
 
     # --- lifecycle --------------------------------------------------------
     def _read_template(self) -> bytes:
@@ -108,9 +115,43 @@ class ComfyVideoAdapter:
     def load(self) -> None:
         if self._template is not None:
             raise GenerationError("adapter already loaded")
-        template = load_template(self._read_template(), self.options.template_sha256)
-        self.supervisor.start()
+        if self.needs_restart:
+            raise GenerationError("this adapter needs a restart: create a new one")
+        pins = self.options.weights
+        template = load_template(self._read_template(), self.options.template_sha256,
+                                 pinned_files=[pin.path for pin in pins] if pins else None)
+        verified = ()
+        if pins:  # before ComfyUI starts: nothing unpinned is ever loaded (G3)
+            launch = self.supervisor.launch
+            verified = verify_weights(launch.resolved_models_directory, pins, cache_path=self.weights_cache,
+                                      comfy_root=Path(launch.main_py).parent)
+        budget = self.supervisor.start()
+        if not self._version_ok(budget):
+            self.supervisor.stop()  # proven stop: the lease goes with ComfyUI
+            raise GenerationError("ComfyUI version does not match the profile pin")
+        self._verified_weights = verified
         self._template = template
+
+    def _weights_still_verified(self) -> None:
+        """Before every job: the files hashed at load are still those files, and the lookup is
+        still unambiguous (no embedding or same-named file added since). ComfyUI reads weights
+        when a job runs, so a start-time check alone would leave the resident lifetime open.
+        A failure refuses the job before submit and marks this ComfyUI for a restart, which
+        re-verifies from scratch."""
+        pins = self.options.weights
+        if not pins:
+            return
+        launch = self.supervisor.launch
+        try:
+            check_weights_unchanged(launch.resolved_models_directory, self._verified_weights)
+            check_lookup_is_unambiguous(Path(launch.main_py).parent, launch.resolved_models_directory, pins)
+        except GenerationError:
+            self.needs_restart = True
+            raise
+
+    def _version_ok(self, budget) -> bool:
+        pin = self.options.comfyui_version
+        return pin is None or getattr(budget, "comfyui_version", None) == pin
 
     def close(self) -> bool:
         """Stop ComfyUI. True once it has exited and the lease is released."""
@@ -122,7 +163,10 @@ class ComfyVideoAdapter:
         raise GenerationError("video is written to a staged sink file; use render_to()")
 
     # --- one job ------------------------------------------------------------
-    def render_to(self, request: GenerationRequest, sink_file: BinaryIO) -> str:
+    def render_to(self, request: GenerationRequest, sink_file: BinaryIO, *,
+                  should_cancel: Callable[[], bool] | None = None) -> str:
+        """Render into sink_file. should_cancel is polled with the history; True interrupts
+        ComfyUI and raises GenerationCancelled (the normal cleanup still runs)."""
         if self._template is None:
             raise GenerationError("adapter not loaded")
         request = validate_request(self.profile, request)
@@ -132,16 +176,17 @@ class ComfyVideoAdapter:
             # One job per ComfyUI, from admission to cleanup (#2316 review 5700997784):
             # a concurrent second call is refused here and never submitted.
             with self.supervisor.job_slot():
-                return self._render_one(request, sink_file)
+                return self._render_one(request, sink_file, should_cancel)
         except ComfyBusy:
             raise GenerationError("ComfyUI is busy with another job: refused, not queued") from None
 
-    def _render_one(self, request: GenerationRequest, sink_file: BinaryIO) -> str:
+    def _render_one(self, request: GenerationRequest, sink_file: BinaryIO,
+                    should_cancel: Callable[[], bool] | None = None) -> str:
         self.supervisor.require_media_volume()  # ArtifactSinkUnavailable propagates: fatal
         before = self._entry_names()  # snapshot before anything is submitted
         owned: list[tuple[str, int, int]] = []  # (name, st_dev, st_ino) attested by THIS prompt's history
         try:
-            return self._render_and_hand_over(request, sink_file, before, owned)
+            return self._render_and_hand_over(request, sink_file, before, owned, should_cancel)
         finally:
             try:
                 self._remove_job_outputs(before, owned)
@@ -149,13 +194,17 @@ class ComfyVideoAdapter:
                 _log.warning("comfy cleanup raised %s; outputs left in place", type(exc).__name__)
 
     def _render_and_hand_over(self, request: GenerationRequest, sink_file: BinaryIO, before: set[str],
-                              owned: list) -> str:
+                              owned: list, should_cancel: Callable[[], bool] | None = None) -> str:
         try:
-            self.supervisor.check_budget()
+            if not self._version_ok(self.supervisor.check_budget()):
+                raise GenerationError("ComfyUI version does not match the profile pin")
+            self._weights_still_verified()
             if not self.supervisor.queue_is_empty():
                 raise GenerationError("ComfyUI queue is not empty: refusing to share it")
             prompt_id = self.supervisor.submit(self._template.bind(request, fps=self.options.fps))
-            outputs = self._wait(prompt_id)
+            outputs = self._wait(prompt_id, should_cancel)
+        except ComfyVramShortage:
+            raise  # before submit: transient, the executor re-queues the job (G4)
         except ComfySupervisorError as exc:
             raise GenerationError("ComfyUI unavailable") from exc
         owned.extend(self._attested_outputs(outputs, before))  # recorded before any validation can fail
@@ -239,7 +288,7 @@ class ComfyVideoAdapter:
             _log.warning("comfy cleanup kept files it cannot prove are this job's: replaced=%s untracked=%s",
                          report["kept_replaced"], report["untracked"])
 
-    def _wait(self, prompt_id: str) -> dict:
+    def _wait(self, prompt_id: str, should_cancel: Callable[[], bool] | None = None) -> dict:
         deadline = time.monotonic() + self.options.max_render_seconds
         while True:
             record = self.supervisor.history(prompt_id)
@@ -254,13 +303,34 @@ class ComfyVideoAdapter:
                     if not isinstance(outputs, dict):
                         raise GenerationError("ComfyUI history has no outputs")
                     return outputs
+            if should_cancel is not None and should_cancel():
+                self._interrupt_and_drain()
+                raise GenerationCancelled("cancelled while rendering")
             if time.monotonic() >= deadline:
-                try:
-                    self.supervisor.interrupt()
-                except ComfySupervisorError:
-                    pass  # stop() interrupts again and terminates if needed
+                self._interrupt_and_drain()
                 raise GenerationError("render exceeded the profile deadline")
             time.sleep(self.poll_s)
+
+    def _interrupt_and_drain(self) -> None:
+        """Interrupt, then wait (bounded) until ComfyUI's queue is empty, so the next job on this
+        resident ComfyUI is not refused as "queue not empty" while the interrupt is still landing.
+        If the drain cannot be confirmed (interrupt or queue check failed, or the deadline passed),
+        mark the adapter for a restart instead of letting it take more jobs."""
+        try:
+            self.supervisor.interrupt()
+        except ComfySupervisorError:
+            self.needs_restart = True
+            return
+        until = time.monotonic() + DRAIN_SECONDS
+        while time.monotonic() < until:
+            try:
+                if self.supervisor.queue_is_empty():
+                    return
+            except ComfySupervisorError:
+                break
+            time.sleep(self.poll_s)
+        self.needs_restart = True
+        _log.warning("comfy queue not confirmed drained after an interrupt; the adapter needs a restart")
 
     def _delete_if_same(self, name: str, dev: int, ino: int, dir_fd: int | None) -> str:
         """Delete `name` only if it is still the file with (dev, ino); never delete anything else.

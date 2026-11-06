@@ -91,6 +91,11 @@ class ComfySupervisorError(RuntimeError):
     """ComfyUI could not be started, verified or stopped safely."""
 
 
+class ComfyVramShortage(ComfySupervisorError):
+    """Not enough free VRAM right now (another process holds it). Transient: the executor
+    re-queues the job instead of failing it (G4, Anders 5 Nov 2026)."""
+
+
 class ComfyBusy(ComfySupervisorError):
     """This ComfyUI is already running a job (single tenant: one job at a time)."""
 
@@ -105,6 +110,13 @@ class ComfyLaunch:
     temp_directory: str
     user_directory: str
     flags: tuple[str, ...] = ("--disable-auto-launch", "--disable-metadata")
+
+    @property
+    def resolved_models_directory(self) -> Path:
+        """Where ComfyUI loads model files from: always <main.py dir>/models. No flag can move it
+        (--base-directory and --extra-model-paths-config are not allowlisted), so the directory the
+        pinned weights are verified in (G3) is the one ComfyUI reads (#2296 6636684138)."""
+        return Path(self.main_py).parent / "models"
 
     def argv(self, resident_lock: str) -> list[str]:
         python = Path(self.python_executable)
@@ -137,6 +149,7 @@ class VramBudget:
     total_bytes: int
     free_bytes: int
     usable_bytes: int
+    comfyui_version: str | None = None  # system.comfyui_version, compared with the profile pin (G3)
 
 
 def _get_json(port: int, path: str, timeout_s: float, *, method: str = "GET",
@@ -180,9 +193,12 @@ def parse_vram_budget(stats: object, *, reserve_gib: float, min_usable_gib: floa
         raise ComfySupervisorError("ComfyUI reported unusable VRAM figures")
     usable = max(0, free - int(reserve_gib * GIB))
     if usable < int(min_usable_gib * GIB):
-        raise ComfySupervisorError("insufficient free VRAM after reservation")
+        raise ComfyVramShortage("insufficient free VRAM after reservation")
     name = device.get("name")
-    return VramBudget(name if isinstance(name, str) else "", total, free, usable)
+    system = stats.get("system")
+    version = system.get("comfyui_version") if isinstance(system, dict) else None
+    return VramBudget(name if isinstance(name, str) else "", total, free, usable,
+                      version if isinstance(version, str) else None)
 
 
 def _bounded(value: object, low: float, high: float, name: str) -> float:
