@@ -9,7 +9,7 @@
 
 **The hand-off.**
 1. A finished file is checked (size, MP4 header, unchanged while copied) and copied from the work area into a staged file on the publication volume (#2347).
-2. The staged file is synced (`fsync`). A delayed write error, such as a full disk, fails the job here; it is never a silent success.
+2. The staged file is synced (`fsync`, through the staged handle's `sync()`, #2347, which reveals no path). A delayed write error, such as a full disk, fails the job here; it is never a silent success.
 3. Only then is the copy in the work area removed.
 4. The staged file is published to the gallery in one atomic rename on that volume. The asset id is derived from the job, so a job can never be published twice.
 
