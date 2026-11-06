@@ -48,9 +48,18 @@ The id ties the configuration to that one disk. Another disk mounted at the same
 - its filesystem is on the list above;
 - the marker matches the configured id.
 
-The root's identity (`st_dev`, `st_ino`) is pinned. On Windows, `st_dev` is the volume serial number.
+The root's identity (`st_dev`, `st_ino`) is pinned. On Windows, `st_dev` is the volume serial number. On Linux, the mount instance (the mount id in `/proc/self/mountinfo`) is pinned too.
 
-**On every `verify()` and `require()`:** all of the start checks again, plus the pinned identity. If the disk was unplugged, replugged or replaced, the identity has changed and the check fails until the executor restarts. That restart is exit 75.
+**On every `verify()` and `require()`:** all of the start checks again, plus the pinned identity and mount instance.
+
+**Once a check has failed, that verifier is done for good.** While the volume is still wrong, the check raises the real reason. Once it looks right again, it raises `media_volume_lost`. Only a new verifier, which means an executor restart (exit 75), resumes. So a disk that went away and came back is never silently used again.
+
+| What happens to the disk | Detected by |
+|---|---|
+| Replaced by another disk or folder at the same path | the identity changes |
+| The same disk unplugged and plugged back in, seen while it was gone | the observed loss sticks: `media_volume_lost` until restart |
+| The same disk mounted again, on Linux | the mount id changes: `media_volume_remounted` |
+| The same disk unplugged and plugged back in between two checks, on Windows | **not detectable.** Windows has no mount-session id: the volume serial, its GUID and the root's file id all survive. The executor checks before every claim and at each step of the hand-off, so the window is short. Writes through handles of the old mount are expected to fail, so a copy in flight fails and its C: copy is kept. That is not yet proven on the rig. |
 
 **`require(path)` additionally refuses:**
 - a path that is relative or contains `.` or `..`;
@@ -67,7 +76,7 @@ The root's identity (`st_dev`, `st_ino`) is pinned. On Windows, `st_dev` is the 
 | Error | Meaning | Executor exit |
 |---|---|---|
 | `MediaVolumeConfigError` | The configuration can never work: a bad id or root, a refused or unknown filesystem, or the system disk | 78 |
-| `ArtifactSinkUnavailable` | The volume is not usable right now: missing, not mounted, wrong or missing marker, identity changed, or a refused path | 75 |
+| `ArtifactSinkUnavailable` | The volume is not usable right now: missing, not mounted, wrong or missing marker, identity changed, mounted again (`media_volume_remounted`), lost earlier (`media_volume_lost`), or a refused path | 75 |
 
 A missing marker counts as 75, because a wrong disk looks exactly the same. The reason string says which check failed. It never contains a prompt.
 
