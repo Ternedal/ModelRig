@@ -2,7 +2,9 @@
 
 Image and video generation on the rig, #2296. This page separates three questions that are easy to blur: what is merged, what is switched on, and what may be released. **A merge is not a release:** every media capability below is default-off, and turning one on is a decision Anders takes per §2. This page records the gates; it does not authorize anything.
 
-Verified against main `5fdf1678` and the open PRs named below. When a row says "open", the PR's own exact-head evidence decides; this page does not replace it.
+**This is a snapshot,** verified against main `5fdf1678` and the open PRs and branches named below. It must be refreshed after the current merge sequence (#2325, #2282, then #2345–#2349). When a row says "open", the PR's own exact-head evidence decides; this page does not replace it.
+
+**Two different "off"s.** Most media modules are **merged but inert**: present in the code, with nothing that starts or calls them. The reachability gate is separate. There are **no media HTTP routes on main**, so no client can submit, list or fetch media.
 
 ## 1. What exists, and what is on
 
@@ -17,7 +19,7 @@ Verified against main `5fdf1678` and the open PRs named below. When a row says "
 | Video in the executor | `media_executor_main` | **refused: exit 78 for any video profile** | none yet | off |
 | Gallery catalog, store, index writer, asset streaming | `media_gallery_*.py` | merged (ChatGPT) | none (no route) | not reachable |
 | Owner-gated source image (#2339) | `media_source_image.py` | merged | none (no route) | not reachable |
-| Gallery HTTP routes, submit/get/cancel API | ChatGPT | **not on main** | not on main | not on main |
+| Gallery HTTP routes, submit/get/cancel API | ChatGPT | **not on main: this is the reachability gate** | not on main | nothing is reachable |
 | Android gallery client (#2301, #2302) | `android/` | merged, fixture-driven | needs the routes | inert |
 
 Open PRs and branches on the path to video:
@@ -26,7 +28,7 @@ Open PRs and branches on the path to video:
 - **#2347** staged video sink.
 - **#2349** G1: production `VerifiedMediaVolume`.
 - `feat/media-i2v-executor`, the executor's image-to-video path.
-- The G1 wiring PR, not yet written.
+- **G1 wiring**, branch `feat/media-volume-wiring` @ `825a9fa7`. It is prepared, not merged and not enabled. It includes Anders' 6 Nov rule that the job database lives on the verified volume.
 - `fix/gallery-index-os-lock`, the index lock (C8 findings).
 - C6 repair tool (`feat/media-volume-repair`).
 
@@ -60,13 +62,13 @@ Prompts are blanked 30 days after a job finishes (#2340). A rollback does not ch
 
 | Gate | Evidence | Owner | Status |
 |---|---|---|---|
-| G1 wired: the executor uses `MountedMediaVolume` for the volume guard, the sink and ComfyUI's directories | wiring PR plus rig R14 | Claude | G1 open (#2349); wiring not written |
+| G1 wired: the executor uses `MountedMediaVolume` for the volume guard, the job database's placement (Anders, 6 Nov), the sink and ComfyUI's directories | wiring PR plus rig R14 | Claude | G1 open (#2349); wiring branch prepared (`825a9fa7`), not merged, not enabled |
 | Staged video sink and image-to-video in the executor | #2347, #2346, the i2v executor PR | Claude | open |
 | Gallery routes and Android gallery against real routes | ChatGPT's route PR, R11 | ChatGPT | not on main |
 | Rig qualification pack at the qualified SHA, with the evidence manifest | runbook #2296 6642831318, R0–R16 | Anders runs it | waiting for A1–A3 (and A2b for Wan 2.2) |
 | Profiles promoted to `rig-qualified` with the measured limits (C4 R16) | a profile PR citing the manifest | Claude + ChatGPT | after the rig run |
 | ComfyUI backend outbound network blocked (firewall rule) | rig item 7 | **Anders (§2)** | open |
-| Cloud: media never reaches the cloud; chat cloud payload is current-message only (D5) | `CloudCurrentMessageOnlyTest`; F1 (#2348) | done for chat; F1 open | — |
+| Cloud: media never reaches the cloud; chat cloud payload is current-message only (D5); no fallback after Stop (F1) | `CloudCurrentMessageOnlyTest`; #2348 | Claude (F1), ChatGPT (review); Anders approved F1 | D5 implemented and tested; #2348 pending exact-head qualification |
 | Index lock survives a killed writer (C8 findings 2–3) | `fix/gallery-index-os-lock` | Claude | branch |
 | Production signing / release | — | **Anders (§2)** | not requested |
 
