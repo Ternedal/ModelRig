@@ -8,6 +8,13 @@ media volume:
   it is gone (#2347). C2's end-to-end test shows that case.
 - **An index entry whose file is missing.**
 
+**The work area on the internal disk** (Anders, 6 Nov 2026; ``docs/MEDIA_WORK_AREA.md``) can hold
+residue too: a render's output, ComfyUI's temp files or a staged source image, left by a crash
+before the adapter's cleanup ran. ``reconcile(..., work_area=, work_dirs=)`` lists files older than
+the minimum age in the named scratch folders, and ``remove_work_file`` removes one of them, named
+exactly, by the same capture-check-remove steps as ``remove_stale_temp``. The job database and its
+``-wal``, ``-shm`` and ``-journal`` files are never listed and never removed.
+
 **Automation.** None of this is deleted or adopted automatically: ``inspect_unindexed_assets``
 says so, and Anders' rule is no automatic deletion. ``reconcile()`` is read-only.
 
@@ -38,6 +45,7 @@ from .media_gallery_catalog import GalleryUnavailable, _index
 from .media_gallery_index_writer import register_asset
 from .media_gallery_store import ExternalMediaSink
 from .media_generation_contract import ArtifactSinkUnavailable
+from .media_work_area import PrivateWorkArea
 
 SCHEMA = "kaliv-media-repair-report/v1"
 DEFAULT_MINIMUM_AGE_S = 6 * 3600
@@ -91,9 +99,74 @@ def executors_running(lease_dir: str) -> list[str]:
     return running
 
 
+_JOB_DB_SIDECARS = ("", "-wal", "-shm", "-journal")
+_MAX_WORK_ENTRIES = 10_000
+
+
+def _job_db_files(job_db: str | None) -> set[str]:
+    if not job_db:
+        return set()
+    base = os.path.normcase(os.path.abspath(job_db))
+    return {base + suffix for suffix in _JOB_DB_SIDECARS}
+
+
+def _scratch_dir(area: PrivateWorkArea, directory: str) -> str:
+    """A scratch folder that is an existing directory inside the verified work area, never its root."""
+    area.require(directory)  # ArtifactSinkUnavailable: canonical, inside, private, no links
+    path = os.path.normpath(directory)
+    if not os.path.isdir(path) or os.path.normcase(path) == os.path.normcase(str(area.root)):
+        raise RepairRefused("not_a_work_scratch_directory")
+    return path
+
+
+def work_area_residue(area: PrivateWorkArea, directories, *, job_db: str | None = None,
+                      minimum_age_seconds: int = DEFAULT_MINIMUM_AGE_S) -> list[dict]:
+    """Files older than the minimum age in the named scratch folders of the work area. Read-only.
+
+    Links are reported and never followed; directories are walked. Never lists the job database or
+    its sidecar files. Each entry carries what ``remove_work_file`` needs to name it exactly."""
+    excluded = _job_db_files(job_db)
+    now = time.time()
+    found: list[dict] = []
+    for directory in directories:
+        top = _scratch_dir(area, directory)
+        pending = [top]
+        while pending:
+            current = pending.pop()
+            try:
+                entries = sorted(os.scandir(current), key=lambda e: e.name)
+            except OSError as exc:
+                raise RepairRefused("work_directory_unreadable") from exc
+            for entry in entries:
+                if len(found) >= _MAX_WORK_ENTRIES:
+                    raise RepairRefused("work_area_residue_too_large")
+                path = entry.path
+                if os.path.normcase(os.path.abspath(path)) in excluded:
+                    continue
+                info = entry.stat(follow_symlinks=False)
+                if stat.S_ISDIR(info.st_mode) and not entry.is_symlink() and not _is_reparse(info):
+                    pending.append(path)
+                    continue
+                kind = ("file" if stat.S_ISREG(info.st_mode) and not _is_reparse(info)
+                        else "link" if entry.is_symlink() or _is_reparse(info) else "other")
+                if kind == "file" and now - info.st_mtime < minimum_age_seconds:
+                    continue
+                found.append({"directory": top, "path": os.path.relpath(path, top), "kind": kind,
+                              "size_bytes": info.st_size if kind == "file" else None,
+                              "age_hours": round((now - info.st_mtime) / 3600, 1),
+                              "device": info.st_dev, "inode": info.st_ino})
+    return found
+
+
+def _is_reparse(info) -> bool:
+    return bool(getattr(info, "st_file_attributes", 0) & 0x400)
+
+
 def reconcile(sink: ExternalMediaSink, job_db: str, *, lease_dir: str | None = None,
-              minimum_age_seconds: int = DEFAULT_MINIMUM_AGE_S) -> dict:
-    """Read-only report of what the volume and the job database disagree on."""
+              minimum_age_seconds: int = DEFAULT_MINIMUM_AGE_S, work_area: PrivateWorkArea | None = None,
+              work_dirs=()) -> dict:
+    """Read-only report of what the volume and the job database disagree on, and of what is left
+    in the work area's scratch folders when ``work_area`` and ``work_dirs`` are given."""
     root = sink._root()  # ArtifactSinkUnavailable: nothing is inspected
     jobs = _jobs(job_db)
     by_asset = {j["asset_id"]: j for j in jobs if j["asset_id"]}
@@ -126,6 +199,12 @@ def reconcile(sink: ExternalMediaSink, job_db: str, *, lease_dir: str | None = N
                              and not any(u["asset_id"] == j["asset_id"] for u in unindexed)]
     stale = sink.inspect_temporary_file_candidates(minimum_age_seconds=minimum_age_seconds)
     quarantined = sorted(p.name for p in root.iterdir() if _QUARANTINE.fullmatch(p.name))
+    residue = (work_area_residue(work_area, work_dirs, job_db=job_db, minimum_age_seconds=minimum_age_seconds)
+               if work_area is not None else None)
+    if residue is not None:
+        for directory in work_dirs:
+            top = os.path.normpath(directory)
+            quarantined += sorted(os.path.join(top, n) for n in os.listdir(top) if _QUARANTINE.fullmatch(n))
     sink._root()
     return {
         "schema": SCHEMA,
@@ -137,9 +216,11 @@ def reconcile(sink: ExternalMediaSink, job_db: str, *, lease_dir: str | None = N
         "completed_jobs_without_asset": completed_unpublished,
         "stale_temporary_files": stale,
         "quarantined": quarantined,
+        "work_area_residue": residue,
         "counts": {"jobs": len(jobs), "indexed": len(indexed), "unindexed": len(unindexed),
                    "adoptable": sum(1 for u in unindexed if u["status"] == "adoptable"),
-                   "indexed_but_missing": len(missing), "stale_temporary_files": len(stale)},
+                   "indexed_but_missing": len(missing), "stale_temporary_files": len(stale),
+                   "work_area_residue": len(residue) if residue is not None else None},
     }
 
 
@@ -224,4 +305,48 @@ def _remove(sink: ExternalMediaSink, name: str, device: int, inode: int, minimum
             os.unlink(captured)
     except OSError:
         raise RepairRefused(f"identity_changed; left as {captured.name}") from None
+    raise RepairRefused("identity_changed")
+
+
+def remove_work_file(area: PrivateWorkArea, directory: str, relative: str, *, device: int, inode: int,
+                     lease_dir: str, job_db: str | None = None,
+                     minimum_age_seconds: int = DEFAULT_MINIMUM_AGE_S) -> dict:
+    """Remove one residue file from a work-area scratch folder, but only the exact one named."""
+    if (type(relative) is not str or not relative or os.path.isabs(relative)
+            or any(part in ("", ".", "..") or ":" in part for part in relative.replace("\\", "/").split("/"))):
+        raise RepairRefused("not_a_relative_path")
+    with _executors_held(lease_dir):
+        return _remove_work(area, directory, relative, device, inode, job_db, minimum_age_seconds)
+
+
+def _remove_work(area, directory, relative, device, inode, job_db, minimum_age_seconds) -> dict:
+    top = _scratch_dir(area, directory)
+    current = {(c["directory"], c["path"]): c
+               for c in work_area_residue(area, [top], job_db=job_db, minimum_age_seconds=minimum_age_seconds)}
+    candidate = current.get((top, os.path.normpath(relative)))
+    if candidate is None or candidate["kind"] != "file":
+        raise RepairRefused("not_a_residue_file")
+    if (candidate["device"], candidate["inode"]) != (device, inode):
+        raise RepairRefused("identity_changed")
+    original = os.path.join(top, os.path.normpath(relative))
+    parent = os.path.dirname(original)
+    area.require(parent)
+    captured = os.path.join(parent, f".kaliv-repair-{secrets.token_hex(8)}.quarantine")
+    try:
+        os.rename(original, captured)  # atomic: captures exactly the file under that name now
+    except OSError as exc:
+        raise RepairRefused("capture_failed") from exc
+    info = os.lstat(captured)
+    if stat.S_ISREG(info.st_mode) and (info.st_dev, info.st_ino) == (device, inode):
+        area.require(parent)
+        os.unlink(captured)
+        return {"removed": os.path.normpath(relative), "directory": top, "size_bytes": info.st_size}
+    try:
+        if os.name == "nt":
+            os.rename(captured, original)  # refuses an existing target on Windows
+        else:
+            os.link(captured, original)  # refuses an existing target
+            os.unlink(captured)
+    except OSError:
+        raise RepairRefused(f"identity_changed; left as {os.path.basename(captured)}") from None
     raise RepairRefused("identity_changed")

@@ -29,7 +29,8 @@ from app.image_job_store import ImageJobStore  # noqa: E402
 from app.media_gallery_catalog import list_gallery  # noqa: E402
 from app.media_gallery_store import ExternalMediaSink  # noqa: E402
 from app.media_generation_contract import ArtifactSinkUnavailable  # noqa: E402
-from app.media_repair import RepairRefused, adopt, reconcile, remove_stale_temp  # noqa: E402
+from app.media_repair import RepairRefused, adopt, reconcile, remove_stale_temp, remove_work_file  # noqa: E402
+from app.media_work_area import PrivateWorkArea  # noqa: E402
 
 GPU = "GPU-6a7f0c2e-1b2d-4c3e-8f9a-0123456789ab"
 DEAD = "GPU-6a7f0c2e-1b2d-4c3e-8f9a-0123456789ab:00000000000000aa"
@@ -51,7 +52,18 @@ class MediaRepairTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.sink = ExternalMediaSink(self.media, self.volume)
-        self.db = os.path.join(self.volume, "jobs.sqlite3")
+        # Anders, 6 Nov: the job database is in the private work area on the internal disk.
+        self.work = os.path.join(self.base, "work")
+        for sub in ("state", "comfy/output", "comfy/temp", "comfy/input"):
+            os.makedirs(os.path.join(self.work, sub))
+        os.chmod(self.work, 0o700)
+        fs = patch("app.media_work_area.WorkAreaProbe.containing_filesystem", return_value=("ext4", False))
+        fs.start()
+        self.addCleanup(fs.stop)
+        self.area = PrivateWorkArea(self.work)
+        self.output = os.path.join(self.work, "comfy", "output")
+        self.temp = os.path.join(self.work, "comfy", "temp")
+        self.db = os.path.join(self.work, "state", "jobs.sqlite3")
         self.store = ImageJobStore(self.db)
 
     def tearDown(self):
@@ -205,7 +217,117 @@ class MediaRepairTests(unittest.TestCase):
         self.mounted.clear()
         with patch("app.media_repair._jobs") as jobs, self.assertRaises(ArtifactSinkUnavailable):
             self.report()
-        jobs.assert_not_called()  # the job database lives on the volume: not opened
+        jobs.assert_not_called()  # nothing is inspected without the volume
+
+    # -- the work area on the internal disk (Anders, 6 Nov; ChatGPT 6686968292 item 2) -----------
+
+    def leftover(self, directory, relative, data=b"partial render", age_s=7 * 3600):
+        path = Path(directory, relative)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        then = time.time() - age_s
+        os.utime(path, (then, then))
+        info = path.lstat()
+        return relative, info.st_dev, info.st_ino
+
+    def residue(self, *dirs, **kw):
+        return self.report(work_area=self.area, work_dirs=list(dirs or (self.output, self.temp)), **kw)["work_area_residue"]
+
+    def test_work_area_residue_is_reported_old_files_only_never_the_job_database(self):
+        self.job(complete=False)
+        rel, dev, ino = self.leftover(self.output, "kaliv_00001_.mp4")
+        self.leftover(self.temp, os.path.join("frames", "f001.png"))
+        self.leftover(self.output, "young.mp4", age_s=0)
+        os.symlink(self.volume, os.path.join(self.temp, "a-link"))
+        found = self.residue(self.output, self.temp)
+        self.assertEqual(sorted((os.path.basename(f["directory"]), f["path"], f["kind"]) for f in found),
+                         [("output", "kaliv_00001_.mp4", "file"), ("temp", "a-link", "link"),
+                          ("temp", os.path.join("frames", "f001.png"), "file")])
+        # The job database and its sidecars are never residue, even in a folder that is scanned.
+        # (Called directly: fake sidecars next to the real database would make SQLite refuse to read it.)
+        from app.media_repair import work_area_residue
+        side = os.path.join(self.work, "comfy", "input")
+        fake_db = os.path.join(side, "jobs.sqlite3")
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            self.leftover(side, "jobs.sqlite3" + suffix)
+        self.leftover(side, "source.png")
+        listed = work_area_residue(self.area, [side], job_db=fake_db)
+        self.assertEqual([f["path"] for f in listed], ["source.png"])
+        self.assertEqual(len(work_area_residue(self.area, [side], job_db=None)), 5, "only the named database is excluded")
+        entry = next(f for f in found if f["path"] == rel)
+        self.assertEqual((entry["device"], entry["inode"], entry["size_bytes"]), (dev, ino, 14))
+        r = self.report(work_area=self.area, work_dirs=[self.output])
+        self.assertEqual(r["counts"]["work_area_residue"], 1)
+        self.assertNotIn(SECRET_PROMPT, json.dumps(r))
+        self.assertIsNone(self.report()["work_area_residue"], "not asked for: not reported")
+
+    def test_work_dirs_must_be_scratch_folders_inside_the_private_work_area(self):
+        with self.assertRaisesRegex(RepairRefused, "not_a_work_scratch_directory"):
+            self.residue(self.work)
+        with self.assertRaisesRegex(ArtifactSinkUnavailable, "media_work_path_outside_work_area"):
+            self.residue(self.media)
+        os.symlink(self.output, os.path.join(self.work, "linked"))
+        with self.assertRaises(ArtifactSinkUnavailable):
+            self.residue(os.path.join(self.work, "linked"))
+        os.chmod(self.work, 0o755)
+        with self.assertRaisesRegex(ArtifactSinkUnavailable, "media_work_area_not_private"):
+            self.residue(self.output)
+
+    def test_remove_work_file_removes_exactly_the_named_file(self):
+        rel, dev, ino = self.leftover(self.output, "kaliv_00001_.mp4")
+        self.assertEqual(remove_work_file(self.area, self.output, rel, device=dev, inode=ino, lease_dir=self.lease,
+                                          job_db=self.db),
+                         {"removed": rel, "directory": self.output, "size_bytes": 14})
+        self.assertFalse(Path(self.output, rel).exists())
+        self.assertEqual(self.report(work_area=self.area, work_dirs=[self.output])["quarantined"], [])
+
+    def test_remove_work_file_refuses_anything_else(self):
+        rel, dev, ino = self.leftover(self.output, "kaliv_00001_.mp4")
+        young, ydev, yino = self.leftover(self.output, "young.mp4", age_s=0)
+        os.symlink(Path(self.output, rel), Path(self.output, "a-link"))
+        state = os.path.join(self.work, "state")
+        db = Path(self.db).lstat()
+        cases = [
+            (self.output, rel, dev, ino + 1, "identity_changed"),
+            (self.output, young, ydev, yino, "not_a_residue_file"),
+            (self.output, "a-link", dev, ino, "not_a_residue_file"),
+            (state, "jobs.sqlite3", db.st_dev, db.st_ino, "not_a_residue_file"),
+            (self.output, "../temp/x", dev, ino, "not_a_relative_path"),
+            (self.output, "/etc/passwd", dev, ino, "not_a_relative_path"),
+            (self.output, "C:/Windows/x", dev, ino, "not_a_relative_path"),
+            (self.output, "kaliv.mp4:stream", dev, ino, "not_a_relative_path"),
+            (self.work, "state/jobs.sqlite3", db.st_dev, db.st_ino, "not_a_work_scratch_directory"),
+        ]
+        with patch("app.media_repair.os.rename") as rename:
+            for directory, name, d, i, reason in cases:
+                with self.subTest(name=name, reason=reason), self.assertRaisesRegex(RepairRefused, reason):
+                    remove_work_file(self.area, directory, name, device=d, inode=i, lease_dir=self.lease, job_db=self.db)
+        rename.assert_not_called()  # refused before anything is captured
+        self.assertTrue(Path(self.output, rel).exists() and Path(self.output, young).exists() and Path(self.db).exists())
+
+    def test_a_swapped_work_file_is_put_back_not_removed(self):
+        rel, dev, ino = self.leftover(self.output, "kaliv_00001_.mp4")
+        real_rename = os.rename
+
+        def swap_then_rename(src, dst):
+            if str(src).endswith(rel):
+                Path(str(src) + ".new").write_bytes(b"someone else's")
+                real_rename(str(src) + ".new", src)
+            return real_rename(src, dst)
+        with patch("app.media_repair.os.rename", side_effect=swap_then_rename):
+            with self.assertRaisesRegex(RepairRefused, "identity_changed"):
+                remove_work_file(self.area, self.output, rel, device=dev, inode=ino, lease_dir=self.lease, job_db=self.db)
+        self.assertEqual(Path(self.output, rel).read_bytes(), b"someone else's")
+
+    def test_remove_work_file_refuses_while_an_executor_runs(self):
+        rel, dev, ino = self.leftover(self.output, "kaliv_00001_.mp4")
+        lock = acquire_executor_lock(GPU, lease_dir=self.lease)
+        try:
+            with self.assertRaisesRegex(RepairRefused, "executor_running"):
+                remove_work_file(self.area, self.output, rel, device=dev, inode=ino, lease_dir=self.lease, job_db=self.db)
+        finally:
+            lock.release()
+        self.assertTrue(Path(self.output, rel).exists())
 
     # -- the CLI ---------------------------------------------------------------------------------
 
@@ -231,6 +353,23 @@ class MediaRepairTests(unittest.TestCase):
         self.mounted.clear()
         code, _, err = self.cli("report", *common, "--job-db", self.db)
         self.assertEqual(code, 75)
+
+    def test_cli_work_area_report_and_removal(self):
+        rel, dev, ino = self.leftover(self.output, "kaliv_00001_.mp4")
+        common = ["--media-root", self.media, "--volume-root", self.volume, "--job-db", self.db]
+        work = ["--work-root", self.work, "--work-dir", self.output]
+        code, out, err = self.cli("report", *common, *work)
+        self.assertEqual(code, 0, err)
+        self.assertEqual([f["path"] for f in json.loads(out)["work_area_residue"]], [rel])
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            self.cli("report", *common, "--work-root", self.work)  # the two go together
+        code, out, err = self.cli("remove-work-file", "--job-db", self.db, "--lease-dir", self.lease, *work,
+                                  "--path", rel, "--device", str(dev), "--inode", str(ino))
+        self.assertEqual((code, json.loads(out)["removed"]), (0, rel), err)
+        os.chmod(self.work, 0o750)
+        code, _, err = self.cli("report", *common, *work)
+        self.assertEqual(code, 75)
+        self.assertIn("work area refused", err)
 
 
 if __name__ == "__main__":
