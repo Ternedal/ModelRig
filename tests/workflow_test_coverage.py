@@ -693,6 +693,7 @@ native_windows_contracts = (
     "tests/worker_media_staged_video_sink.py",
     "tests/support/windows_media_volume_contract.py",
     "tests/support/windows_media_work_area_contract.py",
+    "tests/support/windows_media_preflight_contract.py",
     "tests/support/windows_lease_dir_acl_contract.py",
 )
 check(
