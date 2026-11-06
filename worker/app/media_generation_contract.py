@@ -25,6 +25,10 @@ class GenerationError(ValueError):
     """A request or artifact was refused. The message never contains a prompt."""
 
 
+class SourceImageUnavailable(GenerationError):
+    """The source image is absent, invalid or not authorized for this job."""
+
+
 class GenerationCancelled(GenerationError):
     """The job's owner cancelled it while it was rendering; nothing is published."""
 
