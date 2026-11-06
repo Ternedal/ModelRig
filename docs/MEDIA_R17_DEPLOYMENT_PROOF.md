@@ -5,7 +5,7 @@ Anders' decision (6 Nov 2026, #2275 6686905826) is to generate media in a privat
 **Status: pending.** Nothing here has been run on the rig. Media stays default-off throughout: R17 never switches video on. R17 needs a new `$QualSha` set in the rig runbook (#2296), at a commit that contains:
 
 - **for R17.1 to R17.6, R17.8:** the wiring branch (`feat/media-volume-wiring`);
-- **for R17.7:** also the C6 repair tool (`feat/media-volume-repair`), which provides `scripts/media_volume_repair.py`. Without it, skip R17.7 and record it as not run.
+- **for R17.7 and R17.9:** also the C6 repair tool (`feat/media-volume-repair`), which provides `scripts/media_volume_repair.py`. Without it, skip both and record them as not run.
 
 ## 1. What is proven where
 
@@ -20,6 +20,11 @@ Anders' decision (6 Nov 2026, #2275 6686905826) is to generate media in a privat
 | Crash residue tied to its job; nothing partial visible | C2 (fork + `os._exit` at the copy, before publication; failed adopt, sync, registration), C6 `worker_media_recovery_inventory.py` | R17.7 baseline only (video is off) | pending; physical crash after video is enabled |
 | Default-off | `worker_media_executor_main.py` | R17.1 | pending |
 | Rollback | — | R17.8 | pending |
+| A junction in a work folder is reported as a link, never followed | POSIX symlinks only: `worker_media_repair.py` (a link inside is reported), C2 `worker_media_negative_matrix.py` (a file or folder swapped for a link at the copy) | R17.9 (optional) | pending; the only physical NTFS junction evidence |
+| Access lost while C6 reads (denied, locked, Z: unplugged) | simulated: `worker_media_recovery_inventory.py`, `worker_media_repair.py` (`OSError` injected) | **not on the rig** | simulated only |
+| A crash at each of six hand-off steps | C2 `worker_media_negative_matrix.py` (`os._exit`, POSIX) | **not on the rig**: needs video on | simulated only; physical crash after video is enabled |
+
+**What "simulated" means here.** The CI rows run on Linux. They fake the Windows facts: the mount table, an `OSError` where Windows would deny or lock, a POSIX symlink where NTFS has a junction. They prove the code's decisions, not NTFS. The Windows contract tests (`tests/support/windows_*`, on the Windows gate) run on real NTFS, but on a CI runner, not this rig. Only an R17 step run on the rig is physical evidence for this machine. Every row marked "simulated only" stays unproven physically until Anders decides otherwise.
 
 ## 2. Variables (paste into every PowerShell window)
 
@@ -115,6 +120,21 @@ Expected: `exit=1`, with only `free_space:publication_volume` false and its real
 
 Expected: `exit=0`, `"status": "ok"`, and `jobs: []`, `unattributed: []`, `work_area_residue: []`. A physical crash test (kill the executor during a copy, then run the inventory) follows only after Anders decides to enable video.
 
+**R17.9 Optional: a junction on real NTFS** (non-destructive; needs C6 like R17.7). The junction points at a new empty folder, so nothing else can be touched:
+
+```powershell
+$JTarget = "C:\kaliv-junction-target"
+New-Item -ItemType Directory $JTarget | Out-Null
+Set-Content -Path "$JTarget\outside.txt" -Value "outside"
+New-Item -ItemType Junction -Path "$WorkRoot\comfy\output\junction-test" -Target $JTarget | Out-Null
+& $GenPy "$Qual\scripts\media_volume_repair.py" report --media-root $Gallery --volume-root $VolumeRoot --job-db $JobDb --lease-dir $LeaseDir --work-root $WorkRoot --work-dir "$WorkRoot\comfy\output" > "$Out\report-junction.json"; "exit=$LASTEXITCODE"
+cmd /c rmdir "$WorkRoot\comfy\output\junction-test"
+Get-Content "$JTarget\outside.txt"
+Remove-Item -Recurse $JTarget
+```
+
+Expected: `exit=0`, and `work_area_residue` holds what R17.7 found plus one entry, `"path": "junction-test"` with `"kind": "link"`. `outside.txt` never appears in the report, and `Get-Content` still prints `outside`. `cmd /c rmdir` without `/s` removes only the junction, never its target.
+
 **R17.8 Rollback.** Stop the appliance, then:
 
 ```powershell
@@ -129,7 +149,7 @@ Expected: `exit=78`. The work area, its ACL, the marker and the gallery are unto
 
 ## 4. Evidence to post (on #2296)
 
-- **Files:** `preflight-idle.json`, `preflight-accounts.json`, `inventory-baseline.json` and `report-baseline.json`. They contain paths, SIDs, sizes and reason codes, never a prompt or a token.
+- **Files:** `preflight-idle.json`, `preflight-accounts.json`, `inventory-baseline.json`, `report-baseline.json`, and `report-junction.json` if R17.9 ran. They contain paths, SIDs, sizes and reason codes, never a prompt or a token.
 - **The `icacls` outputs** from R17.2.
 - **The `Get-Volume` lines** from R17.3.
 - **Every exit code** printed above.
