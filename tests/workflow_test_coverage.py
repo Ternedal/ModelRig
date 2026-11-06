@@ -690,6 +690,7 @@ native_windows_contracts = (
     "tests/worker_toolhost.py",
     "tests/support/windows_catalog_tier_a_contract.py",
     "tests/support/windows_tier_a_receipt_contract.py",
+    "tests/support/windows_media_volume_contract.py",
 )
 check(
     all(path in workflow for path in native_windows_contracts),
