@@ -16,22 +16,22 @@ profile (kaliv-media-profile/v1, backend=comfyui, backend_options pin template S
        ├─ read the template once, check SHA-256, parse the same bytes
        └─ ComfySupervisor.start()
             ├─ validate argv (allowlisted flags, absolute non-symlink dirs, port 1024..65535)
-            ├─ media_volume.require(dir) for input/output/temp/user: all on the verified external volume
+            ├─ work_area.require(dir) for input/output/temp/user: all in the private work area on the internal disk
             ├─ acquire_gpu_lease(UUID)          main lease; refuses while a resident lock is held
             ├─ refuse if the port already answers
             ├─ spawn: comfy_resident_launcher -> runpy(main.py) in ComfyUI's own process
             │     env: CUDA_VISIBLE_DEVICES=<UUID>, offline vars, a fresh token, TEMP/TMP/TMPDIR = ComfyUI's temp
-            │          dir on the verified volume (never the caller's temp, which is on the internal disk); PATH,
+            │          dir in the private work area (never the caller's temp, which others may read); PATH,
             │          SYSTEMROOT, HOME, USERPROFILE, LANG, LC_ALL from the caller; nothing else
             │     POSIX: pass_fds(main lease); Windows: Job Object (KILL_ON_JOB_CLOSE, host-memory limit)
             └─ ready = child alive ∧ resident lock held ∧ proof{token,pid} matches ∧ /system_stats VRAM budget
   └─ per job: with sink.staged(".mp4") as out:
        ├─ adapter.render_to(request, out)
        │     job slot (one job per ComfyUI; a concurrent second job is refused, never queued)
-       │     -> media volume re-check -> validate_request -> VRAM re-check -> empty queue -> bind slots -> /prompt
+       │     -> work area re-check -> validate_request -> VRAM re-check -> empty queue -> bind slots -> /prompt
        │     -> /history until the profile deadline (interrupt on timeout)
-       │     -> media volume re-check -> exactly one new .mp4: not a symlink, settled, unchanged while copied, ftyp, size cap
-       │     -> written into `out` (the adapter never sees a path)
+       │     -> work area re-check -> exactly one new .mp4: not a symlink, settled, unchanged while copied, ftyp, size cap
+       │     -> written into `out`, a staged file on the publication volume, then fsync (the adapter never sees a path)
        │     finally: remove exactly the files ComfyUI's history names for THIS prompt (output root, new since
        │              the snapshot, same (st_dev, st_ino) as recorded); see "Output cleanup" below.
        │              Cleanup never raises, so it cannot mask the render's own result or error
@@ -50,14 +50,18 @@ profile (kaliv-media-profile/v1, backend=comfyui, backend_options pin template S
 | VRAM admission (`/system_stats`), before start and before every job | Memory taken by processes outside the lease | Proof of exclusive ownership; it is only a budget check |
 | Job slot (non-blocking lock in the supervisor, held from admission to cleanup) | Two jobs racing past the empty-queue check in one process | Other processes; those are blocked by the leases |
 
-## Media never on the internal disk
+## Generate in the work area, publish on the volume
 
-ComfyUI writes the full MP4 into its own `output_directory` before the adapter copies it into the sink's handle. So the supervisor requires a `VerifiedMediaVolume` (ChatGPT's external-mount verifier; there is no default) and calls `require()` on ComfyUI's input/output/temp/user directories:
+Anders' decision, 6 Nov 2026 (#2275 6686905826): media is generated in a private work area on the internal disk (C:) and published on the external volume (Z:). It replaces the earlier rule that media never touches the internal disk (#2316 review 5700997784). `docs/MEDIA_WORK_AREA.md` has the checks, the setup and the crash cases.
+
+ComfyUI writes the full MP4 into its own `output_directory`, in the work area. So the supervisor requires a `MediaWorkArea` (production: `PrivateWorkArea`; there is no default) and calls `require()` on ComfyUI's input/output/temp/user directories:
 - before ComfyUI starts;
 - before every submit;
 - again before the copy.
 
-A missing, unmounted or replaced volume raises `ArtifactSinkUnavailable`. That is fatal, with no fallback, and nothing is handed to the sink.
+A work area that changed or stopped being private raises `ArtifactSinkUnavailable`. That is fatal, with no fallback, and nothing is handed to the sink.
+
+The adapter copies the checked file into the staged file it was handed on the publication volume and syncs it. Only then does its cleanup remove the file from the work area. The sink publishes the staged file with one atomic rename on that volume, keyed by the job. The executor refuses to claim a job while the publication volume is not there, so no render is wasted.
 
 `pass_fds` (POSIX) and the resident lock each keep the GPU busy after a supervisor SIGKILL on their own. Both are kept as defence in depth.
 
@@ -181,12 +185,10 @@ When pins are set:
 6. Wan VRAM fit and render time on the 3060s, and GPU UUID mapping on the dual-GPU rig.
 7. Outbound network from the ComfyUI backend. `--offline` restricts only the frontend, so this needs a firewall rule. That is §2 (external data transfer), Anders' decision.
 8. WSL/native mixed topology stays **disabled**. Lock interoperability across that boundary is unproven.
-9. The media volume and ComfyUI's output root (#2316 5705457473):
-   - The output root is private to the supervised ComfyUI/worker account. Check with `icacls <output root>`: only that account, SYSTEM and Administrators; no Users, Everyone or Authenticated Users. Rename-capture does not protect against a hostile process that renames concurrently inside the output root.
-   - Same-directory rename is atomic on the volume, and the filesystem has stable file ids (NTFS, ReFS, ext4, xfs, btrfs). Run `tests/support/windows_cleanup_identity_contract.py` against a temp folder on the volume itself (rig run).
-   - FAT32/exFAT derive the id from the directory-entry position. It can change on rename, and a later file can reuse it.
-   - On those filesystems, cleanup may fail to remove its own output. Worse, it cannot rule out a reused id.
-   - Proposal for the `VerifiedMediaVolume` owner: refuse such volumes.
+9. The work area, ComfyUI's output root in it, and the publication volume (#2316 5705457473; Anders, 6 Nov):
+   - The work area is private to the supervised ComfyUI/worker account; `PrivateWorkArea` checks it at start and on every use (`docs/MEDIA_WORK_AREA.md`). Check with `icacls <work area>`: only that account, SYSTEM and Administrators; no Users, Everyone or Authenticated Users. Rename-capture does not protect against a hostile process that renames concurrently inside the output root.
+   - Same-directory rename is atomic, and the filesystem has stable file ids (NTFS, ReFS, ext4, xfs, btrfs), on both disks: cleanup runs in the work area, publication on the volume. Run `tests/support/windows_cleanup_identity_contract.py` against a temp folder in the work area and on the volume (rig run).
+   - FAT32/exFAT derive the id from the directory-entry position. It can change on rename, and a later file can reuse it. Both checks refuse them.
 
 ## Tests (no GPU, no ComfyUI)
 

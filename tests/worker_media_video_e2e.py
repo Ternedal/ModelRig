@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
-"""C2: the image-to-video pipeline end to end, on one verified media volume (test only).
+"""C2: the image-to-video pipeline end to end: generated in the work area, published on the volume (test only).
+
+Anders, 6 Nov 2026 (#2275 6686905826): ComfyUI and the job database work in a private folder on the
+internal disk (the work area); a finished file is copied to the external volume, synced, published.
 
 **Real components:**
-- `ImageJobStore`, with `MountedMediaVolume.verify` as its volume guard (G1);
+- `ImageJobStore` in the work area, guarded like the entry point does it: the work area, then
+  `MountedMediaVolume.verify` (G1), before every access;
 - `MediaExecutor`;
-- `ComfySupervisor`, whose `media_volume` is the G1 volume;
+- `ComfySupervisor`, whose `work_area` is a real `PrivateWorkArea`;
 - `ComfyVideoAdapter` (#2346) driving the fake ComfyUI child process;
 - the owner-gated `read_owned_source_png` (#2339);
 - `ExternalStagedVideoSink` (#2347) with the real gallery index writer and catalog.
 
-**Faked:** only the mount facts (FakeProbe: is this a mount point, which filesystem) and the GPU
-(the fake ComfyUI).
+**Faked:** only the mount facts (FakeProbe: is this a mount point, which filesystem; the work area's
+filesystem type) and the GPU (the fake ComfyUI).
 
 **Asserted:**
 - submit, lease, render, stage, adopt, index, get;
@@ -20,7 +24,9 @@
   the restart records the interrupted job as failed (the store's recovery rule; the owner
   resubmits), and a new job completes;
 - after every outcome, nothing orphaned is visible: no temp or unindexed files, and nothing left
-  in ComfyUI's output.
+  in ComfyUI's output;
+- the state a crash leaves (during the copy, or after the work-area copy is removed but before
+  publication) is recovered as a failed job, never published, and C6 reports every leftover.
 
 Run: PYTHONPATH=worker python3 tests/worker_media_video_e2e.py
 """
@@ -52,6 +58,7 @@ from app.media_generation_profiles import parse_profile  # noqa: E402
 from app.media_source_image import read_owned_source_png  # noqa: E402
 from app.media_staged_video_sink import ExternalStagedVideoSink  # noqa: E402
 from app.media_volume import MARKER_NAME, MountedMediaVolume  # noqa: E402
+from app.media_work_area import PrivateWorkArea  # noqa: E402
 import worker_media_volume as g1  # noqa: E402  (module import: its test classes must not run here)
 from worker_comfy_image_to_video import I2V, png  # noqa: E402
 from worker_comfy_supervisor import FAKE_MAIN, FakeSupervisor, free_port  # noqa: E402
@@ -71,10 +78,17 @@ class VideoPipelineEndToEnd(unittest.TestCase):
         os.mkdir(self.root)
         Path(self.root, MARKER_NAME).write_text(VOLUME_ID)
         self.media = os.path.join(self.root, "gallery")
-        self.comfy = {n: os.path.join(self.root, "comfy", n) for n in ("input", "output", "temp", "user")}
-        for d in (self.media, *self.comfy.values()):
+        # The work area on the internal disk: ComfyUI's folders and the job database.
+        self.work = os.path.join(self.base, "work")
+        self.comfy = {n: os.path.join(self.work, "comfy", n) for n in ("input", "output", "temp", "user")}
+        self.job_dir = os.path.join(self.work, "state")
+        for d in (self.media, *self.comfy.values(), self.job_dir):
             os.makedirs(d)
-        # Not media: these may live off the volume.
+        os.chmod(self.work, 0o700)
+        fs = patch("app.media_work_area.WorkAreaProbe.containing_filesystem", return_value=("ext4", False))
+        fs.start()
+        self.addCleanup(fs.stop)
+        # Not media: these may live anywhere.
         self.lease_dir = os.path.join(self.base, "lease")
         os.mkdir(self.lease_dir, 0o700)
         self.templates = os.path.join(self.base, "templates")
@@ -99,7 +113,14 @@ class VideoPipelineEndToEnd(unittest.TestCase):
 
     def boot(self):
         self.volume = MountedMediaVolume(self.root, VOLUME_ID, probe=self.probe)
-        self.store = ImageJobStore(os.path.join(self.root, "jobs.sqlite3"), volume_guard=self.volume.verify)
+        self.work_area = PrivateWorkArea(self.work)
+        volume, work_area, job_dir = self.volume, self.work_area, self.job_dir
+
+        def guard():  # what media_executor_main.build_from_env installs
+            work_area.require(job_dir)
+            volume.verify()
+
+        self.store = ImageJobStore(os.path.join(self.job_dir, "jobs.sqlite3"), volume_guard=guard)
         self.image_sink = ExternalMediaSink(self.media, str(self.volume.root))
         self.video_sink = ExternalStagedVideoSink(self.media, str(self.volume.root))
 
@@ -120,7 +141,7 @@ class VideoPipelineEndToEnd(unittest.TestCase):
             limits={"max_prompt_chars": 200, "sizes": [[832, 480]], "max_steps": 30, "max_frames": 81},
             backend_options={"template_name": "wan-i2v.json", "template_sha256": sha(raw(I2V)), "fps": 16,
                              "max_render_seconds": 60, "max_output_bytes": 1024 * 1024, "port": self.port}))
-        volume = self.volume
+        work_area = self.work_area
 
         def factory(p):
             launch = ComfyLaunch(python_executable=sys.executable, main_py=str(FAKE_MAIN), port=self.port,
@@ -128,7 +149,7 @@ class VideoPipelineEndToEnd(unittest.TestCase):
                                  temp_directory=self.comfy["temp"], user_directory=self.comfy["user"])
             sup = FakeSupervisor(fake_env={"FAKE_COMFY_STATE_DIR": self.state,
                                            "FAKE_COMFY_RENDER_SECONDS": render_seconds},
-                                 media_volume=volume, gpu_uuid=GPU, lease_dir=self.lease_dir, launch=launch,
+                                 work_area=work_area, gpu_uuid=GPU, lease_dir=self.lease_dir, launch=launch,
                                  reserve_gib=2, min_usable_gib=8, ready_timeout_s=15, stop_timeout_s=5, poll_s=0.05,
                                  base_env={"PATH": os.environ.get("PATH", "")})
             adapter = ComfyVideoAdapter(p, supervisor=sup, template_dir=self.templates,

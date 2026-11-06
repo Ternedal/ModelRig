@@ -2,7 +2,12 @@
 
 The protocol lives in ``media_generation_contract``. ``require(path)`` returns only if ``path`` lies
 on the verified, currently mounted external media volume. Otherwise it raises
-``ArtifactSinkUnavailable``. Media never lands on the internal disk, not even transiently.
+``ArtifactSinkUnavailable``.
+
+This is where media is **published**: the gallery and every staged file. Generation happens in a
+private work area on the internal disk (Anders, 6 Nov 2026, #2275; checked separately). A finished
+file reaches the gallery only by being copied into a staged file here, checked, and published in
+one atomic step.
 
 **One volume.** The operator configures one external volume with two settings:
 
@@ -36,7 +41,7 @@ until the executor restarts. That restart is exit 75, the same as a volume that 
 
 **Limits.** These are checks, not handles. A process running as the same OS user could swap a
 directory between the check and its use. That limit is shared with the rest of the media stack,
-and the private output root guards against it (rig item 9). Nothing here mounts, creates or
+and the private work area guards against it (rig item 9). Nothing here mounts, creates or
 deletes anything.
 
 **Exit codes.** A configuration that can never work is ``MediaVolumeConfigError``, so the executor
@@ -171,10 +176,10 @@ class MountedMediaVolume:
     It is constructed once when the executor starts. A failure there raises
     ``MediaVolumeConfigError`` (exit 78) or ``ArtifactSinkUnavailable`` (exit 75).
 
-    Integration (#2346 / #2347; wiring follows in its own PR, and video stays default-off):
+    Integration (#2347; wiring follows in its own PR, and video stays default-off):
     - ``ExternalStagedVideoSink(media_root, verified_volume_root=volume.root)``;
-    - the ComfyUI supervisor takes ``media_volume=volume``;
-    - ``ImageJobStore(db, volume_guard=volume.verify)``.
+    - the executor calls ``verify()`` before it claims a job.
+    ComfyUI's folders and the job database are in the work area on the internal disk, not here.
     """
 
     def __init__(self, root: str, volume_id: str, *, probe: SystemProbe | None = None,
@@ -205,11 +210,7 @@ class MountedMediaVolume:
     # -- helpers -------------------------------------------------------------------------------
 
     def _normal(self, path: str) -> str:
-        """Collapse doubled separators and drop a trailing one, but keep a drive root's (``E:\\``)."""
-        norm = self._paths.normpath(path)
-        if self._probe.windows and re.fullmatch(r"[A-Za-z]:", norm):
-            norm += "\\"
-        return norm
+        return normal_path(path, windows=self._probe.windows)
 
     def _same(self, a: str, b: str) -> bool:
         return self._paths.normcase(a) == self._paths.normcase(b)
@@ -276,39 +277,66 @@ class MountedMediaVolume:
         """Return only if ``path`` is an existing directory or regular file on this volume."""
         raw = check_path_syntax(os.fspath(path), windows=self._probe.windows)
         self.verify()
-        # Only this platform's separators, everywhere below: a backslash is an ordinary filename
-        # character on POSIX, so treating it as one would check a different path, or let a sibling
-        # of a root ending in a backslash pass containment (#2349 reviews 4491252681, 4491286902).
-        separators = "\\/" if self._probe.windows else "/"
-        target = self._normal(raw)
-        root_key = self._paths.normcase(self._root)
-        target_key = self._paths.normcase(target)
-        prefix = root_key if root_key.endswith(tuple(separators)) else root_key + self._paths.sep
-        if target_key != root_key and not target_key.startswith(prefix):
-            raise _refused("media_path_outside_volume")
+        walk_within(self._root, raw, probe=self._probe, device=self._identity[0],
+                    prefix="media_path", outside="media_path_outside_volume")
+
+
+def normal_path(path: str, *, windows: bool) -> str:
+    """Collapse doubled separators and drop a trailing one, but keep a drive root's (``E:\\``)."""
+    norm = (ntpath if windows else posixpath).normpath(path)
+    if windows and re.fullmatch(r"[A-Za-z]:", norm):
+        norm += "\\"
+    return norm
+
+
+def walk_within(root: str, raw: str, *, probe: SystemProbe, device: int, prefix: str,
+                outside: str) -> list[tuple[str, os.stat_result]]:
+    """The walk behind ``require``, shared by the media volume and the work area.
+
+    ``root`` is already normalised and verified; ``raw`` has passed ``check_path_syntax``. Returns
+    only if ``raw`` is a canonical, existing directory or regular file under ``root``, with no link
+    or reparse point and no other device in any component below the root. Returns every component
+    walked, with its ``lstat``. Raises ``ArtifactSinkUnavailable`` with ``outside`` or
+    ``<prefix>_missing|not_canonical|link|other_device|not_file_or_directory``.
+    """
+    windows = probe.windows
+    paths = ntpath if windows else posixpath
+    # Only this platform's separators, everywhere below: a backslash is an ordinary filename
+    # character on POSIX, so treating it as one would check a different path, or let a sibling
+    # of a root ending in a backslash pass containment (#2349 reviews 4491252681, 4491286902).
+    separators = "\\/" if windows else "/"
+    target = normal_path(raw, windows=windows)
+    root_key = paths.normcase(root)
+    target_key = paths.normcase(target)
+    contained = root_key if root_key.endswith(tuple(separators)) else root_key + paths.sep
+    if target_key != root_key and not target_key.startswith(contained):
+        raise _refused(outside)
+    try:
+        real = probe.realpath(target)
+    except OSError:
+        raise _refused(f"{prefix}_missing") from None
+    if paths.normcase(normal_path(real, windows=windows)) != target_key:
+        raise _refused(f"{prefix}_not_canonical")
+    # Walk every component below the root: no link or reparse point, no other device.
+    relative = target[len(root):].lstrip(separators)
+    current = root
+    parts = [p for p in re.split(f"[{re.escape(separators)}]", relative) if p] if relative else []
+    walked: list[tuple[str, os.stat_result]] = []
+    info = None
+    for part in parts:
+        current = paths.join(current, part)
         try:
-            real = self._probe.realpath(target)
+            info = probe.lstat(current)
         except OSError:
-            raise _refused("media_path_missing") from None
-        if not self._same(self._normal(real), target):
-            raise _refused("media_path_not_canonical")
-        # Walk every component below the root: no link or reparse point, no other device.
-        relative = target[len(self._root):].lstrip(separators)
-        current = self._root
-        parts = [p for p in re.split(f"[{re.escape(separators)}]", relative) if p] if relative else []
-        info = None
-        for part in parts:
-            current = self._paths.join(current, part)
-            try:
-                info = self._probe.lstat(current)
-            except OSError:
-                raise _refused("media_path_missing") from None
-            if _is_link(info):
-                raise _refused("media_path_link")
-            if info.st_dev != self._identity[0]:
-                raise _refused("media_path_other_device")
-        if info is not None and not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
-            raise _refused("media_path_not_file_or_directory")
+            raise _refused(f"{prefix}_missing") from None
+        if _is_link(info):
+            raise _refused(f"{prefix}_link")
+        if info.st_dev != device:
+            raise _refused(f"{prefix}_other_device")
+        walked.append((current, info))
+    if info is not None and not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+        raise _refused(f"{prefix}_not_file_or_directory")
+    return walked
 
 
 def media_volume_from_env(env: Mapping[str, str] | None = None, *,

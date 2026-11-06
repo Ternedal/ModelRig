@@ -63,7 +63,7 @@ class ImageToVideoExecutorTests(unittest.TestCase):
                                  temp_directory=self.dirs["temp"], user_directory=self.dirs["user"])
             sup = FakeSupervisor(fake_env={"FAKE_COMFY_STATE_DIR": self.dirs["state"],
                                            "FAKE_COMFY_RENDER_SECONDS": render_seconds},
-                                 media_volume=AnyExistingDirectory(), gpu_uuid=base.GPU_A, lease_dir=self.lease_dir,
+                                 work_area=AnyExistingDirectory(), gpu_uuid=base.GPU_A, lease_dir=self.lease_dir,
                                  launch=launch, reserve_gib=2, min_usable_gib=8, ready_timeout_s=15, stop_timeout_s=5,
                                  poll_s=0.05, base_env={"PATH": os.environ.get("PATH", "")})
             adapter = ComfyVideoAdapter(profile, supervisor=sup, template_dir=self.dirs["templates"],
