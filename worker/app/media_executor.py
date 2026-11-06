@@ -37,7 +37,7 @@ Rules
   JobKeyedStagedSink), so an artifact can be correlated with its job after a crash.
   If the completion write then fails, the job stays "publishing" (never
   "generation_failed") and the executor exits 76; recovery turns it into
-  "interrupted during publication" for the sink owner's reconciliation.
+  `interrupted_during_publication` for the sink owner's reconciliation.
 - An adapter that reports needs_restart (a ComfyUI whose interrupt did not drain) is
   unloaded after the job, with the same proof rule, before anything else is claimed.
 - The executor lock is released on every terminal path of run(). The GPU lease of

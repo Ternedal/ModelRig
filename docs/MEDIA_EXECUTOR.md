@@ -36,7 +36,7 @@ Sources:
 | Concurrent initialisers serialise the migration | `ImageJobStore.__init__` (`BEGIN IMMEDIATE` spans inspection and `ALTER`) | `test_concurrent_initialisers_serialise_the_migration` (barrier at the schema read) |
 | A failed load continues only if `close()` proves the release; otherwise the adapter is retained and the exit is 70. `GpuResourcesRetained` from `load()` is always fatal | `_adapter_for` | three partial-load tests |
 | Publication is job-keyed when the sink offers it (`JobKeyedArtifactSink`, `JobKeyedStagedSink`) | `step`, `GenerationJobRunner` | image, video and real `ExternalMediaSink` tests |
-| A durable artifact whose completion write fails stays `publishing`, exit 76, then `interrupted during publication` | `step` | `test_a_durable_artifact_whose_completion_fails…`, `test_restart_reconciliation_with_the_real_gallery_sink` |
+| A durable artifact whose completion write fails stays `publishing`, exit 76, then `interrupted_during_publication` | `step` | `test_a_durable_artifact_whose_completion_fails…`, `test_restart_reconciliation_with_the_real_gallery_sink` |
 | A failure after the commit point is `publication_failed`, not `generation_failed` | `step` | `test_a_publication_error_after_the_commit_point…` |
 | The executor lock is released on every terminal path of `run()`; a retained adapter's GPU lease is not | `run`, `ExecutorLock.release` | `test_run_releases_the_executor_lock_on_every_exit_path` |
 | A ComfyUI whose interrupt is not confirmed drained (deadline, interrupt or queue check failed) sets `needs_restart`; the executor unloads it with proof before claiming again | `ComfyVideoAdapter._interrupt_and_drain`, `step` | `test_an_unconfirmed_drain_marks_the_adapter_for_restart`, `test_a_comfyui_whose_cancel_did_not_drain_is_restarted_before_the_next_job` |
@@ -60,9 +60,11 @@ queued --claim_for--> running --begin_publish--> publishing --complete--> comple
                       running/publishing --fail--> failed
                       running --finish_cancelled--> cancelled      (after request_cancel)
                       running --defer (VRAM short)--> queued        (G4; failed "gpu_unavailable" after 10 min)
-recovery:  running    -> failed "interrupted by restart"
-           publishing -> failed "interrupted during publication"   (an asset may exist: the sink reconciles)
+recovery:  running    -> failed interrupted_by_restart
+           publishing -> failed interrupted_during_publication   (an asset may exist: the sink reconciles)
 ```
+
+Rows failed before 6 Nov 2026 hold the sentences `interrupted by restart` and `interrupted during publication`. Nothing rewrites them; `image_job_store.public_error()` maps both forms to the codes, so a route shows codes only.
 
 The migration is additive: `claimed_by` and `cancel_requested`. The legacy API (`claim`/`finish`/`cancel`/`recover_interrupted`) still serves `GenerationJobRunner`.
 
@@ -131,7 +133,7 @@ The entry point checks the configuration before it touches anything, including t
 | 70 | GPU memory not proven free | Restart after 5 s (the OS has freed it with the process) |
 | 73 | Another executor holds this GPU | **Never** restarted; logged once |
 | 75 | Media volume unavailable (also: not there at start) | Restart after 30 s; the executor re-verifies on every start |
-| 76 | Publication not recorded (the artifact is durable; the job stays `publishing`) | Restart after 5 s; recovery marks it `interrupted during publication` for the sink owner's reconciliation |
+| 76 | Publication not recorded (the artifact is durable; the job stays `publishing`) | Restart after 5 s; recovery marks it `interrupted_during_publication` for the sink owner's reconciliation |
 | 78 | Configuration refused (including the switch off) | **Never** restarted; logged once |
 | other, or killed | Crash | Restart after 5 s |
 
@@ -179,7 +181,7 @@ They hold ids, outcomes, counts and codes, never a prompt. A failing log never s
 | Every executor dies with it, and so does the ComfyUI each one started | All children are adopted into one Job Object with `KILL_ON_JOB_CLOSE` right after `Start()` (`main.go`; `executor.go` uses the same tree). ComfyUI is started by the executor, so it is inside the job too. | `processtree_windows_test.go` (closing the job kills its children), on the Windows gate |
 | The GPU lease, the resident lock and the executor lock are free | They are OS locks (`fcntl.flock` on POSIX, `msvcrt.locking` byte-range locks on Windows) held by those processes. The OS drops them when the processes die; nothing is left to clean up. | `worker_gpu_lease.py`; `windows_resident_lock_contract.py` |
 | The new supervisor starts a new executor per GPU | Exit 73 is impossible here, because the old one is gone. | `executor_test.go` (restart policy) |
-| The new executor fails the interrupted jobs | `recover_gpu`, under the executor lock: `interrupted by restart` or `during publication`. Its `kaliv-media-event` log says `recovered:N`. | `worker_image_job_store.py`, `worker_media_executor.py`, C2 crash tests |
+| The new executor fails the interrupted jobs | `recover_gpu`, under the executor lock: `interrupted_by_restart` or `interrupted_during_publication`. Its `kaliv-media-event` log says `recovered:N`. | `worker_image_job_store.py`, `worker_media_executor.py`, C2 crash tests |
 | A finished render the old executor had not published stays on C:, and a staged copy stays on Z: | Publish first, then delete. | C2; C6 `inventory` lists them |
 
 **Not proven physically:** killing `modelrig-supervisor` on the rig while a video renders, then checking that `nvidia-smi` shows the VRAM freed and that the next executor logs `recovered:1`. This needs video to be enabled (Anders) and belongs in the rig pack after R17.
