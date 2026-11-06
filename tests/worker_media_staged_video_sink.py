@@ -355,6 +355,34 @@ class JobKeyedRules(unittest.TestCase):
             self.assertIsNone(output._ticket.fd, "the descriptor that shares the published inode is closed at once")
         self.assertEqual((self.volume.media / f"{asset_id}.mp4").read_bytes(), MP4)
 
+    # -- sync(): durable before the work-area copy goes (Anders, 6 Nov: generate on C:, publish on Z:) --
+    def test_sync_fsyncs_the_staged_descriptor_without_revealing_it(self):
+        synced = []
+        real_fsync = os.fsync
+        with self.sink.staged(".mp4") as output:
+            output.write(MP4)
+            fd = output._ticket.fd
+            with patch.object(sink_module.os, "fsync", side_effect=lambda f: (synced.append(f), real_fsync(f))[1]):
+                self.assertIsNone(output.sync())
+            self.assertEqual(synced, [fd])
+            self.assertFalse(hasattr(output, "fileno"), "sync() is not a way to the descriptor")
+            asset_id = self.sink.adopt_for_job(output, "video/mp4", JOB)
+            with self.assertRaises(ValueError):
+                output.sync()  # after adoption the handle is spent
+        self.assertEqual((self.volume.media / f"{asset_id}.mp4").read_bytes(), MP4)
+        with self.assertRaises(ValueError):
+            output.sync()  # and after the context
+
+    def test_a_failed_sync_is_the_volume_being_unusable_and_publishes_nothing(self):
+        import errno
+        with self.sink.staged(".mp4") as output:
+            output.write(MP4)
+            with patch.object(sink_module.os, "fsync", side_effect=OSError(errno.ENOSPC, "No space left on device")):
+                with self.assertRaisesRegex(ArtifactSinkUnavailable, "staged_video_unavailable"):
+                    output.sync()
+        self.assertEqual(self.volume.indexed(), set())
+        self.assertEqual(self.sink._media.inspect_temporary_files(), [], "the staged name is cleaned up")
+
     def test_one_adoption_attempt_per_handle_even_after_a_refused_one(self):
         with self.sink.staged(".mp4") as output:
             output.write(MP4)
