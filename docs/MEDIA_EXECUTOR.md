@@ -66,6 +66,8 @@ recovery:  running    -> failed interrupted_by_restart
 
 Rows failed before 6 Nov 2026 hold the sentences `interrupted by restart` and `interrupted during publication`. Nothing rewrites them; `image_job_store.public_error()` maps both forms to the codes, so a route shows codes only.
 
+**Owned assets for a gallery list.** `ImageJobStore.completed_assets_for(owner)` returns every asset the authenticated owner has through a completed job, in one read (the same authority as `owns_completed_asset`). Failed, running, publishing, expired and other owners' jobs are never in it, so a `published_not_recorded` file is never listed. More than 10,000 (the gallery index limit) is a refusal (`owner_asset_limit`), never a partial set, and a database error propagates rather than reading as "owns nothing".
+
 The migration is additive: `claimed_by` and `cancel_requested`. The legacy API (`claim`/`finish`/`cancel`/`recover_interrupted`) still serves `GenerationJobRunner`.
 
 ## Prompt retention

@@ -133,6 +133,8 @@ _FINISHED = ("completed", "failed", "cancelled", "expired")
 # epoch, UTC by definition, so time zones and DST never move it).
 QUEUED_MAX_AGE_S = 24 * 3600
 EXPIRED_ERROR = "expired_unclaimed"
+COMPLETED_ASSETS_MAX = 10_000  # the gallery index holds at most this many items (_MAX_INDEX_ITEMS)
+_ASSET_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,128}")
 
 # Restart recovery's errors, as machine codes (#2275 6693665083). Rows written before the codes
 # keep their sentences: nothing rewrites stored errors. public_error() maps both forms, so a route
@@ -326,6 +328,25 @@ class ImageJobStore:
                 "SELECT 1 FROM image_jobs WHERE owner=? AND asset_id=? "
                 "AND state='completed' LIMIT 1", (owner, asset_id)
             ).fetchone() is not None
+
+    def completed_assets_for(self, owner: str, *, limit: int = COMPLETED_ASSETS_MAX) -> frozenset[str]:
+        """Every asset id the authenticated principal owns through a completed job, in one bounded
+        read (#2275 6697074518: a gallery projection filters with this instead of one
+        owns_completed_asset query per index entry). Same authority as owns_completed_asset: the
+        caller supplies the owner from verified pairing/auth; failed, running, publishing, expired
+        and other owners' jobs are never in it. More than `limit` assets is a refusal, never a
+        partial set; a database error propagates, never reads as "owns nothing"."""
+        if type(limit) is not int or not 1 <= limit <= COMPLETED_ASSETS_MAX:
+            raise ImageJobError("invalid limit")
+        if type(owner) is not str or not owner.strip() or len(owner) > 256:
+            return frozenset()
+        with self._db() as db:
+            rows = db.execute(
+                "SELECT DISTINCT asset_id FROM image_jobs WHERE owner=? AND state='completed' "
+                "AND asset_id IS NOT NULL LIMIT ?", (owner, limit + 1)).fetchall()
+        if len(rows) > limit:
+            raise ImageJobError("owner_asset_limit")
+        return frozenset(r[0] for r in rows if type(r[0]) is str and _ASSET_ID_RE.fullmatch(r[0]))
 
     def claim(self) -> dict | None:
         with self._db() as db:
