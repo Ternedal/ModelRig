@@ -17,7 +17,7 @@ The report is JSON, schema `kaliv-media-repair-report/v1`. It never contains a p
 |---|---|---|
 | `unindexed_assets` | A published file that the gallery index does not list. Its `status` decides the action, see the rows below | — |
 | `status: adoptable` | The job **completed** with exactly this asset; only the index row is missing | `adopt` |
-| `status: job_failed` with `job_error: interrupted during publication` | The executor stopped while publishing. The job is failed; the owner resubmits | Leave it; report it upstream if it repeats |
+| `status: job_failed` with `job_error: interrupted_during_publication` (the sentence `interrupted during publication` on rows from before 6 Nov 2026) | The executor stopped while publishing. The job is failed; the owner resubmits | Leave it; report it upstream if it repeats |
 | `status: no_job` | No job in this database produced the file | Investigate; never adopt |
 | `indexed_but_missing` | An index row whose file is gone | Investigate the volume |
 | `completed_jobs_without_asset` | A completed job whose asset is neither indexed nor on disk | Investigate |
