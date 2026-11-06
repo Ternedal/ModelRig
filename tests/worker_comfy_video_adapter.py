@@ -906,7 +906,10 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
         Path(self.state, "vram_free_gib").write_text("9")  # e.g. Ollama loaded a model meanwhile
         os.unlink(Path(self.state, "last_prompt.json"))
-        with self.assertRaisesRegex(GenerationError, "ComfyUI unavailable"):
+        # G4 (Anders 5 Nov 2026): a VRAM shortage is transient, not a job failure -- it reaches the
+        # executor as ComfyVramShortage, which re-queues the job.
+        from app.comfy_supervisor import ComfyVramShortage
+        with self.assertRaisesRegex(ComfyVramShortage, "insufficient free VRAM"):
             adapter.render_to(request(), io.BytesIO())
         self.assertFalse(Path(self.state, "last_prompt.json").exists(), "nothing submitted on a failed budget")
 
