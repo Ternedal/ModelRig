@@ -276,10 +276,14 @@ class MountedMediaVolume:
         """Return only if ``path`` is an existing directory or regular file on this volume."""
         raw = check_path_syntax(os.fspath(path), windows=self._probe.windows)
         self.verify()
+        # Only this platform's separators, everywhere below: a backslash is an ordinary filename
+        # character on POSIX, so treating it as one would check a different path, or let a sibling
+        # of a root ending in a backslash pass containment (#2349 reviews 4491252681, 4491286902).
+        separators = "\\/" if self._probe.windows else "/"
         target = self._normal(raw)
         root_key = self._paths.normcase(self._root)
         target_key = self._paths.normcase(target)
-        prefix = root_key if root_key.endswith(("\\", "/")) else root_key + self._paths.sep
+        prefix = root_key if root_key.endswith(tuple(separators)) else root_key + self._paths.sep
         if target_key != root_key and not target_key.startswith(prefix):
             raise _refused("media_path_outside_volume")
         try:
@@ -289,9 +293,9 @@ class MountedMediaVolume:
         if not self._same(self._normal(real), target):
             raise _refused("media_path_not_canonical")
         # Walk every component below the root: no link or reparse point, no other device.
-        relative = target[len(self._root):].lstrip("\\/")
+        relative = target[len(self._root):].lstrip(separators)
         current = self._root
-        parts = [p for p in re.split(r"[\\/]", relative) if p] if relative else []
+        parts = [p for p in re.split(f"[{re.escape(separators)}]", relative) if p] if relative else []
         info = None
         for part in parts:
             current = self._paths.join(current, part)

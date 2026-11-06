@@ -265,6 +265,38 @@ class MediaVolumeTests(unittest.TestCase):
         self.probe.overrides[comfy] = {"st_file_attributes": FILE_ATTRIBUTE_REPARSE_POINT}
         self.assertRefused("media_path_link", volume.require, self.out)
 
+    def test_a_backslash_is_part_of_a_posix_name_not_a_separator(self):
+        # #2349 review 4491252681: on POSIX "a\\b" is one name. The walk must inspect that entry,
+        # not a/b. Here "a\\b" is a FIFO and "a/b" a regular file.
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("no FIFOs here")
+        volume = self.volume()
+        os.mkdir(os.path.join(self.root, "a"))
+        Path(self.root, "a", "b").write_bytes(b"regular")
+        os.mkfifo(os.path.join(self.root, "a\\b"))
+        self.assertRefused("media_path_not_file_or_directory", volume.require, os.path.join(self.root, "a\\b"))
+        volume.require(os.path.join(self.root, "a", "b"))
+        # and a foreign device is found under its real POSIX name
+        Path(self.root, "c\\d").mkdir()
+        self.probe.overrides[os.path.join(self.root, "c\\d")] = {"st_dev": os.lstat(self.root).st_dev + 1}
+        self.assertRefused("media_path_other_device", volume.require, os.path.join(self.root, "c\\d"))
+
+    def test_a_sibling_of_a_root_ending_in_a_backslash_is_outside(self):
+        # #2349 review 4491286902: on POSIX "vol\\" is a name, so its containment prefix is
+        # "vol\\/", not "vol\\". A sibling "vol\\outside" must not pass.
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("no FIFOs here")
+        root = os.path.join(self.base, "vol\\")
+        os.mkdir(root)
+        Path(root, MARKER_NAME).write_text(VOLUME_ID)
+        Path(root, "outside").write_bytes(b"inside the volume")
+        sibling = os.path.join(self.base, "vol\\outside")
+        os.mkfifo(sibling)
+        self.probe.mounts.add(root)
+        volume = MountedMediaVolume(root, VOLUME_ID, probe=self.probe)
+        self.assertRefused("media_path_outside_volume", volume.require, sibling)
+        volume.require(os.path.join(root, "outside"))
+
     def test_fifo_is_neither_file_nor_directory(self):
         if not hasattr(os, "mkfifo"):
             self.skipTest("no FIFOs here")
