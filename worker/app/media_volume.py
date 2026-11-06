@@ -289,9 +289,12 @@ class MountedMediaVolume:
         if not self._same(self._normal(real), target):
             raise _refused("media_path_not_canonical")
         # Walk every component below the root: no link or reparse point, no other device.
-        relative = target[len(self._root):].lstrip("\\/")
+        # Only this platform's separators: a backslash is an ordinary filename character on POSIX,
+        # so splitting on it there would inspect a different path (#2349 review 4491252681).
+        separators = "\\/" if self._probe.windows else "/"
+        relative = target[len(self._root):].lstrip(separators)
         current = self._root
-        parts = [p for p in re.split(r"[\\/]", relative) if p] if relative else []
+        parts = [p for p in re.split(f"[{re.escape(separators)}]", relative) if p] if relative else []
         info = None
         for part in parts:
             current = self._paths.join(current, part)
