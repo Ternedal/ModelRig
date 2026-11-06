@@ -44,6 +44,16 @@ class ImageGpuAdmissionTests(unittest.TestCase):
             with self.assertRaises(ImageGpuAdmissionError):
                 inspect_cuda_budget(0)
 
+    def test_a_busy_gpu_is_a_transient_shortage_other_refusals_are_not(self):
+        # G4: only "not enough free VRAM right now" is GpuMemoryShortage, which the executor waits out.
+        from app.image_gpu_admission import GpuMemoryShortage
+        with patch.dict(sys.modules, {"torch": self._torch(free_gib=2)}), self.assertRaises(GpuMemoryShortage):
+            inspect_cuda_budget(0, reserve_gib=1, min_usable_gib=8)
+        with patch.dict(sys.modules, {"torch": self._torch(free_gib=11, count=0)}):
+            with self.assertRaises(ImageGpuAdmissionError) as caught:
+                inspect_cuda_budget(0, reserve_gib=1, min_usable_gib=8)
+            self.assertNotIsInstance(caught.exception, GpuMemoryShortage, "a missing GPU is not a wait")
+
     def test_rejects_missing_gpu(self):
         with patch.dict(sys.modules, {"torch": self._torch(11, count=1)}):
             with self.assertRaises(ImageGpuAdmissionError):
