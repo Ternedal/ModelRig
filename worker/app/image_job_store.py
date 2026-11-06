@@ -29,8 +29,8 @@ recover_gpu() runs only while the executor holds its GPU's executor lock
 (gpu_lease.acquire_executor_lock), so every other claim for that GPU belongs to
 a dead process. Transitions require the caller's own instance id, so a stale
 process cannot complete, fail or cancel a recovered job. A job that was
-publishing when its executor died is failed as "interrupted during
-publication": an asset may exist and must be reconciled by the sink owner.
+publishing when its executor died is failed as `interrupted_during_publication`:
+an asset may exist and must be reconciled by the sink owner.
 The migration is additive (two columns), and the legacy single-process API
 (claim/finish/cancel/recover_interrupted) still works for GenerationJobRunner.
 """
