@@ -25,8 +25,9 @@ filesystem type) and the GPU (the fake ComfyUI).
   resubmits), and a new job completes;
 - after every outcome, nothing orphaned is visible: no temp or unindexed files, and nothing left
   in ComfyUI's output;
-- the state a crash leaves (during the copy, or after the work-area copy is removed but before
-  publication) is recovered as a failed job, never published, and C6 reports every leftover.
+- publish first, then delete: the state a crash leaves (during the copy, or after the sync but
+  before publication) and a failed publication are recovered as a failed job, never published;
+  the finished file stays on C: until it is published, and C6 reports every leftover.
 
 Run: PYTHONPATH=worker python3 tests/worker_media_video_e2e.py
 """
@@ -357,24 +358,41 @@ class VideoPipelineEndToEnd(unittest.TestCase):
         self.assertEqual(os.listdir(self.comfy["input"]), [])
 
     @unittest.skipUnless(hasattr(os, "fork"), "needs fork to die without running cleanup")
-    def test_a_crash_after_the_work_area_copy_is_removed_leaves_a_complete_unpublished_copy(self):
-        sizes = []
-
+    def test_a_crash_after_the_sync_but_before_publication_keeps_the_finished_file_on_c(self):
         def die_before_publishing(sink, handle, mime_type, job_key):
-            sizes.append(handle._ticket.written)
             os._exit(0)
 
         job, source = self.crash_at("app.media_staged_video_sink.ExternalStagedVideoSink.adopt_for_job",
                                     die_before_publishing)
-        self.assertEqual(os.listdir(self.comfy["output"]), [], "the work-area copy was already removed")
-        self.assertEqual(os.listdir(self.comfy["input"]), [], "and the staged source with it")
+        finished = os.listdir(self.comfy["output"])
+        self.assertEqual(len(finished), 1, "publish first, then delete: the finished render is still on C:")
+        self.assertEqual(os.listdir(self.comfy["input"]), [], "the staged source (only an input) is gone")
         report = self.restart_and_report(job, source)
-        self.assertEqual(report["work_area_residue"], [], "nothing left on C:")
+        self.assertEqual([(os.path.basename(f["directory"]), f["path"]) for f in report["work_area_residue"]],
+                         [("output", finished[0])])
         temp = report["stale_temporary_files"]
-        self.assertEqual(len(temp), 1, "the complete, synced copy waits on the volume, unpublished")
+        self.assertEqual(len(temp), 1, "and a complete, synced copy waits on the volume, unpublished")
         staged = Path(self.media, temp[0]["name"]).read_bytes()
-        self.assertEqual(staged[4:8], b"ftyp", "a whole MP4, not a partial one")
-        self.assertGreater(len(staged), 12)
+        self.assertEqual(staged, Path(self.comfy["output"], finished[0]).read_bytes(), "the same, whole file")
+
+    def test_a_failed_publication_keeps_the_finished_file_on_c_and_c6_lists_it(self):
+        source = self.owned_source()
+        job = self.submit_video(source)
+        ex = self.executor()
+
+        def unplugged(sink, handle, mime_type, job_key):
+            raise ArtifactSinkUnavailable("test: the volume went away during publication")
+        with patch("app.media_staged_video_sink.ExternalStagedVideoSink.adopt_for_job", unplugged):
+            self.assertEqual(ex.run(max_steps=1), EXIT_SINK_UNAVAILABLE)
+        kept = os.listdir(self.comfy["output"])
+        self.assertEqual(len(kept), 1, "never deleted before it was published")
+        self.assertEqual(self.adapters[-1].last_cleanup["kept_for_recovery"], kept)
+        self.stop_all()
+        hours_ago = time.time() - 7 * 3600
+        os.utime(os.path.join(self.comfy["output"], kept[0]), (hours_ago, hours_ago))
+        report = self.restart_and_report(job, source)
+        self.assertEqual([f["path"] for f in report["work_area_residue"]], kept)
+        self.assertEqual(report["stale_temporary_files"], [], "the sink removed its own staged name")
 
 
 if __name__ == "__main__":
