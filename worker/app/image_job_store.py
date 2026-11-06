@@ -133,6 +133,21 @@ _FINISHED = ("completed", "failed", "cancelled", "expired")
 # epoch, UTC by definition, so time zones and DST never move it).
 QUEUED_MAX_AGE_S = 24 * 3600
 EXPIRED_ERROR = "expired_unclaimed"
+
+# Restart recovery's errors, as machine codes (#2275 6693665083). Rows written before the codes
+# keep their sentences: nothing rewrites stored errors. public_error() maps both forms, so a route
+# can expose codes only, and an older build that still writes sentences is mapped too.
+INTERRUPTED_BY_RESTART = "interrupted_by_restart"
+INTERRUPTED_DURING_PUBLICATION = "interrupted_during_publication"
+LEGACY_ERRORS = {
+    "interrupted by restart": INTERRUPTED_BY_RESTART,
+    "interrupted during publication": INTERRUPTED_DURING_PUBLICATION,
+}
+
+
+def public_error(error: str | None) -> str | None:
+    """The owner-visible code for a stored error: legacy sentences become their codes; None stays None."""
+    return LEGACY_ERRORS.get(error, error) if error is not None else None
 _EXPIRE_SQL = "UPDATE image_jobs SET state='expired',error=?,updated=? WHERE state='queued' AND created <= ?"
 
 
@@ -347,8 +362,8 @@ class ImageJobStore:
         # jobs. With several executors use recover_gpu(), which leaves other executors' jobs alone.
         with self._db() as db:
             result = db.execute(
-                "UPDATE image_jobs SET state='failed',error='interrupted by restart',updated=? WHERE state='running'",
-                (time.time(),))
+                "UPDATE image_jobs SET state='failed',error=?,updated=? WHERE state='running'",
+                (INTERRUPTED_BY_RESTART, time.time()))
             return result.rowcount
 
     # --- executor protocol (G2) ----------------------------------------------------------------
@@ -417,13 +432,13 @@ class ImageJobStore:
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             running = db.execute(
-                "UPDATE image_jobs SET state='failed',error='interrupted by restart',updated=? "
+                "UPDATE image_jobs SET state='failed',error=?,updated=? "
                 "WHERE state='running' AND substr(claimed_by,1,?)=? AND claimed_by<>?",
-                (now, len(prefix), prefix, instance)).rowcount
+                (INTERRUPTED_BY_RESTART, now, len(prefix), prefix, instance)).rowcount
             publishing = db.execute(
-                "UPDATE image_jobs SET state='failed',error='interrupted during publication',updated=? "
+                "UPDATE image_jobs SET state='failed',error=?,updated=? "
                 "WHERE state='publishing' AND substr(claimed_by,1,?)=? AND claimed_by<>?",
-                (now, len(prefix), prefix, instance)).rowcount
+                (INTERRUPTED_DURING_PUBLICATION, now, len(prefix), prefix, instance)).rowcount
             return running + publishing
 
     def request_cancel(self, job_id: str, owner: str) -> str | None:
