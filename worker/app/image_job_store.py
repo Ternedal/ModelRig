@@ -102,6 +102,8 @@ class ImageJobStore:
                 db.execute("ALTER TABLE image_jobs ADD COLUMN claimed_by TEXT")
             if "cancel_requested" not in columns:
                 db.execute("ALTER TABLE image_jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")
+            if "deferred_since" not in columns:  # G4: when a job first had to wait for VRAM
+                db.execute("ALTER TABLE image_jobs ADD COLUMN deferred_since REAL")
             # A database written before every connection had secure_delete on may hold old prompt
             # text in free space (a state update can move a row and free its old copy without
             # zeroing it). The first time this version opens it, a scrub is owed; purge_prompts
@@ -286,6 +288,34 @@ class ImageJobStore:
             db.execute("UPDATE image_jobs SET state='running',claimed_by=?,updated=? WHERE id=? AND state='queued'",
                        (instance, now, row["id"]))
             return dict(row) | {"state": "running", "claimed_by": instance, "updated": now}
+
+    def defer(self, job_id: str, instance: str, *, max_wait_s: float, error: str, now: float | None = None) -> str:
+        """Put a running job back in the queue because the GPU lacks free memory right now (G4).
+
+        Returns "requeued"; "expired" once it has waited max_wait_s since its first deferral (it is
+        then failed with `error`); "cancelled" if its owner asked to cancel meanwhile (a requeued job
+        would otherwise run despite the request); "gone" if this instance no longer holds it.
+        """
+        instance = self._instance(instance)
+        if not isinstance(error, str) or not error or type(max_wait_s) not in (int, float) or max_wait_s < 0:
+            raise ImageJobError("invalid deferral")
+        now = time.time() if now is None else now
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT deferred_since, cancel_requested FROM image_jobs "
+                             "WHERE id=? AND state='running' AND claimed_by=?", (job_id, instance)).fetchone()
+            if row is None:
+                return "gone"
+            if row["cancel_requested"]:
+                db.execute("UPDATE image_jobs SET state='cancelled',updated=? WHERE id=?", (now, job_id))
+                return "cancelled"
+            since = row["deferred_since"] if row["deferred_since"] is not None else now
+            if now - since >= max_wait_s:
+                db.execute("UPDATE image_jobs SET state='failed',error=?,updated=? WHERE id=?", (error, now, job_id))
+                return "expired"
+            db.execute("UPDATE image_jobs SET state='queued',claimed_by=NULL,deferred_since=?,updated=? WHERE id=?",
+                       (since, now, job_id))
+            return "requeued"
 
     def recover_gpu(self, gpu_uuid: str, instance: str) -> int:
         """Startup only, while holding this GPU's executor lock: fail every claim for this GPU

@@ -91,6 +91,11 @@ class ComfySupervisorError(RuntimeError):
     """ComfyUI could not be started, verified or stopped safely."""
 
 
+class ComfyVramShortage(ComfySupervisorError):
+    """Not enough free VRAM right now (another process holds it). Transient: the executor
+    re-queues the job instead of failing it (G4, Anders 5 Nov 2026)."""
+
+
 class ComfyBusy(ComfySupervisorError):
     """This ComfyUI is already running a job (single tenant: one job at a time)."""
 
@@ -188,7 +193,7 @@ def parse_vram_budget(stats: object, *, reserve_gib: float, min_usable_gib: floa
         raise ComfySupervisorError("ComfyUI reported unusable VRAM figures")
     usable = max(0, free - int(reserve_gib * GIB))
     if usable < int(min_usable_gib * GIB):
-        raise ComfySupervisorError("insufficient free VRAM after reservation")
+        raise ComfyVramShortage("insufficient free VRAM after reservation")
     name = device.get("name")
     system = stats.get("system")
     version = system.get("comfyui_version") if isinstance(system, dict) else None
