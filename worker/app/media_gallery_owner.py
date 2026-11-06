@@ -52,3 +52,20 @@ def list_owned_gallery(jobs, authenticated_owner: str, root_path: str | Path, *,
         page.append(safe)
     next_cursor = page[-1]["id"] if start + limit < len(owned) and page else None
     return {"schema": "kaliv-media-gallery/v1", "items": page, "next_cursor": next_cursor}
+
+
+def open_owned_asset(jobs, authenticated_owner: str, root_path: str | Path,
+                     verified_volume_root: str | Path, asset_id: str):
+    """Open an asset only after completed-job ownership is established.
+
+    Return the same (handle, entry) contract as open_asset. Unknown, invalid,
+    incomplete and foreign assets all return the same not-found exception.
+    The caller owns the handle and must close it.
+    """
+    from .media_gallery_asset import GalleryAssetNotFound, open_asset
+    if (not isinstance(authenticated_owner, str) or not authenticated_owner
+            or not isinstance(asset_id, str) or not _ID.fullmatch(asset_id)):
+        raise GalleryAssetNotFound("unknown_asset")
+    if not jobs.owns_completed_asset(authenticated_owner, asset_id):
+        raise GalleryAssetNotFound("unknown_asset")
+    return open_asset(root_path, verified_volume_root, asset_id)
