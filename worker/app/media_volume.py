@@ -2,7 +2,12 @@
 
 The protocol lives in ``media_generation_contract``. ``require(path)`` returns only if ``path`` lies
 on the verified, currently mounted external media volume. Otherwise it raises
-``ArtifactSinkUnavailable``. Media never lands on the internal disk, not even transiently.
+``ArtifactSinkUnavailable``.
+
+This is where media is **published**: the gallery and every staged file. Generation happens in a
+private work area on the internal disk (Anders, 6 Nov 2026, #2275; checked separately). A finished
+file reaches the gallery only by being copied into a staged file here, checked, and published in
+one atomic step.
 
 **One volume.** The operator configures one external volume with two settings:
 
@@ -36,7 +41,7 @@ until the executor restarts. That restart is exit 75, the same as a volume that 
 
 **Limits.** These are checks, not handles. A process running as the same OS user could swap a
 directory between the check and its use. That limit is shared with the rest of the media stack,
-and the private output root guards against it (rig item 9). Nothing here mounts, creates or
+and the private work area guards against it (rig item 9). Nothing here mounts, creates or
 deletes anything.
 
 **Exit codes.** A configuration that can never work is ``MediaVolumeConfigError``, so the executor
@@ -171,10 +176,10 @@ class MountedMediaVolume:
     It is constructed once when the executor starts. A failure there raises
     ``MediaVolumeConfigError`` (exit 78) or ``ArtifactSinkUnavailable`` (exit 75).
 
-    Integration (#2346 / #2347; wiring follows in its own PR, and video stays default-off):
+    Integration (#2347; wiring follows in its own PR, and video stays default-off):
     - ``ExternalStagedVideoSink(media_root, verified_volume_root=volume.root)``;
-    - the ComfyUI supervisor takes ``media_volume=volume``;
-    - ``ImageJobStore(db, volume_guard=volume.verify)``.
+    - the executor calls ``verify()`` before it claims a job.
+    ComfyUI's folders and the job database are in the work area on the internal disk, not here.
     """
 
     def __init__(self, root: str, volume_id: str, *, probe: SystemProbe | None = None,
