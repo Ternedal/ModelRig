@@ -39,8 +39,9 @@ VOLUME_ID = "kaliv-media-0001"
 class FakeProbe(SystemProbe):
     windows = False
 
-    def __init__(self, mounts, filesystem="ext4", system_dev=-1):
+    def __init__(self, mounts, filesystem="ext4", system_dev=-1, mount_ids=None):
         self.mounts = set(mounts)
+        self.mount_ids = dict(mount_ids or {})  # path -> mount id; absent = none known (as on Windows)
         self.fs = filesystem
         self.system_dev = system_dev
         self.overrides = {}  # path -> dict of st_* fields to replace
@@ -62,6 +63,9 @@ class FakeProbe(SystemProbe):
 
     def filesystem(self, root):
         return self.fs
+
+    def mount_instance(self, root):
+        return self.mount_ids.get(root)
 
 
 @unittest.skipIf(os.name == "nt", "POSIX paths; Windows runs tests/support/windows_media_volume_contract.py")
@@ -207,6 +211,46 @@ class MediaVolumeTests(unittest.TestCase):
         # A fresh start pins the new identity (exit 75 -> restart is the recovery path).
         self.volume().require(self.out)
 
+    # -- Codex P2 #2349 4498174484: the same disk unplugged and plugged back in ---------------------
+
+    def test_the_same_disk_mounted_again_is_refused_until_restart(self):
+        """A remount keeps st_dev and the root inode; the mount instance (Linux mount id) changes."""
+        self.probe.mount_ids[self.root] = "41"
+        volume = self.volume()
+        volume.require(self.out)
+        self.probe.mount_ids[self.root] = "57"  # same disk, same identity, a new mount
+        self.assertRefused("media_volume_remounted", volume.verify)
+        self.assertRefused("media_volume_remounted", volume.require, self.out)  # never matches again
+        self.volume().require(self.out)  # exit 75 -> restart pins the new mount
+
+    def test_an_observed_loss_holds_even_when_the_disk_comes_back(self):
+        """Without a mount id (Windows), an observed loss still ends this verifier for good."""
+        volume = self.volume()
+        self.probe.mounts.clear()
+        self.assertRefused("media_volume_not_mounted", volume.verify)  # the real reason, while it lasts
+        self.probe.mounts.add(self.root)  # plugged back in: same disk, same identity, same marker
+        self.assertRefused("media_volume_lost", volume.verify)
+        self.assertRefused("media_volume_lost", volume.require, self.out)
+        self.volume().require(self.out)
+
+    def test_every_root_refusal_is_sticky_but_a_path_refusal_is_not(self):
+        volume = self.volume()
+        self.assertRefused("media_path_outside_volume", volume.require, self.base)
+        volume.require(self.out)  # a bad path says nothing about the volume
+        self.write_marker("kaliv-media-other")
+        self.assertRefused("media_volume_marker_mismatch", volume.verify)
+        self.write_marker(VOLUME_ID)
+        self.assertRefused("media_volume_lost", volume.verify)
+
+    def test_without_a_mount_id_an_unobserved_remount_is_not_detectable(self):
+        """The documented limit (MEDIA_VOLUME.md): with no mount instance (Windows) and no check
+        while it was gone, the same disk back with the same identity passes. Writes through
+        handles of the old mount fail, so a copy in flight fails and its C: copy is kept."""
+        volume = self.volume()
+        self.assertIsNone(self.probe.mount_instance(self.root))
+        volume.verify()  # nothing observed in between: the same disk, the same identity
+        volume.require(self.out)
+
     def test_marker_swapped_after_start_is_refused(self):
         volume = self.volume()
         self.write_marker("kaliv-media-other")
@@ -339,6 +383,16 @@ class RealProbeLinuxTests(unittest.TestCase):
         finally:
             os.unlink(marker)
             shutil.rmtree(work, ignore_errors=True)
+
+    def test_the_real_probe_reads_the_mount_id_from_mountinfo(self):
+        probe = SystemProbe()
+        ids = {}
+        with open("/proc/self/mountinfo", encoding="utf-8") as mounts:
+            for line in mounts:
+                fields = line.split()
+                ids[fields[4]] = fields[0]  # the last mount at a point is the visible one
+        self.assertEqual(probe.mount_instance("/"), ids["/"])
+        self.assertIsNone(probe.mount_instance("/no/such/mount/point"))
 
     def test_root_filesystem_is_the_system_volume(self):
         self.assertEqual(SystemProbe().system_volume_dev(), os.stat("/").st_dev)
