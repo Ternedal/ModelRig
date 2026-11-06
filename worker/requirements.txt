@@ -5,7 +5,7 @@
 fastapi==0.162.0
 uvicorn==0.54.0
 httpx==0.28.1
-pydantic==2.13.5
+pydantic==2.14.2
 # Official public-key verification primitive used by the dormant Development
 # Control Plane DC-L10 authority boundary. Runtime code receives public keys only;
 # no private-key loader or signer is shipped in the authority package.
