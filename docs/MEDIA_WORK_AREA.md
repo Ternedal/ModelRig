@@ -86,7 +86,7 @@ Only the executor's account (plus SYSTEM and Administrators) can open the work a
 
 - **Verified in code (main `cc2b28a6`):** `modelrig-supervisor` starts the worker, the server and the media executor itself, with `exec.Command` and no change of credentials (`backend/cmd/modelrig-supervisor/main.go`, `executor.go`). So on the appliance all three run as the supervisor's account.
 - **Not verified:** a worker or route started some other way, for example by hand or as a separate service. The OS then denies it access to the job database, which fails closed.
-- **Rig preflight (R17, before enabling media):**
+- **Rig preflight (R17, before enabling media; the full pack is `docs/MEDIA_R17_DEPLOYMENT_PROOF.md`, and `scripts/media_work_area_preflight.py --pid ...` checks the same programmatically):**
 
 ```powershell
 whoami /user
