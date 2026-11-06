@@ -12,11 +12,13 @@ import io
 import json
 import os
 import shutil
+import sqlite3
 import sys
 import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -561,6 +563,165 @@ time.sleep(60)
 """
 
 
+class VramWaitTests(unittest.TestCase):
+    """G4, Anders 5 Nov 2026: chat first, media waits. Too little free VRAM re-queues the job."""
+    setUp, tearDown = ExecutorTests.setUp, ExecutorTests.tearDown
+    image, submit = ExecutorTests.image, ExecutorTests.submit
+
+    def executor(self, short):
+        from app.image_gpu_admission import GpuMemoryShortage
+
+        def factory(profile):  # a fresh exception per load: Ollama holds the VRAM while short[0]
+            error = GpuMemoryShortage("insufficient free VRAM after reservation") if short[0] else None
+            return FakeImageAdapter(profile, lease_dir=self.lease_dir, gpu_uuid=GPU_A, load_error=error, log=self.log)
+        return ExecutorTests.executor(self, [self.image()], factory=factory)
+
+    def test_a_shortage_requeues_the_job_waits_then_runs_it_when_vram_frees(self):
+        short = [True]
+        ex = self.executor(short)
+        job = self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "deferred")
+        row = self.store.get(job, "anders")
+        self.assertEqual((row["state"], row["claimed_by"], row["error"]), ("queued", None, None), "not failed")
+        self.clock.now += 29
+        self.assertEqual(ex.step(), "idle", "no claim within the 30 s back-off")
+        self.assertEqual(self.store.get(job, "anders")["state"], "queued")
+        short[0] = False  # Ollama unloaded its model
+        self.clock.now += 1
+        self.assertEqual(ex.step(), "completed")
+        self.assertEqual(self.store.get(job, "anders")["state"], "completed")
+
+    def test_after_ten_minutes_of_waiting_the_job_fails_gpu_unavailable(self):
+        short = [True]
+        ex = self.executor(short)
+        job = self.submit("sdxl-a")
+        real_time = __import__("time").time
+        start = real_time()
+        with patch("app.image_job_store.time.time", side_effect=lambda: start + offset[0]):
+            offset = [0.0]
+            outcomes = []
+            for minute in range(0, 11):
+                offset[0] = minute * 60.0
+                self.clock.now += 60
+                outcomes.append(ex.step())
+        self.assertEqual(outcomes[:10], ["deferred"] * 10)
+        self.assertEqual(outcomes[10], "failed")
+        row = self.store.get(job, "anders")
+        self.assertEqual((row["state"], row["error"]), ("failed", "gpu_unavailable"))
+
+    def test_waiting_never_holds_the_gpu(self):
+        ex = self.executor([True])
+        self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "deferred")
+        self.assertIsNone(ex.adapter, "the refused load left nothing resident")
+        self.assertTrue(lease_free(GPU_A, self.lease_dir), "Ollama can have the GPU")
+
+    def test_a_shortage_on_a_resident_model_unloads_it_before_waiting(self):
+        # Codex 4477938515: the first job loaded the model; the next one's pre-job check is short.
+        from app.image_gpu_admission import GpuMemoryShortage
+        short = [False]
+
+        class Resident(FakeImageAdapter):
+            def render(self, request, *, should_cancel=None):
+                if short[0]:
+                    raise GpuMemoryShortage("insufficient free VRAM after reservation")
+                return super().render(request, should_cancel=should_cancel)
+
+        def factory(profile):
+            return Resident(profile, lease_dir=self.lease_dir, gpu_uuid=GPU_A, log=self.log)
+        ex = ExecutorTests.executor(self, [self.image()], factory=factory)
+        self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "completed")
+        self.assertFalse(lease_free(GPU_A, self.lease_dir), "resident after the first job")
+        short[0] = True  # Ollama loaded a model meanwhile
+        job = self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "deferred")
+        self.assertIsNone(ex.adapter, "unloaded at once, not after idle_unload_s")
+        self.assertTrue(lease_free(GPU_A, self.lease_dir), "the GPU is free while the job waits")
+        self.assertEqual(self.store.get(job, "anders")["state"], "queued")
+        short[0] = False
+        self.clock.now += 30
+        self.assertEqual(ex.step(), "completed", "reloaded when VRAM is back")
+
+    def test_a_resident_model_that_cannot_prove_its_unload_is_fatal_but_the_job_stays_queued(self):
+        from app.image_gpu_admission import GpuMemoryShortage
+        short = [False]
+
+        class Resident(FakeImageAdapter):
+            def render(self, request, *, should_cancel=None):
+                if short[0]:
+                    raise GpuMemoryShortage("insufficient free VRAM after reservation")
+                return super().render(request, should_cancel=should_cancel)
+
+        def factory(profile):
+            return Resident(profile, lease_dir=self.lease_dir, gpu_uuid=GPU_A, close_ok=False, log=self.log)
+        ex = ExecutorTests.executor(self, [self.image()], factory=factory)
+        self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "completed")
+        short[0] = True
+        job = self.submit("sdxl-a")
+        with self.assertRaises(GpuResourcesRetained):
+            ex.step()
+        row = self.store.get(job, "anders")
+        self.assertEqual((row["state"], row["claimed_by"]), ("queued", None), "requeued before the unload")
+
+    def test_other_failures_still_fail_at_once(self):
+        from app.image_gpu_admission import ImageGpuAdmissionError
+
+        def factory(profile):
+            return FakeImageAdapter(profile, lease_dir=self.lease_dir, gpu_uuid=GPU_A,
+                                    load_error=ImageGpuAdmissionError("GPU identity mismatch"), log=self.log)
+        ex = ExecutorTests.executor(self, [self.image()], factory=factory)
+        job = self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "failed")
+        self.assertEqual(self.store.get(job, "anders")["error"], "generation_failed")
+
+class PromptRetentionExecutorTests(unittest.TestCase):
+    """The executor applies the retention at start and then at most hourly while idle."""
+    setUp, tearDown = ExecutorTests.setUp, ExecutorTests.tearDown
+    executor, image, submit = ExecutorTests.executor, ExecutorTests.image, ExecutorTests.submit
+
+    def old_finished_job(self, prompt="an old prompt"):
+        job = self.store.submit("anders", prompt, profile_id="sdxl-a", max_owner_active=16)["job_id"]
+        with sqlite3.connect(self.store.path) as db:
+            db.execute("UPDATE image_jobs SET state='completed', asset_id=?, updated=? WHERE id=?",
+                       ("a" * 32, time.time() - 31 * 24 * 3600, job))
+        return job
+
+    def prompt(self, job):
+        with sqlite3.connect(self.store.path) as db:
+            return db.execute("SELECT prompt FROM image_jobs WHERE id=?", (job,)).fetchone()[0]
+
+    def test_start_blanks_old_prompts(self):
+        job = self.old_finished_job()
+        ex = self.executor([self.image()])
+        self.assertEqual(self.prompt(job), "")
+        self.assertIn("purged:1", ex.events)
+
+    def test_then_at_most_hourly_while_idle(self):
+        ex = self.executor([self.image()], start=False)
+        seen = []
+
+        def idle():  # every idle tick is half an hour; an old job appears after the first one
+            seen.append(self.prompt(late[0]) if late else None)
+            self.clock.now += 1800
+            if not late:
+                late.append(self.old_finished_job("appeared later"))
+        late = []
+        self.assertEqual(ex.run(max_steps=3, idle_sleep=idle), 0)
+        # t0: start purges; t0+30 min: still there; t0+60 min: the idle check purges it.
+        self.assertEqual(seen, [None, "appeared later", ""])
+        self.assertEqual([e for e in ex.events if e.startswith("purged")], ["purged:0", "purged:1"])
+
+    def test_a_failing_purge_is_recorded_and_never_fatal(self):
+        with patch.object(self.store, "purge_prompts", side_effect=sqlite3.OperationalError("database is locked")):
+            ex = self.executor([self.image()])
+            job = self.submit("sdxl-a")
+            self.assertEqual(ex.step(), "completed")
+        self.assertIn("purge_failed:OperationalError", ex.events)
+        self.assertEqual(self.store.get(job, "anders")["state"], "completed")
+
+
 class VideoExecutorTests(unittest.TestCase):
     """Real ComfySupervisor + adapter + fake ComfyUI; ReferenceSink from the conformance suite."""
 
@@ -594,12 +755,16 @@ class VideoExecutorTests(unittest.TestCase):
             backend_options={"template_name": "wan-t2v.json", "template_sha256": sha(raw()), "fps": 16,
                              "max_render_seconds": 60, "max_output_bytes": 1024 * 1024, "port": self.port, **pins}))
 
-    def executor(self, render_seconds="0.2", **pins):
+    def executor_with_fake(self, fake_env):
+        return self.executor(extra_fake=fake_env)
+
+    def executor(self, render_seconds="0.2", extra_fake=None, **pins):
         def factory(profile):
             launch = ComfyLaunch(python_executable=sys.executable, main_py=str(FAKE_MAIN), port=self.port,
                                  input_directory=self.dirs["input"], output_directory=self.dirs["output"],
                                  temp_directory=self.dirs["temp"], user_directory=self.dirs["user"])
-            sup = FakeSupervisor(fake_env={"FAKE_COMFY_STATE_DIR": self.dirs["state"], "FAKE_COMFY_RENDER_SECONDS": render_seconds},
+            sup = FakeSupervisor(fake_env={"FAKE_COMFY_STATE_DIR": self.dirs["state"], "FAKE_COMFY_RENDER_SECONDS": render_seconds,
+                                           **(extra_fake or {})},
                                  media_volume=AnyExistingDirectory(), gpu_uuid=GPU_A, lease_dir=self.lease_dir, launch=launch,
                                  reserve_gib=2, min_usable_gib=8, ready_timeout_s=15, stop_timeout_s=5, poll_s=0.05,
                                  base_env={"PATH": os.environ.get("PATH", "")})
@@ -626,6 +791,28 @@ class VideoExecutorTests(unittest.TestCase):
         self.assertIn(row["asset_id"], self.sink.registry)
         self.assertEqual(os.listdir(self.sink.staging), [], "no staged leftovers")
         self.assertEqual(os.listdir(self.dirs["output"]), [], "ComfyUI's own output removed")
+
+    def test_a_comfyui_vram_shortage_at_start_requeues_and_frees_the_lease(self):
+        ex = self.executor_with_fake({"FAKE_COMFY_VRAM_FREE_GIB": "5"})  # Ollama holds the rest
+        job = self.submit()
+        self.assertEqual(ex.step(), "deferred")
+        self.assertEqual(self.store.get(job, "anders")["state"], "queued")
+        self.assertTrue(lease_free(GPU_A, self.lease_dir), "ComfyUI was stopped; the GPU is free")
+
+    def test_a_comfyui_vram_shortage_before_a_job_requeues_without_submitting(self):
+        ex = self.executor()
+        first = self.submit()
+        self.assertEqual(ex.step(), "completed")
+        Path(self.dirs["state"], "vram_free_gib").write_text("5")  # Ollama loaded a model meanwhile
+        submissions = Path(self.dirs["state"], "prompts.log").read_text().count("submitted")
+        job = self.submit()
+        self.assertEqual(ex.step(), "deferred")
+        self.assertEqual(self.store.get(job, "anders")["state"], "queued")
+        self.assertEqual(Path(self.dirs["state"], "prompts.log").read_text().count("submitted"), submissions)
+        self.assertEqual(self.store.get(first, "anders")["state"], "completed")
+        # Codex 4477938515: the resident ComfyUI is stopped at once, with a proven release.
+        self.assertIsNone(ex.adapter)
+        self.assertTrue(lease_free(GPU_A, self.lease_dir), "ComfyUI stopped; the GPU is free while the job waits")
 
     def test_cancelling_a_running_video_interrupts_comfyui_and_publishes_nothing(self):
         ex = self.executor(render_seconds="5")
