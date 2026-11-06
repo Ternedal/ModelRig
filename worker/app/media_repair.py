@@ -143,7 +143,12 @@ def work_area_residue(area: PrivateWorkArea, directories, *, job_db: str | None 
                 path = entry.path
                 if os.path.normcase(os.path.abspath(path)) in excluded:
                     continue
-                info = entry.stat(follow_symlinks=False)
+                try:
+                    info = entry.stat(follow_symlinks=False)
+                except FileNotFoundError:
+                    continue  # removed since it was listed: nothing left to report
+                except OSError as exc:
+                    raise RepairRefused("work_directory_unreadable") from exc
                 if stat.S_ISDIR(info.st_mode) and not entry.is_symlink() and not _is_reparse(info):
                     pending.append(path)
                     continue
