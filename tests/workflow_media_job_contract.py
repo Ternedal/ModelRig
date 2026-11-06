@@ -35,7 +35,13 @@ def kotlin_states() -> dict[str, bool]:
 
 def kotlin_errors() -> set[str]:
     body = re.search(r"val ERRORS: Map<String, MediaJobOutcome> = mapOf\((.*?)\n    \)", PRESENTATION, re.S).group(1)
-    return set(re.findall(r'^\s*"([^"]+)" to MediaJobOutcome\(', body, re.M))
+    return set(re.findall(r'^\s*"([^"]+)" to ', body, re.M))
+
+
+def kotlin_outcome_names() -> dict[str, str]:
+    """Error -> the outcome it maps to, for entries that share a named outcome."""
+    body = re.search(r"val ERRORS: Map<String, MediaJobOutcome> = mapOf\((.*?)\n    \)", PRESENTATION, re.S).group(1)
+    return dict(re.findall(r'^\s*"([^"]+)" to ([A-Z_]+),', body, re.M))
 
 
 def store_states() -> set[str]:
@@ -55,8 +61,15 @@ def executor_errors() -> set[str]:
 
 
 def store_error_literals() -> set[str]:
-    """The literal errors the store writes itself (SQL), besides EXPIRED_ERROR."""
+    """Any error the store's SQL writes as a literal instead of a constant."""
     return set(re.findall(r"error\s*=\s*'([^']+)'", STORE_SOURCE))
+
+
+def store_errors() -> set[str]:
+    """Every error the store writes, and every older form its public_error() maps."""
+    return ({image_job_store.EXPIRED_ERROR, image_job_store.INTERRUPTED_BY_RESTART,
+             image_job_store.INTERRUPTED_DURING_PUBLICATION}
+            | set(image_job_store.LEGACY_ERRORS) | store_error_literals())
 
 
 class MediaJobContractDriftTests(unittest.TestCase):
@@ -68,8 +81,7 @@ class MediaJobContractDriftTests(unittest.TestCase):
         self.assertEqual(terminal, set(image_job_store._FINISHED))
 
     def test_every_written_error_has_a_presentation(self):
-        written = executor_errors() | {image_job_store.EXPIRED_ERROR} | store_error_literals()
-        self.assertTrue({"interrupted by restart", "interrupted during publication"} <= written)
+        written = executor_errors() | store_errors()
         missing = written - kotlin_errors()
         self.assertEqual(missing, set(), f"Android has no text for: {sorted(missing)}")
 
@@ -78,6 +90,15 @@ class MediaJobContractDriftTests(unittest.TestCase):
         self.assertTrue({"generation_failed", "publication_failed", "gpu_busy", "gpu_unavailable",
                          "gpu_memory_retained", "generation_request_rejected"} <= executor_errors(),
                         sorted(executor_errors()))
+
+    def test_legacy_sentences_and_their_codes_show_the_same_outcome(self):
+        names = kotlin_outcome_names()
+        for sentence, code in image_job_store.LEGACY_ERRORS.items():
+            self.assertIn(sentence, names)
+            self.assertEqual(names[sentence], names.get(code), f"{sentence!r} and {code!r} differ")
+
+    def test_store_writes_no_unmapped_literal_error(self):
+        self.assertEqual(store_error_literals() - kotlin_errors(), set())
 
     def test_expired_error_is_shared(self):
         self.assertEqual(image_job_store.EXPIRED_ERROR,

@@ -51,6 +51,14 @@ class MediaJobPresentationTest {
     }
 
     @Test
+    fun `restart codes and the older sentences read the same`() {
+        fun outcome(error: String) = MediaJobPresentation.outcome(job(MediaJobState.FAILED, error))
+        assertEquals(outcome("interrupted_by_restart"), outcome("interrupted by restart"))
+        assertEquals(outcome("interrupted_during_publication"), outcome("interrupted during publication"))
+        assertFalse(outcome("interrupted_by_restart")!!.message == "Jobbet fejlede.")
+    }
+
+    @Test
     fun `an unknown error is generic and never echoed`() {
         val o = MediaJobPresentation.outcome(job(MediaJobState.FAILED, "C:\\Kaliv\\secret path"))!!
         assertEquals("Jobbet fejlede.", o.message)

@@ -10,7 +10,7 @@ import java.time.format.DateTimeParseException
 /**
  * `kaliv-media-job/v1`: the owner's read model of one media job.
  *
- * **PROPOSED, not agreed.** The routes are ChatGPT's (#2275); none exists yet.
+ * **Read model accepted by ChatGPT (#2275 6693665083); routes not implemented.** The routes are ChatGPT's.
  * This parser is the Android target so the app is ready when they land, the
  * same way [MediaGalleryContract] preceded the gallery routes. See
  * docs/MEDIA_ANDROID_READINESS.md.

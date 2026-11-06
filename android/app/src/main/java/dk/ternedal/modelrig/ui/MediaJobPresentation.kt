@@ -37,10 +37,14 @@ object MediaJobPresentation {
         MediaJobState.EXPIRED -> "Udløbet"
     }
 
+    private val RESTARTED = MediaJobOutcome(
+        "Jobbet blev afbrudt, fordi riggen genstartede.", MediaJobRetry.RESUBMIT)
+    private val INTERRUPTED_PUBLISHING = MediaJobOutcome(
+        "Jobbet blev afbrudt, mens resultatet blev gemt.", MediaJobRetry.RESUBMIT)
+
     /**
      * Every error the job store and the media executor write, keyed exactly as
      * stored. tests/workflow_media_job_contract.py fails when one is missing.
-     * The two sentences are the store's own restart errors (not codes, today).
      */
     val ERRORS: Map<String, MediaJobOutcome> = mapOf(
         "expired_unclaimed" to MediaJobOutcome(
@@ -60,10 +64,12 @@ object MediaJobPresentation {
         "gpu_memory_retained" to MediaJobOutcome(
             "GPU-hukommelsen blev ikke frigivet. Riggen skal genstartes, før der kan genereres igen.",
             MediaJobRetry.LATER),
-        "interrupted by restart" to MediaJobOutcome(
-            "Jobbet blev afbrudt, fordi riggen genstartede.", MediaJobRetry.RESUBMIT),
-        "interrupted during publication" to MediaJobOutcome(
-            "Jobbet blev afbrudt, mens resultatet blev gemt.", MediaJobRetry.RESUBMIT),
+        "interrupted_by_restart" to RESTARTED,
+        "interrupted_during_publication" to INTERRUPTED_PUBLISHING,
+        // Rows failed before 6 Nov 2026 hold sentences. The route should send codes
+        // (image_job_store.public_error), but the app accepts both (#2275 6693665083).
+        "interrupted by restart" to RESTARTED,
+        "interrupted during publication" to INTERRUPTED_PUBLISHING,
     )
 
     private val UNKNOWN_ERROR = MediaJobOutcome("Jobbet fejlede.", MediaJobRetry.RESUBMIT)

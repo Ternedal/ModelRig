@@ -1,6 +1,6 @@
 # Media on Android: readiness and the proposed job contract
 
-**Status:** this is a proposal, not an agreement. The media routes belong to ChatGPT (#2275), and none of the job routes exist yet. This page states what the Android app needs from those routes, and what the branch `feat/android-media-job-readiness` already prepares.
+**Status:** ChatGPT accepted the read model in §2 (#2275 6693665083). Submit, cancel, list and the capability probe are design targets, not agreed shapes. The routes belong to ChatGPT, and none exists yet. This page states what the Android app needs from those routes, and what the branch `feat/android-media-job-readiness` already prepares.
 
 Nothing here turns media on. Video stays default-off. There is no generation UI in the app: the new code is a parser, Danish texts and a polling rule, with tests.
 
@@ -13,7 +13,7 @@ Nothing here turns media on. Video stays default-off. There is no generation UI 
 | **Submit and cancel** | **Missing.** The route design is ChatGPT's to make. Open questions are in §6. |
 | **Media capability probe** | **Missing.** See §4. |
 
-## 2. Proposed read model: `kaliv-media-job/v1`
+## 2. Read model: `kaliv-media-job/v1` (accepted)
 
 ```
 GET /api/v1/media/jobs/{job_id}        (owner only; another owner's job is 404, as in the gallery)
@@ -35,7 +35,7 @@ Job = {
 
 **`expires_at`** is the store's `created + QUEUED_MAX_AGE_S`. It comes from the server, so the phone never works out expiry from its own clock. The store expires lazily in `get()`, so the route already returns `expired` for a stale job, even with media off.
 
-**Error strings.** The store writes two of them as sentences, not codes: `interrupted by restart` and `interrupted during publication`. Android maps them exactly as stored. If the route normalizes them into codes, both sides change together, and `tests/workflow_media_job_contract.py` fails until they match.
+**Error codes.** Restart recovery now writes `interrupted_by_restart` and `interrupted_during_publication` (wiring branch). Rows from earlier builds keep the sentences `interrupted by restart` and `interrupted during publication`: nothing rewrites stored errors. `image_job_store.public_error()` maps both forms to the codes, so the route sends codes only. Android accepts both anyway, with the same text for a sentence and its code.
 
 ## 3. What Android checks (fail-closed)
 
@@ -96,18 +96,26 @@ A missing, unreadable or unknown answer hides the feature. Where the flag lives 
 
 **Gallery lifecycle.** A completed job's `asset_id` opens the gallery item through the existing gallery path. The item may already be gone, for example after a repair. Then the gallery's own `NOT_FOUND` text applies; the job still says completed.
 
-## 6. Open questions for the route owner
+## 6. Design targets for the routes (ChatGPT's, not implemented)
 
-1. **Submit:** the response shape, and whether an `Idempotency-Key` is accepted. Without one, the app can never retry a submit after a timeout, because it cannot know whether the job was created.
-2. **Queue-limit refusals:** `image job queue full` (16) and `owner image job limit reached` (3) are raised as `ImageJobError` text today. They need stable codes for the phone.
-3. **Cancel:** a `queued` job cancels at once. A `running` job is marked for cancellation and stops later. Does the response return the job as it then stands?
-4. **A list of the owner's jobs,** so the app can show the queue after it restarts. The phone keeps no job state of its own.
-5. **Whether `publishing` is exposed** as its own state or folded into `running`. Android accepts both.
+The shared examples are in `docs/contracts/kaliv-media-job-v1/`: `fixtures.json` (24 exchanges) and `openapi.json` (a short OpenAPI 3.1 sketch). Both sides test against the same file.
+
+| Operation | Target (#2275 6693665083) |
+|---|---|
+| **Submit** `POST /api/v1/media/jobs` | `201`, the job and `Location`. An owner-scoped `Idempotency-Key`: an identical retry returns the original response (`Idempotent-Replayed: true`); a different payload under the same key is `409 idempotency_conflict`. The key is stored atomically with the job, with bounded length and retention, and never logged with the prompt. |
+| **Refusals** | `429 queue_full` (with `Retry-After`), `429 owner_active_limit`, `400 invalid_request`, `503 media_disabled`. Codes, never exception text. |
+| **Cancel** `POST …/{id}/cancel` | Idempotent. `200` with `outcome` (`cancelled`, `requested`, `too_late`: the store's own answers) and the job as it now stands. |
+| **List** `GET /api/v1/media/jobs` | Owner only, newest first, at most 50 a page, opaque cursor, never prompt or params. |
+| **Capabilities** `GET /api/v1/media/capabilities` | One explicit boolean per kind; anything else hides the kind (§4). Where it lives is ChatGPT's choice. |
+| **404** | Another owner's job and an unknown id answer alike (`not_found`). |
+
+**`publishing` stays its own state.** The app never resubmits on its own, before or after the idempotency key exists.
 
 ## 7. Evidence on this branch
 
 | Check | What it covers |
 |---|---|
-| `tests/workflow_media_job_contract.py` | Fails when the store's states, its finished states, the executor's errors or the 24-hour expiry drift from the Kotlin model. Mutation-checked: deleting `expired`, a mapping or a sentence, or making `publishing` terminal, makes it fail. |
-| `MediaJobContractTest`, `MediaJobPresentationTest` | JVM unit tests for parsing, presentation and polling. |
+| `tests/workflow_media_job_contract.py` | Fails when the store's states, its finished states, the executor's errors, the restart codes and their sentences, or the 24-hour expiry drift from the Kotlin model. Mutation-checked: deleting `expired`, a mapping or a sentence, or making `publishing` terminal, makes it fail. |
+| `tests/workflow_media_job_fixtures.py` | Checks every fixture against the store's invariants, the public codes, the store's cancel answers and the OpenAPI paths, and that no prompt, params, owner or claim is ever returned. Mutation-checked. |
+| `MediaJobContractTest`, `MediaJobPresentationTest`, `MediaJobFixturesTest` | JVM unit tests for parsing, presentation and polling; the fixture test parses every job in `fixtures.json` on the phone side. |
 | Release build, without signing | `./gradlew :app:compileReleaseKotlin` compiles the release variant. The signed APK is a release step and needs Anders (§2). |

@@ -563,6 +563,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_media_gallery_store.py`
 - `tests/workflow_media_generation_boundary.py`
 - `tests/workflow_media_job_contract.py`
+- `tests/workflow_media_job_fixtures.py`
 - `tests/workflow_milestone3_current_main.py`
 - `tests/workflow_milestone3_current_main_handoff.py`
 - `tests/workflow_mrbody_cross_repo_contract.py`

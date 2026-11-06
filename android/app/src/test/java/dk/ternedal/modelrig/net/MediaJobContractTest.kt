@@ -9,7 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
 
-/** `kaliv-media-job/v1`, PROPOSED on ModelRig #2275 (not agreed; routes are ChatGPT's). */
+/** `kaliv-media-job/v1`: read model accepted on ModelRig #2275 (6693665083); routes are ChatGPT's. */
 class MediaJobContractTest {
 
     private val created = "2026-11-06T10:00:00Z"
@@ -63,9 +63,10 @@ class MediaJobContractTest {
     }
 
     @Test
-    fun `the store's restart sentences are accepted as errors`() {
-        val j = MediaJobContract.parse(body(job("failed", error = "interrupted by restart")))
-        assertEquals("interrupted by restart", j.error)
+    fun `restart codes and the store's older sentences are both accepted`() {
+        for (error in listOf("interrupted_by_restart", "interrupted by restart")) {
+            assertEquals(error, MediaJobContract.parse(body(job("failed", error = error))).error)
+        }
     }
 
     @Test

@@ -1,0 +1,473 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "kaliv-media-job/v1 (PROPOSED)",
+    "version": "0.1.0-proposed",
+    "description": "Owner-only media job API. Proposed by Claude, read model accepted by ChatGPT (#2275 6693665083). Routes are ChatGPT's; nothing here is implemented or authorized to deploy. Examples: fixtures.json."
+  },
+  "components": {
+    "securitySchemes": {
+      "owner": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "Job": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "state",
+          "profile_id",
+          "created_at",
+          "updated_at",
+          "expires_at",
+          "asset_id",
+          "error"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "running",
+              "publishing",
+              "completed",
+              "failed",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "profile_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$"
+          },
+          "expires_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "Z$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "non-null exactly when state is queued"
+          },
+          "asset_id": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,128}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "non-null exactly when state is completed"
+          },
+          "error": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,63}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "non-null exactly when state is failed or expired; expired => expired_unclaimed"
+          }
+        },
+        "description": "Never contains prompt, params, owner, claimed_by or cancel_requested."
+      },
+      "JobResponse": {
+        "type": "object",
+        "required": [
+          "schema",
+          "job"
+        ],
+        "properties": {
+          "schema": {
+            "const": "kaliv-media-job/v1"
+          },
+          "job": {
+            "$ref": "#/components/schemas/Job"
+          }
+        }
+      },
+      "CancelResponse": {
+        "type": "object",
+        "required": [
+          "schema",
+          "outcome",
+          "job"
+        ],
+        "properties": {
+          "schema": {
+            "const": "kaliv-media-job/v1"
+          },
+          "outcome": {
+            "enum": [
+              "cancelled",
+              "requested",
+              "too_late"
+            ]
+          },
+          "job": {
+            "$ref": "#/components/schemas/Job"
+          }
+        }
+      },
+      "JobPage": {
+        "type": "object",
+        "required": [
+          "schema",
+          "jobs",
+          "next_cursor"
+        ],
+        "properties": {
+          "schema": {
+            "const": "kaliv-media-job/v1"
+          },
+          "jobs": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            }
+          },
+          "next_cursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "SubmitRequest": {
+        "type": "object",
+        "required": [
+          "profile_id",
+          "prompt"
+        ],
+        "properties": {
+          "profile_id": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "params": {
+            "type": "object"
+          },
+          "input_asset_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,128}$"
+          }
+        }
+      },
+      "Capabilities": {
+        "type": "object",
+        "required": [
+          "schema"
+        ],
+        "properties": {
+          "schema": {
+            "const": "kaliv-media-capabilities/v1"
+          },
+          "text_to_image": {
+            "type": "boolean"
+          },
+          "text_to_video": {
+            "type": "boolean"
+          },
+          "image_to_video": {
+            "type": "boolean"
+          }
+        },
+        "description": "Fail closed: a kind is offered only when its field is exactly true."
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "schema",
+          "error"
+        ],
+        "properties": {
+          "schema": {
+            "const": "kaliv-media-job/v1"
+          },
+          "error": {
+            "enum": [
+              "not_found",
+              "invalid_request",
+              "idempotency_conflict",
+              "queue_full",
+              "owner_active_limit",
+              "media_disabled"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "owner": []
+    }
+  ],
+  "paths": {
+    "/api/v1/media/jobs": {
+      "get": {
+        "summary": "The owner's jobs, newest first",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "a page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Submit a job",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            },
+            "description": "Owner-scoped; stored atomically with the job; bounded retention; never logged with the prompt."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "queued (or the original response again on an identical retry, with Idempotent-Replayed: true)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Idempotent-Replayed": {
+                "schema": {
+                  "const": "true"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/media/jobs/{job_id}": {
+      "get": {
+        "summary": "One job",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/media/jobs/{job_id}/cancel": {
+      "post": {
+        "summary": "Cancel (idempotent)",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the outcome and the job as it now stands",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/media/capabilities": {
+      "get": {
+        "summary": "Which media kinds this rig offers",
+        "responses": {
+          "200": {
+            "description": "explicit flags",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Capabilities"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
