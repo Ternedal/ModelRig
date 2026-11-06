@@ -149,17 +149,32 @@ class SystemProbe:
             ok = ctypes.windll.kernel32.GetVolumeInformationW(  # type: ignore[attr-defined]
                 ctypes.c_wchar_p(target), None, 0, None, None, None, name, len(name))
             return name.value.lower() if ok and name.value else None
+        mount = self._mountinfo(root)
+        return mount[1] if mount else None
+
+    def mount_instance(self, root: str) -> str | None:
+        """This mounting of ``root``, where the platform names one: Linux's mount id, which a new
+        mount of the same disk does not reuse. None on Windows, which has no such id (a volume's
+        GUID and serial survive an unplug and replug), and wherever it cannot be read."""
+        if self.windows:
+            return None
+        mount = self._mountinfo(root)
+        return mount[0] if mount else None
+
+    @staticmethod
+    def _mountinfo(root: str) -> tuple[str, str] | None:
+        """(mount id, filesystem type) of the visible mount at ``root``, from /proc/self/mountinfo."""
         found = None
         try:
             with open("/proc/self/mountinfo", encoding="utf-8", errors="replace") as mounts:
                 for line in mounts:
                     left, sep, right = line.partition(" - ")
                     fields = left.split()
-                    if not sep or len(fields) < 5:
+                    if not sep or len(fields) < 5 or not right.split():
                         continue
                     point = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), fields[4])
                     if point == root:
-                        found = right.split()[0].lower()  # the last mount at a point is the visible one
+                        found = (fields[0], right.split()[0].lower())  # the last mount at a point is the visible one
         except OSError:
             return None
         return found
@@ -203,6 +218,8 @@ class MountedMediaVolume:
         if info.st_dev == self._probe.system_volume_dev():
             raise MediaVolumeConfigError("media_volume_is_system_volume")
         self._identity = (info.st_dev, info.st_ino)
+        self._mount = self._probe.mount_instance(self._root)
+        self._lost: str | None = None
         self.filesystem = filesystem
         self._check_marker()
         self.root = Path(self._root)
@@ -270,11 +287,24 @@ class MountedMediaVolume:
     # -- the protocol --------------------------------------------------------------------------
 
     def verify(self) -> Path:
-        """Re-check the volume itself: still the pinned, mounted, marked root. Returns the root."""
-        info = self._observe_root()
-        if (info.st_dev, info.st_ino) != self._identity:
-            raise _refused("media_volume_identity_changed")
-        self._check_marker()
+        """Re-check the volume itself: still the pinned, mounted, marked root. Returns the root.
+
+        Once a check has failed, this verifier is done for good (Codex #2349 4498174484): while
+        the volume is still wrong the real reason is raised, and once it looks right again,
+        ``media_volume_lost``. Only a new verifier, i.e. an executor restart (exit 75), resumes,
+        so a disk that went away and came back is never silently used again."""
+        try:
+            info = self._observe_root()
+            if (info.st_dev, info.st_ino) != self._identity:
+                raise _refused("media_volume_identity_changed")
+            if self._mount is not None and self._probe.mount_instance(self._root) != self._mount:
+                raise _refused("media_volume_remounted")  # the same disk, mounted again
+            self._check_marker()
+        except ArtifactSinkUnavailable as exc:
+            self._lost = self._lost or str(exc)
+            raise
+        if self._lost is not None:
+            raise _refused("media_volume_lost")
         return self.root
 
     def require(self, path: str | os.PathLike) -> None:
