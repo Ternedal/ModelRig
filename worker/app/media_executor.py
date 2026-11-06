@@ -57,6 +57,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import secrets
 import time
 from typing import Callable, Mapping
@@ -98,6 +99,16 @@ class PublicationUnrecorded(RuntimeError):
 
 
 EVENTS_KEPT = 1000
+EVENT_MAX_CHARS = 256  # one event, whatever it carries; the diagnostics stream stays line-bounded
+_EVENT_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}")
+
+
+def _event_code(exc: BaseException) -> str:
+    """An exception's reason code for an event: the part before the first colon when it is a code,
+    otherwise the exception's type. The rest of a message (an OS error with a path and so a user
+    name, an ACL's SIDs) stays out of the diagnostics stream."""
+    head = str(exc).split(":", 1)[0].strip()
+    return head if _EVENT_CODE.fullmatch(head) else type(exc).__name__
 EXPIRE_INTERVAL_S = 60.0  # how often an idle executor expires queued jobs older than 24 hours
 
 
@@ -111,6 +122,7 @@ class _EventLog(collections.deque):
         self.sink = sink
 
     def append(self, entry: str) -> None:
+        entry = entry[:EVENT_MAX_CHARS]
         super().append(entry)
         if self.sink is not None:
             kind, _, detail = entry.partition(":")
@@ -436,7 +448,7 @@ class MediaExecutor:
         except GpuResourcesRetained:
             code = EXIT_GPU_RETAINED
         except ArtifactSinkUnavailable as exc:  # a reason code, never a prompt
-            self.events.append(f"sink_unavailable:{exc}")
+            self.events.append(f"sink_unavailable:{_event_code(exc)}")
             code = EXIT_SINK_UNAVAILABLE
         except PublicationUnrecorded:
             code = EXIT_UNRECORDED
