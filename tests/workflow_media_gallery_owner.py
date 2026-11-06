@@ -37,6 +37,22 @@ class OwnerGalleryTests(unittest.TestCase):
         self.assertIsNone(second["next_cursor"])
         self.assertTrue(all(owner == "principal" for owner, _ in jobs.calls))
 
+    def test_thumbnail_reference_not_leaked(self):
+        self.entries[1]["thumbnail_id"] = "foreign"
+        self.entries[1]["thumbnail_url"] = "/api/v1/media/foreign"
+        jobs = Jobs({"one"})
+        result = list_owned_gallery(jobs, "principal", "/media")
+        self.assertEqual(len(result["items"]), 1)
+        self.assertIsNone(result["items"][0]["thumbnail_id"])
+        self.assertIsNone(result["items"][0]["thumbnail_url"])
+        self.assertEqual(self.entries[1]["thumbnail_id"], "foreign")
+
+    def test_owned_thumbnail_preserved(self):
+        self.entries[1]["thumbnail_id"] = "three"
+        self.entries[1]["thumbnail_url"] = "/api/v1/media/three"
+        result = list_owned_gallery(Jobs({"one", "three"}), "principal", "/media")
+        self.assertEqual(result["items"][0]["thumbnail_id"], "three")
+
     def test_foreign_cursor_rejected(self):
         with self.assertRaisesRegex(GalleryBadRequest, "unknown_cursor"):
             list_owned_gallery(Jobs({"one"}), "principal", "/media", cursor="foreign")
