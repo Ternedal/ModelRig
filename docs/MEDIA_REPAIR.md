@@ -77,6 +77,7 @@ The output is JSON, schema `kaliv-media-recovery-inventory/v1`. It lists one ent
 | `publication_failed` | publication failed after the copy; the work file was kept | the work file is intact; nothing is staged or published |
 | `crash_after_publication_before_cleanup` | published and indexed once; the work copy was not yet removed | the job's asset has the receipt's SHA-256 and is indexed; the work file is intact |
 | `published_unindexed` | the file was published, but the gallery index was not updated | the job's asset has the receipt's SHA-256 and is not indexed; the work file is intact |
+| `published_not_recorded` | published, indexed and the work copy removed, but the job's completion was never recorded. No job owns the file as completed, so nobody can fetch it; a gallery listing must filter by owner to keep it hidden | the job's asset has the receipt's SHA-256 and is indexed; nothing is on C: or staged; the job is `publishing` or failed with `interrupted_during_publication` |
 | `volume_changed` | the volume root is not the one the job handed over to | nothing on it is correlated |
 | `unknown` | anything else, including two candidates for one piece or a changed file | — |
 

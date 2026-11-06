@@ -26,6 +26,7 @@ ties each piece to its job, using the hand-off receipt the executor stored befor
 | ``publication_failed`` | the copy finished, publication failed, the work-area file was kept |
 | ``crash_after_publication_before_cleanup`` | published and indexed once (same SHA-256); the work-area copy is still there |
 | ``published_unindexed`` | the file is published (same SHA-256) but the gallery index was not updated; the work-area copy is kept |
+| ``published_not_recorded`` | published and indexed once (same SHA-256), the work-area copy removed, but the job's completion was never recorded: the job is publishing, or failed as interrupted during publication. No job owns the file as completed, so nobody can fetch it. Nothing re-records it |
 | ``volume_changed`` | the volume's root is not the one the job handed over to: nothing on it is correlated |
 | ``unknown`` | anything else, including two candidates for one piece |
 
@@ -48,6 +49,7 @@ import stat
 import time
 from pathlib import Path
 
+from .image_job_store import INTERRUPTED_DURING_PUBLICATION, public_error
 from .media_gallery_catalog import GalleryUnavailable, _index
 from .media_gallery_store import ExternalMediaSink
 from .media_generation_contract import MAX_ARTIFACT_BYTES, ArtifactSinkUnavailable
@@ -301,6 +303,9 @@ def _decide(job: dict, stage: str, entry: dict, work_intact: bool) -> str:
             return "crash_after_publication_before_cleanup"
         if work == "absent" and staged == "absent" and job["state"] == "completed":
             return "clean"
+        if (work == "absent" and staged == "absent" and entry["asset"]["indexed"]
+                and (job["state"] == "publishing" or public_error(job["error"]) == INTERRUPTED_DURING_PUBLICATION)):
+            return "published_not_recorded"  # died after the cleanup, before complete()
         return "unknown"
     if job["state"] == "completed":
         return "unknown"  # completed without its asset: the existing C6 report lists it too
