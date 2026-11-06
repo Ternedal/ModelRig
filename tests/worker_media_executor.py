@@ -589,6 +589,59 @@ class DiagnosticsTests(unittest.TestCase):
         self.submit("sdxl-a")
         self.assertEqual(ex.step(), "completed")
 
+    def test_a_sink_failure_event_carries_its_code_never_a_path_or_account(self):
+        """ChatGPT 6694053328 P4: the work area's refusal can carry an OS error with a path (a
+        Windows user name) or SIDs. The event, which goes to the supervisor's log, keeps the code."""
+        from app.media_generation_contract import ArtifactSinkUnavailable
+        cases = {
+            "media_work_area_not_private: security descriptor could not be verified: "
+            "[WinError 5] Access is denied: 'C:\\Users\\anders\\kaliv'": "media_work_area_not_private",
+            "media_work_area_not_private: S-1-5-21-111-222-333-1001 has write access": "media_work_area_not_private",
+            "external_media_unavailable": "external_media_unavailable",
+            "sink returned no asset id": "ArtifactSinkUnavailable",
+            "/home/anders/kaliv/z is gone": "ArtifactSinkUnavailable",
+        }
+        for message, code in cases.items():
+            with self.subTest(message=message):
+                seen = []
+                ex = self.executor([self.image()], start=False)
+                ex.events.sink = seen.append
+                with patch.object(ex, "step", side_effect=ArtifactSinkUnavailable(message)):
+                    self.assertEqual(ex.run(max_steps=1, idle_sleep=lambda: None), EXIT_SINK_UNAVAILABLE)
+                self.assertIn({"event": "sink_unavailable", "detail": code}, seen)
+                text = json.dumps(seen) + "\n".join(ex.events)
+                for secret in ("anders", "Users", "S-1-5-21", "/home"):
+                    self.assertNotIn(secret, text)
+
+    def test_every_event_is_bounded_in_length(self):
+        from app.media_executor import EVENT_MAX_CHARS
+        seen = []
+        ex = self.executor([self.image()])
+        ex.events.sink = seen.append
+        ex.events.append("tick:" + "x" * 10_000)
+        self.assertEqual(len(ex.events[-1]), EVENT_MAX_CHARS)
+        self.assertLessEqual(len(seen[-1]["event"]) + len(seen[-1]["detail"]) + 1, EVENT_MAX_CHARS)
+
+    def test_events_after_a_crash_come_in_restart_order(self):
+        """A dead executor's job is recovered before anything else, then the new job runs, then exit."""
+        dead = self.executor([self.image()])
+        stuck = self.submit("sdxl-a")
+        self.assertEqual(self.store.claim_for(["sdxl-a"], dead.instance)["id"], stuck)
+        dead.release_lock()  # the process dies with the job claimed; the OS drops its lock
+        seen = []
+        ex = self.executor([self.image()], start=False)
+        ex.events.sink = seen.append
+        job = self.submit("sdxl-a")
+        self.assertEqual(ex.run(max_steps=1, idle_sleep=lambda: None), 0)
+        kinds = [e["event"] for e in seen]
+        self.assertEqual(seen[0], {"event": "recovered", "detail": "1"}, "recovery is the first thing")
+        self.assertLess(kinds.index("purged"), kinds.index("loaded"))
+        self.assertLess(kinds.index("loaded"), kinds.index("job"))
+        self.assertEqual(seen[-1], {"event": "exit", "detail": "0"})
+        self.assertEqual(kinds.count("recovered"), 1)
+        self.assertEqual(self.store.get(stuck, "anders")["error"], "interrupted_by_restart")
+        self.assertTrue(next(e for e in seen if e["event"] == "job")["detail"].startswith(f"{job}:"))
+
     def test_the_record_keeps_only_the_last_entries(self):
         from app.media_executor import EVENTS_KEPT
         ex = self.executor([self.image()])

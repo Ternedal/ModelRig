@@ -150,10 +150,12 @@ kaliv-media-event {"detail": "<job id>:sdxl-a:completed:12.3", "event": "job", "
 | `loaded` and `closed` | a model was loaded or unloaded (with whether the GPU was proven free) |
 | `vram_short` | a job deferred for VRAM |
 | `job` | job id, profile, outcome and seconds |
-| `sink_unavailable` | the reason code, at exit 75 |
+| `sink_unavailable` | the reason code only, at exit 75: the part of the message before its first colon when that is a code, otherwise the exception type. The rest of a message (an OS error with a path, and so a user name; an ACL's SIDs) never reaches the log |
 | `exit` | the exit code |
 
-They hold ids, outcomes, counts and codes, never a prompt. A failing log never stops the work. The in-memory record keeps only the last 1000 events, so a process that runs for months does not grow.
+They hold ids, outcomes, counts and codes, never a prompt or an owner. Each event is cut to 256 characters, so every log line is bounded. A failing log never stops the work. The in-memory record keeps only the last 1000 events, so a process that runs for months does not grow.
+
+**Order after a crash.** The first event of a new executor is `recovered` (the dead one's jobs, failed), then `expired` if any, and `purged`. Only then does it load a model and run a job, and its last event is `exit`. `tests/worker_media_executor.py` checks this order.
 
 ## When the supervisor restarts (Track 3)
 
