@@ -29,6 +29,11 @@ from worker_comfy_image_to_video import I2V, png  # noqa: E402
 from worker_comfy_video_adapter import raw, sha  # noqa: E402
 from worker_media_generation_profiles import video_profile  # noqa: E402
 
+try:  # the wiring branch writes machine codes (#2275 6693665083); main still writes the sentence
+    from app.image_job_store import INTERRUPTED_BY_RESTART  # noqa: E402
+except ImportError:
+    INTERRUPTED_BY_RESTART = "interrupted by restart"
+
 
 class ImageToVideoExecutorTests(unittest.TestCase):
     setUp, tearDown = base.VideoExecutorTests.setUp, base.VideoExecutorTests.tearDown
@@ -135,7 +140,7 @@ class ImageToVideoExecutorTests(unittest.TestCase):
         ex.release_lock()  # the process ends
         ex2, _ = self.i2v_executor(lambda owner, asset: png())  # the next start of this GPU's executor
         row = self.store.get(job, "anders")
-        self.assertEqual((row["state"], row["error"]), ("failed", "interrupted by restart"))
+        self.assertEqual((row["state"], row["error"]), ("failed", INTERRUPTED_BY_RESTART))
         del ex2
 
     def test_an_id_the_reader_rejects_is_a_rejected_request(self):
