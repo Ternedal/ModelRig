@@ -72,11 +72,15 @@ _log = logging.getLogger("kaliv.media.comfy")
 MAX_SOURCE_AXIS = 4096  # so at most 16.8 MP
 MAX_SOURCE_BYTES = 64 * 1024 * 1024
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+# APNG: ComfyUI's LoadImage decodes and concatenates EVERY frame, so IHDR's size alone does not
+# bound memory (#2346 review 4489553700: 100 frames at 4096x4096 fit in 5 MB of APNG).
+_ANIMATION_CHUNKS = frozenset({b"acTL", b"fcTL", b"fdAT"})
 
 
 def check_source_png(data: object) -> None:
-    """Refuse a source that is not a PNG whose first chunk is a well-formed IHDR within the
-    caps. Not a full validation (that is the reader's); a bound on what ComfyUI may decode."""
+    """Refuse a source that is not a single-frame PNG whose first chunk is a well-formed IHDR
+    within the caps. Not a full validation (CRCs are the reader's); a bound on what ComfyUI may
+    decode: one frame of at most MAX_SOURCE_AXIS per side."""
     if type(data) is not bytes or not 8 + 25 <= len(data) <= MAX_SOURCE_BYTES:
         raise GenerationError("the source image must be PNG bytes within the size limit")
     if data[:8] != _PNG_SIGNATURE or data[8:16] != b"\x00\x00\x00\x0dIHDR":
@@ -84,6 +88,15 @@ def check_source_png(data: object) -> None:
     width, height = int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
     if not (1 <= width <= MAX_SOURCE_AXIS and 1 <= height <= MAX_SOURCE_AXIS):
         raise GenerationError(f"the source image must be 1..{MAX_SOURCE_AXIS} px per side")
+    offset = 8
+    while offset + 12 <= len(data):
+        length, kind = int.from_bytes(data[offset:offset + 4], "big"), data[offset + 4:offset + 8]
+        if kind in _ANIMATION_CHUNKS:
+            raise GenerationError("the source image must be a single-frame PNG (animated PNG refused)")
+        if kind == b"IEND":
+            return
+        offset += 12 + length
+    raise GenerationError("the source image is not a complete PNG")
 
 
 class ComfyVideoAdapter:
