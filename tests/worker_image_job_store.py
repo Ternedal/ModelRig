@@ -301,8 +301,8 @@ class ExecutorProtocolTests(unittest.TestCase):
         self.store.claim_for(["sdxl-b"], B1)          # another GPU's job
         self.store.claim_for(["sdxl-a"], A2)          # 'live' claimed by the new instance itself
         self.assertEqual(self.store.recover_gpu(GPU_A, A2), 2)
-        self.assertEqual((self.row(running_a)["state"], self.row(running_a)["error"]), ("failed", "interrupted by restart"))
-        self.assertEqual(self.row(publishing_a)["error"], "interrupted during publication")
+        self.assertEqual((self.row(running_a)["state"], self.row(running_a)["error"]), ("failed", "interrupted_by_restart"))
+        self.assertEqual(self.row(publishing_a)["error"], "interrupted_during_publication")
         self.assertEqual(self.row(running_b)["state"], "running", "another GPU's job is untouched")
         self.assertEqual(self.row(live)["state"], "running", "the recovering instance's own claim is untouched")
         with self.assertRaises(ImageJobError):
@@ -520,6 +520,51 @@ class QueuedExpiryTests(unittest.TestCase):
         for bad in (0, -1, "1", None):
             with self.subTest(bad=bad), self.assertRaises(ImageJobError):
                 self.store.expire_queued(max_age_s=bad)
+
+
+class RestartErrorCodeTests(unittest.TestCase):
+    """#2275 6693665083: restart recovery writes machine codes; rows with the old sentences stay
+    as stored and still map to the codes."""
+    setUp = ExecutorProtocolTests.setUp
+    job = ExecutorProtocolTests.job
+    row = QueuedExpiryTests.row
+
+    def test_recovery_writes_codes(self):
+        from app.image_job_store import INTERRUPTED_BY_RESTART, INTERRUPTED_DURING_PUBLICATION
+        running, publishing = self.job(), self.job()
+        self.store.claim_for(["sdxl-a"], A1)
+        self.store.claim_for(["sdxl-a"], A1)
+        self.assertTrue(self.store.begin_publish(publishing, A1))
+        self.assertEqual(self.store.recover_gpu(GPU_A, A2), 2)
+        self.assertEqual(self.row(running)["error"], INTERRUPTED_BY_RESTART)
+        self.assertEqual(self.row(publishing)["error"], INTERRUPTED_DURING_PUBLICATION)
+        legacy = self.job()
+        self.store.claim()
+        self.assertEqual(self.store.recover_interrupted(), 1)
+        self.assertEqual(self.row(legacy)["error"], INTERRUPTED_BY_RESTART)
+
+    def test_existing_sentence_rows_are_kept_and_map_to_codes(self):
+        import sqlite3
+        from app.image_job_store import LEGACY_ERRORS, public_error
+        jobs = {}
+        for sentence in LEGACY_ERRORS:
+            job = self.job()
+            with sqlite3.connect(self.db) as db:  # a row written by a build before the codes
+                db.execute("UPDATE image_jobs SET state='failed',error=? WHERE id=?", (sentence, job))
+            jobs[job] = sentence
+        ImageJobStore(self.db)  # reopening (schema migration) never rewrites stored errors
+        for job, sentence in jobs.items():
+            self.assertEqual(self.row(job)["error"], sentence)
+            self.assertEqual(self.store.get(job, "anders")["error"], sentence)
+            self.assertEqual(public_error(sentence), LEGACY_ERRORS[sentence])
+        self.assertEqual(set(LEGACY_ERRORS.values()),
+                         {"interrupted_by_restart", "interrupted_during_publication"})
+
+    def test_public_error_passes_codes_and_none_through(self):
+        from app.image_job_store import EXPIRED_ERROR, public_error
+        for code in (EXPIRED_ERROR, "gpu_busy", "interrupted_by_restart"):
+            self.assertEqual(public_error(code), code)
+        self.assertIsNone(public_error(None))
 
 
 class PromptRetentionTests(unittest.TestCase):

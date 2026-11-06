@@ -303,7 +303,7 @@ class ExecutorTests(unittest.TestCase):
         self.crash(ex)
         restarted = self.executor([self.image()], start=False)
         self.assertEqual(restarted.start(), 1)
-        self.assertEqual((self.state(job)["state"], self.state(job)["error"]), ("failed", "interrupted during publication"),
+        self.assertEqual((self.state(job)["state"], self.state(job)["error"]), ("failed", "interrupted_during_publication"),
                          "an asset may exist: flagged for reconciliation, not silently failed")
 
     # --- several executors (dual GPU) ----------------------------------------------------------------
@@ -348,7 +348,7 @@ class ExecutorTests(unittest.TestCase):
             child.wait()
             child.stdout.close()
         after = self.executor([self.image()])  # the holder is dead: now recovery is safe
-        self.assertEqual((self.state(job)["state"], self.state(job)["error"]), ("failed", "interrupted by restart"))
+        self.assertEqual((self.state(job)["state"], self.state(job)["error"]), ("failed", "interrupted_by_restart"))
         self.assertEqual(after.step(), "idle")
 
     # --- #2296 6511335742 P1: cancellation vs publication ------------------------------------------------
@@ -492,7 +492,7 @@ class ExecutorTests(unittest.TestCase):
                 self.crash(ex)
                 restarted = self.executor([self.image()], image_sink=keyed)
                 self.assertEqual((self.state(job)["state"], self.state(job)["error"]),
-                                 ("failed", "interrupted during publication"))
+                                 ("failed", "interrupted_during_publication"))
                 restarted.release_lock()
                 restarted._lock = None
 

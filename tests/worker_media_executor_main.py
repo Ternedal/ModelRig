@@ -399,7 +399,7 @@ class EntryPointTests(unittest.TestCase):
                                       adapter_factory=lambda p: FakeAdapter(p, self.env["KALIV_GPU_LEASE_DIR"]))
             self.assertEqual(executor.run(max_steps=2, idle_sleep=lambda: None), 0)
         self.assertEqual((store.get(jobs[0], "anders")["state"], store.get(jobs[0], "anders")["error"]),
-                         ("failed", "interrupted during publication"))
+                         ("failed", "interrupted_during_publication"))
         self.assertEqual(store.get(jobs[1], "anders")["state"], "completed")
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
             items = list_gallery(self.env["KALIV_MEDIA_ROOT"], verified_volume_root=self.env["KALIV_MEDIA_VOLUME_ROOT"])
