@@ -46,6 +46,8 @@ def validate_png_container(payload: bytes) -> None:
             seen_ihdr = True
         elif kind == b"IHDR":
             raise InvalidSourcePng("duplicate_png_ihdr")
+        elif kind in (b"acTL", b"fcTL", b"fdAT"):
+            raise InvalidSourcePng("animated_png_not_supported")
         elif kind == b"IDAT":
             if seen_iend:
                 raise InvalidSourcePng("png_data_after_end")
