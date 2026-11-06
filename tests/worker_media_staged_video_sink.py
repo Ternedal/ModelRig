@@ -383,6 +383,20 @@ class JobKeyedRules(unittest.TestCase):
         self.assertEqual(self.volume.indexed(), set())
         self.assertEqual(self.sink._media.inspect_temporary_files(), [], "the staged name is cleaned up")
 
+    def test_a_failed_write_is_the_volume_being_unusable_and_the_handle_is_spent(self):
+        import errno
+        with self.sink.staged(".mp4") as output:
+            output.write(MP4[:16])
+            with patch.object(sink_module.os, "write", side_effect=OSError(errno.ENOSPC, "No space left on device")):
+                with self.assertRaisesRegex(ArtifactSinkUnavailable, "staged_video_unavailable"):
+                    output.write(MP4[16:])
+            for spent in (lambda: output.write(b"x"), output.sync,
+                          lambda: self.sink.adopt_for_job(output, "video/mp4", JOB)):
+                with self.assertRaises(ValueError):
+                    spent()
+        self.assertEqual(self.volume.indexed(), set())
+        self.assertEqual(self.sink._media.inspect_temporary_files(), [], "the staged name is cleaned up")
+
     def test_one_adoption_attempt_per_handle_even_after_a_refused_one(self):
         with self.sink.staged(".mp4") as output:
             output.write(MP4)
