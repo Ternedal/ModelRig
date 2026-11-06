@@ -130,3 +130,26 @@ Every restartable code doubles its delay for each exit in a row, capped at 5 min
 - G3 pinning: ComfyUI version and weight manifest.
 - Retiring `GenerationJobRunner`.
 - **Assumed, to be verified on the pinned diffusers in rig R5:** every allowlisted pipeline honours `callback_on_step_end` and `_interrupt`.
+
+## Diagnostics (Track 3)
+
+While it runs, the executor writes one JSON line per lifecycle event to stderr, which `modelrig-supervisor` writes to the executor's log:
+
+```
+kaliv-media-event {"detail": "<job id>:sdxl-a:completed:12.3", "event": "job", "gpu": "GPU-..."}
+```
+
+**Events:**
+
+| Event | Detail |
+|---|---|
+| `recovered` | the number of interrupted jobs failed at start |
+| `purged` | prompts blanked by retention |
+| `loaded` and `closed` | a model was loaded or unloaded (with whether the GPU was proven free) |
+| `vram_short` | a job deferred for VRAM |
+| `job` | job id, profile, outcome and seconds |
+| `sink_unavailable` | the reason code, at exit 75 |
+| `exit` | the exit code |
+
+They hold ids, outcomes, counts and codes, never a prompt. A failing log never stops the work. The in-memory record keeps only the last 1000 events, so a process that runs for months does not grow.
+

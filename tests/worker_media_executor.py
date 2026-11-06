@@ -440,7 +440,8 @@ class ExecutorTests(unittest.TestCase):
         self.assertEqual(ex.step(), "failed")
         self.assertEqual(self.state(job)["error"], "generation_failed")
         self.assertTrue(lease_free(GPU_A, self.lease_dir), "close() released what load() took")
-        self.assertEqual(ex.events[-1], "failed_load:sdxl-a:True")
+        self.assertEqual(ex.events[-2], "failed_load:sdxl-a:True")
+        self.assertTrue(ex.events[-1].startswith("job:") and ":sdxl-a:failed:" in ex.events[-1])
 
     def test_a_failed_load_without_proven_release_is_fatal_and_nothing_more_is_claimed(self):
         for close_ok in (False, "raise"):
@@ -561,6 +562,40 @@ assert job['id'] == sys.argv[6]
 print('READY', flush=True)
 time.sleep(60)
 """
+
+
+class DiagnosticsTests(unittest.TestCase):
+    """Track 3: restart and recovery are observable, and the record never grows without bound."""
+    setUp, tearDown = ExecutorTests.setUp, ExecutorTests.tearDown
+    image, submit, executor = ExecutorTests.image, ExecutorTests.submit, ExecutorTests.executor
+
+    def test_each_lifecycle_step_is_one_structured_event_without_prompt_text(self):
+        seen = []
+        ex = self.executor([self.image()], start=False)
+        ex.events.sink = seen.append
+        job = self.submit("sdxl-a")
+        self.assertEqual(ex.run(max_steps=2, idle_sleep=lambda: None), 0)
+        kinds = [e["event"] for e in seen]
+        for kind in ("recovered", "purged", "loaded", "job", "closed", "exit"):
+            self.assertIn(kind, kinds)
+        done = next(e for e in seen if e["event"] == "job")
+        self.assertTrue(done["detail"].startswith(f"{job}:sdxl-a:completed:"))
+        self.assertEqual(seen[-1], {"event": "exit", "detail": "0"})
+        self.assertNotIn("a red bicycle", json.dumps(seen))
+
+    def test_a_failing_sink_never_stops_the_work(self):
+        ex = self.executor([self.image()])
+        ex.events.sink = lambda event: 1 / 0
+        self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "completed")
+
+    def test_the_record_keeps_only_the_last_entries(self):
+        from app.media_executor import EVENTS_KEPT
+        ex = self.executor([self.image()])
+        for i in range(EVENTS_KEPT + 500):
+            ex.events.append(f"tick:{i}")
+        self.assertEqual(len(ex.events), EVENTS_KEPT)
+        self.assertEqual(ex.events[0], "tick:500")
 
 
 class VramWaitTests(unittest.TestCase):

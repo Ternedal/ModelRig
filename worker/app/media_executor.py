@@ -52,6 +52,7 @@ restart after 70 and 76, never loop on 73, wait for the volume after 75, stop on
 """
 from __future__ import annotations
 
+import collections
 import contextlib
 import json
 import os
@@ -94,12 +95,35 @@ class PublicationUnrecorded(RuntimeError):
     """The artifact is durable but its completion could not be recorded; the job stays publishing."""
 
 
+EVENTS_KEPT = 1000
+
+
+class _EventLog(collections.deque):
+    """The executor's lifecycle record ("kind:detail" strings, never prompt text). Only the last
+    EVENTS_KEPT are kept, so a process that runs for months does not grow; each is also handed to
+    the diagnostics sink as {"event": kind, "detail": detail}. A failing sink never stops the work."""
+
+    def __init__(self, sink: Callable[[dict], None] | None = None):
+        super().__init__(maxlen=EVENTS_KEPT)
+        self.sink = sink
+
+    def append(self, entry: str) -> None:
+        super().append(entry)
+        if self.sink is not None:
+            kind, _, detail = entry.partition(":")
+            try:
+                self.sink({"event": kind, "detail": detail})
+            except Exception:
+                pass
+
+
 class MediaExecutor:
     def __init__(self, store: ImageJobStore, *, gpu_uuid: str, lease_dir: str,
                  profiles: Mapping[str, ModelProfile], adapter_factory: Callable[[ModelProfile], object],
                  image_sink: ArtifactSink | None = None, video_sink: StagedFileArtifactSink | None = None,
                  idle_unload_s: float = 300.0, cancel_poll_s: float = 1.0,
-                 clock: Callable[[], float] = time.monotonic, volume_root: str | None = None):
+                 clock: Callable[[], float] = time.monotonic, volume_root: str | None = None,
+                 diagnostics: Callable[[dict], None] | None = None):
         if not isinstance(store, ImageJobStore):
             raise ExecutorConfigError("store must be an ImageJobStore")
         if not profiles:
@@ -127,7 +151,7 @@ class MediaExecutor:
         self._next_purge = clock()
         self._lock = None
         self._retained: list = []  # adapters whose unload failed: kept alive (lease held) until exit
-        self.events: list[str] = []  # lifecycle record for logs and tests; never prompt text
+        self.events = _EventLog(diagnostics)  # bounded lifecycle record for logs and tests; never prompt text
 
     # --- lifecycle --------------------------------------------------------------------------------
     def start(self) -> int:
@@ -229,7 +253,9 @@ class MediaExecutor:
         if job is None:
             self.maybe_unload_idle()
             return "idle"
+        started = self.clock()
         outcome = self._run_job(job)
+        self.events.append(f"job:{job['id']}:{job['profile_id']}:{outcome}:{self.clock() - started:.1f}")
         if self.adapter is not None and getattr(self.adapter, "needs_restart", False):
             # e.g. a cancelled ComfyUI whose queue did not drain: never give it another job.
             self.events.append(f"restart:{self.adapter.profile_id}")
@@ -336,6 +362,7 @@ class MediaExecutor:
     def run(self, *, max_steps: int | None = None, idle_sleep: Callable[[], None] = lambda: time.sleep(1.0)) -> int:
         """The executor's main loop; returns the process exit code. The executor lock is released
         on every terminal path; a retained adapter's GPU lease is not (it ends with the process)."""
+        code = None
         try:
             self.start()
             steps = 0
@@ -346,19 +373,22 @@ class MediaExecutor:
                         self.purge_prompts()
                     idle_sleep()
             self.shutdown()
-            return EXIT_DONE
+            code = EXIT_DONE
         except ExecutorAlreadyRunning:
-            return EXIT_DUPLICATE
+            code = EXIT_DUPLICATE
         except GpuResourcesRetained:
-            return EXIT_GPU_RETAINED
-        except ArtifactSinkUnavailable:
-            return EXIT_SINK_UNAVAILABLE
+            code = EXIT_GPU_RETAINED
+        except ArtifactSinkUnavailable as exc:  # a reason code, never a prompt
+            self.events.append(f"sink_unavailable:{exc}")
+            code = EXIT_SINK_UNAVAILABLE
         except PublicationUnrecorded:
-            return EXIT_UNRECORDED
+            code = EXIT_UNRECORDED
         except ExecutorConfigError:
-            return EXIT_CONFIG
+            code = EXIT_CONFIG
         finally:
             self.release_lock()
+            self.events.append(f"exit:{code if code is not None else 'crash'}")
+        return code
 
     def release_lock(self) -> None:
         lock, self._lock = self._lock, None
