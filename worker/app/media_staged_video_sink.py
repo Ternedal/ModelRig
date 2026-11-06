@@ -93,6 +93,21 @@ class _StagedVideoWriter:
     def flush(self) -> None:
         return None  # os.write is unbuffered; adoption fsyncs
 
+    def sync(self) -> None:
+        """Make what was written so far durable (fsync), without revealing the path or descriptor.
+
+        The adapter calls it before it removes its own copy in the work area on the internal disk
+        (Anders, 6 Nov 2026: generate on C:, publish on Z:), so a full disk or an I/O error on the
+        volume fails the job instead of losing the file. A failure is ArtifactSinkUnavailable,
+        exactly as for the sync in adoption."""
+        ticket = self._ticket
+        if ticket.fd is None or ticket.attempted:
+            raise ValueError("staged video handle is closed")
+        try:
+            os.fsync(ticket.fd)
+        except OSError as exc:
+            raise ArtifactSinkUnavailable("staged_video_unavailable") from exc
+
 
 class ExternalStagedVideoSink:
     """StagedFileArtifactSink + JobKeyedStagedSink on the verified external media volume."""
