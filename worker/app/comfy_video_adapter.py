@@ -447,9 +447,13 @@ class ComfyVideoAdapter:
         # The bytes must be durable on the publication volume before the work-area copy is removed:
         # render_to's cleanup runs as soon as this returns (Anders, 6 Nov: work on C:, publish to Z:).
         # A delayed write error (disk full, I/O error) surfaces here and fails the job, never a
-        # silent success.
+        # silent success. The staged sink's handle has sync() and deliberately no fileno (#2347).
+        sync = getattr(sink_file, "sync", None)
+        if callable(sync):
+            sync()
+            return
         try:
             fileno = sink_file.fileno()
-        except (AttributeError, OSError):  # an in-memory sink (tests) has no descriptor to sync
+        except (AttributeError, OSError):  # an in-memory sink (tests) has nothing to sync
             return
         os.fsync(fileno)

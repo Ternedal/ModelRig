@@ -444,6 +444,46 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(os.listdir(self.dirs["output"]), [])
         self.assertEqual(staged.read_bytes()[4:8], b"ftyp")
 
+    def test_a_staged_handle_is_synced_through_its_own_sync_before_the_removal(self):
+        """The staged sink's handle (#2347) has sync() and no fileno: that is what is called."""
+        adapter = self.adapter()
+        adapter.load()
+        events = []
+        real_remove = adapter._remove_job_outputs
+        adapter._remove_job_outputs = lambda *a: (events.append("remove"), real_remove(*a))[1]
+
+        class StagedHandle:
+            def __init__(self):
+                self.data = bytearray()
+
+            def write(self, chunk):
+                self.data += chunk
+                return len(chunk)
+
+            def flush(self):
+                pass
+
+            def sync(self):
+                events.append(("sync", len(self.data)))
+
+        handle = StagedHandle()
+        self.assertEqual(adapter.render_to(request(), handle), "video/mp4")
+        self.assertEqual(events, [("sync", len(handle.data)), "remove"], "the whole copy is synced, then removed")
+        self.assertEqual(bytes(handle.data[4:8]), b"ftyp")
+
+    def test_a_staged_handle_whose_sync_fails_fails_the_job(self):
+        from app.media_generation_contract import ArtifactSinkUnavailable
+        adapter = self.adapter()
+        adapter.load()
+
+        class FullDisk(io.BytesIO):
+            def sync(self):
+                raise ArtifactSinkUnavailable("staged_video_unavailable")
+
+        with self.assertRaises(ArtifactSinkUnavailable):
+            adapter.render_to(request(), FullDisk())
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "a failed job's output is cleaned up, as for any failure")
+
     def test_a_sync_failure_is_a_failed_job_never_a_silent_success(self):
         import errno
         from unittest.mock import patch
