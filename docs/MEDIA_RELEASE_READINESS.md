@@ -91,6 +91,7 @@ Prompts are blanked 30 days after a job finishes (#2340). A rollback does not ch
 - Checks, not handles: a process running as the same OS user can race a path check. The private work area is the mitigation (rig item 9).
 - Prompts and partial media sit on the internal disk while kept or rendered; the work area's ACL keeps other users out, and retention blanks prompts after 30 days.
 - A crash can leave leftovers in the work area. C6 reports them; an operator removes them one at a time.
+- Publish first, then delete: a finished video stays in the work area until it is published. If publication fails (the volume went away, the sink refused it), it is kept there for recovery and C6 lists it; there is no automatic republish, and the owner resubmits.
 - ComfyUI's error text is never propagated, so an out-of-memory error is visible only in ComfyUI's own log.
 - An interrupted render is failed, not re-queued; the owner resubmits.
 - A volume lost mid-render leaves an unindexed `.kaliv-*.tmp`; C6 reports it, and an operator removes it.
