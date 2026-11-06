@@ -59,6 +59,36 @@ It captures, checks and removes the file exactly like `remove-temp`.
 
 It captures the file by an atomic rename, then checks it again. If it is not the named file, it is put back without overwriting anything.
 
+## The recovery inventory (read-only)
+
+The video hand-off from the work area (C:) to the volume (Z:) is: copy into a staged file, sync, publish, then remove the copy on C:. Before the copy starts, the executor stores a **hand-off receipt** for the job (table `image_jobs_handoff`). The receipt holds the output's name, `st_dev`, `st_ino` and size, the volume root's identity, and the SHA-256 once copied. `inventory` uses it to tie each leftover to its job:
+
+```powershell
+& $GenPy scripts\media_volume_repair.py inventory --media-root $Gallery --volume-root $VolumeRoot --job-db $JobDb `
+    --lease-dir $LeaseDir --work-root $WorkRoot --work-dir "$WorkRoot\comfy\output"
+```
+
+The output is JSON, schema `kaliv-media-recovery-inventory/v1`. It lists one entry per job that left something behind:
+
+| `classification` | What happened | Evidence |
+|---|---|---|
+| `interrupted_copy` | the copy started and never finished | the work file is intact; the staged temp, if any, is a byte-exact prefix of it |
+| `crash_after_sync_before_publication` | a complete, synced copy was never published | a staged temp with the receipt's SHA-256; the work file is intact |
+| `publication_failed` | publication failed after the copy; the work file was kept | the work file is intact; nothing is staged or published |
+| `crash_after_publication_before_cleanup` | published once; the work copy was not yet removed | the job's asset has the receipt's SHA-256; the work file is intact |
+| `volume_changed` | the volume root is not the one the job handed over to | nothing on it is correlated |
+| `unknown` | anything else, including two candidates for one piece or a changed file | — |
+
+`source` (image-to-video) is `present`, `missing` (not on the volume, or not indexed), `changed` (another SHA-256 than recorded) or `unverified`. Pieces no job claims are under `unattributed`.
+
+**What it never does:**
+- change a file;
+- follow a link or reparse point;
+- use a file name that is not a plain name;
+- show a prompt, an owner or job parameters.
+
+While an executor runs it classifies nothing (`status: executor_running`), because its files are in flight. The inventory says what happened; what to do stays the operator's choice. The repairs above remove one named item at a time. **Nothing is retried or republished automatically**, and the owner resubmits.
+
 ## Exit codes
 
 | Code | Meaning |
