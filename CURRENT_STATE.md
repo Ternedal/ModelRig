@@ -396,6 +396,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_media_generation_profiles.py`
 - `tests/worker_media_generation_reconciliation.py`
 - `tests/worker_media_generation_runner.py`
+- `tests/worker_media_negative_matrix.py`
 - `tests/worker_media_preflight.py`
 - `tests/worker_media_recovery_inventory.py`
 - `tests/worker_media_repair.py`
