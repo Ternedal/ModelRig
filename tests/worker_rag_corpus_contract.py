@@ -66,6 +66,7 @@ async def _embed(text, model=None):
 
 def _fresh() -> DocStore:
     oc.embed = _embed
+    oc.embed_many = oc.embed_each
     oc.EMBED_MODEL = "nomic-embed-text"
     return DocStore(_db_path())
 
