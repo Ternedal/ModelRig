@@ -52,6 +52,13 @@ class EntryPointTests(unittest.TestCase):
         for name in ("lease", "profiles", "volume/media", "state"):
             (self.tmp / name).mkdir(parents=True)
         os.chmod(self.tmp / "lease", 0o700)
+        # G1: the volume's marker, and the two facts a temp dir cannot have (patched for every test;
+        # whether the root is a mount point stays per test, through os.path.ismount as before).
+        (self.tmp / "volume" / ".kaliv-media-volume").write_text("kaliv-test-volume-1")
+        for name, value in (("filesystem", "ext4"), ("system_volume_dev", -1)):
+            patcher = patch(f"app.media_volume.SystemProbe.{name}", return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.write_profile(image_profile(profile_id="sdxl-a", resources={
             "min_usable_gib": 8, "reserve_gib": 2, "devices": ["cuda:0"], "cpu_offload": False}))
         self.env = {
@@ -59,6 +66,7 @@ class EntryPointTests(unittest.TestCase):
             "KALIV_MEDIA_JOB_DB": str(self.tmp / "state" / "jobs.sqlite3"),
             "KALIV_MEDIA_ROOT": str(self.tmp / "volume" / "media"),
             "KALIV_MEDIA_VOLUME_ROOT": str(self.tmp / "volume"),
+            "KALIV_MEDIA_VOLUME_ID": "kaliv-test-volume-1",
             "KALIV_MEDIA_PROFILE_DIR": str(self.tmp / "profiles"),
             "KALIV_MEDIA_PROFILES_ENABLED": "sdxl-a",
             "KALIV_MEDIA_ALLOW_CANDIDATE_PROFILES": "1",
@@ -215,6 +223,42 @@ class EntryPointTests(unittest.TestCase):
         env = {**self.env, "KALIV_MEDIA_PROFILES_ENABLED": "wan-a"}
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
             self.assertEqual(main(["--device", "cuda:0"], env), EXIT_CONFIG)
+
+    def test_g1_volume_configuration_is_78_and_an_absent_or_foreign_volume_is_75(self):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            for env in ({k: v for k, v in self.env.items() if k != "KALIV_MEDIA_VOLUME_ID"},
+                        {**self.env, "KALIV_MEDIA_VOLUME_ID": "bad id"}):
+                with self.subTest(id=env.get("KALIV_MEDIA_VOLUME_ID")):
+                    self.assertEqual(main(["--device", "cuda:0"], env), EXIT_CONFIG)
+            with patch("app.media_volume.SystemProbe.filesystem", return_value="exfat"):
+                self.assertEqual(main(["--device", "cuda:0"], self.env), EXIT_CONFIG, "no stable file ids")
+            with patch("app.media_volume.SystemProbe.system_volume_dev",
+                       return_value=os.lstat(self.tmp / "volume").st_dev):
+                self.assertEqual(main(["--device", "cuda:0"], self.env), EXIT_CONFIG, "the system disk")
+            # another disk at the same path: its marker does not match
+            self.assertEqual(main(["--device", "cuda:0"], {**self.env, "KALIV_MEDIA_VOLUME_ID": "kaliv-other-disk-1"}),
+                             EXIT_SINK_UNAVAILABLE)
+        self.assertFalse(Path(self.env["KALIV_MEDIA_JOB_DB"]).exists(), "nothing written before the volume is proven")
+
+    def test_a_disk_swapped_while_running_stops_the_executor_before_the_next_claim(self):
+        # G1 pins the volume's identity at start: the same marker on another disk is not enough.
+        from app.image_job_store import ImageJobStore
+        volume = self.tmp / "volume"
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            store = ImageJobStore(self.env["KALIV_MEDIA_JOB_DB"])
+            executor = build_from_env("cuda:0", self.env,
+                                      adapter_factory=lambda p: FakeAdapter(p, self.env["KALIV_GPU_LEASE_DIR"]))
+            jobs = []
+
+            def swap_disk():
+                jobs.append(store.submit("anders", "a red bicycle", profile_id="sdxl-a",
+                                         params={"width": 1024, "height": 1024, "steps": 20})["job_id"])
+                volume.rename(self.tmp / "volume-old")
+                (volume / "media").mkdir(parents=True)
+                (volume / ".kaliv-media-volume").write_text("kaliv-test-volume-1")
+            self.assertEqual(executor.run(max_steps=3, idle_sleep=swap_disk), EXIT_SINK_UNAVAILABLE)
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(store.get(jobs[0], "anders")["state"], "queued", "not claimed on the other disk")
 
     def test_an_unmounted_volume_exits_75_from_the_real_process(self):
         result = self.run_entry(self.env)  # a plain temp dir is not a mount point

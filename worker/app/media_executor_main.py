@@ -11,7 +11,8 @@ Configuration (all from the environment; shared names agreed in 6636684138):
   KALIV_MEDIA_EXECUTOR=1              master switch
   KALIV_MEDIA_JOB_DB                  absolute path of the job SQLite (ImageJobStore)
   KALIV_MEDIA_ROOT                    gallery media directory on the external volume
-  KALIV_MEDIA_VOLUME_ROOT             the verified (mounted) volume root
+  KALIV_MEDIA_VOLUME_ROOT             the verified (mounted) volume root (G1: docs/MEDIA_VOLUME.md)
+  KALIV_MEDIA_VOLUME_ID               the id in <volume root>/.kaliv-media-volume
   KALIV_MEDIA_PROFILE_DIR             operator profile directory
   KALIV_MEDIA_PROFILES_ENABLED, KALIV_MEDIA_ALLOW_CANDIDATE_PROFILES, KALIV_GPU_LEASE_DIR,
   KALIV_GPU_DEVICE_UUIDS, CUDA_DEVICE_ORDER, HF_HUB_OFFLINE, TRANSFORMERS_OFFLINE  (existing)
@@ -41,6 +42,7 @@ from .media_executor import EXIT_CONFIG, EXIT_SINK_UNAVAILABLE, ExecutorConfigEr
 from .media_gallery_store import ExternalMediaSink
 from .media_generation_contract import ArtifactSinkUnavailable, GenerationError
 from .media_generation_profiles import ModelProfile, enabled_profiles, load_profile_dir
+from .media_volume import VOLUME_ID_ENV, MediaVolumeConfigError, media_volume_from_env
 
 SWITCH_ENV = "KALIV_MEDIA_EXECUTOR"
 JOB_DB_ENV = "KALIV_MEDIA_JOB_DB"
@@ -85,7 +87,8 @@ def default_adapter_factory(device: str, lease_dir: str, env: Mapping[str, str])
 
 
 def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
-                   adapter_factory: Callable[[ModelProfile], object] | None = None) -> MediaExecutor:
+                   adapter_factory: Callable[[ModelProfile], object] | None = None,
+                   volume_probe=None) -> MediaExecutor:
     """Everything the executor needs, from the environment. Raises ExecutorConfigError or
     ArtifactSinkUnavailable (the volume is not there); never creates a missing directory."""
     env = os.environ if env is None else env
@@ -101,7 +104,10 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
     if gpu_uuid is None:
         raise ExecutorConfigError(f"no GPU UUID is configured for {device}")
     job_db = _absolute(env, JOB_DB_ENV)
-    media_root, volume_root = _absolute(env, MEDIA_ROOT_ENV), _absolute(env, VOLUME_ROOT_ENV)
+    media_root = _absolute(env, MEDIA_ROOT_ENV)
+    _absolute(env, VOLUME_ROOT_ENV)
+    if not env.get(VOLUME_ID_ENV):
+        raise ExecutorConfigError(f"{VOLUME_ID_ENV} is required (the id in the volume's marker)")
     profile_dir = _absolute(env, PROFILE_DIR_ENV)
     try:
         profiles = enabled_profiles(load_profile_dir(profile_dir), env)
@@ -114,15 +120,27 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
         # The adapter refuses to load without them; checked here so a missing setting is exit 78
         # and leaves the queue untouched, instead of failing every claimed job (#2337 review 4477167705).
         raise ExecutorConfigError(f"{' and '.join(f + '=1' for f in OFFLINE_FLAGS)} are required (never a download)")
-    sink = ExternalMediaSink(media_root, volume_root)
+    # G1: the production volume check. A configuration that can never work (a malformed id, a FAT
+    # volume, the system disk) is 78; a volume that is not usable right now is 75. Its identity is
+    # pinned here, so a disk unplugged or swapped while the executor runs stops it until a restart.
+    try:
+        volume = media_volume_from_env(env, probe=volume_probe)
+    except MediaVolumeConfigError as exc:
+        raise ExecutorConfigError(str(exc)) from None
+    sink = ExternalMediaSink(media_root, str(volume.root))
+
+    def guard() -> None:
+        volume.verify()  # mounted, marked, the pinned identity
+        sink._root()  # the gallery root is a canonical directory inside it
+
     # The volume is verified before the job database is first looked at (exit 75, nothing
     # inspected or created) and again before EVERY later access, so a volume that goes away while
     # the executor runs stops it before it claims another job, instead of rendering one it cannot
     # publish (#2337 review 4477083808).
-    sink._root()
+    guard()
     _check_job_db(job_db)
     try:
-        store = ImageJobStore(job_db, volume_guard=sink._root)
+        store = ImageJobStore(job_db, volume_guard=guard)
     except ImageJobError as exc:
         raise ExecutorConfigError(str(exc)) from None
     except sqlite3.DatabaseError as exc:

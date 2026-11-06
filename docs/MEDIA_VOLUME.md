@@ -2,7 +2,12 @@
 
 Generated media never lands on the internal disk, not even transiently. `worker/app/media_volume.py` is the production check behind that rule. `MountedMediaVolume` implements the `VerifiedMediaVolume` protocol in `media_generation_contract`.
 
-**Status: it exists but is not wired in yet.** Nothing calls it; wiring it into the executor is a separate PR. Video stays default-off, and `media_executor_main` keeps exit 78 for video until that PR and the rig evidence are in.
+**Status: wired into the media executor's entry point** (`media_executor_main.build_from_env`).
+- **The volume:** `KALIV_MEDIA_VOLUME_ROOT` plus `KALIV_MEDIA_VOLUME_ID` build one `MountedMediaVolume` at start.
+- **The job store's guard:** checks it before every access (`volume.verify()`, then the gallery root).
+- **The gallery sink:** uses its root.
+- **Exit codes:** a configuration that can never work is exit 78; a missing, foreign or swapped disk is exit 75.
+- **Video stays default-off:** `media_executor_main` keeps exit 78 for video until the staged sink, image-to-video and the rig evidence are in.
 
 ## Operator setup (once per disk)
 
@@ -64,7 +69,7 @@ The root's identity (`st_dev`, `st_ino`) is pinned. On Windows, `st_dev` is the 
 
 A missing marker counts as 75, because a wrong disk looks exactly the same. The reason string says which check failed. It never contains a prompt.
 
-## Integration (the follow-up wiring PR)
+## Integration
 
 ```python
 volume = media_volume_from_env()                       # KALIV_MEDIA_VOLUME_ROOT / _ID
