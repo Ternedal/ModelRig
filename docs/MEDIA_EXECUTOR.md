@@ -93,15 +93,17 @@ Each executor runs in the supervisor's process tree (a Windows Job Object), so s
 | `KALIV_MEDIA_EXECUTOR_DEVICES` | supervisor | `cuda:0` or `cuda:0,cuda:1`; at most 8, no duplicates |
 | `KALIV_MEDIA_EXECUTOR_PYTHON` | supervisor | Absolute path of the media environment's `python.exe` (torch and diffusers are not in the frozen worker) |
 | `KALIV_MEDIA_EXECUTOR_APP_DIR` | supervisor | Absolute path of the directory that contains `app/media_executor_main.py` |
-| `KALIV_MEDIA_JOB_DB` | executor, routes | Absolute path of the job SQLite |
+| `KALIV_MEDIA_WORK_ROOT` | executor | The private work area on the internal disk, where media is generated and the job database lives (Anders, 6 Nov; `docs/MEDIA_WORK_AREA.md`). Missing, not private, a network drive or on the media volume: exit 78 |
+| `KALIV_MEDIA_JOB_DB` | executor, routes | Absolute path of the job SQLite, in an existing folder inside the work area (else exit 78). The routes must run as the same account as the executor: nobody else can read the work area |
 | `KALIV_MEDIA_ROOT`, `KALIV_MEDIA_VOLUME_ROOT` | executor, gallery | Media directory and the verified volume root (`ExternalMediaSink`) |
+| `KALIV_MEDIA_VOLUME_ID` | executor | The id in `<volume root>/.kaliv-media-volume` (G1, `docs/MEDIA_VOLUME.md`). Missing or malformed: exit 78. Wrong disk: exit 75 |
 | `KALIV_MEDIA_PROFILE_DIR` | executor | Operator profile directory |
 | `KALIV_MEDIA_IDLE_UNLOAD_S` | executor | Optional; default 300 |
 | `KALIV_MEDIA_PROFILES_ENABLED`, `KALIV_MEDIA_ALLOW_CANDIDATE_PROFILES`, `KALIV_GPU_LEASE_DIR`, `KALIV_GPU_DEVICE_UUIDS`, `CUDA_DEVICE_ORDER`, `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE` | executor | Existing |
 
 The supervisor reads them the way the children see them: the env file (`modelrig.env`) wins over its own environment.
 
-The entry point checks the configuration before it touches anything, including the GPU lease directory: one that is relative, missing, a symlink or writable by others is exit 78, not a crash. The volume is verified before the job database is first opened and again before every later database access, so a volume that goes away while the executor runs stops it (exit 75) before it claims another job (#2337 reviews 4477083816, 4477083808). A diffusers profile also requires `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` at configuration time: without them it is exit 78 and the queue is untouched, instead of every claimed job failing at load (#2337 review 4477167705). An existing job database must be a regular SQLite file: a directory, a link (which could lead off the volume), a FIFO or a file that is not SQLite is exit 78 (#2337 review 4477759300); a locked database stays a transient exit 1. A missing directory is never created.
+The entry point checks the configuration before it touches anything, including the GPU lease directory: one that is relative, missing, a symlink or writable by others is exit 78, not a crash. The work area and then the volume are verified before the job database is first opened and again before every later database access, so a volume that goes away, or a work area that changes, while the executor runs stops it (exit 75) before it claims another job (#2337 reviews 4477083816, 4477083808). A diffusers profile also requires `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` at configuration time: without them it is exit 78 and the queue is untouched, instead of every claimed job failing at load (#2337 review 4477167705). An existing job database must be a regular SQLite file: a directory, a link (which could lead out of the work area), a FIFO or a file that is not SQLite is exit 78 (#2337 review 4477759300); a locked database stays a transient exit 1. A missing directory is never created.
 
 ## Exit codes and the supervisor's policy
 

@@ -248,13 +248,13 @@ class AdapterTests(unittest.TestCase):
                                            limits={"max_prompt_chars": 200, "sizes": [[832, 480]],
                                                    "max_steps": 30, "max_frames": 81}))
 
-    def adapter(self, fake=None, profile=None, volume=None, comfy_root=None, **kwargs) -> ComfyVideoAdapter:
+    def adapter(self, fake=None, profile=None, work_area=None, comfy_root=None, **kwargs) -> ComfyVideoAdapter:
         main_py = str(Path(comfy_root, "main.py")) if comfy_root else str(FAKE_MAIN)
         launch = ComfyLaunch(python_executable=sys.executable, main_py=main_py, port=self.port,
                              input_directory=self.dirs["input"], output_directory=self.dirs["output"],
                              temp_directory=self.dirs["temp"], user_directory=self.dirs["user"])
         env = {"FAKE_COMFY_STATE_DIR": self.state, **(fake or {})}
-        sup = FakeSupervisor(fake_env=env, media_volume=volume, gpu_uuid=GPU, lease_dir=self.lease_dir, launch=launch,
+        sup = FakeSupervisor(fake_env=env, work_area=work_area, gpu_uuid=GPU, lease_dir=self.lease_dir, launch=launch,
                              reserve_gib=2, min_usable_gib=8, ready_timeout_s=15, stop_timeout_s=5, poll_s=0.05,
                              base_env={"PATH": os.environ.get("PATH", "")})
         values = dict(supervisor=sup, template_dir=self.templates, output_directory=self.dirs["output"], poll_s=0.05,
@@ -359,36 +359,36 @@ class AdapterTests(unittest.TestCase):
         with adapter.supervisor.job_slot():
             pass  # acquirable: the failed job did not leak it
 
-    def test_comfyui_media_directories_must_be_on_the_verified_volume_before_start(self):
+    def test_comfyui_directories_must_be_in_the_private_work_area_before_start(self):
         for lost in ("input", "output", "temp", "user"):
             with self.subTest(lost=lost):
-                volume = AnyExistingDirectory()
-                volume.lost.add(self.dirs[lost])
+                work_area = AnyExistingDirectory()
+                work_area.lost.add(self.dirs[lost])
                 self.port = free_port()
                 with self.assertRaises(ArtifactSinkUnavailable):
-                    self.adapter(volume=volume).load()
-                self.assertFalse(Path(self.state, "pid").exists(), "no ComfyUI on an unverified disk")
+                    self.adapter(work_area=work_area).load()
+                self.assertFalse(Path(self.state, "pid").exists(), "no ComfyUI outside the verified work area")
                 self.assertTrue(self.lease_is_free())
 
-    def test_losing_the_volume_before_submit_is_fatal_and_submits_nothing(self):
-        volume = AnyExistingDirectory()
-        adapter = self.adapter(volume=volume)
+    def test_losing_the_work_area_before_submit_is_fatal_and_submits_nothing(self):
+        work_area = AnyExistingDirectory()
+        adapter = self.adapter(work_area=work_area)
         adapter.load()
-        volume.lost.add("*")  # unplugged, or replaced by another disk
+        work_area.lost.add("*")  # replaced, or no longer private
         with self.assertRaises(ArtifactSinkUnavailable):
             adapter.render_to(request(), io.BytesIO())
         self.assertEqual(self.submissions(), 0)
 
-    def test_losing_the_volume_during_the_render_hands_nothing_to_the_sink(self):
-        volume = AnyExistingDirectory()
-        adapter = self.adapter(volume=volume, fake={"FAKE_COMFY_RENDER_SECONDS": "0.5"})
+    def test_losing_the_work_area_during_the_render_hands_nothing_to_the_sink(self):
+        work_area = AnyExistingDirectory()
+        adapter = self.adapter(work_area=work_area, fake={"FAKE_COMFY_RENDER_SECONDS": "0.5"})
         adapter.load()
         real_history = adapter.supervisor.history
 
         def history_then_unplug(prompt_id):
             record = real_history(prompt_id)
             if record is not None:
-                volume.lost.add("*")  # the render finished, then the disk went away
+                work_area.lost.add("*")  # the render finished, then the work area failed its check
             return record
 
         adapter.supervisor.history = history_then_unplug
@@ -397,7 +397,7 @@ class AdapterTests(unittest.TestCase):
             adapter.render_to(request(), sink)
         self.assertEqual(sink.getvalue(), b"")
 
-    # --- #2316 review 4415046066: failed jobs must not fill the volume ---------------------------
+    # --- #2316 review 4415046066: failed jobs must not fill the work area-----------------------
     def test_rejected_outputs_do_not_accumulate(self):
         """Codex's scenario: three renders rejected by the size cap must leave nothing behind."""
         adapter = self.adapter(fake={"FAKE_COMFY_MP4_PAD": "4096"}, profile=self.profile(max_output_bytes=1024))
@@ -418,6 +418,45 @@ class AdapterTests(unittest.TestCase):
             adapter.render_to(request(), BrokenSink())
         self.assertEqual(os.listdir(self.dirs["output"]), [])
 
+    # --- Anders, 6 Nov (#2275 6686905826): the work-area copy goes only once the staged copy is durable ---
+    def test_the_staged_copy_is_synced_before_the_work_area_copy_is_removed(self):
+        from unittest.mock import patch
+        adapter = self.adapter()
+        adapter.load()
+        events = []
+        real_remove = adapter._remove_job_outputs
+
+        def remove(*args):
+            events.append(("remove", sorted(os.listdir(self.dirs["output"]))))
+            return real_remove(*args)
+
+        adapter._remove_job_outputs = remove
+        real_fsync = os.fsync
+        staged = Path(self.tmp, "staged.mp4")
+        with open(staged, "wb") as sink, \
+                patch("app.comfy_video_adapter.os.fsync",
+                      side_effect=lambda fd: (events.append(("fsync", fd)), real_fsync(fd))[1]):
+            self.assertEqual(adapter.render_to(request(), sink), "video/mp4")
+            fileno = sink.fileno()
+        self.assertEqual([e[0] for e in events], ["fsync", "remove"], "durable on the volume, then removed here")
+        self.assertEqual(events[0][1], fileno, "the sink's own descriptor is synced")
+        self.assertEqual(len(events[1][1]), 1, "the render's output was still there when the copy was synced")
+        self.assertEqual(os.listdir(self.dirs["output"]), [])
+        self.assertEqual(staged.read_bytes()[4:8], b"ftyp")
+
+    def test_a_sync_failure_is_a_failed_job_never_a_silent_success(self):
+        import errno
+        from unittest.mock import patch
+        adapter = self.adapter()
+        adapter.load()
+        with open(Path(self.tmp, "staged.mp4"), "wb") as sink, \
+                patch("app.comfy_video_adapter.os.fsync", side_effect=OSError(errno.ENOSPC, "No space left on device")):
+            with self.assertRaises(OSError) as caught:
+                adapter.render_to(request(), sink)
+        self.assertEqual(caught.exception.errno, errno.ENOSPC)
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "the failed job's output is cleaned up, as for any failure")
+        self.assertEqual(adapter.last_cleanup["failed"], [])
+
     def test_cleanup_never_touches_what_existed_before_the_job(self):
         Path(self.dirs["output"], "operator-note.txt").write_text("keep me")
         os.mkdir(os.path.join(self.dirs["output"], "keep-dir"))
@@ -426,16 +465,16 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
         self.assertEqual(sorted(os.listdir(self.dirs["output"])), ["keep-dir", "operator-note.txt"])
 
-    def test_cleanup_touches_nothing_when_the_volume_is_no_longer_verified(self):
-        volume = AnyExistingDirectory()
-        adapter = self.adapter(volume=volume, fake={"FAKE_COMFY_RENDER_SECONDS": "0.3"})
+    def test_cleanup_touches_nothing_when_the_work_area_is_no_longer_verified(self):
+        work_area = AnyExistingDirectory()
+        adapter = self.adapter(work_area=work_area, fake={"FAKE_COMFY_RENDER_SECONDS": "0.3"})
         adapter.load()
         real_history = adapter.supervisor.history
 
         def history_then_unplug(prompt_id):
             record = real_history(prompt_id)
             if record is not None:
-                volume.lost.add("*")
+                work_area.lost.add("*")
             return record
 
         adapter.supervisor.history = history_then_unplug
@@ -810,17 +849,17 @@ class AdapterTests(unittest.TestCase):
         with self.assertLogs("kaliv.media.comfy", level="WARNING"):
             self.assertEqual(good.render_to(request(), io.BytesIO()), "video/mp4", "a successful hand-off stays a success")
 
-    def test_production_supervisor_has_no_internal_disk_default(self):
+    def test_production_supervisor_has_no_default_work_area(self):
         from app.comfy_supervisor import ComfyLaunch, ComfySupervisor, ComfySupervisorError
         launch = ComfyLaunch(python_executable=sys.executable, main_py=str(FAKE_MAIN), port=self.port,
                              input_directory=self.dirs["input"], output_directory=self.dirs["output"],
                              temp_directory=self.dirs["temp"], user_directory=self.dirs["user"])
         common = dict(gpu_uuid=GPU, lease_dir=self.lease_dir, launch=launch, reserve_gib=2, min_usable_gib=8)
         with self.assertRaises(TypeError):
-            ComfySupervisor(**common)  # media_volume is required
+            ComfySupervisor(**common)  # work_area is required
         for bogus in (None, "/mnt/media", object()):
-            with self.subTest(volume=bogus), self.assertRaises(ComfySupervisorError):
-                ComfySupervisor(media_volume=bogus, **common)
+            with self.subTest(work_area=bogus), self.assertRaises(ComfySupervisorError):
+                ComfySupervisor(work_area=bogus, **common)
 
     def test_template_problems_stop_load_before_comfyui_starts(self):
         link_dir = tempfile.mkdtemp(dir=self.tmp)

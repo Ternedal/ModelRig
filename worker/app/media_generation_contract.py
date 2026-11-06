@@ -130,13 +130,27 @@ class JobKeyedStagedSink(Protocol):
 
 @runtime_checkable
 class VerifiedMediaVolume(Protocol):
-    """The external-media mount check (ChatGPT implements it; #2316 review 5700997784).
+    """The external-media mount check (#2316 review 5700997784; production: media_volume, G1).
 
     require(path) returns only if path lies on the verified, currently mounted
-    external media volume, and raises ArtifactSinkUnavailable otherwise. Every
-    directory that ever holds generated media -- including ComfyUI's own
-    input/output/temp/user scratch -- must pass it: media never lands on the
-    internal disk, not even transiently.
+    external media volume, and raises ArtifactSinkUnavailable otherwise. This is
+    where media is PUBLISHED: the gallery and every staged file. Generation
+    happens in the MediaWorkArea below (Anders, 6 Nov 2026, #2275).
+    """
+
+    def require(self, path: str) -> None: ...
+
+
+@runtime_checkable
+class MediaWorkArea(Protocol):
+    """Where media is GENERATED: a private folder on the internal disk (Anders, 6 Nov 2026, #2275).
+
+    require(path) returns only if path lies in the verified private work area,
+    and raises ArtifactSinkUnavailable otherwise. ComfyUI's input/output/temp/user
+    folders and the staged source image must pass it. Finished media leaves it
+    only by being copied into a staged file on the VerifiedMediaVolume, checked
+    and published there in one atomic step; then the copy here is removed.
+    Production: media_work_area.PrivateWorkArea.
     """
 
     def require(self, path: str) -> None: ...

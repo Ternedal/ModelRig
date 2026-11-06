@@ -387,6 +387,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_kaliv_repository_authority_qualifier.py`
 - `tests/worker_kaliv_software_exact_green_qualifier.py`
 - `tests/worker_kaliv_voicerig_physical_qualifier.py`
+- `tests/worker_lease_dir_acl.py`
 - `tests/worker_media_executor.py`
 - `tests/worker_media_executor_main.py`
 - `tests/worker_media_generation_profiles.py`
@@ -394,6 +395,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_media_generation_runner.py`
 - `tests/worker_media_repair.py`
 - `tests/worker_media_source_image.py`
+- `tests/worker_media_volume.py`
+- `tests/worker_media_work_area.py`
 - `tests/worker_migrate.py`
 - `tests/worker_netguard.py`
 - `tests/worker_occurrence_ledger.py`

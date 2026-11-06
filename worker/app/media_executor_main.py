@@ -9,9 +9,11 @@ down). Default-off: without KALIV_MEDIA_EXECUTOR=1 it refuses to run.
 
 Configuration (all from the environment; shared names agreed in 6636684138):
   KALIV_MEDIA_EXECUTOR=1              master switch
-  KALIV_MEDIA_JOB_DB                  absolute path of the job SQLite (ImageJobStore)
+  KALIV_MEDIA_WORK_ROOT               the private work area on the internal disk (docs/MEDIA_WORK_AREA.md)
+  KALIV_MEDIA_JOB_DB                  absolute path of the job SQLite (ImageJobStore), in the work area
   KALIV_MEDIA_ROOT                    gallery media directory on the external volume
-  KALIV_MEDIA_VOLUME_ROOT             the verified (mounted) volume root
+  KALIV_MEDIA_VOLUME_ROOT             the verified (mounted) volume root (G1: docs/MEDIA_VOLUME.md)
+  KALIV_MEDIA_VOLUME_ID               the id in <volume root>/.kaliv-media-volume
   KALIV_MEDIA_PROFILE_DIR             operator profile directory
   KALIV_MEDIA_PROFILES_ENABLED, KALIV_MEDIA_ALLOW_CANDIDATE_PROFILES, KALIV_GPU_LEASE_DIR,
   KALIV_GPU_DEVICE_UUIDS, CUDA_DEVICE_ORDER, HF_HUB_OFFLINE, TRANSFORMERS_OFFLINE  (existing)
@@ -21,8 +23,15 @@ First version: images only, published job-keyed through ExternalMediaSink.
 A video profile for this device is a configuration error (exit 78) until a
 staged video sink exists; there is no bytes fallback.
 
+Where things live (Anders, 6 Nov 2026, #2275 6686905826): media is generated in
+the private work area on the internal disk, and published on the external volume.
+The job database, which holds prompts until retention blanks them, is in the work
+area. The executor still refuses to claim a job while the volume is not there, so
+no render is wasted on a result it cannot publish.
+
 Exit codes are MediaExecutor's: 0, 70, 73, 75 (also: the volume is not there
-at start), 76, 78 (also: any configuration error, including the switch off).
+at start), 76, 78 (also: any configuration error, including the switch off and a
+work area that fails its checks at start).
 """
 from __future__ import annotations
 
@@ -41,11 +50,14 @@ from .media_executor import EXIT_CONFIG, EXIT_SINK_UNAVAILABLE, ExecutorConfigEr
 from .media_gallery_store import ExternalMediaSink
 from .media_generation_contract import ArtifactSinkUnavailable, GenerationError
 from .media_generation_profiles import ModelProfile, enabled_profiles, load_profile_dir
+from .media_volume import VOLUME_ID_ENV, MediaVolumeConfigError, MountedMediaVolume, media_volume_from_env
+from .media_work_area import MediaWorkAreaConfigError, PrivateWorkArea, work_area_from_env
 
 SWITCH_ENV = "KALIV_MEDIA_EXECUTOR"
 JOB_DB_ENV = "KALIV_MEDIA_JOB_DB"
 MEDIA_ROOT_ENV = "KALIV_MEDIA_ROOT"
 VOLUME_ROOT_ENV = "KALIV_MEDIA_VOLUME_ROOT"
+WORK_ROOT_ENV = "KALIV_MEDIA_WORK_ROOT"
 PROFILE_DIR_ENV = "KALIV_MEDIA_PROFILE_DIR"
 IDLE_ENV = "KALIV_MEDIA_IDLE_UNLOAD_S"
 
@@ -57,9 +69,14 @@ def _absolute(env: Mapping[str, str], name: str) -> str:
     return value
 
 
+def _on_one_device(work: PrivateWorkArea, volume: MountedMediaVolume) -> bool:
+    """Whether the work area is on the media volume's device."""
+    return work.device == os.stat(volume.root).st_dev
+
+
 def _check_job_db(path: str) -> None:
-    """An existing job database must be a regular file. A directory, a link (which could lead off
-    the verified volume) or a FIFO (which SQLite would block on) is a configuration error: exit 78,
+    """An existing job database must be a regular file. A directory, a link (which could lead out
+    of the work area) or a FIFO (which SQLite would block on) is a configuration error: exit 78,
     never a crash the supervisor restarts (#2337 review 4477759300). A missing file is fine: the
     store creates it, and refuses a missing parent itself."""
     try:
@@ -85,7 +102,8 @@ def default_adapter_factory(device: str, lease_dir: str, env: Mapping[str, str])
 
 
 def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
-                   adapter_factory: Callable[[ModelProfile], object] | None = None) -> MediaExecutor:
+                   adapter_factory: Callable[[ModelProfile], object] | None = None,
+                   volume_probe=None, work_probe=None) -> MediaExecutor:
     """Everything the executor needs, from the environment. Raises ExecutorConfigError or
     ArtifactSinkUnavailable (the volume is not there); never creates a missing directory."""
     env = os.environ if env is None else env
@@ -101,7 +119,10 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
     if gpu_uuid is None:
         raise ExecutorConfigError(f"no GPU UUID is configured for {device}")
     job_db = _absolute(env, JOB_DB_ENV)
-    media_root, volume_root = _absolute(env, MEDIA_ROOT_ENV), _absolute(env, VOLUME_ROOT_ENV)
+    media_root = _absolute(env, MEDIA_ROOT_ENV)
+    _absolute(env, VOLUME_ROOT_ENV)
+    if not env.get(VOLUME_ID_ENV):
+        raise ExecutorConfigError(f"{VOLUME_ID_ENV} is required (the id in the volume's marker)")
     profile_dir = _absolute(env, PROFILE_DIR_ENV)
     try:
         profiles = enabled_profiles(load_profile_dir(profile_dir), env)
@@ -114,15 +135,44 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
         # The adapter refuses to load without them; checked here so a missing setting is exit 78
         # and leaves the queue untouched, instead of failing every claimed job (#2337 review 4477167705).
         raise ExecutorConfigError(f"{' and '.join(f + '=1' for f in OFFLINE_FLAGS)} are required (never a download)")
-    sink = ExternalMediaSink(media_root, volume_root)
-    # The volume is verified before the job database is first looked at (exit 75, nothing
-    # inspected or created) and again before EVERY later access, so a volume that goes away while
-    # the executor runs stops it before it claims another job, instead of rendering one it cannot
-    # publish (#2337 review 4477083808).
-    sink._root()
+    # Anders, 6 Nov 2026: generate in a private folder on the internal disk. It is local, so a work
+    # area that fails its checks at start is a configuration error (78), never "not there right now".
+    try:
+        work = work_area_from_env(env, probe=work_probe)
+    except MediaWorkAreaConfigError as exc:
+        raise ExecutorConfigError(str(exc)) from None
+    # G1: the production volume check. A configuration that can never work (a malformed id, a FAT
+    # volume, the system disk) is 78; a volume that is not usable right now is 75. Its identity is
+    # pinned here, so a disk unplugged or swapped while the executor runs stops it until a restart.
+    try:
+        volume = media_volume_from_env(env, probe=volume_probe)
+    except MediaVolumeConfigError as exc:
+        raise ExecutorConfigError(str(exc)) from None
+    if _on_one_device(work, volume):
+        raise ExecutorConfigError(f"{WORK_ROOT_ENV} must not be on the media volume: media is generated on the "
+                                  "internal disk and published on the external one")
+    # The job database (prompts until retention blanks them) lives where media is generated: in the
+    # work area. Checked, never moved: a folder outside it, behind a link or on another device is 78.
+    job_dir = os.path.dirname(job_db)
+    try:
+        work.require(job_dir)
+    except ArtifactSinkUnavailable as exc:
+        raise ExecutorConfigError(f"{JOB_DB_ENV} must be in an existing folder in the work area ({exc})") from None
+    sink = ExternalMediaSink(media_root, str(volume.root))
+
+    def guard() -> None:
+        work.require(job_dir)  # still the pinned, private work area, and the same folder in it
+        volume.verify()  # mounted, marked, the pinned identity: no claim without the publication volume
+        sink._root()  # the gallery root is a canonical directory inside it
+
+    # Both are verified before the job database is first looked at (nothing inspected or created)
+    # and again before EVERY later access, so a volume that goes away while the executor runs stops
+    # it (75) before it claims another job, instead of rendering one it cannot publish
+    # (#2337 review 4477083808), and a work area that changes stops it too.
+    guard()
     _check_job_db(job_db)
     try:
-        store = ImageJobStore(job_db, volume_guard=sink._root)
+        store = ImageJobStore(job_db, volume_guard=guard)
     except ImageJobError as exc:
         raise ExecutorConfigError(str(exc)) from None
     except sqlite3.DatabaseError as exc:
@@ -148,8 +198,8 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
     except ExecutorConfigError as exc:
         print(f"media executor: configuration refused: {exc}", file=sys.stderr)
         return EXIT_CONFIG
-    except ArtifactSinkUnavailable:
-        print("media executor: the external media volume is not available", file=sys.stderr)
+    except ArtifactSinkUnavailable as exc:  # a reason code, never a prompt
+        print(f"media executor: the external media volume is not available ({exc})", file=sys.stderr)
         return EXIT_SINK_UNAVAILABLE
     poll = min(max(args.poll_seconds, 0.1), 30.0)
     try:

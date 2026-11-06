@@ -42,8 +42,8 @@ def free_port() -> int:
 
 
 class AnyExistingDirectory:
-    """Test-only stand-in for ChatGPT's external-mount verifier: accepts any existing
-    directory unless told that the volume is gone. Production passes the real one."""
+    """Test-only stand-in for the private work area (production: media_work_area.PrivateWorkArea):
+    accepts any existing directory unless told that it is no longer verified."""
 
     def __init__(self):
         self.lost: set[str] = set()
@@ -53,14 +53,14 @@ class AnyExistingDirectory:
         from app.media_generation_contract import ArtifactSinkUnavailable
         self.checked.append(path)
         if path in self.lost or "*" in self.lost or not os.path.isdir(path):
-            raise ArtifactSinkUnavailable(f"{path} is not on the verified external media volume")
+            raise ArtifactSinkUnavailable(f"{path} is not in the verified private work area")
 
 
 class FakeSupervisor(ComfySupervisor):
     """Adds the test-only FAKE_COMFY_* channel on top of the real child env."""
 
-    def __init__(self, *, fake_env: dict[str, str], media_volume=None, **kwargs):
-        super().__init__(media_volume=media_volume or AnyExistingDirectory(), **kwargs)
+    def __init__(self, *, fake_env: dict[str, str], work_area=None, **kwargs):
+        super().__init__(work_area=work_area or AnyExistingDirectory(), **kwargs)
         self.fake_env = fake_env
 
     def child_env(self) -> dict[str, str]:

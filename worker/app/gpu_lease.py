@@ -142,11 +142,26 @@ def lease_dir_from_env(env: Mapping[str, str] | None = None) -> str:
     return value
 
 
+_IS_WINDOWS = os.name == "nt"
+
+
+def _windows_lease_dir_private(directory: Path) -> tuple[bool, str]:
+    from .lease_dir_acl_windows import lease_dir_private  # Windows only; imports no third-party code
+    return lease_dir_private(directory)
+
+
 def _check_lease_dir(lease_dir: object) -> Path:
     directory = Path(lease_dir) if isinstance(lease_dir, str) and lease_dir else None
     if directory is None or not directory.is_absolute() or directory.is_symlink() or not directory.is_dir():
         raise GpuLeaseError("lease directory must be an existing absolute non-symlink directory")
-    if os.name != "nt":
+    if _IS_WINDOWS:
+        # The mode bits say nothing on Windows: read the owner and DACL instead (gap G5, #2296).
+        # Same rule as POSIX: owned by this user (or SYSTEM/Administrators), nobody else can
+        # add, replace, delete or re-permission a lock file.
+        private, reason = _windows_lease_dir_private(directory)
+        if not private:
+            raise GpuLeaseError(f"lease directory refused: {reason}")
+    else:
         info = directory.stat()
         if info.st_uid != os.getuid():
             raise GpuLeaseError("lease directory must be owned by the current user")
