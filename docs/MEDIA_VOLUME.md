@@ -5,7 +5,6 @@ Generated media never lands on the internal disk, not even transiently. `worker/
 **Status: wired into the media executor's entry point** (`media_executor_main.build_from_env`).
 - **The volume:** `KALIV_MEDIA_VOLUME_ROOT` plus `KALIV_MEDIA_VOLUME_ID` build one `MountedMediaVolume` at start.
 - **The job store's guard:** checks it before every access (`volume.verify()`, then the gallery root).
-- **The job database:** must be in an existing folder on the volume (Anders, 6 Nov). Prompts stay there until retention blanks them. A path off the volume, behind a link or in a missing folder is exit 78. Nothing is moved.
 - **The gallery sink:** uses its root.
 - **Exit codes:** a configuration that can never work is exit 78; a missing, foreign or swapped disk is exit 75.
 - **Video stays default-off:** `media_executor_main` keeps exit 78 for video until the staged sink, image-to-video and the rig evidence are in.

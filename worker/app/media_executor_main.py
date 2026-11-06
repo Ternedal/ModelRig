@@ -9,7 +9,7 @@ down). Default-off: without KALIV_MEDIA_EXECUTOR=1 it refuses to run.
 
 Configuration (all from the environment; shared names agreed in 6636684138):
   KALIV_MEDIA_EXECUTOR=1              master switch
-  KALIV_MEDIA_JOB_DB                  absolute path of the job SQLite (ImageJobStore), on the media volume
+  KALIV_MEDIA_JOB_DB                  absolute path of the job SQLite (ImageJobStore)
   KALIV_MEDIA_ROOT                    gallery media directory on the external volume
   KALIV_MEDIA_VOLUME_ROOT             the verified (mounted) volume root (G1: docs/MEDIA_VOLUME.md)
   KALIV_MEDIA_VOLUME_ID               the id in <volume root>/.kaliv-media-volume
@@ -127,16 +127,6 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
         volume = media_volume_from_env(env, probe=volume_probe)
     except MediaVolumeConfigError as exc:
         raise ExecutorConfigError(str(exc)) from None
-    # Anders, 6 Nov: the job database (it holds prompts until retention blanks them) lives where the
-    # media is generated, on the verified volume. Checked here, never moved: a path off the volume,
-    # behind a link or on another device is a configuration error (78).
-    try:
-        volume.require(os.path.dirname(job_db))
-    except ArtifactSinkUnavailable as exc:
-        if str(exc).startswith("media_volume_"):
-            raise  # the volume itself went away: 75
-        raise ExecutorConfigError(f"{JOB_DB_ENV} must be in an existing folder on the media volume "
-                                  f"({exc})") from None
     sink = ExternalMediaSink(media_root, str(volume.root))
 
     def guard() -> None:

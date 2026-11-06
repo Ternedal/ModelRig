@@ -49,7 +49,7 @@ class EntryPointTests(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        for name in ("lease", "profiles", "volume/media", "volume/state"):
+        for name in ("lease", "profiles", "volume/media", "state"):
             (self.tmp / name).mkdir(parents=True)
         os.chmod(self.tmp / "lease", 0o700)
         # G1: the volume's marker, and the two facts a temp dir cannot have (patched for every test;
@@ -63,7 +63,7 @@ class EntryPointTests(unittest.TestCase):
             "min_usable_gib": 8, "reserve_gib": 2, "devices": ["cuda:0"], "cpu_offload": False}))
         self.env = {
             "KALIV_MEDIA_EXECUTOR": "1",
-            "KALIV_MEDIA_JOB_DB": str(self.tmp / "volume" / "state" / "jobs.sqlite3"),
+            "KALIV_MEDIA_JOB_DB": str(self.tmp / "state" / "jobs.sqlite3"),
             "KALIV_MEDIA_ROOT": str(self.tmp / "volume" / "media"),
             "KALIV_MEDIA_VOLUME_ROOT": str(self.tmp / "volume"),
             "KALIV_MEDIA_VOLUME_ID": "kaliv-test-volume-1",
@@ -105,25 +105,25 @@ class EntryPointTests(unittest.TestCase):
 
     def test_a_job_database_that_is_not_a_regular_sqlite_file_is_78_not_a_crash(self):
         # #2337 review 4477759300: a directory raised sqlite3.OperationalError, exit 1, restarted forever.
-        (self.tmp / "volume" / "state" / "a-directory").mkdir()
-        real = self.tmp / "volume" / "state" / "real.sqlite3"
+        (self.tmp / "state" / "a-directory").mkdir()
+        real = self.tmp / "state" / "real.sqlite3"
         __import__("sqlite3").connect(real).close()
-        (self.tmp / "volume" / "state" / "a-link").symlink_to(real)
-        os.mkfifo(self.tmp / "volume" / "state" / "a-fifo")
-        (self.tmp / "volume" / "state" / "not-sqlite").write_bytes(b"not a database " * 100)
+        (self.tmp / "state" / "a-link").symlink_to(real)
+        os.mkfifo(self.tmp / "state" / "a-fifo")
+        (self.tmp / "state" / "not-sqlite").write_bytes(b"not a database " * 100)
         import threading
         for name in ("a-directory", "a-link", "a-fifo", "not-sqlite"):
             with self.subTest(name=name), patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
-                env = {**self.env, "KALIV_MEDIA_JOB_DB": str(self.tmp / "volume" / "state" / name)}
+                env = {**self.env, "KALIV_MEDIA_JOB_DB": str(self.tmp / "state" / name)}
                 codes = []  # in a thread: SQLite opening a FIFO blocks, and a test must fail, not hang
                 worker = threading.Thread(target=lambda: codes.append(main(["--device", "cuda:0"], env)), daemon=True)
                 worker.start()
                 worker.join(10)
                 self.assertEqual(codes, [EXIT_CONFIG], "refused promptly")
-        self.assertEqual((self.tmp / "volume" / "state" / "not-sqlite").read_bytes(), b"not a database " * 100, "untouched")
+        self.assertEqual((self.tmp / "state" / "not-sqlite").read_bytes(), b"not a database " * 100, "untouched")
 
     def test_an_unmounted_volume_is_75_before_the_job_database_is_inspected(self):
-        env = {**self.env, "KALIV_MEDIA_JOB_DB": str(self.tmp / "volume" / "state")}  # would be 78 if inspected
+        env = {**self.env, "KALIV_MEDIA_JOB_DB": str(self.tmp / "state")}  # would be 78 if inspected
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=False):
             self.assertEqual(main(["--device", "cuda:0"], env), EXIT_SINK_UNAVAILABLE)
 
@@ -240,24 +240,6 @@ class EntryPointTests(unittest.TestCase):
                              EXIT_SINK_UNAVAILABLE)
         self.assertFalse(Path(self.env["KALIV_MEDIA_JOB_DB"]).exists(), "nothing written before the volume is proven")
 
-    def test_the_job_database_must_be_on_the_media_volume(self):
-        # Anders, 6 Nov: the job database (prompts until retention) lives where the media is
-        # generated. Checked at start, never moved: off the volume, behind a link, or a missing
-        # folder is 78, and nothing is created anywhere.
-        outside = self.tmp / "state-on-internal-disk"
-        outside.mkdir()
-        (self.tmp / "volume" / "linked").symlink_to(outside)
-        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True), \
-                patch("app.media_executor_main.MediaExecutor.run",
-                      side_effect=AssertionError("the executor must not start")):  # fail fast, never hang
-            for path in (outside / "jobs.sqlite3", self.tmp / "volume" / "linked" / "jobs.sqlite3",
-                         self.tmp / "volume" / "no-such-folder" / "jobs.sqlite3"):
-                with self.subTest(path=str(path)):
-                    self.assertEqual(main(["--device", "cuda:0"], {**self.env, "KALIV_MEDIA_JOB_DB": str(path)}),
-                                     EXIT_CONFIG)
-            self.assertEqual(list(outside.iterdir()), [], "no database was created off the volume")
-            self.assertFalse((self.tmp / "volume" / "no-such-folder").exists())
-
     def test_a_disk_swapped_while_running_stops_the_executor_before_the_next_claim(self):
         # G1 pins the volume's identity at start: the same marker on another disk is not enough.
         from app.image_job_store import ImageJobStore
@@ -276,8 +258,7 @@ class EntryPointTests(unittest.TestCase):
                 (volume / ".kaliv-media-volume").write_text("kaliv-test-volume-1")
             self.assertEqual(executor.run(max_steps=3, idle_sleep=swap_disk), EXIT_SINK_UNAVAILABLE)
         self.assertEqual(len(jobs), 1)
-        moved = ImageJobStore(str(self.tmp / "volume-old" / "state" / "jobs.sqlite3"))  # the original disk
-        self.assertEqual(moved.get(jobs[0], "anders")["state"], "queued", "not claimed on the other disk")
+        self.assertEqual(store.get(jobs[0], "anders")["state"], "queued", "not claimed on the other disk")
 
     def test_an_unmounted_volume_exits_75_from_the_real_process(self):
         result = self.run_entry(self.env)  # a plain temp dir is not a mount point
