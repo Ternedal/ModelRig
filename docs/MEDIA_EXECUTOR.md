@@ -95,6 +95,7 @@ Each executor runs in the supervisor's process tree (a Windows Job Object), so s
 | `KALIV_MEDIA_EXECUTOR_APP_DIR` | supervisor | Absolute path of the directory that contains `app/media_executor_main.py` |
 | `KALIV_MEDIA_JOB_DB` | executor, routes | Absolute path of the job SQLite |
 | `KALIV_MEDIA_ROOT`, `KALIV_MEDIA_VOLUME_ROOT` | executor, gallery | Media directory and the verified volume root (`ExternalMediaSink`) |
+| `KALIV_MEDIA_JOB_DB` placement | executor | Must be in an existing folder on the verified media volume, the same place the media is generated (Anders, 6 Nov); otherwise exit 78 |
 | `KALIV_MEDIA_VOLUME_ID` | executor | The id in `<volume root>/.kaliv-media-volume` (G1, `docs/MEDIA_VOLUME.md`). Missing or malformed: exit 78. Wrong disk: exit 75 |
 | `KALIV_MEDIA_PROFILE_DIR` | executor | Operator profile directory |
 | `KALIV_MEDIA_IDLE_UNLOAD_S` | executor | Optional; default 300 |
