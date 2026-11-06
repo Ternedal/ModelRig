@@ -17,8 +17,9 @@ The copy between the two disks is **not** atomic, which is why the gallery never
 
 **When publication does not succeed.**
 - The owner cancelled before publication: the work-area copy is removed (the owner's choice).
-- Anything else after the copy (the volume went away, the sink refused it, registration failed): the work-area copy is **kept** for recovery. The adapter reports it in `last_cleanup["kept_for_recovery"]`, and C6 lists it.
-- A render that fails before it is finished leaves no finished file. Its output is removed at once, so failed renders do not pile up.
+- Anything else once the render is finished (the volume could not take the copy, it went away, the sink refused it, registration failed): the work-area copy is **kept** for recovery. The adapter reports it in `last_cleanup["kept_for_recovery"]`, and C6 lists it.
+- A render that fails before it is finished, or turns out not to be a valid MP4 within the size cap, leaves no finished file. Its output is removed at once, so failed renders do not pile up.
+- **Hand-off receipts:** before the first byte is copied, the executor stores a receipt for the job (`image_jobs_handoff`). It names the output, its `st_dev`, `st_ino` and size, and the volume root's identity. After the sync it adds the SHA-256. If a receipt cannot be stored, the job fails before anything is copied. C6's `inventory` uses the receipts to tie leftovers to their job (`docs/MEDIA_REPAIR.md`).
 
 **Where a crash leaves things.** A crashed job is failed at the next start ("interrupted by restart" or "during publication"), and the owner resubmits. Nothing partial ever reaches the gallery, and a finished file is never only on a disk where it could be lost: until it is published, the work-area copy exists.
 

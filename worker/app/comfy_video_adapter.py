@@ -98,6 +98,7 @@ class ComfyVideoAdapter:
         self.last_cleanup: dict[str, list[str]] = {}
         self._holding: list[tuple[set[str], list]] | None = None  # see holding_outputs()
         self._on_handoff: Callable[[dict], None] | None = None
+        self._sink_failed = False
         # True once an interrupt could not be confirmed drained: this ComfyUI must not take another
         # job. The executor unloads (and so restarts) the adapter (#2318 review 4469472651).
         self.needs_restart = False
@@ -194,14 +195,16 @@ class ComfyVideoAdapter:
         before = self._entry_names()  # snapshot before anything is submitted
         owned: list[tuple[str, int, int]] = []  # (name, st_dev, st_ino) attested by THIS prompt's history
         handed_over = False
+        self._sink_failed = False
         try:
             mime = self._render_and_hand_over(request, sink_file, before, owned, should_cancel)
             handed_over = True
             return mime
         finally:
-            if handed_over and self._holding is not None:
+            if (handed_over or self._sink_failed) and self._holding is not None:
                 # Anders, 6 Nov: the finished file stays in the work area until the caller has
                 # published it; holding_outputs() removes it then (or keeps it if publication fails).
+                # A copy the volume could not take (write or sync failed) is a finished file too.
                 self._holding.append((before, owned))
             else:
                 self._cleanup_quietly(before, owned)
@@ -490,7 +493,7 @@ class ComfyVideoAdapter:
                 raise GenerationError("ComfyUI output is not an MP4 container")
             output = {"name": source.name, "dev": first.st_dev, "ino": first.st_ino, "size": first.st_size}
             self._notify_handoff({"stage": "copying", "output": output})  # before a byte reaches the volume
-            sink_file.write(header)
+            self._to_sink(sink_file.write, header)
             digest.update(header)
             copied = len(header)
             while True:
@@ -500,28 +503,37 @@ class ComfyVideoAdapter:
                 copied += len(chunk)
                 if copied > limit:
                     raise GenerationError("ComfyUI output grew past the size cap")
-                sink_file.write(chunk)
+                self._to_sink(sink_file.write, chunk)
                 digest.update(chunk)
             last = os.fstat(handle.fileno())
         if (copied != first.st_size or last.st_size != first.st_size
                 or last.st_mtime_ns != first.st_mtime_ns or last.st_ino != first.st_ino):
             raise GenerationError("ComfyUI output changed while it was copied")
-        sink_file.flush()
-        # The bytes must be durable on the publication volume before the work-area copy is removed:
-        # render_to's cleanup runs as soon as this returns (Anders, 6 Nov: work on C:, publish to Z:).
-        # A delayed write error (disk full, I/O error) surfaces here and fails the job, never a
-        # silent success. The staged sink's handle has sync() and deliberately no fileno (#2347).
+        self._to_sink(sink_file.flush)
+        # The bytes must be durable on the publication volume before anything relies on them
+        # (Anders, 6 Nov: work on C:, publish to Z:). A delayed write error (disk full, I/O error)
+        # surfaces here and fails the job, never a silent success. The staged sink's handle has
+        # sync() and deliberately no fileno (#2347).
         sync = getattr(sink_file, "sync", None)
         if callable(sync):
-            sync()
+            self._to_sink(sync)
         else:
             try:
                 fileno = sink_file.fileno()
             except (AttributeError, OSError):  # an in-memory sink (tests) has nothing to sync
                 fileno = None
             if fileno is not None:
-                os.fsync(fileno)
+                self._to_sink(os.fsync, fileno)
         self._notify_handoff({"stage": "copied", "output": output, "sha256": digest.hexdigest(), "size": copied})
+
+    def _to_sink(self, call, *args):
+        """A write, flush or sync on the volume's side. If it fails, the finished file is not at fault:
+        inside holding_outputs() it is kept for recovery instead of being removed."""
+        try:
+            return call(*args)
+        except BaseException:
+            self._sink_failed = True
+            raise
 
     def _notify_handoff(self, record: dict) -> None:
         """Tell the holder (holding_outputs(on_handoff=...)) what is being handed over. A failure
