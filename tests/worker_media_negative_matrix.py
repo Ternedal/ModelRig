@@ -242,6 +242,56 @@ class SwappedOutput(Harness):
 
 
 @unittest.skipIf(os.name == "nt", "POSIX test")
+class TamperedSource(Harness):
+    """ChatGPT 6698426548 (#2346 boundary): the adapter delegates PNG validation to the source
+    reader, so prove it end to end. The owner's completed source PNG is altered on Z: after it was
+    published (bit rot, a tool, a person). The job must fail with source_image_unavailable before
+    any GPU work: nothing staged for ComfyUI, nothing published, the altered file left as it is."""
+
+    def tamper_and_run(self, tamper):
+        source = self.owned_source()
+        path = Path(self.media, source + ".png")
+        tamper(path)
+        altered = path.read_bytes() if path.is_file() and not path.is_symlink() else None
+        job = self.submit_video(source)
+        ex = self.executor()
+        ex.start()
+        self.assertEqual(ex.step(), "failed")
+        row = self.store.get(job, "anders")
+        self.assertEqual((row["state"], row["error"], row["asset_id"]), ("failed", "source_image_unavailable", None))
+        self.assertEqual(os.listdir(self.comfy["input"]), [], "the source was never staged for ComfyUI")
+        self.assertEqual(os.listdir(self.comfy["output"]), [], "no render")
+        self.assertEqual(list(self.gallery()), [source], "no video published")
+        if altered is not None:
+            self.assertEqual(path.read_bytes(), altered, "the reader never repairs or rewrites the source")
+
+    def test_a_flipped_byte_fails_the_png_crc(self):
+        def flip(path):
+            data = bytearray(path.read_bytes())
+            at = data.index(b"IDAT") + 8  # inside the image data: the chunk CRC no longer matches
+            data[at] ^= 0xFF
+            path.write_bytes(bytes(data))
+        self.tamper_and_run(flip)
+
+    def test_a_truncated_png(self):
+        self.tamper_and_run(lambda path: path.write_bytes(path.read_bytes()[:-20]))
+
+    def test_other_bytes_of_the_same_size(self):
+        self.tamper_and_run(lambda path: path.write_bytes(b"\0" * path.stat().st_size))
+
+    def test_a_link_in_place_of_the_source(self):
+        def link(path):
+            elsewhere = Path(self.base, "elsewhere.png")
+            elsewhere.write_bytes(path.read_bytes())  # even the identical image, behind a link
+            path.unlink()
+            path.symlink_to(elsewhere)
+        self.tamper_and_run(link)
+
+    def test_a_source_gone_from_the_volume(self):
+        self.tamper_and_run(lambda path: path.unlink())
+
+
+@unittest.skipIf(os.name == "nt", "POSIX test")
 class NoPromptOrOwnerAnywhere(Harness):
     """ChatGPT 6694053328 P1/P4: across success, failure, cancel, a lost volume, restart recovery
     and C6, no log record, executor event or report contains the prompt or the owner."""
