@@ -170,3 +170,17 @@ They hold ids, outcomes, counts and codes, never a prompt. A failing log never s
 
 **A known window:** a child is adopted right after `Start()`. A process it spawned in the microseconds before that would not be inside the job. The executor starts ComfyUI only on its first job, long after its own adoption.
 
+## Queued jobs expire after 24 hours
+
+Anders decided this on 6 Nov 2026 (#2275 6691069504). A job that no executor claims within 24 hours of being submitted ends in the terminal state **`expired`** (error `expired_unclaimed`). The owner sees it, its place in the queue (16) and in the owner's limit (3) is freed, and its prompt is blanked after 30 days like any finished job's. Running and publishing jobs never expire.
+
+**How the age is measured.** The age is `time.time() - created`: seconds since the epoch, persisted when the job is submitted. That is UTC by definition, so time zones and summer time never move it, and it survives restarts.
+- **The clock is set back** after a job was submitted: the job is not old by its own stamp, so it never expires early.
+- **The clock is set forward:** jobs become older at once. That is the wall clock's verdict, and it applies only to queued jobs.
+
+**Who enforces it.** None of these depends on the executor running.
+- **The executor:** at start (`expired:N` in its log), and at most once a minute while idle, including while it waits for VRAM.
+- **The store:** `claim_for()` expires stale jobs in the same transaction and never claims one, so a claim and an expiry cannot both win.
+- **Submission:** `submit()` expires stale jobs first, so stale jobs never fill the queue while media is off.
+- **Reading a job:** `get()` expires a stale job when it reads one, so the owner sees `expired` even while media is off.
+

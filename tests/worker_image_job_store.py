@@ -406,6 +406,122 @@ class HandoffReceiptTests(unittest.TestCase):
                                                              "source_asset_id": "a" * 32, "source_sha256": "c" * 64}))
 
 
+class QueuedExpiryTests(unittest.TestCase):
+    """Anders, 6 Nov 2026 (#2275 6691069504): a queued job nobody claims within 24 hours expires."""
+    setUp = ExecutorProtocolTests.setUp
+    DAY = 24 * 3600
+
+    def row(self, job_id):
+        """The stored row, read directly: get() would itself expire a stale job on read."""
+        import sqlite3
+        with sqlite3.connect(self.db) as db:
+            db.row_factory = sqlite3.Row
+            return dict(db.execute("SELECT * FROM image_jobs WHERE id=?", (job_id,)).fetchone())
+
+    def job_at(self, created, owner="anders"):
+        with patch("app.image_job_store.time.time", return_value=created):
+            return self.store.submit(owner, "a red bicycle", profile_id="sdxl-a", max_owner_active=16)["job_id"]
+
+    def test_a_queued_job_expires_exactly_24_hours_after_it_was_submitted(self):
+        job = self.job_at(1_000_000.0)
+        self.assertEqual(self.store.expire_queued(now=1_000_000.0 + self.DAY - 1), 0)
+        self.assertEqual(self.row(job)["state"], "queued")
+        self.assertEqual(self.store.expire_queued(now=1_000_000.0 + self.DAY), 1)
+        row = self.row(job)
+        self.assertEqual((row["state"], row["error"], row["updated"]), ("expired", "expired_unclaimed", 1_000_000.0 + self.DAY))
+        self.assertEqual(self.store.expire_queued(now=1_000_000.0 + 2 * self.DAY), 0, "terminal: not expired twice")
+        self.assertIsNone(self.store.request_cancel(job, "anders"), "nothing left to cancel")
+
+    def test_running_and_publishing_jobs_never_expire(self):
+        running = self.job_at(1_000_000.0)
+        publishing = self.job_at(1_000_001.0)
+        with patch("app.image_job_store.time.time", return_value=1_000_002.0):
+            self.assertEqual(self.store.claim_for(["sdxl-a"], A1)["id"], running)
+            self.assertEqual(self.store.claim_for(["sdxl-a"], A1)["id"], publishing)
+        self.store.begin_publish(publishing, A1)
+        self.assertEqual(self.store.expire_queued(now=1_000_000.0 + 10 * self.DAY), 0)
+        self.assertEqual((self.row(running)["state"], self.row(publishing)["state"]), ("running", "publishing"))
+
+    def test_a_clock_set_back_never_expires_a_job_early(self):
+        job = self.job_at(2_000_000.0)  # submitted while the clock ran an hour ahead
+        corrected = 2_000_000.0 - 3600
+        self.assertEqual(self.store.expire_queued(now=corrected + self.DAY), 0, "only 23 h by the job's own stamp")
+        self.assertEqual(self.store.expire_queued(now=2_000_000.0 + self.DAY), 1, "a full day after its stamp")
+        self.assertEqual(self.row(job)["state"], "expired")
+
+    def test_a_clock_set_forward_is_the_wall_clocks_verdict_and_only_for_queued_jobs(self):
+        job = self.job_at(3_000_000.0)
+        self.assertEqual(self.store.expire_queued(now=3_000_000.0 + 3 * self.DAY), 1)
+        self.assertEqual(self.row(job)["state"], "expired")
+
+    def test_an_expired_job_is_never_claimed_even_before_any_sweep(self):
+        stale = self.job_at(4_000_000.0)
+        fresh = self.job_at(4_000_000.0 + self.DAY)
+        with patch("app.image_job_store.time.time", return_value=4_000_000.0 + self.DAY + 10):
+            claimed = self.store.claim_for(["sdxl-a"], A1)
+        self.assertEqual(claimed["id"], fresh, "the stale job is skipped although it is older")
+        self.assertEqual(self.row(stale)["state"], "expired", "and expired in the same transaction")
+
+    def test_claim_and_expiry_racing_never_run_an_expired_job(self):
+        import threading
+        for attempt in range(25):
+            with self.subTest(attempt=attempt):
+                job = self.job_at(5_000_000.0)
+                barrier = threading.Barrier(2)
+                results = {}
+
+                def claim():
+                    barrier.wait()
+                    results["claim"] = self.store.claim_for(["sdxl-a"], A1)
+
+                def expire():
+                    barrier.wait()
+                    results["expire"] = self.store.expire_queued(now=5_000_000.0 + self.DAY)
+                with patch("app.image_job_store.time.time", return_value=5_000_000.0 + self.DAY):
+                    threads = [threading.Thread(target=claim), threading.Thread(target=expire)]
+                    for t in threads:
+                        t.start()
+                    for t in threads:
+                        t.join(20)
+                self.assertIsNone(results["claim"], "a job that is 24 hours old is never claimed")
+                self.assertEqual(self.row(job)["state"], "expired")
+                self.store.expire_queued(now=5_000_000.0 + self.DAY)
+
+    def test_a_fresh_job_racing_an_expiry_is_claimed_and_never_expired_afterwards(self):
+        job = self.job_at(6_000_000.0)
+        with patch("app.image_job_store.time.time", return_value=6_000_000.0 + 60):
+            self.assertEqual(self.store.claim_for(["sdxl-a"], A1)["id"], job)
+        self.assertEqual(self.store.expire_queued(now=6_000_000.0 + 10 * self.DAY), 0)
+        self.assertEqual(self.row(job)["state"], "running")
+
+    def test_the_stamp_survives_a_restart(self):
+        job = self.job_at(7_000_000.0)
+        reopened = ImageJobStore(self.db)  # another process, later
+        self.assertEqual(reopened.expire_queued(now=7_000_000.0 + self.DAY), 1)
+        self.assertEqual(reopened.get(job, "anders")["state"], "expired")
+
+    def test_with_media_off_the_owner_still_sees_expiry_and_the_queue_frees(self):
+        stale = [self.job_at(8_000_000.0 + i) for i in range(16)]  # media off: nothing claims
+        now = 8_000_000.0 + self.DAY + 100
+        with patch("app.image_job_store.time.time", return_value=now):
+            self.assertEqual(self.store.get(stale[0], "anders")["state"], "expired", "seen by the owner on read")
+            job = self.store.submit("anders", "again", profile_id="sdxl-a", max_owner_active=16)["job_id"]
+        self.assertEqual({self.row(j)["state"] for j in stale}, {"expired"}, "they no longer fill the queue of 16")
+        self.assertEqual(self.row(job)["state"], "queued")
+
+    def test_expired_jobs_free_the_owners_places_and_their_prompts_are_purged(self):
+        for i in range(3):
+            self.job_at(9_000_000.0 + i)
+        with patch("app.image_job_store.time.time", return_value=9_000_000.0 + self.DAY + 10):
+            self.store.submit("anders", "fresh", profile_id="sdxl-a", max_owner_active=3)
+        self.assertEqual(self.store.purge_prompts(now=9_000_000.0 + self.DAY + 10 + 31 * self.DAY), 3)
+
+    def test_the_age_must_be_positive(self):
+        for bad in (0, -1, "1", None):
+            with self.subTest(bad=bad), self.assertRaises(ImageJobError):
+                self.store.expire_queued(max_age_s=bad)
+
+
 class PromptRetentionTests(unittest.TestCase):
     """Anders' decision (5 Nov 2026): the prompt of a finished job is blanked after 30 days."""
     DAY = 24 * 3600
