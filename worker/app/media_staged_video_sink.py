@@ -85,8 +85,15 @@ class _StagedVideoWriter:
         if len(ticket.head) < _MIN_BYTES:
             ticket.head += bytes(view[:_MIN_BYTES - len(ticket.head)])
         chunk = view[:max(0, room)]
-        while chunk:
-            chunk = chunk[os.write(ticket.fd, chunk):]
+        try:
+            while chunk:
+                chunk = chunk[os.write(ticket.fd, chunk):]
+        except OSError as exc:
+            # A full or failing volume is the volume being unusable, as for staging, sync and adoption:
+            # fatal for the executor (exit 75), never an ordinary failed job (#2347 review 4493807109).
+            # The handle is spent: what it holds is incomplete and is never adopted.
+            ticket.attempted = True
+            raise ArtifactSinkUnavailable("staged_video_unavailable") from exc
         ticket.written += size
         return size
 
