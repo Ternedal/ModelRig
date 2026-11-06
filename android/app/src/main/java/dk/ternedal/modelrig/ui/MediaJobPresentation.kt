@@ -122,6 +122,20 @@ object MediaJobPolling {
     /** Offline or a failed request: keep the last known job on screen and back off to this. */
     const val OFFLINE_MAX_MS = 120_000L
 
+    /** The longest `Retry-After` honoured; a larger value is capped, never trusted blindly. */
+    const val RETRY_AFTER_MAX_MS = 3_600_000L
+
+    /**
+     * A 429's `Retry-After`, in ms, before the app offers "Prøv igen" again. Only
+     * delta-seconds ("60") is read; an HTTP date, a negative or anything else is
+     * null (no wait known). It only gates a button: nothing is resent on its own.
+     */
+    fun retryAfterMs(header: String?): Long? {
+        val value = header?.trim() ?: return null
+        if (value.isEmpty() || value.length > 10 || !value.all { it in '0'..'9' }) return null
+        return (value.toLong() * 1000L).coerceAtMost(RETRY_AFTER_MAX_MS)
+    }
+
     /**
      * Delay before the next request, or null to stop. [attempt] counts
      * consecutive requests in the current state (0 right after a change), or

@@ -98,12 +98,12 @@ A missing, unreadable or unknown answer hides the feature. Where the flag lives 
 
 ## 6. Design targets for the routes (ChatGPT's, not implemented)
 
-The shared examples are in `docs/contracts/kaliv-media-job-v1/`: `fixtures.json` (24 exchanges) and `openapi.json` (a short OpenAPI 3.1 sketch). Both sides test against the same file.
+The shared examples are in `docs/contracts/kaliv-media-job-v1/`: `fixtures.json` (27 exchanges, including another owner's job on GET and cancel, a cancel racing the executor, and cancelling an expired job) and `openapi.json` (a short OpenAPI 3.1 sketch). Both sides test against the same file.
 
 | Operation | Target (#2275 6693665083) |
 |---|---|
 | **Submit** `POST /api/v1/media/jobs` | `201`, the job and `Location`. An owner-scoped `Idempotency-Key`: an identical retry returns the original response (`Idempotent-Replayed: true`); a different payload under the same key is `409 idempotency_conflict`. The key is stored atomically with the job, with bounded length and retention, and never logged with the prompt. |
-| **Refusals** | `429 queue_full` (with `Retry-After`), `429 owner_active_limit`, `400 invalid_request`, `503 media_disabled`. Codes, never exception text. |
+| **Refusals** | `429 queue_full` (with `Retry-After`), `429 owner_active_limit`, `400 invalid_request`, `503 media_disabled`. Codes, never exception text. The app reads `Retry-After` as seconds only, capped at one hour, and uses it only to hold back the "Prøv igen" button; it never resends on its own. |
 | **Cancel** `POST …/{id}/cancel` | Idempotent. `200` with `outcome` (`cancelled`, `requested`, `too_late`: the store's own answers) and the job as it now stands. |
 | **List** `GET /api/v1/media/jobs` | Owner only, newest first, at most 50 a page, opaque cursor, never prompt or params. |
 | **Capabilities** `GET /api/v1/media/capabilities` | One explicit boolean per kind; anything else hides the kind (§4). Where it lives is ChatGPT's choice. |

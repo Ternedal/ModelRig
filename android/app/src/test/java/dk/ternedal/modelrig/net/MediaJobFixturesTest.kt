@@ -1,5 +1,6 @@
 package dk.ternedal.modelrig.net
 
+import dk.ternedal.modelrig.ui.MediaJobPolling
 import dk.ternedal.modelrig.ui.MediaJobPresentation
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -47,6 +48,10 @@ class MediaJobFixturesTest {
                     val refusal = MediaJobContract.refusal(e.body)
                     assertNotEquals(name, MediaJobRefusal.UNKNOWN, refusal)
                     refusals += refusal
+                    val headers = e.getJSONObject("response").getJSONObject("headers")
+                    if (headers.has("Retry-After")) {
+                        assertNotNull(name, MediaJobPolling.retryAfterMs(headers.getString("Retry-After")))
+                    }
                 }
                 e.path.endsWith("/cancel") -> {
                     val result = MediaJobContract.parseCancel(e.body)

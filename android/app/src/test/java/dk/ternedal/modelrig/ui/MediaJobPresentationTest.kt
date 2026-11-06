@@ -72,6 +72,18 @@ class MediaJobPresentationTest {
     }
 
     @Test
+    fun `Retry-After is read as seconds, capped, and anything else is unknown`() {
+        assertEquals(60_000L, MediaJobPolling.retryAfterMs("60"))
+        assertEquals(0L, MediaJobPolling.retryAfterMs("0"))
+        assertEquals(60_000L, MediaJobPolling.retryAfterMs(" 60 "))
+        assertEquals(MediaJobPolling.RETRY_AFTER_MAX_MS, MediaJobPolling.retryAfterMs("86400"))
+        assertEquals(MediaJobPolling.RETRY_AFTER_MAX_MS, MediaJobPolling.retryAfterMs("9999999999"))
+        for (bad in listOf(null, "", "-5", "1.5", "Wed, 21 Oct 2026 07:28:00 GMT", "60s", "99999999999")) {
+            assertNull(bad, MediaJobPolling.retryAfterMs(bad))
+        }
+    }
+
+    @Test
     fun `polling stops at a terminal state`() {
         for (s in MediaJobState.entries.filter { it.terminal }) assertNull(MediaJobPolling.nextDelayMs(s, 0))
     }

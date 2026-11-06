@@ -659,6 +659,92 @@
       }
     },
     {
+      "name": "cancel-running-already-stopped",
+      "note": "race: the executor stopped it between the request and the read-back; the outcome is still 'requested'",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/media/jobs/11111111111111111111111111111111/cancel",
+        "headers": {
+          "Authorization": "Bearer <owner token>"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "schema": "kaliv-media-job/v1",
+          "outcome": "requested",
+          "job": {
+            "id": "11111111111111111111111111111111",
+            "state": "cancelled",
+            "profile_id": "wan-t2v-480p",
+            "created_at": "2026-11-06T10:00:00Z",
+            "updated_at": "2026-11-06T10:05:00Z",
+            "expires_at": null,
+            "asset_id": null,
+            "error": null
+          }
+        }
+      }
+    },
+    {
+      "name": "cancel-expired",
+      "note": "expired after 24 h unclaimed: nothing left to cancel",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/media/jobs/77777777777777777777777777777777/cancel",
+        "headers": {
+          "Authorization": "Bearer <owner token>"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "schema": "kaliv-media-job/v1",
+          "outcome": "too_late",
+          "job": {
+            "id": "77777777777777777777777777777777",
+            "state": "expired",
+            "profile_id": "wan-t2v-480p",
+            "created_at": "2026-11-06T10:00:00Z",
+            "updated_at": "2026-11-07T10:00:00Z",
+            "expires_at": null,
+            "asset_id": null,
+            "error": "expired_unclaimed"
+          }
+        }
+      }
+    },
+    {
+      "name": "cancel-other-owner",
+      "note": "another owner's job: indistinguishable from an unknown id",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/media/jobs/99999999999999999999999999999999/cancel",
+        "headers": {
+          "Authorization": "Bearer <owner token>"
+        }
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store"
+        },
+        "body": {
+          "schema": "kaliv-media-job/v1",
+          "error": "not_found"
+        }
+      }
+    },
+    {
       "name": "list-first-page",
       "note": "newest first; bounded; never prompt or params",
       "request": {

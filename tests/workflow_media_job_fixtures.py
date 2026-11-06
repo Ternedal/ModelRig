@@ -124,9 +124,21 @@ class MediaJobFixtureTests(unittest.TestCase):
         answers = set(re.findall(r'return "([a-z_]+)"', body))
         self.assertEqual(answers, set(OPENAPI["components"]["schemas"]["CancelResponse"]["properties"]["outcome"]["enum"]))
         for e in self.exchanges:
-            if e["request"]["path"].endswith("/cancel"):
+            if e["request"]["path"].endswith("/cancel") and e["response"]["status"] == 200:
                 with self.subTest(e["name"]):
                     self.assertIn(e["response"]["body"]["outcome"], answers)
+
+    def test_owner_isolation_and_races_have_examples(self):
+        """ChatGPT 6694053328 P2: another owner's job, a cancel racing the executor, an expired job."""
+        by_name = {e["name"]: e for e in self.exchanges}
+        for name in ("get-other-owner", "cancel-other-owner"):
+            self.assertEqual((by_name[name]["response"]["status"], by_name[name]["response"]["body"]["error"]),
+                             (404, "not_found"))
+        race = by_name["cancel-running-already-stopped"]["response"]["body"]
+        self.assertEqual((race["outcome"], race["job"]["state"]), ("requested", "cancelled"))
+        expired = by_name["cancel-expired"]["response"]["body"]
+        self.assertEqual((expired["outcome"], expired["job"]["state"]), ("too_late", "expired"))
+        self.assertIn("Retry-After", by_name["submit-queue-full"]["response"]["headers"])
 
     def test_submit_location_names_the_job(self):
         for e in self.exchanges:
