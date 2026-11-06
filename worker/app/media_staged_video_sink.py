@@ -267,16 +267,27 @@ class ExternalStagedVideoSink:
         return None
 
     def _same_content(self, destination: Path, ticket: _Ticket) -> bool:
-        """An idempotent retry: the existing destination is a regular file with our exact bytes."""
-        if destination.is_symlink():
+        """An idempotent retry: the existing destination is a regular file with our exact bytes.
+
+        The type is checked before the open, so a FIFO or device is never opened (a blocking open
+        of a FIFO with no writer never returns: Codex #2347 4498178920). The open is non-blocking
+        all the same, and the descriptor must be the very file that was checked, so a swap in
+        between is a conflict too."""
+        try:
+            before = os.lstat(destination)
+        except OSError:
+            return False
+        if not stat.S_ISREG(before.st_mode):
             return False
         try:
-            fd = os.open(destination, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+            fd = os.open(destination, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+                         | getattr(os, "O_BINARY", 0))
         except OSError:
             return False
         try:
             info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode) or info.st_size != ticket.written:
+            if (not stat.S_ISREG(info.st_mode) or (info.st_dev, info.st_ino) != (before.st_dev, before.st_ino)
+                    or info.st_size != ticket.written):
                 return False
             return hmac.compare_digest(self._digest(fd), self._digest(ticket.fd))
         except OSError:
