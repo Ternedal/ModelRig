@@ -152,6 +152,36 @@ def barrier_worker(directory: Path, api: FakeApi, read_id: str, *, stop_after_ac
     (directory / COMPLETED_NAME).write_text(json.dumps(completed), encoding="utf-8")
 
 
+with tempfile.TemporaryDirectory(prefix="pilot-json-race-") as td:
+    root = Path(td)
+    target = root / "active.json"
+    target.write_text("{", encoding="utf-8")
+    ticks = [0.0]
+
+    def tick():
+        return ticks[0]
+
+    def complete_after_retry(_seconds):
+        ticks[0] += 0.1
+        if ticks[0] >= 0.2:
+            target.write_text('{"state":"active"}', encoding="utf-8")
+
+    reader = PilotOperator(
+        api=FakeApi(0), state_path=root / "state.json", barrier_dir=root,
+        monotonic=tick, sleeper=complete_after_retry,
+    )
+    check(reader._wait_json(target, 0.5, "test") == {"state": "active"},
+          "barrier reader retries transient incomplete JSON")
+    target.write_text("{", encoding="utf-8")
+    ticks[0] = 0.0
+    reader.sleeper = lambda seconds: ticks.__setitem__(0, ticks[0] + seconds)
+    rejected = False
+    try:
+        reader._wait_json(target, 0.3, "test")
+    except OperatorError:
+        rejected = True
+    check(rejected, "barrier reader rejects persistently malformed JSON")
+
 check(
     schedule_matches(
         {"schedule_id": "x", **clone(READ_MANIFEST), "enabled": True},
