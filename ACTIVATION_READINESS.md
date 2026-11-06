@@ -5,7 +5,7 @@
 
 **Version på main:** `2.0.18`
 **Kørende appliance:** ingen fundet på 127.0.0.1:8080 — dommen bygger på dette miljøs rapportstier (CI-fallback)
-**Genereret:** 2026-10-20 06:02 UTC
+**Genereret:** 2026-11-06 16:31 UTC
 
 ---
 
@@ -71,7 +71,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 39 feature-switches er tændt som default.** (34 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 39 feature-switches er tændt som default.** (35 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
@@ -136,6 +136,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `MODELRIG_CLAIM_MAX` | `(unset)` | indstilling |
 | `MODELRIG_CONFIG` | `(unset)` | indstilling |
 | `MODELRIG_DATA` | `(unset)` | slukket |
+| `MODELRIG_EMBED_BATCH` | `32` | indstilling |
 | `MODELRIG_EMBED_MODEL` | `nomic-embed-text` | indstilling |
 | `MODELRIG_GEN_MODEL` | `qwen2.5-coder:7b` | indstilling |
 | `MODELRIG_HOST` | `(unset)` | indstilling |

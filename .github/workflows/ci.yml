@@ -28,9 +28,14 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.action != 'closed'
     uses: ./.github/workflows/_tests.yml
     with:
-      # Pull requests are already Stage-B qualified by exact-head-qualification.
-      # Push/main and workflow_dispatch keep the reusable default=true gate.
-      run_stage_b: ${{ github.event_name != 'pull_request' }}
+      # Pull requests AND pushes to main are Stage-B qualified exactly once by
+      # exact-head-qualification (exact immutable sha, no merge ref). Before
+      # 06/11-2026 a push to main ran the full Stage-B chain three times (ci,
+      # agent3-full-diagnostics, exact-head): 60-85 min x 7 shards each, with
+      # no extra verdict -- the same sha, the same tests. Only an explicit
+      # workflow_dispatch keeps this invocation, as an on-demand second lane.
+      # Release tags still run build-and-release's default=true gate.
+      run_stage_b: ${{ github.event_name == 'workflow_dispatch' }}
 
   # Source-mode imports can succeed while the shipped exe lacks a sibling
   # package. Exercise the frozen entrypoint before a release tag is needed.
