@@ -894,6 +894,52 @@ class VideoExecutorTests(unittest.TestCase):
         self.assertEqual(self.store.get(job, "anders")["state"], "cancelled")
         self.assertEqual(self.sink.registry, set(), "adopt() never called")
         self.assertEqual(os.listdir(self.sink.staging), [], "staged file removed")
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "the owner cancelled: the work-area copy goes too")
+
+    # -- Anders, 6 Nov 2026: publish on the volume, THEN remove the copy in the work area -------------
+    def test_the_work_area_copy_is_still_there_when_the_file_is_published_and_removed_after(self):
+        output = self.dirs["output"]
+
+        class Recording(ReferenceSink):
+            seen = []
+
+            def adopt(self, handle, mime_type):
+                Recording.seen.append(sorted(os.listdir(output)))
+                return super().adopt(handle, mime_type)
+        os.mkdir(os.path.join(self.tmp, "recording-sink"))
+        self.sink = Recording(os.path.join(self.tmp, "recording-sink"), max_bytes=64 * 1024 * 1024)
+        ex = self.executor()
+        job = self.submit()
+        self.assertEqual(ex.step(), "completed")
+        self.assertEqual(len(Recording.seen), 1)
+        self.assertEqual(len(Recording.seen[0]), 1, "the finished render is still on C: while it is published")
+        self.assertEqual(os.listdir(output), [], "and removed once publication succeeded")
+        self.assertIn(self.store.get(job, "anders")["asset_id"], self.sink.registry)
+
+    def test_a_failed_publication_keeps_the_work_area_copy_for_recovery(self):
+        from app.media_generation_contract import ArtifactSinkUnavailable
+
+        class Unplugged(ReferenceSink):
+            def adopt(self, handle, mime_type):
+                raise ArtifactSinkUnavailable("test: the volume went away during publication")
+        os.mkdir(os.path.join(self.tmp, "unplugged-sink"))
+        self.sink = Unplugged(os.path.join(self.tmp, "unplugged-sink"), max_bytes=64 * 1024 * 1024)
+        ex = self.executor()
+        job = self.submit()
+        with self.assertRaises(ArtifactSinkUnavailable):
+            ex.step()
+        kept = os.listdir(self.dirs["output"])
+        self.assertEqual(len(kept), 1, "the finished file was never deleted before it was published")
+        self.assertEqual(ex.adapter.last_cleanup["kept_for_recovery"], kept)
+        self.assertEqual(self.store.get(job, "anders")["state"], "publishing", "left for recovery")
+
+    def test_a_render_that_fails_is_cleaned_at_once_even_while_held(self):
+        ex = self.executor_with_fake({"FAKE_COMFY_OUTPUT_MODE": "notmp4"})
+        job = self.submit()
+        self.assertEqual(ex.step(), "failed")
+        self.assertEqual(self.store.get(job, "anders")["state"], "failed")
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "no finished file: nothing to keep")
+        self.assertNotIn("kept_for_recovery", ex.adapter.last_cleanup if ex.adapter else {})
 
 
 if __name__ == "__main__":

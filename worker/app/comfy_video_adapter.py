@@ -15,7 +15,8 @@ render_to(request, sink_file):
           during it, ftyp header, size cap) -> copied into sink_file (a
           staged file on the external media volume, published by the sink
           only after the copy is complete and checked) -> ComfyUI's output
-          removed.
+          removed: at once, or, inside holding_outputs(), only after the
+          caller has published it (kept for recovery if publication fails).
           Cleanup (#2316 reviews 4415046066, 5702562074): after the job --
           success or failure -- remove exactly the files that are provably
           the job's: named by ComfyUI in THIS prompt's history (type
@@ -50,6 +51,7 @@ identity check as the outputs: a replaced file is never deleted.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import secrets
@@ -130,6 +132,7 @@ class ComfyVideoAdapter:
         self.weights_cache = weights_cache
         self._template: WorkflowTemplate | None = None
         self.last_cleanup: dict[str, list[str]] = {}
+        self._holding: list[tuple[set[str], list]] | None = None  # see holding_outputs()
         # True once an interrupt could not be confirmed drained: this ComfyUI must not take another
         # job. The executor unloads (and so restarts) the adapter (#2318 review 4469472651).
         self.needs_restart = False
@@ -233,19 +236,72 @@ class ComfyVideoAdapter:
         before = self._entry_names()  # snapshot before anything is submitted
         owned: list[tuple[str, int, int]] = []  # (name, st_dev, st_ino) attested by THIS prompt's history
         staged: list[tuple[str, int, int]] = []  # the source file this job created, once it exists
+        handed_over = False
         try:
-            return self._render_and_hand_over(request, sink_file, before, owned, should_cancel, source_png, staged)
+            mime = self._render_and_hand_over(request, sink_file, before, owned, should_cancel, source_png, staged)
+            handed_over = True
+            return mime
         finally:
-            try:
-                self._remove_job_outputs(before, owned)
-            except Exception as exc:  # never mask the render's own result or error
-                _log.warning("comfy cleanup raised %s; outputs left in place", type(exc).__name__)
-            if staged:
+            if handed_over and self._holding is not None:
+                # Anders, 6 Nov: the finished file stays in the work area until the caller has
+                # published it; holding_outputs() removes it then (or keeps it if publication fails).
+                self._holding.append((before, owned))
+            else:
+                self._cleanup_quietly(before, owned)
+            if staged:  # the staged source is only an input: it never waits for publication
                 try:
                     self._remove_staged_source(*staged[0])
                 except Exception as exc:
                     self.last_cleanup["source"] = f"failed: {type(exc).__name__}"
                     _log.warning("comfy source cleanup raised %s; source left in place", type(exc).__name__)
+
+    def _cleanup_quietly(self, before: set[str], owned: list, *, keep_source: bool = False) -> None:
+        # A deferred cleanup runs after the job's source cleanup already reported: keep that report.
+        source = self.last_cleanup.get("source") if keep_source else None
+        try:
+            self._remove_job_outputs(before, owned)
+        except Exception as exc:  # never mask the render's own result or error
+            _log.warning("comfy cleanup raised %s; outputs left in place", type(exc).__name__)
+        if source is not None:
+            self.last_cleanup.setdefault("source", source)
+
+    @contextlib.contextmanager
+    def holding_outputs(self):
+        """Keep a finished render's copy in the work area until the caller has published it.
+
+            with adapter.holding_outputs():
+                with sink.staged(".mp4") as out:
+                    mime = adapter.render_to(request, out)
+                    asset_id = sink.adopt_for_job(out, mime, job_id)
+
+        Anders, 6 Nov 2026: publish on the volume, THEN remove the copy on the internal disk. A
+        normal exit (published) removes it, and so does GenerationCancelled (the owner's choice).
+        Any other exception after the hand-over keeps it, reported in last_cleanup
+        ["kept_for_recovery"] and listed by C6, so a finished file is never deleted before it is
+        published. A render that fails before the hand-over is cleaned up at once, as always.
+        """
+        if self._holding is not None:
+            raise RuntimeError("holding_outputs() does not nest")
+        self._holding = []
+        keep = False
+        try:
+            yield
+        except GenerationCancelled:
+            raise
+        except BaseException:
+            keep = True
+            raise
+        finally:
+            pending, self._holding = self._holding, None
+            for before, owned in pending:
+                if keep:
+                    kept = [name for name, _, _ in owned]
+                    source = self.last_cleanup.get("source")
+                    self.last_cleanup = {"removed": [], "kept_replaced": [], "untracked": [], "failed": [],
+                                         "kept_for_recovery": kept, **({"source": source} if source else {})}
+                    _log.warning("publication did not complete: kept %s in the work area for recovery", kept)
+                else:
+                    self._cleanup_quietly(before, owned, keep_source=True)
 
     def _render_and_hand_over(self, request: GenerationRequest, sink_file: BinaryIO, before: set[str],
                               owned: list, should_cancel: Callable[[], bool] | None = None,
