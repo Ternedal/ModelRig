@@ -58,10 +58,11 @@ from app.media_generation_profiles import parse_profile  # noqa: E402
 from app.media_source_image import read_owned_source_png  # noqa: E402
 from app.media_staged_video_sink import ExternalStagedVideoSink  # noqa: E402
 from app.media_volume import MARKER_NAME, MountedMediaVolume  # noqa: E402
+from app.media_repair import reconcile, remove_stale_temp, remove_work_file  # noqa: E402
 from app.media_work_area import PrivateWorkArea  # noqa: E402
 import worker_media_volume as g1  # noqa: E402  (module import: its test classes must not run here)
 from worker_comfy_image_to_video import I2V, png  # noqa: E402
-from worker_comfy_supervisor import FAKE_MAIN, FakeSupervisor, free_port  # noqa: E402
+from worker_comfy_supervisor import FAKE_MAIN, FakeSupervisor, free_port, wait_gone  # noqa: E402
 from worker_comfy_video_adapter import raw, sha  # noqa: E402
 from worker_media_generation_profiles import video_profile  # noqa: E402
 
@@ -282,6 +283,98 @@ class VideoPipelineEndToEnd(unittest.TestCase):
         with self.assertRaises(ArtifactSinkUnavailable):
             ex.step()
         self.assertEqual(os.listdir(self.root), [MARKER_NAME], "nothing was written to the other disk")
+
+    # -- crashes in the hand-off from the work area to the volume (ChatGPT 6686968292 items 1 and 2) --
+
+    def crash_at(self, target: str, crash) -> int:
+        """Run one job in a forked process that dies (os._exit: no finally, no cleanup) at `target`.
+        Returns the job id. Afterwards the orphaned ComfyUI is killed, as the OS would on a reboot."""
+        source = self.owned_source()
+        job = self.submit_video(source)
+        pid = os.fork()
+        if pid == 0:  # the executor process
+            try:
+                with patch(target, crash):
+                    self.executor().run(max_steps=1)
+            finally:
+                os._exit(3)  # never back into unittest; reaching here means it did not crash
+        _, status = os.waitpid(pid, 0)
+        self.assertEqual(os.waitstatus_to_exitcode(status), 0, "the executor died at the crash point")
+        comfy = int(Path(self.state, "pid").read_text())
+        try:
+            os.kill(comfy, 9)
+        except ProcessLookupError:
+            pass
+        self.assertTrue(wait_gone(comfy, 10))
+        self.assertIn(self.store.get(job, "anders")["state"], ("running", "publishing"), "nobody recorded an outcome")
+        # Time passes before the operator looks: every leftover is older than C6's minimum age.
+        hours_ago = time.time() - 7 * 3600
+        for top in (self.media, *self.comfy.values()):
+            for dirpath, _, files in os.walk(top):
+                for name in files:
+                    os.utime(os.path.join(dirpath, name), (hours_ago, hours_ago), follow_symlinks=False)
+        return job, source
+
+    def restart_and_report(self, job, source):
+        """The next process: recovery fails the job; nothing reaches the gallery; C6 sees the rest."""
+        self.boot()
+        ex = self.executor()
+        self.assertEqual(ex.start(), 1, "the interrupted job is recovered")
+        self.assertEqual(self.store.get(job, "anders")["state"], "failed")
+        self.assertEqual(list(self.gallery()), [source], "nothing partial or unrecorded is visible")
+        self.assertEqual(self.image_sink.inspect_unindexed_assets(), [], "and nothing was published unindexed")
+        ex.release_lock()
+        return reconcile(self.image_sink, os.path.join(self.job_dir, "jobs.sqlite3"), lease_dir=self.lease_dir,
+                         work_area=self.work_area,
+                         work_dirs=[self.comfy["input"], self.comfy["output"], self.comfy["temp"]])
+
+    @unittest.skipUnless(hasattr(os, "fork"), "needs fork to die without running cleanup")
+    def test_a_crash_during_the_copy_leaves_nothing_visible_and_c6_finds_every_leftover(self):
+        def die_halfway(adapter, source, sink_file):
+            data = Path(source).read_bytes()
+            sink_file.write(data[:len(data) // 2])
+            os._exit(0)
+
+        job, source = self.crash_at("app.comfy_video_adapter.ComfyVideoAdapter._copy_validated", die_halfway)
+        report = self.restart_and_report(job, source)
+        temp = report["stale_temporary_files"]
+        self.assertEqual(len(temp), 1, "the partial staged copy on the volume")
+        work = {(os.path.basename(f["directory"]), f["kind"]) for f in report["work_area_residue"]}
+        self.assertEqual(work, {("output", "file"), ("input", "file")}, "the render and the staged source on C:")
+        self.assertEqual(report["unindexed_assets"], [])
+        # The operator removes each one, named exactly (C6); then the pipeline works as before.
+        for f in report["work_area_residue"]:
+            remove_work_file(self.work_area, f["directory"], f["path"], device=f["device"], inode=f["inode"],
+                             lease_dir=self.lease_dir, job_db=os.path.join(self.job_dir, "jobs.sqlite3"))
+        remove_stale_temp(self.image_sink, temp[0]["name"], device=temp[0]["device"], inode=temp[0]["inode"],
+                          lease_dir=self.lease_dir)
+        again = self.submit_video(source)
+        ex = self.executor()
+        ex.start()
+        self.assertEqual(ex.step(), "completed")
+        self.assertEqual(self.store.get(again, "anders")["state"], "completed")
+        self.assert_nothing_orphaned()
+        self.assertEqual(os.listdir(self.comfy["input"]), [])
+
+    @unittest.skipUnless(hasattr(os, "fork"), "needs fork to die without running cleanup")
+    def test_a_crash_after_the_work_area_copy_is_removed_leaves_a_complete_unpublished_copy(self):
+        sizes = []
+
+        def die_before_publishing(sink, handle, mime_type, job_key):
+            sizes.append(handle._ticket.written)
+            os._exit(0)
+
+        job, source = self.crash_at("app.media_staged_video_sink.ExternalStagedVideoSink.adopt_for_job",
+                                    die_before_publishing)
+        self.assertEqual(os.listdir(self.comfy["output"]), [], "the work-area copy was already removed")
+        self.assertEqual(os.listdir(self.comfy["input"]), [], "and the staged source with it")
+        report = self.restart_and_report(job, source)
+        self.assertEqual(report["work_area_residue"], [], "nothing left on C:")
+        temp = report["stale_temporary_files"]
+        self.assertEqual(len(temp), 1, "the complete, synced copy waits on the volume, unpublished")
+        staged = Path(self.media, temp[0]["name"]).read_bytes()
+        self.assertEqual(staged[4:8], b"ftyp", "a whole MP4, not a partial one")
+        self.assertGreater(len(staged), 12)
 
 
 if __name__ == "__main__":
