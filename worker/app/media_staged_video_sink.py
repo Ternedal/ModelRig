@@ -141,8 +141,11 @@ class ExternalStagedVideoSink:
         except OSError as exc:
             raise ArtifactSinkUnavailable("staged_video_create_failed") from exc
         try:
-            created = os.fstat(fd)
-            named = os.lstat(path)
+            try:
+                created = os.fstat(fd)
+                named = os.lstat(path)
+            except OSError as exc:  # the volume failed or vanished just after the create: fatal, not per job
+                raise ArtifactSinkUnavailable("staged_video_unavailable") from exc
             if not stat.S_ISREG(named.st_mode) or (named.st_dev, named.st_ino) != (created.st_dev, created.st_ino):
                 raise ArtifactSinkUnavailable("staged_video_replaced")
         except BaseException:
@@ -197,10 +200,15 @@ class ExternalStagedVideoSink:
             raise ArtifactSinkUnavailable("staged_video_changed")
         destination = root / (asset_id + EXTENSION)
         sibling = root / (asset_id + ".png")
-        if sibling.exists() or sibling.is_symlink():
+        try:  # exists() raises for anything but "not found": a denied or failing name is the volume failing
+            sibling_present = sibling.exists() or sibling.is_symlink()
+            destination_present = destination.exists() or destination.is_symlink()
+        except OSError as exc:
+            raise ArtifactSinkUnavailable("staged_video_unavailable") from exc
+        if sibling_present:
             raise ArtifactSinkUnavailable("asset_job_conflict")
         created = False
-        if destination.exists() or destination.is_symlink():
+        if destination_present:
             if not self._same_content(destination, ticket):
                 raise ArtifactSinkUnavailable("asset_job_conflict")
         else:
@@ -317,13 +325,21 @@ class ExternalStagedVideoSink:
         except OSError:
             pass
         finally:
-            os.close(fd)
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
     @staticmethod
     def _close(ticket: _Ticket) -> None:
+        """Release the descriptor. A late error from close() is ignored: adoption fsyncs before it
+        links, so it cannot concern published bytes, and an unadopted file is never published."""
         if ticket.fd is not None:
             fd, ticket.fd = ticket.fd, None
-            os.close(fd)
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
     def _remove_if_ours(self, path: Path, dev: int, ino: int) -> None:
         """Unlink path only if it is still the given file, on the still verified volume. Only ever

@@ -177,6 +177,81 @@ class JobKeyedRules(unittest.TestCase):
         self.assertEqual(self.volume.indexed(), set())
         self.assertEqual(target.read_bytes(), MP4)
 
+    def test_an_io_error_checking_the_new_staged_file_stops_the_sink_and_leaves_the_name(self):
+        """Codex P2 (#2347 4498227150): an OSError from the identity check right after the create
+        went up raw, so the executor failed the job and kept working on a broken volume. It must be
+        the fatal ArtifactSinkUnavailable (exit 75), with the descriptor closed and the unproven
+        name left alone."""
+        import errno
+        for failing in ("fstat", "lstat"):
+            with self.subTest(failing=failing):
+                real = getattr(os, failing)
+                opened, closed = [], []
+                real_open, real_close = os.open, os.close
+
+                def spy_open(path, flags, *args, **kwargs):
+                    fd = real_open(path, flags, *args, **kwargs)
+                    if Path(str(path)).parent == self.volume.media:
+                        opened.append(fd)
+                    return fd
+
+                def spy_close(fd):
+                    closed.append(fd)
+                    return real_close(fd)
+
+                def broken(target, *args, **kwargs):
+                    if isinstance(target, int) or Path(str(target)).parent == self.volume.media:
+                        raise OSError(errno.EIO, "Input/output error")
+                    return real(target, *args, **kwargs)
+                with patch("app.media_staged_video_sink.os.open", side_effect=spy_open), \
+                        patch("app.media_staged_video_sink.os.close", side_effect=spy_close), \
+                        patch(f"app.media_staged_video_sink.os.{failing}", side_effect=broken), \
+                        self.assertRaisesRegex(ArtifactSinkUnavailable, "^staged_video_unavailable$"):
+                    with self.sink.staged(".mp4"):
+                        self.fail("never yields")
+                self.assertEqual(len(opened), 1)
+                self.assertEqual(opened, closed, "the descriptor is closed")
+                self.assertEqual(len(self.volume.temporaries()), 1, "the unproven name is left alone")
+                for name in self.volume.temporaries():
+                    (self.volume.media / name).unlink()
+
+    def test_an_io_error_probing_the_destination_is_a_sink_failure_not_a_raw_error(self):
+        """Path.exists() raises for anything but 'not found': a denied or failing name at the
+        destination must stop the sink too (same class as Codex 4498227150)."""
+        import errno
+        real_exists = Path.exists
+
+        def failing(path, *args, **kwargs):
+            if path.parent == self.volume.media and path.suffix in (".mp4", ".png") and not path.name.startswith("."):
+                raise OSError(errno.EIO, "Input/output error")
+            return real_exists(path, *args, **kwargs)
+        with patch.object(Path, "exists", autospec=True, side_effect=failing), \
+                self.assertRaisesRegex(ArtifactSinkUnavailable, "^staged_video_unavailable$"):
+            self.adopt()
+        self.assertEqual(self.volume.indexed(), set())
+
+    def test_a_late_error_from_close_never_turns_a_published_asset_into_an_error(self):
+        """Adoption fsyncs before it links, so a deferred I/O error reported by close() cannot
+        concern the published bytes; it must not surface as a raw OSError after the asset exists."""
+        import errno
+        if not os.path.isdir("/proc/self/fd"):
+            self.skipTest("needs /proc/self/fd to tell the sink's descriptors apart")
+        real_close = os.close
+        media = os.path.realpath(self.volume.media)
+
+        def failing_close(fd):
+            try:
+                target = os.readlink(f"/proc/self/fd/{fd}")
+            except OSError:
+                target = ""
+            real_close(fd)
+            if target == media or (os.path.dirname(target) == media and os.path.basename(target).startswith(".kaliv-")):
+                raise OSError(errno.EIO, "Input/output error")  # only the sink's own staged file and folder
+        with patch("app.media_staged_video_sink.os.close", side_effect=failing_close):
+            asset_id = self.adopt()
+        self.assertEqual(asset_id, self.expected)
+        self.assertEqual(self.volume.indexed(), {asset_id})
+
     @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFOs")
     def test_a_fifo_at_the_destination_is_a_conflict_and_never_blocks(self):
         """Codex P2 (#2347 4498178920): a blocking open of a FIFO with no writer never returned."""
