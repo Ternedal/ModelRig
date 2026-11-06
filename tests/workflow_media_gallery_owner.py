@@ -62,6 +62,12 @@ class OwnerGalleryTests(unittest.TestCase):
                     open_owned_asset(jobs, "principal", "/media", "/volume", asset_id)
             opener.assert_not_called()
 
+    def test_asset_read_requires_verified_volume(self):
+        with patch("app.media_gallery_asset.open_asset") as opener:
+            with self.assertRaisesRegex(GalleryUnavailable, "verified_volume_required"):
+                open_owned_asset(Jobs({"one"}), "principal", "/media", None, "one")
+            opener.assert_not_called()
+
     def test_owned_asset_delegates_to_guarded_file_opener(self):
         with patch("app.media_gallery_asset.open_asset", return_value=("handle", {"id": "one"})) as opener:
             result = open_owned_asset(Jobs({"one"}), "principal", "/media", "/volume", "one")
