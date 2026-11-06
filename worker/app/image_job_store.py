@@ -14,6 +14,12 @@ executor per GPU claims and transitions jobs as `<GPU UUID>:<instance>`:
     queued --claim_for--> running --begin_publish--> publishing --complete--> completed
                           running/publishing --fail--> failed
                           running --finish_cancelled--> cancelled   (after request_cancel)
+    queued --(24 h without a claim)--> expired   (error 'expired_unclaimed'; Anders, 6 Nov 2026)
+
+A queued job expires once time.time() - created >= QUEUED_MAX_AGE_S (24 h). expire_queued()
+runs it; claim_for() and submit() run it in their own transaction (so a stale job is never
+claimed and never holds one of the 16 queue places), and get() does when it reads a stale job
+(so the owner sees it even while media is off). Running and publishing jobs never expire.
 
 begin_publish() is the commit point between cancellation and publication: one
 transaction moves running -> publishing only if no cancel was requested, and
@@ -118,7 +124,16 @@ def check_handoff_record(record: object) -> dict:
                                           and _SHA256.fullmatch(record["source_sha256"])):
         raise ImageJobError("hand-off source hash is malformed")
     return dict(record)
-_FINISHED = ("completed", "failed", "cancelled")
+
+
+_FINISHED = ("completed", "failed", "cancelled", "expired")
+
+# Anders, 6 Nov 2026 (#2275 6691069504): a queued job that no executor claims within 24 hours of
+# being submitted expires. Measured from the persisted `created` (time.time(): seconds since the
+# epoch, UTC by definition, so time zones and DST never move it).
+QUEUED_MAX_AGE_S = 24 * 3600
+EXPIRED_ERROR = "expired_unclaimed"
+_EXPIRE_SQL = "UPDATE image_jobs SET state='expired',error=?,updated=? WHERE state='queued' AND created <= ?"
 
 
 class ImageJobStore:
@@ -241,6 +256,8 @@ class ImageJobStore:
         job_id, now = uuid.uuid4().hex, time.time()
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
+            # Expired jobs never hold queue places, even while media is off and nothing claims.
+            db.execute(_EXPIRE_SQL, (EXPIRED_ERROR, now, now - QUEUED_MAX_AGE_S))
             queued = db.execute("SELECT count(*) FROM image_jobs WHERE state='queued'").fetchone()[0]
             if queued >= max_queued:
                 raise ImageJobError("image job queue full")
@@ -257,7 +274,27 @@ class ImageJobStore:
     def get(self, job_id: str, owner: str) -> dict | None:
         with self._db() as db:
             row = db.execute("SELECT * FROM image_jobs WHERE id=? AND owner=?", (job_id, owner)).fetchone()
-            return dict(row) if row else None
+        if row is not None and row["state"] == "queued" and row["created"] <= time.time() - QUEUED_MAX_AGE_S:
+            # Media may be off and no executor running: the owner still sees the job expire.
+            self.expire_queued()
+            with self._db() as db:
+                row = db.execute("SELECT * FROM image_jobs WHERE id=? AND owner=?", (job_id, owner)).fetchone()
+        return dict(row) if row else None
+
+    def expire_queued(self, *, max_age_s: float = QUEUED_MAX_AGE_S, now: float | None = None) -> int:
+        """Expire every queued job submitted at least max_age_s ago: terminal state 'expired', error
+        'expired_unclaimed'. Returns how many. Running and publishing jobs are never touched.
+
+        The age is now - created, both from time.time(). A job whose `created` lies in the future
+        (the clock was set back after it was submitted) is not old: it expires only once the clock
+        has passed it by max_age_s, never early. A clock set forward makes jobs older at once;
+        that is the wall clock's verdict, and only queued jobs are affected."""
+        if type(max_age_s) not in (int, float) or not max_age_s > 0:
+            raise ImageJobError("invalid queued job age")
+        now = time.time() if now is None else now
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            return db.execute(_EXPIRE_SQL, (EXPIRED_ERROR, now, now - max_age_s)).rowcount
 
     def owns_completed_asset(self, owner: str, asset_id: str) -> bool:
         """Authorize only completed assets of the authenticated principal.
@@ -322,7 +359,9 @@ class ImageJobStore:
         return instance
 
     def claim_for(self, profile_ids, instance: str) -> dict | None:
-        """The oldest queued job for one of these profiles, claimed by this executor instance."""
+        """The oldest queued job for one of these profiles, claimed by this executor instance. Jobs
+        older than QUEUED_MAX_AGE_S are expired in the same transaction and never claimed, so an
+        executor that starts after a long pause cannot run a job its owner has given up on."""
         instance = self._instance(instance)
         ids = sorted(set(profile_ids))
         if not ids or any(not isinstance(p, str) or not _PROFILE_ID.fullmatch(p) for p in ids):
@@ -330,11 +369,12 @@ class ImageJobStore:
         marks = ",".join("?" * len(ids))
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
+            now = time.time()
+            db.execute(_EXPIRE_SQL, (EXPIRED_ERROR, now, now - QUEUED_MAX_AGE_S))
             row = db.execute(f"SELECT * FROM image_jobs WHERE state='queued' AND profile_id IN ({marks}) "
                              "ORDER BY created,id LIMIT 1", ids).fetchone()
             if row is None:
                 return None
-            now = time.time()
             db.execute("UPDATE image_jobs SET state='running',claimed_by=?,updated=? WHERE id=? AND state='queued'",
                        (instance, now, row["id"]))
             return dict(row) | {"state": "running", "claimed_by": instance, "updated": now}

@@ -96,6 +96,7 @@ class PublicationUnrecorded(RuntimeError):
 
 
 EVENTS_KEPT = 1000
+EXPIRE_INTERVAL_S = 60.0  # how often an idle executor expires queued jobs older than 24 hours
 
 
 class _EventLog(collections.deque):
@@ -149,6 +150,7 @@ class MediaExecutor:
         self.last_used = clock()
         self._claim_not_before = float("-inf")  # after a VRAM shortage: no claims until then
         self._next_purge = clock()
+        self._next_expiry = clock()
         self._lock = None
         self._retained: list = []  # adapters whose unload failed: kept alive (lease held) until exit
         self.events = _EventLog(diagnostics)  # bounded lifecycle record for logs and tests; never prompt text
@@ -161,8 +163,28 @@ class MediaExecutor:
         self._lock = acquire_executor_lock(self.gpu_uuid, lease_dir=self.lease_dir)  # ExecutorAlreadyRunning
         recovered = self.store.recover_gpu(self.gpu_uuid, self.instance)
         self.events.append(f"recovered:{recovered}")
+        self.expire_queued()
         self.purge_prompts()
         return recovered
+
+    def idle_housekeeping(self) -> None:
+        """While idle (also while waiting for VRAM, when nothing is claimed): what is due."""
+        if self.clock() >= self._next_expiry:
+            self.expire_queued()
+        if self.clock() >= self._next_purge:
+            self.purge_prompts()
+
+    def expire_queued(self) -> None:
+        """Anders, 6 Nov: queued jobs nobody claimed for 24 hours expire. At start, then at most once
+        a minute while idle (claim_for also refuses them). Best effort, never fatal to the GPU work."""
+        self._next_expiry = self.clock() + EXPIRE_INTERVAL_S
+        try:
+            expired = self.store.expire_queued()
+        except Exception as exc:
+            self.events.append(f"expire_failed:{type(exc).__name__}")
+            return
+        if expired:
+            self.events.append(f"expired:{expired}")
 
     def purge_prompts(self) -> None:
         """Prompt retention (PROMPT_RETENTION_S), at start and then at most once an hour while
@@ -369,8 +391,7 @@ class MediaExecutor:
             while max_steps is None or steps < max_steps:
                 steps += 1
                 if self.step() == "idle":
-                    if self.clock() >= self._next_purge:
-                        self.purge_prompts()
+                    self.idle_housekeeping()
                     idle_sleep()
             self.shutdown()
             code = EXIT_DONE
