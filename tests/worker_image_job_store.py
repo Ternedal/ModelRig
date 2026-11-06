@@ -567,6 +567,82 @@ class RestartErrorCodeTests(unittest.TestCase):
         self.assertIsNone(public_error(None))
 
 
+class CompletedAssetsTests(unittest.TestCase):
+    """#2275 6697074518: one bounded read of an owner's completed assets for the gallery filter."""
+    setUp = ExecutorProtocolTests.setUp
+
+    def finished(self, owner, asset, outcome="complete"):
+        job = self.store.submit(owner, "a red bicycle", profile_id="sdxl-a", max_owner_active=16)["job_id"]
+        self.assertEqual(self.store.claim_for(["sdxl-a"], A1)["id"], job)
+        if outcome == "running":
+            return job
+        self.assertTrue(self.store.begin_publish(job, A1))
+        if outcome == "publishing":
+            return job
+        if outcome == "failed":
+            self.assertTrue(self.store.fail(job, A1, "publication_failed"))
+            return job
+        self.assertTrue(self.store.complete(job, A1, asset))
+        return job
+
+    def test_only_the_owners_completed_assets_and_the_same_answer_as_one_by_one(self):
+        self.finished("anders", "img_a1")
+        self.finished("anders", "img_a2")
+        self.finished("mallory", "img_m1")
+        self.finished("anders", None, "running")
+        self.finished("anders", None, "publishing")
+        self.finished("anders", None, "failed")
+        queued = self.store.submit("anders", "x", profile_id="sdxl-a", max_owner_active=16)["job_id"]
+        self.store.request_cancel(queued, "anders")
+        owned = self.store.completed_assets_for("anders")
+        self.assertEqual(owned, frozenset({"img_a1", "img_a2"}))
+        self.assertIsInstance(owned, frozenset)
+        for asset in ("img_a1", "img_a2", "img_m1", "nope"):
+            self.assertEqual(asset in owned, self.store.owns_completed_asset("anders", asset), asset)
+        self.assertEqual(self.store.completed_assets_for("mallory"), frozenset({"img_m1"}))
+
+    def test_an_indexed_file_whose_job_failed_is_not_owned(self):
+        """published_not_recorded: the asset id may be on the failed row; it is never 'owned'."""
+        import sqlite3
+        job = self.finished("anders", None, "publishing")
+        with sqlite3.connect(self.db) as db:
+            db.execute("UPDATE image_jobs SET state='failed',error='interrupted_during_publication',"
+                       "asset_id='img_orphan' WHERE id=?", (job,))
+        self.assertEqual(self.store.completed_assets_for("anders"), frozenset())
+        self.assertFalse(self.store.owns_completed_asset("anders", "img_orphan"))
+
+    def test_no_principal_owns_nothing(self):
+        self.finished("anders", "img_a1")
+        for owner in ("", "   ", None, 7, "x" * 257, b"anders"):
+            with self.subTest(owner=owner):
+                self.assertEqual(self.store.completed_assets_for(owner), frozenset())
+
+    def test_more_than_the_limit_is_a_refusal_never_a_partial_set(self):
+        for i in range(4):
+            self.finished("anders", f"img_{i}")
+        self.assertEqual(len(self.store.completed_assets_for("anders", limit=4)), 4)
+        with self.assertRaisesRegex(ImageJobError, "^owner_asset_limit$"):
+            self.store.completed_assets_for("anders", limit=3)
+        from app.image_job_store import COMPLETED_ASSETS_MAX
+        for bad in (0, -1, COMPLETED_ASSETS_MAX + 1, "10", None, 2.0):
+            with self.subTest(limit=bad), self.assertRaises(ImageJobError):
+                self.store.completed_assets_for("anders", limit=bad)
+
+    def test_a_database_error_propagates_and_never_reads_as_owning_nothing(self):
+        import sqlite3
+        self.finished("anders", "img_a1")
+        with patch.object(ImageJobStore, "_db", side_effect=sqlite3.OperationalError("database is locked")):
+            with self.assertRaises(sqlite3.OperationalError):
+                self.store.completed_assets_for("anders")
+
+    def test_a_stored_id_outside_the_asset_alphabet_is_never_returned(self):
+        import sqlite3
+        job = self.finished("anders", "img_ok")
+        with sqlite3.connect(self.db) as db:
+            db.execute("UPDATE image_jobs SET asset_id='../escape' WHERE id=?", (job,))
+        self.assertEqual(self.store.completed_assets_for("anders"), frozenset())
+
+
 class PromptRetentionTests(unittest.TestCase):
     """Anders' decision (5 Nov 2026): the prompt of a finished job is blanked after 30 days."""
     DAY = 24 * 3600
