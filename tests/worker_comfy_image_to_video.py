@@ -100,6 +100,28 @@ class SourceLimitTests(unittest.TestCase):
         with patch.object(adapter_module, "MAX_SOURCE_BYTES", len(png()) - 1), self.assertRaises(GenerationError):
             adapter_module.check_source_png(png())
 
+    def test_an_animated_png_is_refused_whatever_its_frame_size(self):
+        # #2346 review 4489553700: LoadImage decodes and concatenates every APNG frame, so IHDR's
+        # size bounds one frame only. Any animation chunk refuses the source.
+        def chunk(kind: bytes, data: bytes) -> bytes:
+            return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+        single = png()
+        head, iend = single[:33], single[-12:]
+        idat = single[33:-12]
+        actl = chunk(b"acTL", struct.pack(">II", 100, 0))
+        fctl = chunk(b"fcTL", struct.pack(">IIIIIHHBB", 0, 832, 480, 0, 0, 1, 10, 0, 0))
+        fdat = chunk(b"fdAT", struct.pack(">I", 1) + zlib.compress(b"\x00" * 16))
+        for animated in (head + actl + fctl + idat + fdat + iend,  # a regular APNG
+                         head + actl + idat + iend,                 # animation control alone
+                         head + idat + fctl + fdat + iend):         # frames after the default image
+            with self.subTest(chunks=animated[33:].count(b"acTL") + animated.count(b"fdAT")), \
+                    self.assertRaisesRegex(GenerationError, "single-frame"):
+                adapter_module.check_source_png(animated)
+        for truncated in (single[:-12], single[:-12] + b"\x00\x00\x00\x00IEN"):  # no complete IEND
+            with self.assertRaisesRegex(GenerationError, "not a complete PNG"):
+                adapter_module.check_source_png(truncated)
+        adapter_module.check_source_png(head + chunk(b"tEXt", b"Comment\x00fine") + idat + iend)
+
 
 class ImageToVideoAdapterTests(unittest.TestCase):
     setUp, tearDown = base.AdapterTests.setUp, base.AdapterTests.tearDown
