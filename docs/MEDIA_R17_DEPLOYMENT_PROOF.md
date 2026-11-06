@@ -2,7 +2,10 @@
 
 Anders' decision (6 Nov 2026, #2275 6686905826) is to generate media in a private work area on the internal disk (C:) and publish it on the external disk (Z:). This page is the operator pack that proves that layout **on the rig**. It complements the CI evidence and does not replace it.
 
-**Status: pending.** Nothing here has been run on the rig. R17 is runnable once the wiring branch (`feat/media-volume-wiring`) is merged and a new `$QualSha` is set in the rig runbook (#2296). Media stays default-off throughout: R17 never switches video on.
+**Status: pending.** Nothing here has been run on the rig. Media stays default-off throughout: R17 never switches video on. R17 needs a new `$QualSha` set in the rig runbook (#2296), at a commit that contains:
+
+- **for R17.1 to R17.6, R17.8:** the wiring branch (`feat/media-volume-wiring`);
+- **for R17.7:** also the C6 repair tool (`feat/media-volume-repair`), which provides `scripts/media_volume_repair.py`. Without it, skip R17.7 and record it as not run.
 
 ## 1. What is proven where
 
