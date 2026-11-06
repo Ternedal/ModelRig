@@ -950,6 +950,16 @@ class VideoExecutorTests(unittest.TestCase):
         self.assertEqual((receipt["sha256"], receipt["size"]), (hashlib.sha256(published).hexdigest(), len(published)))
         self.assertNotIn("a red kite", json.dumps(receipt), "never the prompt")
 
+    def test_a_hand_off_that_cannot_be_recorded_fails_the_job_before_any_copy(self):
+        ex = self.executor()
+        job = self.submit()
+        with patch.object(self.store, "record_handoff", return_value=False):
+            self.assertEqual(ex.step(), "failed")
+        self.assertEqual(self.store.get(job, "anders")["state"], "failed")
+        self.assertEqual(self.sink.registry, set(), "nothing published")
+        self.assertEqual(os.listdir(self.sink.staging), [], "nothing staged")
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "never handed over: cleaned at once")
+
     def test_a_render_that_fails_is_cleaned_at_once_even_while_held(self):
         ex = self.executor_with_fake({"FAKE_COMFY_OUTPUT_MODE": "notmp4"})
         job = self.submit()

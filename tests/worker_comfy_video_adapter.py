@@ -566,6 +566,39 @@ class AdapterTests(unittest.TestCase):
         adapter.render_to(request(), io.BytesIO())  # no holder: no receipts, as before
         self.assertEqual([r["stage"] for r in receipts], ["copying", "copied"])
 
+    def test_a_copy_the_volume_could_not_take_keeps_the_finished_file(self):
+        import errno
+        from app.media_generation_contract import ArtifactSinkUnavailable
+        adapter = self.adapter()
+        adapter.load()
+
+        class FullVolume(io.BytesIO):
+            def write(self, data):
+                if self.tell() > 0:
+                    raise ArtifactSinkUnavailable("staged_video_unavailable")
+                return super().write(data)
+
+        class SyncFails(io.BytesIO):
+            def sync(self):
+                raise OSError(errno.EIO, "I/O error")
+
+        for sink in (FullVolume(), SyncFails()):
+            with self.subTest(sink=type(sink).__name__):
+                with self.assertLogs("kaliv.media.comfy", level="WARNING"), self.assertRaises((ArtifactSinkUnavailable, OSError)):
+                    with adapter.holding_outputs():
+                        adapter.render_to(request(), sink)
+                kept = os.listdir(self.dirs["output"])
+                self.assertEqual(len(kept), 1, "the finished render was never deleted before it was published")
+                self.assertEqual(adapter.last_cleanup["kept_for_recovery"], kept)
+                os.unlink(os.path.join(self.dirs["output"], kept[0]))
+
+    def test_a_bad_render_found_while_copying_is_still_cleaned_at_once(self):
+        adapter = self.adapter(fake={"FAKE_COMFY_MP4_PAD": "4096"}, profile=self.profile(max_output_bytes=1024))
+        adapter.load()
+        with self.assertRaisesRegex(GenerationError, "size cap"), adapter.holding_outputs():
+            adapter.render_to(request(), io.BytesIO())
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "not a finished file: nothing to keep")
+
     def test_holding_does_not_nest(self):
         adapter = self.adapter()
         with adapter.holding_outputs():
