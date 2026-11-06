@@ -525,6 +525,47 @@ class AdapterTests(unittest.TestCase):
                 self.assertEqual(os.listdir(self.dirs["output"]), [], "removed before the hold even ends")
         self.assertNotIn("kept_for_recovery", adapter.last_cleanup)
 
+    def test_the_holder_gets_a_receipt_before_the_copy_and_one_after_the_sync(self):
+        adapter = self.adapter()
+        adapter.load()
+        sink = io.BytesIO()
+        receipts = []
+
+        def record(receipt):
+            receipts.append((receipt, len(sink.getvalue())))
+        with adapter.holding_outputs(on_handoff=record):
+            adapter.render_to(request(), sink)
+            name = os.listdir(self.dirs["output"])[0]
+            info = os.stat(Path(self.dirs["output"], name))
+        output = {"name": name, "dev": info.st_dev, "ino": info.st_ino, "size": info.st_size}
+        self.assertEqual(receipts[0], ({"stage": "copying", "output": output}, 0), "before a byte reached the sink")
+        copied, written = receipts[1]
+        self.assertEqual(copied, {"stage": "copied", "output": output, "sha256": hashlib.sha256(sink.getvalue()).hexdigest(),
+                                  "size": len(sink.getvalue())})
+        self.assertEqual(written, len(sink.getvalue()))
+        self.assertEqual(len(receipts), 2)
+
+    def test_an_unrecorded_hand_off_fails_before_anything_is_copied(self):
+        adapter = self.adapter()
+        adapter.load()
+        sink = io.BytesIO()
+
+        def refuse(receipt):
+            raise GenerationError("the hand-off could not be recorded for this job")
+        with self.assertRaises(GenerationError), adapter.holding_outputs(on_handoff=refuse):
+            adapter.render_to(request(), sink)
+        self.assertEqual(sink.getvalue(), b"", "nothing reached the volume")
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "a job that never handed over is cleaned at once")
+
+    def test_receipts_go_only_to_the_current_holder(self):
+        adapter = self.adapter()
+        adapter.load()
+        receipts = []
+        with adapter.holding_outputs(on_handoff=receipts.append):
+            adapter.render_to(request(), io.BytesIO())
+        adapter.render_to(request(), io.BytesIO())  # no holder: no receipts, as before
+        self.assertEqual([r["stage"] for r in receipts], ["copying", "copied"])
+
     def test_holding_does_not_nest(self):
         adapter = self.adapter()
         with adapter.holding_outputs():

@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import secrets
 import time
 from typing import Callable, Mapping
@@ -98,7 +99,7 @@ class MediaExecutor:
                  profiles: Mapping[str, ModelProfile], adapter_factory: Callable[[ModelProfile], object],
                  image_sink: ArtifactSink | None = None, video_sink: StagedFileArtifactSink | None = None,
                  idle_unload_s: float = 300.0, cancel_poll_s: float = 1.0,
-                 clock: Callable[[], float] = time.monotonic):
+                 clock: Callable[[], float] = time.monotonic, volume_root: str | None = None):
         if not isinstance(store, ImageJobStore):
             raise ExecutorConfigError("store must be an ImageJobStore")
         if not profiles:
@@ -113,6 +114,7 @@ class MediaExecutor:
         if type(cancel_poll_s) not in (int, float) or not 0.05 <= cancel_poll_s <= 60:
             raise ExecutorConfigError("cancel_poll_s must be 0.05..60")
         self.store = store
+        self.volume_root = volume_root  # recorded in hand-off receipts (C6 notices a different disk)
         self.gpu_uuid = normalize_gpu_uuid(gpu_uuid)
         self.lease_dir = lease_dir
         self.profiles = dict(profiles)
@@ -234,6 +236,16 @@ class MediaExecutor:
             self._unload()  # close() must prove the release, otherwise this is fatal (exit 70)
         return outcome
 
+    def _handoff_recorder(self, job_id: str) -> Callable[[dict], None]:
+        """Store each hand-off receipt before the copy goes on: an unrecorded hand-off fails the job."""
+        def record(receipt: dict) -> None:
+            if self.volume_root is not None:
+                root = os.stat(self.volume_root)
+                receipt = {**receipt, "volume": {"dev": root.st_dev, "ino": root.st_ino}}
+            if not self.store.record_handoff(job_id, self.instance, receipt):
+                raise GenerationError("the hand-off could not be recorded for this job")
+        return record
+
     def _run_job(self, job: dict) -> str:
         job_id, profile = job["id"], self.profiles[job["profile_id"]]
         try:
@@ -250,7 +262,7 @@ class MediaExecutor:
                 # area. The hold ends after the staged context: on success the file is published
                 # first; if publication fails, the copy is kept for recovery (C6 lists it).
                 hold = getattr(adapter, "holding_outputs", None)
-                with hold() if callable(hold) else contextlib.nullcontext():
+                with hold(on_handoff=self._handoff_recorder(job_id)) if callable(hold) else contextlib.nullcontext():
                     with self.video_sink.staged(".mp4") as out:
                         mime = adapter.render_to(request, out, should_cancel=should_cancel)
                         if not self.store.begin_publish(job_id, self.instance):
