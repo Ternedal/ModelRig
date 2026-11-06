@@ -177,6 +177,45 @@ class JobKeyedRules(unittest.TestCase):
         self.assertEqual(self.volume.indexed(), set())
         self.assertEqual(target.read_bytes(), MP4)
 
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFOs")
+    def test_a_fifo_at_the_destination_is_a_conflict_and_never_blocks(self):
+        """Codex P2 (#2347 4498178920): a blocking open of a FIFO with no writer never returned."""
+        import threading
+        os.mkfifo(self.volume.media / f"{self.expected}.mp4")
+        outcome = []
+
+        def adopt():
+            try:
+                self.adopt()
+                outcome.append("adopted")
+            except ArtifactSinkUnavailable as exc:
+                outcome.append(str(exc))
+        worker = threading.Thread(target=adopt, daemon=True)
+        worker.start()
+        worker.join(timeout=5)
+        if worker.is_alive():  # unblock the hung open so the test process can exit
+            fd = os.open(self.volume.media / f"{self.expected}.mp4", os.O_WRONLY | os.O_NONBLOCK)
+            os.close(fd)
+            worker.join(timeout=5)
+            self.fail("adoption blocked on a FIFO")
+        self.assertEqual(outcome, ["asset_job_conflict"])
+        self.assertEqual(self.volume.indexed(), set())
+
+    def test_a_destination_swapped_between_its_check_and_its_open_is_a_conflict(self):
+        """The type is checked before the open and the descriptor after it: a swap in between fails."""
+        first = self.adopt()
+        destination = self.volume.media / f"{first}.mp4"
+        real_open = os.open
+
+        def swap_then_open(path, flags, *args, **kwargs):
+            if Path(path) == destination and not flags & (os.O_WRONLY | os.O_RDWR):
+                destination.rename(destination.with_name("kept-aside.mp4"))  # alive: no inode reuse
+                destination.write_bytes(MP4)  # same bytes, different file
+            return real_open(path, flags, *args, **kwargs)
+        with patch("app.media_staged_video_sink.os.open", side_effect=swap_then_open), \
+                self.assertRaisesRegex(ArtifactSinkUnavailable, "asset_job_conflict"):
+            self.adopt(sink=self.volume.sink(max_bytes=4096))
+
     def test_a_staged_name_swapped_before_adoption_is_refused_and_kept(self):
         real_lstat = os.lstat
         swapped = []
