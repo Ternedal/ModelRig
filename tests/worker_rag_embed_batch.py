@@ -151,10 +151,22 @@ with tempfile.TemporaryDirectory(prefix="rag-embed-batch-") as td:
             check("a short batch answer aborts ingest", True)
         check("nothing was written after the aborted ingest", store.count() == 0)
 
-# 7 -- the env knob is wired: MODELRIG_EMBED_BATCH is read at import
-src = (Path(__file__).resolve().parents[1] / "worker/app/ollama_client.py").read_text()
-check("MODELRIG_EMBED_BATCH is the documented knob", 'getenv("MODELRIG_EMBED_BATCH"' in src)
-check("EMBED_BATCH is at least 1 even when misconfigured", oc.EMBED_BATCH >= 1)
+# 7 -- the env knob is wired: a fresh interpreter with MODELRIG_EMBED_BATCH set
+#      reads it, and a nonsense value still yields a usable batch of at least 1
+import subprocess  # noqa: E402
+
+
+def _batch_with(value: str) -> str:
+    env = dict(os.environ, MODELRIG_EMBED_BATCH=value, PYTHONPATH="worker")
+    return subprocess.run(
+        [sys.executable, "-c", "from app import ollama_client as oc; print(oc.EMBED_BATCH)"],
+        cwd=str(Path(__file__).resolve().parents[1]), env=env,
+        capture_output=True, text=True, timeout=60,
+    ).stdout.strip()
+
+
+check("MODELRIG_EMBED_BATCH=7 makes the batch size 7", _batch_with("7") == "7")
+check("MODELRIG_EMBED_BATCH=0 is clamped to 1, never a zero-step range", _batch_with("0") == "1")
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
