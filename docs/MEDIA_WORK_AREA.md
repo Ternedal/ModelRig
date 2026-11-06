@@ -9,7 +9,7 @@
 
 **The hand-off.**
 1. A finished file is checked (size, MP4 header, unchanged while copied) and copied from the work area into a staged file on the publication volume (#2347).
-2. The staged file is synced (`fsync`). A delayed write error, such as a full disk, fails the job here; it is never a silent success.
+2. The staged file is synced (`fsync`, through the staged handle's `sync()`, #2347, which reveals no path). A delayed write error, such as a full disk, fails the job here; it is never a silent success.
 3. Only then is the copy in the work area removed.
 4. The staged file is published to the gallery in one atomic rename on that volume. The asset id is derived from the job, so a job can never be published twice.
 
@@ -42,7 +42,7 @@ At start, a failure is exit 78. The folder is local, so a failure there is a con
 
 The root's `(st_dev, st_ino)` is pinned at start. **Before every job-database access**, the work area is checked again, then the publication volume. A work area that changed (another folder at the same path, opened up to other users, replaced by a link) stops the executor (exit 75) before it claims another job. So does a publication volume that is gone or swapped. The restart then refuses with 78 if the work area is still wrong.
 
-On Windows, every folder that is used must itself be private, not only the root. Anyone may traverse on Windows, and a subfolder can carry its own grants.
+On Windows, every folder and file that is used must itself be private, not only the root. Anyone may traverse on Windows, and a subfolder or file can carry its own grants. A file **moved** in from elsewhere on the same disk keeps the ACL it had there, so at start the job database and its `-wal`, `-shm` and `-journal` files are checked as well (exit 78 if another user could read them).
 
 ## Operator setup (once)
 
@@ -72,7 +72,7 @@ export KALIV_MEDIA_WORK_ROOT=/var/lib/kaliv/media-work
 export KALIV_MEDIA_JOB_DB=/var/lib/kaliv/media-work/state/jobs.sqlite3
 ```
 
-**Moving an existing job database** from the old place: stop the executor, so that its lock is free. Copy the file (and its `-wal` and `-shm` files, if present) into `state`. Start the executor, and check that the queue is as before. Then delete the old copy. Nothing moves it automatically.
+**Moving an existing job database** from the old place: stop the executor, so that its lock is free. **Copy** the file (never move it: a move on the same disk keeps its old permissions, and the executor then refuses it) (and its `-wal` and `-shm` files, if present) into `state`. Start the executor, and check that the queue is as before. Then delete the old copy. Nothing moves it automatically.
 
 ## Privacy and retention
 

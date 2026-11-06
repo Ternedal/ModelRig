@@ -38,8 +38,9 @@ must still match. ``require(path)`` also refuses:
 - a path outside the root, or one that is not canonical;
 - a link or reparse point in any component, or a component on another device;
 - anything that is neither a directory nor a regular file;
-- on Windows, any directory below the root whose own DACL is not private. Windows lets anyone
-  traverse, so privacy must hold for each folder that is used, not only for the root.
+- on Windows, any folder or file below the root whose own DACL is not private. Windows lets anyone
+  traverse, and a file moved in from elsewhere on the same disk keeps its old ACL, so privacy must
+  hold for each folder and file that is used, not only for the root.
 
 A failure there is ``ArtifactSinkUnavailable`` (reason ``media_work_*``): the executor stops (75),
 and its restart then refuses with 78 if the problem is still there.
@@ -83,10 +84,11 @@ class WorkAreaProbe(SystemProbe):
     mountinfo = "/proc/self/mountinfo"
 
     @property
-    def acl_per_directory(self) -> bool:
-        """Whether every directory used must itself be private. On Windows anyone may traverse
-        (``SeChangeNotifyPrivilege``), and a folder can carry its own grants, so the root's ACL alone
-        proves nothing about what is below it. On POSIX a private root stops every other user."""
+    def acl_per_entry(self) -> bool:
+        """Whether every folder and file used must itself be private. On Windows anyone may traverse
+        (``SeChangeNotifyPrivilege``), and a folder or file can carry its own grants: a file moved in
+        from elsewhere on the same disk keeps the ACL it had there. So the root's ACL alone proves
+        nothing about what is below it. On POSIX a private root stops every other user."""
         return self.windows
 
     def containing_filesystem(self, path: str) -> tuple[str | None, bool]:
@@ -123,10 +125,11 @@ class WorkAreaProbe(SystemProbe):
         """Whether only this user (and on Windows SYSTEM and Administrators) can use ``path``."""
         if self.windows:
             from .credential_acl import evaluate_credential_acl
-            from .credential_acl_windows import CredentialAclUnavailable
+            from .credential_acl_windows import CredentialAclUnavailable, read_credential_security
             from .lease_dir_acl_windows import read_lease_dir_security
+            reader = read_lease_dir_security if stat.S_ISDIR(info.st_mode) else read_credential_security
             try:
-                owner, dacl, process = read_lease_dir_security(path)
+                owner, dacl, process = reader(path)
             except CredentialAclUnavailable as exc:
                 return False, f"security descriptor could not be verified: {exc}"
             except (OSError, ValueError, TypeError):
@@ -204,9 +207,9 @@ class PrivateWorkArea:
         self.verify()
         walked = walk_within(self._root, raw, probe=self._probe, device=self._identity[0],
                              prefix="media_work_path", outside="media_work_path_outside_work_area")
-        if self._probe.acl_per_directory:
+        if self._probe.acl_per_entry:
             for current, info in walked:
-                if stat.S_ISDIR(info.st_mode) and not self._probe.private(current, info)[0]:
+                if not self._probe.private(current, info)[0]:  # every folder, and the file itself
                     raise _refused("media_work_path_not_private")
 
 
