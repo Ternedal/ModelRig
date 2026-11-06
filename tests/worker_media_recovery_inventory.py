@@ -160,6 +160,38 @@ class RecoveryInventoryTests(unittest.TestCase):
         self.assertEqual(entry["asset"], {"status": "same", "asset_id": asset, "indexed": True})
         self.assertEqual(entry["error"], "interrupted_during_publication")
 
+    def test_a_crash_after_cleanup_before_complete_is_published_not_recorded(self):
+        """Published, indexed and the C: copy removed, but complete() never ran: the file is whole
+        and in the index, yet no job owns it as completed (C2's crash matrix found this as unknown)."""
+        job = self.job()
+        path, output = self.work_file()
+        self.receipt(job, output)
+        self.store.begin_publish(job, DEAD)
+        asset = self.publish(job)
+        path.unlink()  # publish first, then delete: the copy on C: was removed
+        seen = {}
+        for when in ("before the restart", "after the restart"):
+            if when == "after the restart":
+                self.restart()
+            with self.subTest(when=when):
+                entry = seen[when] = self.only(self.inventory())
+                self.assertEqual(entry["classification"], "published_not_recorded")
+                self.assertEqual(entry["asset"], {"status": "same", "asset_id": asset, "indexed": True})
+                self.assertEqual(entry["work_file"]["status"], "absent")
+        self.assertEqual((seen["before the restart"]["state"], seen["before the restart"]["error"]), ("publishing", None))
+        self.assertEqual(seen["after the restart"]["error"], "interrupted_during_publication")
+
+    def test_published_not_recorded_needs_an_interrupted_publication(self):
+        """The same files under a job that failed for another reason are not this class."""
+        job = self.job()
+        path, output = self.work_file()
+        self.receipt(job, output)
+        self.store.begin_publish(job, DEAD)
+        self.publish(job)
+        path.unlink()
+        self.assertTrue(self.store.fail(job, DEAD, "generation_failed"))
+        self.assertEqual(self.only(self.inventory())["classification"], "unknown")
+
     def test_a_failed_index_registration_is_published_unindexed(self):
         job = self.job()
         _, output = self.work_file()
