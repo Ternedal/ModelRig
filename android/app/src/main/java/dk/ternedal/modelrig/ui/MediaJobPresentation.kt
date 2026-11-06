@@ -1,6 +1,8 @@
 package dk.ternedal.modelrig.ui
 
+import dk.ternedal.modelrig.net.MediaCancelOutcome
 import dk.ternedal.modelrig.net.MediaJob
+import dk.ternedal.modelrig.net.MediaJobRefusal
 import dk.ternedal.modelrig.net.MediaJobState
 
 /**
@@ -73,6 +75,28 @@ object MediaJobPresentation {
     )
 
     private val UNKNOWN_ERROR = MediaJobOutcome("Jobbet fejlede.", MediaJobRetry.RESUBMIT)
+
+    /** A refused request. The texts never name a number the server may change. */
+    fun refusal(refusal: MediaJobRefusal): MediaJobOutcome = when (refusal) {
+        MediaJobRefusal.NOT_FOUND -> MediaJobOutcome("Jobbet findes ikke.", MediaJobRetry.NONE)
+        MediaJobRefusal.INVALID_REQUEST -> MediaJobOutcome(
+            "Riggen afviste anmodningen. Ret indstillingerne og prøv igen.", MediaJobRetry.FIX_INPUT)
+        MediaJobRefusal.IDEMPOTENCY_CONFLICT -> MediaJobOutcome(
+            "En tidligere anmodning med samme nøgle havde et andet indhold. Send den som en ny.", MediaJobRetry.RESUBMIT)
+        MediaJobRefusal.QUEUE_FULL -> MediaJobOutcome(
+            "Køen på riggen er fuld. Prøv igen om lidt.", MediaJobRetry.LATER)
+        MediaJobRefusal.OWNER_ACTIVE_LIMIT -> MediaJobOutcome(
+            "Du har for mange aktive jobs. Vent til et er færdigt.", MediaJobRetry.LATER)
+        MediaJobRefusal.MEDIA_DISABLED -> MediaJobOutcome(
+            "Mediegenerering er slået fra på riggen.", MediaJobRetry.NONE)
+        MediaJobRefusal.UNKNOWN -> MediaJobOutcome("Riggen afviste anmodningen.", MediaJobRetry.NONE)
+    }
+
+    fun cancelled(outcome: MediaCancelOutcome): String = when (outcome) {
+        MediaCancelOutcome.CANCELLED -> "Jobbet er annulleret."
+        MediaCancelOutcome.REQUESTED -> "Annullering sendt. Jobbet stopper om lidt."
+        MediaCancelOutcome.TOO_LATE -> "For sent at annullere: resultatet gemmes allerede, eller jobbet er færdigt."
+    }
 
     /** Null while the job is still active. An unknown error is never shown verbatim. */
     fun outcome(job: MediaJob): MediaJobOutcome? = when (job.state) {

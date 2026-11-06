@@ -57,8 +57,44 @@ data class MediaJob(
     val assetPath: String? get() = assetId?.let(MediaGalleryContract::mediaPath)
 }
 
+/** The store's answers to a cancel request (`ImageJobStore.request_cancel`). */
+enum class MediaCancelOutcome(val wire: String) {
+    /** It was queued and is now cancelled (or already was). */
+    CANCELLED("cancelled"),
+
+    /** It is running; the executor stops it and marks it cancelled. */
+    REQUESTED("requested"),
+
+    /** It is publishing or already finished. */
+    TOO_LATE("too_late"),
+}
+
+data class MediaCancelResult(val outcome: MediaCancelOutcome, val job: MediaJob)
+
+data class MediaJobPage(
+    val jobs: List<MediaJob>,
+    /** Null at the end. Opaque: only ever echoed back. */
+    val nextCursor: String?,
+    /** Jobs in this page that failed validation and are not shown. */
+    val skipped: Int,
+)
+
+/** A refused request (status >= 400). The wire codes are openapi.json's Error enum. */
+enum class MediaJobRefusal(val wire: String?) {
+    NOT_FOUND("not_found"),
+    INVALID_REQUEST("invalid_request"),
+    IDEMPOTENCY_CONFLICT("idempotency_conflict"),
+    QUEUE_FULL("queue_full"),
+    OWNER_ACTIVE_LIMIT("owner_active_limit"),
+    MEDIA_DISABLED("media_disabled"),
+
+    /** Not JSON, another schema, or a code this app does not know. */
+    UNKNOWN(null),
+}
+
 object MediaJobContract {
     const val SCHEMA = "kaliv-media-job/v1"
+    const val MAX_PAGE = 50
 
     /** The store's error for a queued job nobody claimed within 24 hours (Anders, 6 Nov 2026). */
     const val EXPIRED_UNCLAIMED = "expired_unclaimed"
@@ -82,16 +118,82 @@ object MediaJobContract {
     private fun seg(value: String): String =
         URLEncoder.encode(value, StandardCharsets.UTF_8.toString()).replace("+", "%20")
 
-    /** Parse one status response. Throws [MediaJobException] with [MediaJobException.Reason.PROTOCOL]. */
-    fun parse(body: String): MediaJob {
+    private fun root(body: String): JSONObject {
         val root = try {
             JSONObject(body)
         } catch (e: JSONException) {
             throw protocol("Jobstatus var ikke gyldig JSON")
         }
         if (root.opt("schema") != SCHEMA) throw protocol("Ukendt jobstatus-format")
-        val job = root.opt("job") as? JSONObject ?: throw protocol("Manglende job")
+        return root
+    }
+
+    /**
+     * Parse one status response (GET a job, or a submit's 201). Throws
+     * [MediaJobException] with [MediaJobException.Reason.PROTOCOL].
+     */
+    fun parse(body: String): MediaJob {
+        val job = root(body).opt("job") as? JSONObject ?: throw protocol("Manglende job")
         return parseJob(job)
+    }
+
+    /** A cancel response. The outcome must agree with the job it returns. */
+    fun parseCancel(body: String): MediaCancelResult {
+        val root = root(body)
+        val outcome = MediaCancelOutcome.entries.firstOrNull { it.wire == root.opt("outcome") }
+            ?: throw protocol("Ukendt annulleringssvar")
+        val job = parseJob(root.opt("job") as? JSONObject ?: throw protocol("Manglende job"))
+        val consistent = when (outcome) {
+            MediaCancelOutcome.CANCELLED -> job.state == MediaJobState.CANCELLED
+            // The executor may already have stopped it by the time the route reads it back.
+            MediaCancelOutcome.REQUESTED -> job.state == MediaJobState.RUNNING || job.state == MediaJobState.CANCELLED
+            MediaCancelOutcome.TOO_LATE -> job.state == MediaJobState.PUBLISHING || job.state.terminal
+        }
+        if (!consistent) throw protocol("Annulleringssvar passer ikke til status")
+        return MediaCancelResult(outcome, job)
+    }
+
+    /**
+     * One page of the owner's jobs. Like the gallery, an invalid job is
+     * skipped and counted, never shown and never takes the page with it;
+     * damage to the page itself rejects it.
+     */
+    fun parsePage(body: String): MediaJobPage {
+        val root = root(body)
+        val array = root.opt("jobs") as? org.json.JSONArray ?: throw protocol("Manglende jobliste")
+        if (array.length() > MAX_PAGE) throw protocol("For mange jobs i ét svar")
+        if (!root.has("next_cursor")) throw protocol("Manglende next_cursor")
+        val cursor = when (val raw = root.opt("next_cursor")) {
+            null, JSONObject.NULL -> null
+            is String -> raw.takeIf(MediaGalleryContract::isValidCursor) ?: throw protocol("Ugyldig next_cursor")
+            else -> throw protocol("Ugyldig next_cursor")
+        }
+        val jobs = ArrayList<MediaJob>(array.length())
+        val seen = HashSet<String>()
+        var skipped = 0
+        for (i in 0 until array.length()) {
+            val job = (array.opt(i) as? JSONObject)?.let {
+                try {
+                    parseJob(it)
+                } catch (e: MediaJobException) {
+                    null
+                }
+            }
+            if (job == null || !seen.add(job.id)) skipped++ else jobs += job
+        }
+        return MediaJobPage(jobs, cursor, skipped)
+    }
+
+    /** The refusal in an error response. Never throws: anything unreadable is [MediaJobRefusal.UNKNOWN]. */
+    fun refusal(body: String?): MediaJobRefusal {
+        val root = try {
+            JSONObject(body ?: return MediaJobRefusal.UNKNOWN)
+        } catch (e: JSONException) {
+            return MediaJobRefusal.UNKNOWN
+        }
+        if (root.opt("schema") != SCHEMA) return MediaJobRefusal.UNKNOWN
+        val code = root.opt("error") as? String ?: return MediaJobRefusal.UNKNOWN
+        return MediaJobRefusal.entries.firstOrNull { it.wire == code } ?: MediaJobRefusal.UNKNOWN
     }
 
     fun parseJob(obj: JSONObject): MediaJob {

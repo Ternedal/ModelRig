@@ -150,6 +150,15 @@ class MediaJobFixtureTests(unittest.TestCase):
         declared = {(p, m) for p, ops in OPENAPI["paths"].items() for m in ops}
         self.assertEqual(declared - used, set(), "every operation has an example")
 
+    def test_android_knows_every_refusal_and_cancel_outcome(self):
+        kotlin = (ROOT / "android/app/src/main/java/dk/ternedal/modelrig/net/MediaJobContract.kt").read_text(encoding="utf-8")
+        def enum(name):
+            body = re.search(rf"enum class {name}\b.*?\{{(.*?)\n\}}", kotlin, re.S).group(1)
+            return set(re.findall(r'[A-Z_]+\("([a-z_]+)"\)', body))
+        schemas = OPENAPI["components"]["schemas"]
+        self.assertEqual(enum("MediaJobRefusal"), set(schemas["Error"]["properties"]["error"]["enum"]))
+        self.assertEqual(enum("MediaCancelOutcome"), set(schemas["CancelResponse"]["properties"]["outcome"]["enum"]))
+
     def test_openapi_job_states_and_store_agree(self):
         states = OPENAPI["components"]["schemas"]["Job"]["properties"]["state"]["enum"]
         self.assertEqual(set(states), ACTIVE | set(image_job_store._FINISHED))
