@@ -52,6 +52,7 @@ restart after 70 and 76, never loop on 73, wait for the volume after 75, stop on
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import secrets
 import time
@@ -245,15 +246,20 @@ class MediaExecutor:
             adapter = self._adapter_for(profile)
             should_cancel = self._cancel_check(job_id)
             if profile.modality == "video":
-                with self.video_sink.staged(".mp4") as out:
-                    mime = adapter.render_to(request, out, should_cancel=should_cancel)
-                    if not self.store.begin_publish(job_id, self.instance):
-                        raise GenerationCancelled("cancelled before publication")  # staged file is removed
-                    publishing = True
-                    if isinstance(self.video_sink, JobKeyedStagedSink):
-                        asset_id = self.video_sink.adopt_for_job(out, mime, job_id)
-                    else:
-                        asset_id = self.video_sink.adopt(out, mime)
+                # Anders, 6 Nov 2026: publish on the volume, THEN remove the adapter's copy in the work
+                # area. The hold ends after the staged context: on success the file is published
+                # first; if publication fails, the copy is kept for recovery (C6 lists it).
+                hold = getattr(adapter, "holding_outputs", None)
+                with hold() if callable(hold) else contextlib.nullcontext():
+                    with self.video_sink.staged(".mp4") as out:
+                        mime = adapter.render_to(request, out, should_cancel=should_cancel)
+                        if not self.store.begin_publish(job_id, self.instance):
+                            raise GenerationCancelled("cancelled before publication")  # staged file is removed
+                        publishing = True
+                        if isinstance(self.video_sink, JobKeyedStagedSink):
+                            asset_id = self.video_sink.adopt_for_job(out, mime, job_id)
+                        else:
+                            asset_id = self.video_sink.adopt(out, mime)
             else:
                 rendered = adapter.render(request, should_cancel=should_cancel)
                 if not isinstance(rendered, RenderedArtifact) or rendered.mime_type not in profile.outputs:

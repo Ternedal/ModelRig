@@ -60,7 +60,7 @@ ComfyUI writes the full MP4 into its own `output_directory`, in the work area. S
 
 A work area that changed or stopped being private raises `ArtifactSinkUnavailable`. That is fatal, with no fallback, and nothing is handed to the sink.
 
-The adapter copies the checked file into the staged file it was handed on the publication volume and syncs it. Only then does its cleanup remove the file from the work area. The sink publishes the staged file with one atomic rename on that volume, keyed by the job. The executor refuses to claim a job while the publication volume is not there, so no render is wasted.
+The adapter copies the checked file into the staged file it was handed on the publication volume and syncs it. The sink publishes the staged file with one atomic rename on that volume, keyed by the job. The executor holds the adapter's copy (`adapter.holding_outputs()`) until then: only after publication is it removed from the work area. If publication fails, the copy is kept for recovery (C6 lists it); if the owner cancelled, it is removed. The executor refuses to claim a job while the publication volume is not there, so no render is wasted.
 
 `pass_fds` (POSIX) and the resident lock each keep the GPU busy after a supervisor SIGKILL on their own. Both are kept as defence in depth.
 
