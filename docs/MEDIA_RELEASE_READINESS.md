@@ -46,6 +46,7 @@ Every change to stored data so far is **additive**. Nothing is rewritten, rename
 | `image_jobs` | index `image_jobs_state`, index `image_jobs_owner_asset_state` | G2, #2339 | Harmless to older code |
 | `image_jobs.state` | new value `expired` (no schema change) | wiring | Older code never claims or counts an expired job, but its retention does not know the state: **prompts of expired jobs are not blanked while older code runs.** They are blanked once the newer code runs again. |
 | `image_jobs_handoff` | new table: one copy receipt per video job | wiring | Older code never reads it; C6 then has no receipt to classify by |
+| `image_jobs.error` after a restart | the codes `interrupted_by_restart` and `interrupted_during_publication` instead of sentences; existing rows are **not** rewritten | wiring | Older code writes the sentences again. `public_error()` maps both forms, so the route and Android show the same thing either way |
 | `image_jobs_scrub` | one-row table: a VACUUM is owed once after `secure_delete` was enabled | #2340 | Older code never reads it |
 | Gallery index `gallery-index.json` (`kaliv-media-gallery/v1` items) | none since v1. The writer strips presentation-only fields before writing. | #2313 | — |
 | `.gallery-index.lock` | with the lock fix: a persistent, never-unlinked lock file instead of an `O_EXCL` marker | `fix/gallery-index-os-lock` | **One-way:** the old writer treats a leftover file as held. Once the new writer has run, do not downgrade without deleting the file, with no writer running. |
