@@ -5,6 +5,7 @@ fix/image-job-quota-type-20261029 (ChatGPT hardening, 87a522d5). Changes for
 ModelRig #2296: every job names a profile_id; the volume guard is any callable
 (the media store is ChatGPT's slice, so this test uses its own exception).
 """
+import json
 import tempfile
 import time
 import sqlite3
@@ -346,6 +347,63 @@ class ExecutorProtocolTests(unittest.TestCase):
             self.store.submit("anders", "y", profile_id="sdxl-a", max_owner_active=1)
         self.store.complete(job, A1, "asset")
         self.store.submit("anders", "y", profile_id="sdxl-a", max_owner_active=1)
+
+
+class HandoffReceiptTests(unittest.TestCase):
+    """Anders, 6 Nov: what a video job handed from the work area to the volume, for C6."""
+    setUp, job, row, claimed = ExecutorProtocolTests.setUp, ExecutorProtocolTests.job, \
+        ExecutorProtocolTests.row, ExecutorProtocolTests.claimed
+    OUTPUT = {"name": "kaliv_00001_.mp4", "dev": 2049, "ino": 77, "size": 4096}
+
+    def receipts(self):
+        import sqlite3
+        with sqlite3.connect(self.db) as db:
+            return {r[0]: json.loads(r[1]) for r in db.execute("SELECT job_id, record FROM image_jobs_handoff")}
+
+    def test_the_executor_records_and_replaces_its_own_jobs_receipt(self):
+        job = self.claimed()
+        self.assertTrue(self.store.record_handoff(job, A1, {"stage": "copying", "output": self.OUTPUT,
+                                                             "volume": {"dev": 5, "ino": 2}}))
+        copied = {"stage": "copied", "output": self.OUTPUT, "sha256": "ab" * 32, "size": 4096}
+        self.assertTrue(self.store.begin_publish(job, A1))
+        self.assertTrue(self.store.record_handoff(job, A1, copied), "still the holder while publishing")
+        self.assertEqual(self.receipts(), {job: copied})
+        self.assertNotIn("record", self.row(job), "image_jobs is unchanged: a separate table")
+
+    def test_only_the_claiming_instance_of_an_active_job(self):
+        job = self.claimed()
+        receipt = {"stage": "copying", "output": self.OUTPUT}
+        self.assertFalse(self.store.record_handoff(job, A2, receipt), "another instance")
+        self.store.fail(job, A1, "generation_failed")
+        self.assertFalse(self.store.record_handoff(job, A1, receipt), "a finished job")
+        self.assertEqual(self.receipts(), {})
+
+    def test_a_receipt_holds_names_ids_and_hashes_only(self):
+        job = self.claimed()
+        bad = [
+            {"stage": "copying", "output": self.OUTPUT, "prompt": "a red bicycle"},
+            {"stage": "copying", "output": {**self.OUTPUT, "name": "../jobs.sqlite3"}},
+            {"stage": "copying", "output": {**self.OUTPUT, "name": "sub/dir.mp4"}},
+            {"stage": "copying", "output": {**self.OUTPUT, "name": ".."}},
+            {"stage": "copying", "output": {**self.OUTPUT, "size": -1}},
+            {"stage": "copying", "output": {**self.OUTPUT, "dev": True}},
+            {"stage": "copying", "output": {**self.OUTPUT, "extra": 1}},
+            {"stage": "copying", "output": self.OUTPUT, "sha256": "ab" * 32, "size": 1},
+            {"stage": "copied", "output": self.OUTPUT, "size": 1},
+            {"stage": "copied", "output": self.OUTPUT, "sha256": "AB" * 32, "size": 1},
+            {"stage": "copied", "output": self.OUTPUT, "sha256": 7, "size": 1},
+            {"stage": "published", "output": self.OUTPUT},
+            {"stage": "copying", "output": self.OUTPUT, "volume": {"dev": 1}},
+            {"stage": "copying", "output": self.OUTPUT, "source_asset_id": "../x"},
+            {"stage": "copying", "output": self.OUTPUT, "source_sha256": "z" * 64},
+            "not a dict",
+        ]
+        for record in bad:
+            with self.subTest(record=record), self.assertRaises(ImageJobError):
+                self.store.record_handoff(job, A1, record)
+        self.assertEqual(self.receipts(), {})
+        self.assertTrue(self.store.record_handoff(job, A1, {"stage": "copying", "output": self.OUTPUT,
+                                                             "source_asset_id": "a" * 32, "source_sha256": "c" * 64}))
 
 
 class PromptRetentionTests(unittest.TestCase):

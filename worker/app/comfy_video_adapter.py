@@ -47,6 +47,7 @@ not supported here.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import logging
 import os
 import secrets
@@ -96,6 +97,7 @@ class ComfyVideoAdapter:
         self._template: WorkflowTemplate | None = None
         self.last_cleanup: dict[str, list[str]] = {}
         self._holding: list[tuple[set[str], list]] | None = None  # see holding_outputs()
+        self._on_handoff: Callable[[dict], None] | None = None
         # True once an interrupt could not be confirmed drained: this ComfyUI must not take another
         # job. The executor unloads (and so restarts) the adapter (#2318 review 4469472651).
         self.needs_restart = False
@@ -211,10 +213,10 @@ class ComfyVideoAdapter:
             _log.warning("comfy cleanup raised %s; outputs left in place", type(exc).__name__)
 
     @contextlib.contextmanager
-    def holding_outputs(self):
+    def holding_outputs(self, on_handoff: Callable[[dict], None] | None = None):
         """Keep a finished render's copy in the work area until the caller has published it.
 
-            with adapter.holding_outputs():
+            with adapter.holding_outputs(on_handoff=record):
                 with sink.staged(".mp4") as out:
                     mime = adapter.render_to(request, out)
                     asset_id = sink.adopt_for_job(out, mime, job_id)
@@ -224,10 +226,15 @@ class ComfyVideoAdapter:
         Any other exception after the hand-over keeps it, reported in last_cleanup
         ["kept_for_recovery"] and listed by C6, so a finished file is never deleted before it is
         published. A render that fails before the hand-over is cleaned up at once, as always.
+
+        on_handoff, if given, receives the hand-off receipt twice: {"stage": "copying", "output":
+        {name, dev, ino, size}} before the first byte is copied, and {"stage": "copied", ..., "sha256",
+        "size"} after the copy is synced. The executor stores it (C6 correlates leftovers with jobs).
         """
         if self._holding is not None:
             raise RuntimeError("holding_outputs() does not nest")
         self._holding = []
+        self._on_handoff = on_handoff
         keep = False
         try:
             yield
@@ -237,7 +244,7 @@ class ComfyVideoAdapter:
             keep = True
             raise
         finally:
-            pending, self._holding = self._holding, None
+            pending, self._holding, self._on_handoff = self._holding, None, None
             for before, owned in pending:
                 if keep:
                     kept = [name for name, _, _ in owned]
@@ -473,6 +480,7 @@ class ComfyVideoAdapter:
             fd = os.open(source, flags)
         except OSError:
             raise GenerationError("ComfyUI output is missing or a symlink") from None
+        digest = hashlib.sha256()
         with os.fdopen(fd, "rb") as handle:
             first = os.fstat(handle.fileno())
             if not stat.S_ISREG(first.st_mode) or not 12 <= first.st_size <= limit:
@@ -480,7 +488,10 @@ class ComfyVideoAdapter:
             header = handle.read(12)
             if header[4:8] != b"ftyp" or int.from_bytes(header[:4], "big") < 8:
                 raise GenerationError("ComfyUI output is not an MP4 container")
+            output = {"name": source.name, "dev": first.st_dev, "ino": first.st_ino, "size": first.st_size}
+            self._notify_handoff({"stage": "copying", "output": output})  # before a byte reaches the volume
             sink_file.write(header)
+            digest.update(header)
             copied = len(header)
             while True:
                 chunk = handle.read(COPY_CHUNK)
@@ -490,6 +501,7 @@ class ComfyVideoAdapter:
                 if copied > limit:
                     raise GenerationError("ComfyUI output grew past the size cap")
                 sink_file.write(chunk)
+                digest.update(chunk)
             last = os.fstat(handle.fileno())
         if (copied != first.st_size or last.st_size != first.st_size
                 or last.st_mtime_ns != first.st_mtime_ns or last.st_ino != first.st_ino):
@@ -502,9 +514,17 @@ class ComfyVideoAdapter:
         sync = getattr(sink_file, "sync", None)
         if callable(sync):
             sync()
-            return
-        try:
-            fileno = sink_file.fileno()
-        except (AttributeError, OSError):  # an in-memory sink (tests) has nothing to sync
-            return
-        os.fsync(fileno)
+        else:
+            try:
+                fileno = sink_file.fileno()
+            except (AttributeError, OSError):  # an in-memory sink (tests) has nothing to sync
+                fileno = None
+            if fileno is not None:
+                os.fsync(fileno)
+        self._notify_handoff({"stage": "copied", "output": output, "sha256": digest.hexdigest(), "size": copied})
+
+    def _notify_handoff(self, record: dict) -> None:
+        """Tell the holder (holding_outputs(on_handoff=...)) what is being handed over. A failure
+        here fails the job: no hand-off goes unrecorded."""
+        if self._on_handoff is not None:
+            self._on_handoff(dict(record))
