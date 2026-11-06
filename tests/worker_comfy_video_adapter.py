@@ -484,6 +484,54 @@ class AdapterTests(unittest.TestCase):
             adapter.render_to(request(), FullDisk())
         self.assertEqual(os.listdir(self.dirs["output"]), [], "a failed job's output is cleaned up, as for any failure")
 
+    def test_holding_keeps_the_copy_until_the_block_ends_then_removes_it(self):
+        adapter = self.adapter()
+        adapter.load()
+        with adapter.holding_outputs():
+            self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
+            self.assertEqual(len(os.listdir(self.dirs["output"])), 1, "still on C: until published")
+        self.assertEqual(os.listdir(self.dirs["output"]), [])
+        self.assertIsNone(adapter._holding)
+
+    def test_a_failure_after_the_hand_over_keeps_the_copy_for_recovery(self):
+        from app.media_generation_contract import ArtifactSinkUnavailable
+        adapter = self.adapter()
+        adapter.load()
+        with self.assertLogs("kaliv.media.comfy", level="WARNING"), self.assertRaises(ArtifactSinkUnavailable):
+            with adapter.holding_outputs():
+                adapter.render_to(request(), io.BytesIO())
+                raise ArtifactSinkUnavailable("publication failed")
+        kept = os.listdir(self.dirs["output"])
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(adapter.last_cleanup["kept_for_recovery"], kept)
+
+    def test_a_cancel_after_the_hand_over_removes_the_copy(self):
+        from app.media_generation_contract import GenerationCancelled
+        adapter = self.adapter()
+        adapter.load()
+        with self.assertRaises(GenerationCancelled):
+            with adapter.holding_outputs():
+                adapter.render_to(request(), io.BytesIO())
+                raise GenerationCancelled("the owner cancelled before publication")
+        self.assertEqual(os.listdir(self.dirs["output"]), [])
+
+    def test_a_render_that_fails_inside_the_hold_is_cleaned_at_once(self):
+        adapter = self.adapter(fake={"FAKE_COMFY_OUTPUT_MODE": "notmp4"})
+        adapter.load()
+        with self.assertRaises(GenerationError), adapter.holding_outputs():
+            try:
+                adapter.render_to(request(), io.BytesIO())
+            finally:
+                self.assertEqual(os.listdir(self.dirs["output"]), [], "removed before the hold even ends")
+        self.assertNotIn("kept_for_recovery", adapter.last_cleanup)
+
+    def test_holding_does_not_nest(self):
+        adapter = self.adapter()
+        with adapter.holding_outputs():
+            with self.assertRaises(RuntimeError):
+                with adapter.holding_outputs():
+                    pass
+
     def test_a_sync_failure_is_a_failed_job_never_a_silent_success(self):
         import errno
         from unittest.mock import patch

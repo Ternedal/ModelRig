@@ -7,23 +7,28 @@
 | **Work area** | a private folder on the internal disk (C:) | ComfyUI's input, output, temp and user folders (partial frames and videos), the staged source image of an image-to-video job, the job database | `worker/app/media_work_area.py`, `PrivateWorkArea` |
 | **Publication volume** | the external disk (for example Z:) | the gallery, its index, staged files | `worker/app/media_volume.py`, `MountedMediaVolume` (G1, `docs/MEDIA_VOLUME.md`) |
 
-**The hand-off.**
+**The hand-off** (the executor holds the adapter's copy with `adapter.holding_outputs()` until publication is done):
 1. A finished file is checked (size, MP4 header, unchanged while copied) and copied from the work area into a staged file on the publication volume (#2347).
 2. The staged file is synced (`fsync`, through the staged handle's `sync()`, #2347, which reveals no path). A delayed write error, such as a full disk, fails the job here; it is never a silent success.
-3. Only then is the copy in the work area removed.
-4. The staged file is published to the gallery in one atomic rename on that volume. The asset id is derived from the job, so a job can never be published twice.
+3. The staged file is published to the gallery in one atomic rename on that volume, keyed by the job, and registered in the index. A job can never be published twice.
+4. **Only then** is the copy in the work area removed.
 
 The copy between the two disks is **not** atomic, which is why the gallery never sees a file until it is complete, synced and published.
 
-**Where a crash leaves things.** A crashed job is failed at the next start ("interrupted by restart"), and the owner resubmits. Nothing partial ever reaches the gallery.
+**When publication does not succeed.**
+- The owner cancelled before publication: the work-area copy is removed (the owner's choice).
+- Anything else after the copy (the volume went away, the sink refused it, registration failed): the work-area copy is **kept** for recovery. The adapter reports it in `last_cleanup["kept_for_recovery"]`, and C6 lists it.
+- A render that fails before it is finished leaves no finished file. Its output is removed at once, so failed renders do not pile up.
+
+**Where a crash leaves things.** A crashed job is failed at the next start ("interrupted by restart" or "during publication"), and the owner resubmits. Nothing partial ever reaches the gallery, and a finished file is never only on a disk where it could be lost: until it is published, the work-area copy exists.
 
 | Crash | In the work area | On the publication volume |
 |---|---|---|
-| During the render or the copy | the render's output, ComfyUI's temp | a partial staged `.kaliv-*.tmp`, never indexed |
-| After the sync, before publication | nothing (already removed) | a complete staged `.kaliv-*.tmp`, never indexed |
-| After publication, before the job is recorded | nothing | the published asset, once |
+| During the render or the copy | the render's output, ComfyUI's temp, the staged source image | a partial staged `.kaliv-*.tmp`, never indexed |
+| After the sync, before publication | the finished render | a complete staged `.kaliv-*.tmp`, never indexed |
+| After publication, before the work-area copy is removed | the finished render | the published asset, once |
 
-`scripts/media_volume_repair.py` reports all of these (C6); nothing is deleted automatically. A failed job's output is removed from the work area like after any failure, so failed renders do not pile up there. A removal that fails is logged and reported in the adapter's `last_cleanup`, never ignored.
+`scripts/media_volume_repair.py` reports all of these (C6); nothing is deleted or republished automatically. An operator removes each leftover by name, and the owner resubmits. A removal that fails is logged and reported in the adapter's `last_cleanup`, never ignored.
 
 **Status:** the executor's entry point builds the work area at start and keeps the job database in it. Video stays default-off: `media_executor_main` keeps exit 78 for video. When video is wired, the supervisor takes the work area (`ComfySupervisor(work_area=...)`), and ComfyUI's four folders must be inside it.
 
@@ -73,6 +78,24 @@ export KALIV_MEDIA_JOB_DB=/var/lib/kaliv/media-work/state/jobs.sqlite3
 ```
 
 **Moving an existing job database** from the old place: stop the executor, so that its lock is free. **Copy** the file (never move it: a move on the same disk keeps its old permissions, and the executor then refuses it) (and its `-wal` and `-shm` files, if present) into `state`. Start the executor, and check that the queue is as before. Then delete the old copy. Nothing moves it automatically.
+
+## Accounts (a deployment gate)
+
+Only the executor's account (plus SYSTEM and Administrators) can open the work area, and so the job database. Anything else that reads the job database, such as the gallery routes in the API worker, must run as **that same account**. No broader ACL is granted to make another account work.
+
+- **Verified in code (main `cc2b28a6`):** `modelrig-supervisor` starts the worker, the server and the media executor itself, with `exec.Command` and no change of credentials (`backend/cmd/modelrig-supervisor/main.go`, `executor.go`). So on the appliance all three run as the supervisor's account.
+- **Not verified:** a worker or route started some other way, for example by hand or as a separate service. The OS then denies it access to the job database, which fails closed.
+- **Rig preflight (R17, before enabling media):**
+
+```powershell
+whoami /user
+icacls $env:KALIV_MEDIA_WORK_ROOT
+icacls "$env:KALIV_MEDIA_WORK_ROOT\state\jobs.sqlite3"
+Get-CimInstance Win32_Process -Filter "Name LIKE 'modelrig-%' OR (Name='python.exe' AND CommandLine LIKE '%media_executor_main%')" |
+  ForEach-Object { "{0} {1} {2}" -f $_.ProcessId, $_.Name, (Invoke-CimMethod -InputObject $_ -MethodName GetOwner).User }
+```
+
+Expected: `modelrig-supervisor`, `modelrig-worker-windows-x64`, `modelrig-server-windows-x64` and the executor's `python.exe` all have the same owner as `whoami`. The two ACLs list only that account's SID, `NT AUTHORITY\SYSTEM` and the Administrators group.
 
 ## Privacy and retention
 
