@@ -371,6 +371,40 @@ class EntryPointTests(unittest.TestCase):
         self.assertEqual(len(jobs), 1)
         self.assertEqual(store.get(jobs[0], "anders")["state"], "queued", "not claimed, not rendered")
 
+    def test_a_full_disk_while_publishing_an_image_stops_the_executor_and_shows_nothing(self):
+        # Track 2: the image path publishes bytes (ExternalMediaSink, used unchanged). A full volume
+        # is the volume being unusable: exit 75, not a failed job and on to the next claim.
+        import errno
+        from app.image_job_store import ImageJobStore
+        from app.media_gallery_catalog import list_gallery
+        from app.media_gallery_store import ExternalMediaSink
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            store = ImageJobStore(self.env["KALIV_MEDIA_JOB_DB"])
+            jobs = [store.submit("anders", "a red bicycle", profile_id="sdxl-a",
+                                 params={"width": 1024, "height": 1024, "steps": 20})["job_id"] for _ in range(2)]
+            executor = build_from_env("cuda:0", self.env,
+                                      adapter_factory=lambda p: FakeAdapter(p, self.env["KALIV_GPU_LEASE_DIR"]))
+            with patch("app.media_gallery_store.os.fsync", side_effect=OSError(errno.ENOSPC, "No space left on device")):
+                self.assertEqual(executor.run(max_steps=3, idle_sleep=lambda: None), EXIT_SINK_UNAVAILABLE)
+            self.assertEqual(store.get(jobs[0], "anders")["state"], "publishing", "left for recovery, not failed")
+            self.assertEqual(store.get(jobs[1], "anders")["state"], "queued", "the next job was never claimed")
+            sink = ExternalMediaSink(self.env["KALIV_MEDIA_ROOT"], self.env["KALIV_MEDIA_VOLUME_ROOT"])
+            self.assertFalse(Path(self.env["KALIV_MEDIA_ROOT"], "gallery-index.json").exists(), "nothing was indexed")
+            self.assertEqual((sink.inspect_temporary_files(), sink.inspect_unindexed_assets()), ([], []),
+                             "no partial file and nothing unindexed")
+            if executor.adapter is not None:  # what the process exit does: the GPU lease goes with it
+                executor.adapter.close()
+            # Space is back: the restart fails the interrupted job and publishes the next one.
+            executor = build_from_env("cuda:0", self.env,
+                                      adapter_factory=lambda p: FakeAdapter(p, self.env["KALIV_GPU_LEASE_DIR"]))
+            self.assertEqual(executor.run(max_steps=2, idle_sleep=lambda: None), 0)
+        self.assertEqual((store.get(jobs[0], "anders")["state"], store.get(jobs[0], "anders")["error"]),
+                         ("failed", "interrupted during publication"))
+        self.assertEqual(store.get(jobs[1], "anders")["state"], "completed")
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            items = list_gallery(self.env["KALIV_MEDIA_ROOT"], verified_volume_root=self.env["KALIV_MEDIA_VOLUME_ROOT"])
+        self.assertEqual([item["id"] for item in items["items"]], [store.get(jobs[1], "anders")["asset_id"]])
+
     def test_an_unmounted_volume_exits_75_from_the_real_process(self):
         result = self.run_entry(self.env)  # a plain temp dir is not a mount point
         self.assertEqual(result.returncode, EXIT_SINK_UNAVAILABLE, result.stderr)
