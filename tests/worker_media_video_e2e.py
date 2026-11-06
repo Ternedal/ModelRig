@@ -393,7 +393,7 @@ class VideoPipelineEndToEnd(unittest.TestCase):
         self.boot()
         ex = self.executor()
         self.assertEqual(ex.start(), 1)
-        self.assertEqual(self.store.get(job, "anders")["error"], "interrupted by restart")
+        self.assertEqual(self.store.get(job, "anders")["error"], "interrupted_by_restart")
         again = self.submit_video(source)
         self.assertEqual(ex.step(), "failed", "GPU busy: never two renders on one GPU")
         self.assertEqual(self.store.get(again, "anders")["error"], "gpu_busy")
