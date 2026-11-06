@@ -127,7 +127,7 @@ class MediaRepairTests(unittest.TestCase):
         job, asset = self.job(complete=False)
         self.store.recover_gpu(GPU, LIVE)  # the restart fails the publishing job
         (entry,) = self.report()["unindexed_assets"]
-        self.assertEqual((entry["status"], entry["job_error"]), ("job_failed", "interrupted during publication"))
+        self.assertEqual((entry["status"], entry["job_error"]), ("job_failed", "interrupted_during_publication"))
         with self.assertRaisesRegex(RepairRefused, "not_adoptable:job_failed"):
             adopt(self.sink, self.db, asset, lease_dir=self.lease)
         self.assertFalse(Path(self.media, "gallery-index.json").exists(), "nothing was registered")

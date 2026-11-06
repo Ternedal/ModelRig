@@ -153,11 +153,11 @@ class RecoveryInventoryTests(unittest.TestCase):
         self.receipt(job, output)
         self.store.begin_publish(job, DEAD)
         asset = self.publish(job)
-        self.restart()  # died before complete(): "interrupted during publication"
+        self.restart()  # died before complete(): interrupted_during_publication
         entry = self.only(self.inventory())
         self.assertEqual(entry["classification"], "crash_after_publication_before_cleanup")
         self.assertEqual(entry["asset"], {"status": "same", "asset_id": asset, "indexed": True})
-        self.assertEqual(entry["error"], "interrupted during publication")
+        self.assertEqual(entry["error"], "interrupted_during_publication")
 
     def test_a_failed_index_registration_is_published_unindexed(self):
         job = self.job()
