@@ -1,6 +1,8 @@
 # Verified media volume (G1)
 
-Generated media never lands on the internal disk, not even transiently. `worker/app/media_volume.py` is the production check behind that rule. `MountedMediaVolume` implements the `VerifiedMediaVolume` protocol in `media_generation_contract`.
+The verified media volume is where generated media is **published**: the gallery, its index and every staged file. `worker/app/media_volume.py` is the production check for it. `MountedMediaVolume` implements the `VerifiedMediaVolume` protocol in `media_generation_contract`.
+
+**Generation happens elsewhere (Anders, 6 Nov 2026, #2275).** ComfyUI's working folders and the job database live in a private work area on the internal disk. A finished file is copied into a staged file on this volume, checked, and published to the gallery in one atomic step; only then is the copy on the internal disk removed. So nothing partial is ever visible in the gallery. That work area is a separate check, added with the wiring; this module does not cover it.
 
 **Status: wired into the media executor's entry point** (`media_executor_main.build_from_env`).
 - **The volume:** `KALIV_MEDIA_VOLUME_ROOT` plus `KALIV_MEDIA_VOLUME_ID` build one `MountedMediaVolume` at start.
@@ -73,14 +75,15 @@ A missing marker counts as 75, because a wrong disk looks exactly the same. The 
 
 ```python
 volume = media_volume_from_env()                       # KALIV_MEDIA_VOLUME_ROOT / _ID
-store = ImageJobStore(job_db, volume_guard=volume.verify)
 sink = ExternalStagedVideoSink(media_root, verified_volume_root=volume.root)   # #2347
-supervisor = ComfySupervisor(..., media_volume=volume)                          # require() on ComfyUI's dirs
+# The executor calls volume.verify() before it claims a job, so no render is
+# wasted on a volume that cannot take the result. ComfyUI's folders and the job
+# database are in the work area on the internal disk, not here.
 ```
 
 ## Limits
 
-These are checks, not handles. A process running as the same OS user could swap a directory between the check and its use. The private ComfyUI output root (rig item 9 in `MEDIA_VIDEO_GENERATION.md`) is the guard against that.
+These are checks, not handles. A process running as the same OS user could swap a directory between the check and its use. The private work area on the internal disk, where ComfyUI writes (rig item 9 in `MEDIA_VIDEO_GENERATION.md`), is the guard against that.
 
 ## Tests
 
