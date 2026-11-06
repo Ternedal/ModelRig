@@ -36,6 +36,9 @@ output and report goes to --out, which must be on the verified media volume.
             the source image; ComfyUI's input folder must be empty again afterwards.
             video --cancel-after S --expect-error Cancelled: the owner cancels S seconds
             into the render; ComfyUI is interrupted and nothing of the job is left
+  bench     C4: a matrix of renders (--matrix JSON, --repeat N) on one loaded ComfyUI; per cell
+            wall clock, VRAM peak from nvidia-smi, MP4 boxes and duration. A cell with
+            "may_oom": true may fail out of memory; the GPU must then still be released
   remount   the external volume goes away under a running executor: it must exit 75
             without claiming the queued job; once the volume is back, a new executor
             completes that job. The operator takes the disk offline and back online
@@ -176,11 +179,10 @@ def run_image(args, report: Report) -> None:
     report.check("lease free for other processes after close", lease_state(gpu_uuid, lease_dir) == "free")
 
 
-def run_video(args, report: Report) -> None:
+def video_rig(args, report: Report):
+    """The supervised ComfyUI and its adapter for video and bench (not loaded yet)."""
     from app.comfy_supervisor import ComfyLaunch, ComfySupervisor
     from app.comfy_video_adapter import ComfyVideoAdapter
-    from app.gpu_lease import resident_is_held
-    from app.media_generation_contract import GenerationRequest
     profile, lease_dir, gpu_uuid = common(args)
     dirs = {name: str(Path(args.comfy_dirs) / name) for name in ("input", "output", "temp", "user")}
     for path in dirs.values():
@@ -201,6 +203,13 @@ def run_video(args, report: Report) -> None:
     report.data.update(profile=profile.profile_id, gpu_uuid=gpu_uuid, template_sha256=profile.backend_options.template_sha256,
                        comfy_log=str(log), comfyui_version_pin=profile.backend_options.comfyui_version,
                        weight_pins=[pin.path for pin in profile.backend_options.weights])
+    return profile, lease_dir, gpu_uuid, dirs, supervisor, adapter
+
+
+def run_video(args, report: Report) -> None:
+    from app.gpu_lease import resident_is_held
+    from app.media_generation_contract import GenerationRequest
+    profile, lease_dir, gpu_uuid, dirs, supervisor, adapter = video_rig(args, report)
     started = time.monotonic()
     try:
         adapter.load()
@@ -380,6 +389,174 @@ def check_retention(store, db: Path, prompt: str, logs, report: Report) -> None:
     report.check("retention: the prompt text is in neither the job DB nor its WAL", left == [], left)
     in_logs = [str(p) for p in logs if needle in p.read_bytes()]
     report.check("the prompt text is in no executor log", in_logs == [], in_logs)
+
+
+def mp4_summary(path: Path) -> dict:
+    """Top-level box types and the movie duration from mvhd; no decoder needed (C4 evidence)."""
+    boxes, duration = [], None
+    with open(path, "rb") as f:
+        size_total = os.fstat(f.fileno()).st_size
+        offset = 0
+        while offset + 8 <= size_total and len(boxes) < 64:
+            f.seek(offset)
+            header = f.read(16)
+            size, kind = int.from_bytes(header[:4], "big"), header[4:8].decode("latin-1")
+            head = 8
+            if size == 1 and len(header) >= 16:
+                size, head = int.from_bytes(header[8:16], "big"), 16
+            elif size == 0:
+                size = size_total - offset
+            if size < head:
+                boxes.append(f"{kind}!bad-size")
+                break
+            boxes.append(kind)
+            if kind == "moov":
+                f.seek(offset + head)
+                moov = f.read(min(size - head, 1 << 20))
+                at = moov.find(b"mvhd")
+                if at >= 4:
+                    body = moov[at + 4:]
+                    if body[:1] == b"\x01":
+                        timescale, units = int.from_bytes(body[20:24], "big"), int.from_bytes(body[24:32], "big")
+                    else:
+                        timescale, units = int.from_bytes(body[12:16], "big"), int.from_bytes(body[16:20], "big")
+                    duration = round(units / timescale, 3) if timescale else None
+            offset += size
+    valid = bool(boxes) and boxes[0] == "ftyp" and "moov" in boxes and "mdat" in boxes
+    return {"boxes": boxes, "duration_s": duration, "valid_mp4": valid}
+
+
+class VramSampler:
+    """Peak memory.used for one GPU, sampled from nvidia-smi every interval (evidence only)."""
+
+    def __init__(self, gpu_uuid: str, interval_s: float = 0.5):
+        import threading
+        self.gpu_uuid, self.interval_s, self.peak_mib, self.samples = gpu_uuid, interval_s, None, 0
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                out = subprocess.run(["nvidia-smi", "--query-gpu=uuid,memory.used", "--format=csv,noheader,nounits"],
+                                     capture_output=True, text=True, timeout=10).stdout
+            except (OSError, subprocess.TimeoutExpired):
+                return  # no nvidia-smi here: peak stays None
+            for line in out.splitlines():
+                uuid, _, used = line.partition(",")
+                if uuid.strip() == self.gpu_uuid and used.strip().isdigit():
+                    self.samples += 1
+                    self.peak_mib = max(self.peak_mib or 0, int(used.strip()))
+            self._stop.wait(self.interval_s)
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self._stop.set()
+        self._thread.join(15)
+
+
+def run_bench(args, report: Report) -> None:
+    """C4: a matrix of renders on one loaded ComfyUI. Per cell: wall clock, VRAM peak, MP4
+    structure and duration. A cell marked may_oom may fail: ComfyUI's own error text is never
+    propagated, so an out-of-memory is not told apart from other ComfyUI failures here; the
+    ComfyUI log on the volume says which, and the VRAM peak is recorded. After a failed cell the
+    next cells must still run. Cells outside the profile's limits are reported, not rendered."""
+    from app.gpu_lease import resident_is_held
+    from app.media_generation_contract import GenerationRequest
+    try:
+        matrix = json.loads(Path(args.matrix).read_text(encoding="utf-8"))
+        cells = matrix["cells"]
+        assert isinstance(cells, list) and cells
+    except (OSError, ValueError, KeyError, AssertionError):
+        fail_usage("--matrix must be a JSON file with a non-empty \"cells\" list")
+    profile, lease_dir, gpu_uuid, dirs, supervisor, adapter = video_rig(args, report)
+    fps = profile.backend_options.fps
+    source = Path(args.source_png).read_bytes() if args.source_png else None
+    report.data.update(matrix=str(args.matrix), matrix_sha256=sha256(Path(args.matrix)), repeat=args.repeat, fps=fps)
+    started = time.monotonic()
+    adapter.load()
+    report.data["start_seconds"] = round(time.monotonic() - started, 1)
+    results = []
+    for index, cell in enumerate(cells):
+        for attempt in range(args.repeat):
+            width, height = parse_size(cell.get("size", args.size))
+            task = cell.get("task", args.task)
+            frames, steps = int(cell.get("frames", args.frames)), int(cell.get("steps", args.steps))
+            entry = {"cell": index, "attempt": attempt, "task": task, "size": f"{width}x{height}", "frames": frames,
+                     "steps": steps, "may_oom": bool(cell.get("may_oom", False))}
+            limits = profile.limits
+            if ([width, height] not in [list(size) for size in limits.sizes] or (limits.max_frames is not None and frames > limits.max_frames)
+                    or steps > limits.max_steps):
+                entry.update(outcome="outside_limits", limits={"sizes": [list(x) for x in limits.sizes],
+                                                               "max_frames": limits.max_frames,
+                                                               "max_steps": limits.max_steps})
+                results.append(entry)
+                continue
+            if task == "image_to_video" and source is None:
+                entry.update(outcome="skipped", reason="image_to_video needs --source-png")
+                results.append(entry)
+                continue
+            if adapter.needs_restart or not supervisor.running:
+                adapter.close()
+                adapter.load()
+                entry["reloaded_before"] = True
+            request = GenerationRequest(profile_id=profile.profile_id, task=task, prompt=cell.get("prompt", args.prompt),
+                                        width=width, height=height, steps=steps, seed=args.seed + attempt, frames=frames,
+                                        input_asset_id=hashlib.sha256(source).hexdigest()[:32]
+                                        if task == "image_to_video" else None)
+            target = Path(args.out) / f"bench-{index:02d}-{attempt}-{time.strftime('%H%M%S')}.mp4"
+            options = {"source_png": source} if task == "image_to_video" else {}
+            t0 = time.monotonic()
+            with VramSampler(gpu_uuid) as vram:
+                try:
+                    with open(target, "wb") as sink:
+                        mime = adapter.render_to(request, sink, **options)
+                    error = None if mime == "video/mp4" else f"unexpected mime {mime}"
+                except Exception as exc:  # recorded by type and our own message only
+                    error = f"{type(exc).__name__}: {exc}"
+            entry.update(render_seconds=round(time.monotonic() - t0, 1), vram_peak_mib=vram.peak_mib,
+                         vram_samples=vram.samples, cleanup=adapter.last_cleanup)
+            if error is None:
+                summary = mp4_summary(target)
+                expected = round(frames / fps, 3)
+                summary["expected_duration_s"] = expected
+                summary["duration_ok"] = (summary["duration_s"] is not None
+                                          and abs(summary["duration_s"] - expected) <= 1.5 / fps)
+                entry.update(outcome="ok", bytes=target.stat().st_size, sha256=sha256(target), mp4=summary)
+            else:
+                entry.update(outcome="failed", error=error)
+                if target.exists() and target.stat().st_size == 0:
+                    target.unlink()
+            results.append(entry)
+            print(f"cell {index} try {attempt}: {entry['outcome']} {entry.get('render_seconds')}s "
+                  f"peak={entry.get('vram_peak_mib')}MiB", flush=True)
+    report.data["cells"] = results
+    ran = [r for r in results if r["outcome"] in ("ok", "failed")]
+    report.check("every cell within the profile's limits ran", all(r["outcome"] != "skipped" for r in results),
+                 [r for r in results if r["outcome"] == "skipped"])
+    if any(r["outcome"] == "outside_limits" for r in results):
+        report.check("cells outside the profile's limits were reported, not rendered", True,
+                     [r["cell"] for r in results if r["outcome"] == "outside_limits"])
+    bad = [r for r in ran if r["outcome"] == "failed" and not r["may_oom"]]
+    report.check("no cell failed except one marked may_oom", not bad,
+                 [{k: r.get(k) for k in ("cell", "attempt", "outcome", "error")} for r in bad])
+    invalid = [r for r in ran if r["outcome"] == "ok" and not (r["mp4"]["valid_mp4"] and r["mp4"]["duration_ok"])]
+    report.check("every output is an MP4 (ftyp, moov, mdat) of the requested duration", not invalid,
+                 [{k: r.get(k) for k in ("cell", "attempt", "mp4")} for r in invalid])
+    failed_at = [i for i, r in enumerate(results) if r["outcome"] == "failed"]
+    if failed_at and failed_at[0] < len(results) - 1:
+        later = [r for r in results[failed_at[0] + 1:] if r["outcome"] in ("ok", "failed")]
+        report.check("after a failed cell the next cells still ran", bool(later),
+                     {"reloaded": sum(1 for r in results if r.get("reloaded_before"))})
+    left = sorted(os.listdir(dirs["output"]))
+    report.check("ComfyUI output root is empty after the matrix", left == [], left)
+    closed = adapter.close()
+    report.check("close(): ComfyUI exited and the lease was released", closed is True)
+    report.check("resident lock free after close", not resident_is_held(gpu_uuid, lease_dir=lease_dir))
+    report.check("lease free for other processes after close", lease_state(gpu_uuid, lease_dir) == "free")
 
 
 def free_vram_mib(gpu_uuid: str):
@@ -621,7 +798,7 @@ def run_lease(args, report: Report) -> None:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("mode", choices=("image", "executor", "chatfirst", "remount", "video", "lease", "pins"))
+    parser.add_argument("mode", choices=("image", "executor", "chatfirst", "remount", "video", "bench", "lease", "pins"))
     parser.add_argument("--repo", required=True, help="ModelRig worktree at the qualified head")
     parser.add_argument("--out", required=True, help="report/output folder on the media volume")
     parser.add_argument("--profiles", help="operator profile folder")
@@ -660,6 +837,8 @@ def main(argv: list[str]) -> int:
                         help="chatfirst: seconds to wait for the operator to unload Ollama (below the 600 s expiry)")
     parser.add_argument("--expect-expiry", action="store_true", help="chatfirst: nobody unloads Ollama; expect gpu_unavailable")
     parser.add_argument("--cancel-after", type=float, help="video: the owner cancels this many seconds into the render")
+    parser.add_argument("--matrix", help="bench: JSON file with the cells to render (docs/qualification/media/bench-*.json)")
+    parser.add_argument("--repeat", type=int, default=1, help="bench: renders per cell")
     args = parser.parse_args(argv)
     global WORKER_PATH
     WORKER_PATH = str(Path(args.repo, "worker").resolve())
@@ -667,11 +846,13 @@ def main(argv: list[str]) -> int:
     out = Path(args.out)
     if not out.is_dir():
         fail_usage("--out must be an existing folder on the media volume")
-    if args.mode in ("image", "executor", "chatfirst", "remount", "video") and not (args.profiles and args.profile):
+    if args.mode in ("image", "executor", "chatfirst", "remount", "video", "bench") and not (args.profiles and args.profile):
         fail_usage("--profiles and --profile are required")
-    if args.mode == "video" and not all((args.comfy_python, args.comfy_main, args.comfy_dirs, args.templates,
-                                         args.volume_root)):
-        fail_usage("video needs --comfy-python --comfy-main --comfy-dirs --templates --volume-root")
+    if args.mode in ("video", "bench") and not all((args.comfy_python, args.comfy_main, args.comfy_dirs,
+                                                    args.templates, args.volume_root)):
+        fail_usage(f"{args.mode} needs --comfy-python --comfy-main --comfy-dirs --templates --volume-root")
+    if args.mode == "bench" and (not args.matrix or args.repeat < 1):
+        fail_usage("bench needs --matrix and --repeat >= 1")
     if args.mode in ("executor", "chatfirst", "remount") and not (args.volume_root and args.media_root):
         fail_usage(f"{args.mode} needs --volume-root (the mounted volume, e.g. E:\\) and --media-root")
     if args.mode == "pins" and not (args.comfy_main and args.templates and args.profiles and args.pin
@@ -692,7 +873,7 @@ def main(argv: list[str]) -> int:
     report.data["head"] = head.stdout.strip() or None
     try:
         {"image": run_image, "executor": run_executor, "chatfirst": run_chatfirst, "remount": run_remount,
-         "video": run_video, "lease": run_lease, "pins": run_pins}[args.mode](args, report)
+         "video": run_video, "bench": run_bench, "lease": run_lease, "pins": run_pins}[args.mode](args, report)
     except SystemExit:
         raise
     except Exception as exc:

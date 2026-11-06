@@ -33,10 +33,10 @@ from pathlib import Path
 SCHEMA = "kaliv-media-rig-evidence/v1"
 # What the runbook expects (#2296 6642831318). R12/R13 and the optional steps may be absent.
 EXPECTED_MODES = ("image", "executor", "pins", "video", "lease")
-OPTIONAL_MODES = ("chatfirst", "remount")
+OPTIONAL_MODES = ("chatfirst", "remount", "bench")
 _MEASUREMENTS = ("load_seconds", "render_seconds", "start_seconds", "cleanup", "sqlite_version", "gpu_uuid",
                  "comfyui_version", "comfyui_version_pin", "template_sha256", "weight_pins", "revision", "task",
-                 "free_vram_mib_before", "profile_needs_mib", "job_id", "exit_codes")
+                 "free_vram_mib_before", "profile_needs_mib", "job_id", "exit_codes", "cells", "matrix_sha256", "fps")
 
 
 def _sha256(path: Path) -> str:

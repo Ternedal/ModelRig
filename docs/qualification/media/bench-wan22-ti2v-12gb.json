@@ -1,0 +1,12 @@
+{
+  "schema": "kaliv-media-bench-matrix/v1",
+  "profile": "wan22-ti2v-qual",
+  "gpu": "RTX 3060 12 GB",
+  "note": "C4. Image-to-video with Wan 2.2 TI2V-5B (needs --source-png). The 5B model is the one most likely to exceed 12 GB, so the two longest cells may hit out-of-memory.",
+  "cells": [
+    {"task": "image_to_video", "size": "832x480", "frames": 33, "steps": 20},
+    {"task": "image_to_video", "size": "832x480", "frames": 49, "steps": 20},
+    {"task": "image_to_video", "size": "832x480", "frames": 81, "steps": 20, "may_oom": true},
+    {"task": "image_to_video", "size": "832x480", "frames": 121, "steps": 20, "may_oom": true}
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "schema": "kaliv-media-bench-matrix/v1",
+  "profile": "wan21-t2v-qual",
+  "gpu": "RTX 3060 12 GB",
+  "note": "C4. Frames rise until the 3060 runs out; only the last cell may hit out-of-memory. Steps 20 vs 30 at the middle length shows the step cost.",
+  "cells": [
+    {"task": "text_to_video", "size": "832x480", "frames": 17, "steps": 20},
+    {"task": "text_to_video", "size": "832x480", "frames": 33, "steps": 20},
+    {"task": "text_to_video", "size": "832x480", "frames": 49, "steps": 20},
+    {"task": "text_to_video", "size": "832x480", "frames": 49, "steps": 30},
+    {"task": "text_to_video", "size": "832x480", "frames": 81, "steps": 20, "may_oom": true}
+  ]
+}
