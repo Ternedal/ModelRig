@@ -99,6 +99,7 @@ class VideoPipelineEndToEnd(unittest.TestCase):
         os.mkdir(self.templates)
         os.mkdir(self.state)
         Path(self.templates, "wan-i2v.json").write_bytes(raw(I2V))
+        Path(self.templates, "wan-t2v.json").write_bytes(raw())
         self.probe = g1.FakeProbe({self.root})
         # One source of truth for "mounted": the gallery's own check asks the same probe.
         mounted = patch("app.media_gallery_catalog.os.path.ismount", side_effect=lambda p: str(p) in self.probe.mounts)
@@ -139,11 +140,14 @@ class VideoPipelineEndToEnd(unittest.TestCase):
         self.executors, self.adapters = [], []
 
     def executor(self, render_seconds="0.2"):
-        profile = parse_profile(video_profile(
-            profile_id="wan-i2v", tasks=["image_to_video"],
-            limits={"max_prompt_chars": 200, "sizes": [[832, 480]], "max_steps": 30, "max_frames": 81},
-            backend_options={"template_name": "wan-i2v.json", "template_sha256": sha(raw(I2V)), "fps": 16,
-                             "max_render_seconds": 60, "max_output_bytes": 1024 * 1024, "port": self.port}))
+        limits = {"max_prompt_chars": 200, "sizes": [[832, 480]], "max_steps": 30, "max_frames": 81}
+        profiles = {}
+        for profile_id, task, template, data in (("wan-i2v", "image_to_video", "wan-i2v.json", raw(I2V)),
+                                                 ("wan-t2v", "text_to_video", "wan-t2v.json", raw())):
+            profiles[profile_id] = parse_profile(video_profile(
+                profile_id=profile_id, tasks=[task], limits=limits,
+                backend_options={"template_name": template, "template_sha256": sha(data), "fps": 16,
+                                 "max_render_seconds": 60, "max_output_bytes": 1024 * 1024, "port": self.port}))
         work_area = self.work_area
 
         def factory(p):
@@ -161,7 +165,7 @@ class VideoPipelineEndToEnd(unittest.TestCase):
             return adapter
 
         store, image_sink = self.store, self.image_sink
-        ex = MediaExecutor(store, gpu_uuid=GPU, profiles={profile.profile_id: profile}, adapter_factory=factory,
+        ex = MediaExecutor(store, gpu_uuid=GPU, profiles=profiles, adapter_factory=factory,
                            lease_dir=self.lease_dir, video_sink=self.video_sink, cancel_poll_s=0.1, volume_root=self.root,
                            source_reader=lambda owner, asset: read_owned_source_png(image_sink, store, owner, asset))
         self.executors.append(ex)
@@ -182,6 +186,28 @@ class VideoPipelineEndToEnd(unittest.TestCase):
         return self.store.submit(owner, "the kite takes off", profile_id="wan-i2v",
                                  params={"task": "image_to_video", "width": 832, "height": 480, "steps": 20,
                                          "frames": 33, "input_asset_id": asset})["job_id"]
+
+    def submit_text_video(self, owner="anders"):
+        return self.store.submit(owner, "a kite over the harbour", profile_id="wan-t2v",
+                                 params={"task": "text_to_video", "width": 832, "height": 480, "steps": 20,
+                                         "frames": 33})["job_id"]
+
+    def receipt(self, job):
+        import json
+        import sqlite3
+        with sqlite3.connect(os.path.join(self.job_dir, "jobs.sqlite3")) as db:
+            row = db.execute("SELECT record FROM image_jobs_handoff WHERE job_id=?", (job,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def retrieve(self, owner, asset):
+        """What an authenticated route does (ChatGPT owns it; used here read-only, not changed):
+        authorize the owner against the job store, then stream the asset from the gallery. The
+        route's process has its own store handle on the job database in the work area (C:), with
+        no volume guard: Z: matters only for the asset itself."""
+        from app.media_gallery_asset import stream_open_asset
+        if not ImageJobStore(os.path.join(self.job_dir, "jobs.sqlite3")).owns_completed_asset(owner, asset):
+            return None
+        return b"".join(stream_open_asset(self.media, str(self.volume.root), asset))
 
     def gallery(self):
         return {item["id"]: item for item in list_gallery(self.media, limit=100,
@@ -288,6 +314,51 @@ class VideoPipelineEndToEnd(unittest.TestCase):
         with self.assertRaises(ArtifactSinkUnavailable):
             ex.step()
         self.assertEqual(os.listdir(self.root), [MARKER_NAME], "nothing was written to the other disk")
+
+    # -- Track 2: request to retrieval, for both video tasks (ChatGPT 6689818626) ---------------------
+
+    def test_text_and_image_video_are_retrieved_by_their_owner_through_the_gallery_asset_api(self):
+        import hashlib
+        from app.media_gallery_asset import open_asset, read_asset_range
+        source = self.owned_source()
+        jobs = [self.submit_video(source), self.submit_text_video()]
+        ex = self.executor()
+        ex.start()
+        self.assertEqual([ex.step(), ex.step()], ["completed", "completed"])
+        items = self.gallery()
+        for job in jobs:
+            with self.subTest(job=job):
+                row = self.store.get(job, "anders")
+                asset = row["asset_id"]
+                self.assertEqual(items[asset]["kind"], "video")
+                data = self.retrieve("anders", asset)
+                receipt = self.receipt(job)
+                self.assertEqual((hashlib.sha256(data).hexdigest(), len(data)), (receipt["sha256"], receipt["size"]),
+                                 "the owner gets exactly the bytes that were handed over")
+                self.assertIsNone(self.retrieve("sofie", asset), "another owner gets nothing")
+                handle, entry = open_asset(self.media, str(self.volume.root), asset)
+                with handle:
+                    head, status, headers = read_asset_range(handle, entry, "bytes=0-11")
+                self.assertEqual((status, head[4:8], headers["Content-Range"]),
+                                 (206, b"ftyp", f"bytes 0-11/{len(data)}"))
+        self.assertIn("source_sha256", self.receipt(jobs[0]), "image-to-video records its source")
+        self.assertNotIn("source_sha256", self.receipt(jobs[1]), "text-to-video has none")
+        self.assert_nothing_orphaned()
+
+    def test_retrieval_survives_a_restart_and_fails_closed_without_the_volume(self):
+        from app.media_gallery_catalog import GalleryUnavailable
+        job = self.submit_text_video()
+        ex = self.executor()
+        ex.start()
+        self.assertEqual(ex.step(), "completed")
+        asset = self.store.get(job, "anders")["asset_id"]
+        first = self.retrieve("anders", asset)
+        self.stop_all()
+        self.boot()  # a new process: everything comes from the job store and the gallery index
+        self.assertEqual(self.retrieve("anders", asset), first)
+        self.probe.mounts.clear()  # the disk is unplugged
+        with self.assertRaises(GalleryUnavailable):
+            self.retrieve("anders", asset)
 
     # -- crashes in the hand-off from the work area to the volume (ChatGPT 6686968292 items 1 and 2) --
 
