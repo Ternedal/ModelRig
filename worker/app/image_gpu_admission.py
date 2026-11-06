@@ -17,6 +17,11 @@ class ImageGpuAdmissionError(RuntimeError):
     pass
 
 
+class GpuMemoryShortage(ImageGpuAdmissionError):
+    """Not enough free VRAM right now -- another process (Ollama, typically) holds it. Transient:
+    the executor puts the job back in the queue instead of failing it (G4, Anders 5 Nov 2026)."""
+
+
 @dataclass(frozen=True)
 class GpuBudget:
     index: int
@@ -59,5 +64,5 @@ def inspect_cuda_budget(index: int, *, reserve_gib: float = 3.0,
     reserved = int(reserve_gib * 1024**3)
     usable = max(0, free - reserved)
     if usable < int(min_usable_gib * 1024**3):
-        raise ImageGpuAdmissionError("insufficient free VRAM after reservation")
+        raise GpuMemoryShortage("insufficient free VRAM after reservation")
     return GpuBudget(index, total, free, reserved, usable)
