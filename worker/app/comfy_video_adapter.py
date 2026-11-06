@@ -55,7 +55,7 @@ import time
 from pathlib import Path
 from typing import BinaryIO, Callable
 
-from .comfy_supervisor import ComfyBusy, ComfySupervisor, ComfySupervisorError
+from .comfy_supervisor import ComfyBusy, ComfySupervisor, ComfySupervisorError, ComfyVramShortage
 from .comfy_weights import check_lookup_is_unambiguous, check_weights_unchanged, verify_weights
 from .comfy_workflow_template import MAX_TEMPLATE_BYTES, WorkflowTemplate, load_template
 from .media_generation_contract import GenerationCancelled, GenerationError, GenerationRequest, RenderedArtifact
@@ -259,6 +259,8 @@ class ComfyVideoAdapter:
             prompt_id = self.supervisor.submit(self._template.bind(request, fps=self.options.fps,
                                                                    source_file=source_file))
             outputs = self._wait(prompt_id, should_cancel)
+        except ComfyVramShortage:
+            raise  # before submit: transient, the executor re-queues the job (G4)
         except ComfySupervisorError as exc:
             raise GenerationError("ComfyUI unavailable") from exc
         owned.extend(self._attested_outputs(outputs, before))  # recorded before any validation can fail

@@ -305,6 +305,16 @@ time.sleep(120)
         self._assert_start_fails_and_cleans_up(
             self.supervisor(fake={"FAKE_COMFY_VRAM_FREE_GIB": "9"}), "insufficient free VRAM")
 
+    def test_insufficient_vram_is_the_transient_shortage_type(self):
+        # G4: the executor re-queues on ComfyVramShortage; other start failures are not waits.
+        from app.comfy_supervisor import ComfyVramShortage
+        with self.assertRaises(ComfyVramShortage):
+            self.supervisor(fake={"FAKE_COMFY_VRAM_FREE_GIB": "9"}).start()
+        self.assertTrue(self.lease_is_free())
+        with self.assertRaises(ComfySupervisorError) as caught:
+            self.supervisor(fake={"FAKE_COMFY_DEVICES": "2"}).start()
+        self.assertNotIsInstance(caught.exception, ComfyVramShortage)
+
     def test_two_devices_refused(self):
         self._assert_start_fails_and_cleans_up(
             self.supervisor(fake={"FAKE_COMFY_DEVICES": "2"}), "exactly one device")
