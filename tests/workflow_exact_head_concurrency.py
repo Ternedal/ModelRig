@@ -45,8 +45,10 @@ assert "exact-head-core:" in WORKFLOW
 
 # Stage-B admission (shared by every caller): one lane per caller workflow and
 # SHA. A lane shared across callers lets GitHub evict a pending gate when a
-# third workflow starts Stage-B for the same SHA (push to main: ci,
-# agent3-full-diagnostics, exact-head-qualification; tags: build-and-release).
+# second workflow starts Stage-B for the same SHA (workflow_dispatch of ci or
+# agent3-full-diagnostics next to exact-head-qualification; tags:
+# build-and-release). Since 06/11-2026 PRs and pushes to main run Stage-B once,
+# in exact-head-qualification.
 SLICES = code_of(ROOT / ".github" / "workflows" / "_stage_b_slices.yml")
 admission = re.search(
     r"(?ms)^  stage-b-admission:\n(?P<body>.*?)(?=^    steps:)", SLICES

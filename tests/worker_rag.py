@@ -18,6 +18,7 @@ async def fake_embed(text, model=None):
     return _vec(text)
 
 oc.embed = fake_embed  # rag calls oc.embed at runtime → picks this up
+oc.embed_many = oc.embed_each  # ingest batches through embed_many; route it to the stub
 
 
 async def fake_chat_stream(messages, model=None):
