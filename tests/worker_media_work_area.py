@@ -34,11 +34,11 @@ class Probe(WorkAreaProbe):
         self.fs = filesystem
         self.foreign_dev: set[str] = set()
         self.not_private: set[str] = set()
-        self.per_directory = False
+        self.per_entry = False
 
     @property
-    def acl_per_directory(self) -> bool:
-        return self.per_directory
+    def acl_per_entry(self) -> bool:
+        return self.per_entry
 
     def containing_filesystem(self, path):
         return self.fs
@@ -189,14 +189,26 @@ class WorkAreaTests(unittest.TestCase):
 
     def test_on_windows_every_directory_used_must_itself_be_private(self):
         area = self.area()
-        self.probe.per_directory = True
+        self.probe.per_entry = True
         os.chmod(self.root / "state", 0o700)
         self.probe.not_private.add(str(self.root / "comfy"))
         self.assertEqual(self.refused(area, self.root / "comfy" / "output"), "media_work_path_not_private")
         self.assertEqual(self.refused(area, self.root / "comfy"), "media_work_path_not_private")
         self.assertIsNone(self.refused(area, self.root / "state"))
-        self.probe.per_directory = False  # POSIX: the private root already stops every other user
+        self.probe.per_entry = False  # POSIX: the private root already stops every other user
         self.assertIsNone(self.refused(area, self.root / "comfy" / "output"))
+
+    def test_on_windows_a_file_moved_in_with_its_old_grants_is_refused(self):
+        area = self.area()
+        db = self.root / "state" / "jobs.sqlite3"
+        db.write_bytes(b"")
+        os.chmod(self.root / "state", 0o700)
+        os.chmod(db, 0o600)
+        self.probe.per_entry = True
+        self.assertIsNone(self.refused(area, db))
+        self.probe.not_private.add(str(db))  # e.g. moved from C:\\ModelRig, where Users could read it
+        self.assertEqual(self.refused(area, db), "media_work_path_not_private")
+        self.assertIsNone(self.refused(area, self.root / "state"), "its folder is still fine")
 
     # -- after start ------------------------------------------------------------------------------
 
@@ -266,12 +278,12 @@ class RealProbeTests(unittest.TestCase):
             self.assertTrue(probe.private(td, os.lstat(td))[0])
             os.chmod(td, 0o750)
             self.assertFalse(probe.private(td, os.lstat(td))[0])
-            self.assertFalse(probe.acl_per_directory)
+            self.assertFalse(probe.acl_per_entry)
 
         class OnWindows(WorkAreaProbe):
             windows = True
 
-        self.assertTrue(OnWindows().acl_per_directory, "Windows checks every directory used")
+        self.assertTrue(OnWindows().acl_per_entry, "Windows checks every folder and file used")
 
 
 if __name__ == "__main__":

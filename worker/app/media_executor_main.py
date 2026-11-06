@@ -171,6 +171,15 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
     # (#2337 review 4477083808), and a work area that changes stops it too.
     guard()
     _check_job_db(job_db)
+    # The database file and its sidecars must be private too: on Windows a file moved in from
+    # elsewhere on the same disk keeps the ACL it had there (docs/MEDIA_WORK_AREA.md: copy, never move).
+    for existing in (job_db, job_db + "-wal", job_db + "-shm", job_db + "-journal"):
+        if os.path.lexists(existing):
+            try:
+                work.require(existing)
+            except ArtifactSinkUnavailable as exc:
+                raise ExecutorConfigError(f"{JOB_DB_ENV} is not private in the work area ({exc}); copy it "
+                                          "into the work area instead of moving it") from None
     try:
         store = ImageJobStore(job_db, volume_guard=guard)
     except ImageJobError as exc:
