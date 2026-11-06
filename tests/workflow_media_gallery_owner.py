@@ -30,10 +30,10 @@ class OwnerGalleryTests(unittest.TestCase):
 
     def test_filters_before_paging_and_keeps_cursor_private(self):
         jobs = Jobs({"one", "two", "three"})
-        first = list_owned_gallery(jobs, "principal", "/media", limit=2)
+        first = list_owned_gallery(jobs, "principal", "/media", limit=2, verified_volume_root="/volume")
         self.assertEqual([x["id"] for x in first["items"]], ["one", "two"])
         self.assertEqual(first["next_cursor"], "two")
-        second = list_owned_gallery(jobs, "principal", "/media", cursor="two", limit=2)
+        second = list_owned_gallery(jobs, "principal", "/media", cursor="two", limit=2, verified_volume_root="/volume")
         self.assertEqual([x["id"] for x in second["items"]], ["three"])
         self.assertIsNone(second["next_cursor"])
         self.assertTrue(all(owner == "principal" for owner, _ in jobs.calls))
@@ -42,7 +42,7 @@ class OwnerGalleryTests(unittest.TestCase):
         self.entries[1]["thumbnail_id"] = "foreign"
         self.entries[1]["thumbnail_url"] = "/api/v1/media/foreign"
         jobs = Jobs({"one"})
-        result = list_owned_gallery(jobs, "principal", "/media")
+        result = list_owned_gallery(jobs, "principal", "/media", verified_volume_root="/volume")
         self.assertEqual(len(result["items"]), 1)
         self.assertIsNone(result["items"][0]["thumbnail_id"])
         self.assertIsNone(result["items"][0]["thumbnail_url"])
@@ -51,7 +51,7 @@ class OwnerGalleryTests(unittest.TestCase):
     def test_owned_thumbnail_preserved(self):
         self.entries[1]["thumbnail_id"] = "three"
         self.entries[1]["thumbnail_url"] = "/api/v1/media/three"
-        result = list_owned_gallery(Jobs({"one", "three"}), "principal", "/media")
+        result = list_owned_gallery(Jobs({"one", "three"}), "principal", "/media", verified_volume_root="/volume")
         self.assertEqual(result["items"][0]["thumbnail_id"], "three")
 
     def test_asset_read_foreign_and_unfinished_are_identical_not_found(self):
@@ -76,20 +76,24 @@ class OwnerGalleryTests(unittest.TestCase):
 
     def test_foreign_cursor_rejected(self):
         with self.assertRaisesRegex(GalleryBadRequest, "unknown_cursor"):
-            list_owned_gallery(Jobs({"one"}), "principal", "/media", cursor="foreign")
+            list_owned_gallery(Jobs({"one"}), "principal", "/media", cursor="foreign", verified_volume_root="/volume")
 
     def test_missing_principal_refused(self):
         with self.assertRaisesRegex(GalleryBadRequest, "missing_authenticated_owner"):
-            list_owned_gallery(Jobs({"one"}), "", "/media")
+            list_owned_gallery(Jobs({"one"}), "", "/media", verified_volume_root="/volume")
 
     def test_invalid_page_refused(self):
         with self.assertRaises(GalleryBadRequest):
-            list_owned_gallery(Jobs({"one"}), "principal", "/media", limit=True)
+            list_owned_gallery(Jobs({"one"}), "principal", "/media", limit=True, verified_volume_root="/volume")
+
+    def test_missing_verified_volume_refused(self):
+        with self.assertRaisesRegex(GalleryUnavailable, "verified_volume_required"):
+            list_owned_gallery(Jobs({"one"}), "principal", "/media")
 
     def test_unavailable_volume_fails_closed(self):
         with patch("app.media_gallery_owner._root", side_effect=GalleryUnavailable("offline")):
             with self.assertRaises(GalleryUnavailable):
-                list_owned_gallery(Jobs({"one"}), "principal", "/media")
+                list_owned_gallery(Jobs({"one"}), "principal", "/media", verified_volume_root="/volume")
 
 
 if __name__ == "__main__":
