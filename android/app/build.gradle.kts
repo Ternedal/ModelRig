@@ -96,6 +96,11 @@ android.testOptions {
     unitTests {
         // Robolectric skal bruge rigtige ressourcer (temaer, fonte) til screenshots.
         isIncludeAndroidResources = true
+        // Robolectric 4.17 kalder jdk.internal.access.SharedSecrets fra
+        // AndroidInterceptors (FileDescriptor.setInt$), som JDK 17+ ikke
+        // eksporterer til unnamed modules. Uden flaget fejler alle screenshot-
+        // tests med IllegalAccessException (#1866). Gaelder kun test-JVM'en.
+        all { it.jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED") }
     }
 }
 
@@ -117,10 +122,10 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.4.2")
     implementation("androidx.camera:camera-view:1.4.2")
     testImplementation("junit:junit:4.13.2")
-    // Screenshot-regression: Robolectric 4.16 (SDK 36 + JDK 21) + Roborazzi.
-    testImplementation("org.robolectric:robolectric:4.16.1")
-    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.73.0")
-    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.73.0")
+    // Screenshot-regression: Robolectric 4.17 (SDK 36 + JDK 21) + Roborazzi.
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.77.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.77.0")
     testImplementation(platform("androidx.compose:compose-bom:2026.08.00"))
     testImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("androidx.test.ext:junit:1.3.0")
@@ -131,7 +136,7 @@ dependencies {
     testImplementation("org.json:json:20260814")
     // Scheduler client contracts need a real HTTP boundary without relying on
     // JDK-only com.sun.net.httpserver, which is absent from AGP's test compiler.
-    testImplementation("com.squareup.okhttp3:mockwebserver:5.5.0")
+    testImplementation("com.squareup.okhttp3:mockwebserver:5.5.1")
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     implementation(composeBom)
     implementation("androidx.compose.material3:material3")
@@ -139,7 +144,14 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
-    implementation("com.squareup.okhttp3:okhttp:5.5.0")
+    implementation("com.squareup.okhttp3:okhttp:5.5.1")
+    // Videoafspilning i mediegalleriet (ModelRig #2275, godkendt af Anders
+    // 28/10-2026): samme bibliotek som SkyPlayer (Media3/ExoPlayer). OkHttp-
+    // modulet saa video gaar gennem galleriets egen klient: token kun til den
+    // parrede rig, ingen redirects, Range-streaming. Ingen disk-cache.
+    implementation("androidx.media3:media3-exoplayer:1.11.1")
+    implementation("androidx.media3:media3-datasource-okhttp:1.11.1")
+    implementation("androidx.media3:media3-ui:1.11.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     // Android 12+ splash. Without this the app only set windowBackground, which
     // the system splash overrides on 12+ -- so on a Pixel there was effectively

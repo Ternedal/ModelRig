@@ -21,11 +21,11 @@ from __future__ import annotations
 
 import ipaddress
 import os
-import stat
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Protocol
 
+from .credential_file import CredentialFileRefused, read_private_credential
 from .github_connector_client import (
     GitHubReadClient,
     GitHubReadRemoteError,
@@ -45,6 +45,16 @@ _GITHUB_HOST = "api.github.com"
 _GITHUB_PORT = 443
 _DEFAULT_TIMEOUT_SECONDS = 15.0
 _MAX_TOKEN_FILE_BYTES = 4_096
+
+
+_REFUSAL_MESSAGES = {
+    "unavailable": "GitHub credential file is unavailable",
+    "not_regular": "GitHub credential path is not a regular file",
+    "size": "GitHub credential file size is invalid",
+    "permissions": "GitHub credential file permissions are too broad",
+    "unverifiable": "GitHub credential file permissions could not be verified",
+    "read": "GitHub credential file cannot be read",
+}
 
 
 class GitHubCredentialError(RuntimeError):
@@ -78,22 +88,13 @@ class FileGitHubCredentialProvider:
         return self._account
 
     def bearer_token(self) -> str:
+        # Same rule as the Home Assistant and RigGate bearers
+        # (docs/T038_WINDOWS_TOKEN_ACL_DESIGN.md): POSIX mode bits, or on Windows
+        # owner + DACL, judged on the handle the bytes are read from.
         try:
-            info = self._path.stat()
-        except OSError as exc:
-            raise GitHubCredentialError("GitHub credential file is unavailable") from exc
-        if not stat.S_ISREG(info.st_mode):
-            raise GitHubCredentialError("GitHub credential path is not a regular file")
-        if info.st_size < 1 or info.st_size > _MAX_TOKEN_FILE_BYTES:
-            raise GitHubCredentialError("GitHub credential file size is invalid")
-        if os.name == "posix" and stat.S_IMODE(info.st_mode) & 0o077:
-            raise GitHubCredentialError("GitHub credential file permissions are too broad")
-        try:
-            raw = self._path.read_bytes()
-        except OSError as exc:
-            raise GitHubCredentialError("GitHub credential file cannot be read") from exc
-        if len(raw) > _MAX_TOKEN_FILE_BYTES:
-            raise GitHubCredentialError("GitHub credential file size is invalid")
+            raw = read_private_credential(self._path, max_bytes=_MAX_TOKEN_FILE_BYTES)
+        except CredentialFileRefused as exc:
+            raise GitHubCredentialError(_REFUSAL_MESSAGES[exc.kind]) from None
         try:
             text = raw.decode("ascii")
         except UnicodeDecodeError as exc:
