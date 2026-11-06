@@ -933,6 +933,23 @@ class VideoExecutorTests(unittest.TestCase):
         self.assertEqual(ex.adapter.last_cleanup["kept_for_recovery"], kept)
         self.assertEqual(self.store.get(job, "anders")["state"], "publishing", "left for recovery")
 
+    def test_the_hand_off_receipt_is_stored_and_matches_the_published_file(self):
+        import hashlib
+        import sqlite3
+        ex = self.executor()
+        ex.volume_root = self.tmp
+        job = self.submit()
+        self.assertEqual(ex.step(), "completed")
+        with sqlite3.connect(os.path.join(self.tmp, "jobs.sqlite3")) as db:
+            receipt = json.loads(db.execute("SELECT record FROM image_jobs_handoff WHERE job_id=?", (job,)).fetchone()[0])
+        asset = self.store.get(job, "anders")["asset_id"]
+        published = (self.sink.store / f"{asset}.mp4").read_bytes()
+        self.assertEqual(receipt["stage"], "copied")
+        root = os.stat(self.tmp)
+        self.assertEqual(receipt["volume"], {"dev": root.st_dev, "ino": root.st_ino})
+        self.assertEqual((receipt["sha256"], receipt["size"]), (hashlib.sha256(published).hexdigest(), len(published)))
+        self.assertNotIn("a red kite", json.dumps(receipt), "never the prompt")
+
     def test_a_render_that_fails_is_cleaned_at_once_even_while_held(self):
         ex = self.executor_with_fake({"FAKE_COMFY_OUTPUT_MODE": "notmp4"})
         job = self.submit()

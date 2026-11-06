@@ -73,6 +73,51 @@ def _encode_params(params: object) -> str:
 # blanked 30 days after it finished. The row stays (id, owner, state, asset, error), so the
 # gallery and the audit trail still resolve; only the user's text goes.
 PROMPT_RETENTION_S = 30 * 24 * 3600
+
+HANDOFF_STAGES = ("copying", "copied")
+_HANDOFF_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+_HANDOFF_ASSET = re.compile(r"[A-Za-z0-9_-]{1,128}")
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def _nonnegative_int(value: object) -> bool:
+    return type(value) is int and 0 <= value < 2 ** 64
+
+
+def _file_identity(value: object, *, named: bool) -> bool:
+    keys = {"name", "dev", "ino", "size"} if named else {"dev", "ino"}
+    return (isinstance(value, dict) and set(value) == keys
+            and all(_nonnegative_int(value[k]) for k in keys - {"name"})
+            and (not named or (type(value["name"]) is str and bool(_HANDOFF_NAME.fullmatch(value["name"]))
+                               and value["name"] not in (".", ".."))))
+
+
+def check_handoff_record(record: object) -> dict:
+    """A hand-off receipt, or ImageJobError. Allowed keys only:
+    - stage: "copying" (before the copy) or "copied" (after copy and sync);
+    - output: {name, dev, ino, size} of the finished file in the work area (a plain file name);
+    - sha256 and size: of the copy, once "copied";
+    - volume: {dev, ino} of the publication volume's root at hand-off;
+    - source_asset_id and source_sha256: the source of an image-to-video job."""
+    if not isinstance(record, dict) or not set(record) <= {"stage", "output", "sha256", "size", "volume",
+                                                           "source_asset_id", "source_sha256"}:
+        raise ImageJobError("hand-off record has unknown fields")
+    if record.get("stage") not in HANDOFF_STAGES or not _file_identity(record.get("output"), named=True):
+        raise ImageJobError("hand-off record needs a stage and the output's identity")
+    if record["stage"] == "copied" and not (type(record.get("sha256")) is str and _SHA256.fullmatch(record["sha256"])
+                                            and _nonnegative_int(record.get("size"))):
+        raise ImageJobError("a copied hand-off needs sha256 and size")
+    if record["stage"] == "copying" and ("sha256" in record or "size" in record):
+        raise ImageJobError("sha256 and size are known only once copied")
+    if "volume" in record and not _file_identity(record["volume"], named=False):
+        raise ImageJobError("hand-off volume identity is malformed")
+    if "source_asset_id" in record and not (type(record["source_asset_id"]) is str
+                                            and _HANDOFF_ASSET.fullmatch(record["source_asset_id"])):
+        raise ImageJobError("hand-off source asset id is malformed")
+    if "source_sha256" in record and not (type(record["source_sha256"]) is str
+                                          and _SHA256.fullmatch(record["source_sha256"])):
+        raise ImageJobError("hand-off source hash is malformed")
+    return dict(record)
 _FINISHED = ("completed", "failed", "cancelled")
 
 
@@ -108,6 +153,11 @@ class ImageJobStore:
             # text in free space (a state update can move a row and free its old copy without
             # zeroing it). The first time this version opens it, a scrub is owed; purge_prompts
             # pays it with a VACUUM (#2340 review 4477941179).
+            # Hand-off receipts (Anders, 6 Nov: generate on C:, publish on Z:): what a video job handed
+            # from the work area to the volume, so C6 can correlate leftovers with jobs. Its own table:
+            # SELECT * on image_jobs is unchanged, and a receipt never holds a prompt or parameters.
+            db.execute("CREATE TABLE IF NOT EXISTS image_jobs_handoff (job_id TEXT PRIMARY KEY, "
+                       "record TEXT NOT NULL, updated REAL NOT NULL)")
             if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='image_jobs_scrub'").fetchone() is None:
                 db.execute("CREATE TABLE image_jobs_scrub (id INTEGER PRIMARY KEY CHECK (id = 1), "
                            "owed INTEGER NOT NULL)")
@@ -358,6 +408,21 @@ class ImageJobStore:
             row = db.execute("SELECT cancel_requested FROM image_jobs WHERE id=? AND state='running' AND claimed_by=?",
                              (job_id, self._instance(instance))).fetchone()
             return bool(row and row[0])
+
+    def record_handoff(self, job_id: str, instance: str, record: dict) -> bool:
+        """Store the hand-off receipt of the executor's own running or publishing job (replaces the
+        previous one). Only names, sizes, file ids, asset ids and hashes: never a prompt, an owner or
+        parameters. Raises ImageJobError on anything else; False if the job is not this instance's."""
+        checked = check_handoff_record(record)
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute("SELECT 1 FROM image_jobs WHERE id=? AND state IN ('running','publishing') AND claimed_by=?",
+                          (job_id, self._instance(instance))).fetchone() is None:
+                return False
+            db.execute("INSERT INTO image_jobs_handoff (job_id, record, updated) VALUES (?,?,?) "
+                       "ON CONFLICT(job_id) DO UPDATE SET record=excluded.record, updated=excluded.updated",
+                       (job_id, json.dumps(checked, sort_keys=True), time.time()))
+            return True
 
     def begin_publish(self, job_id: str, instance: str) -> bool:
         """The commit point: running -> publishing only if no cancel was requested. Publish only after True."""

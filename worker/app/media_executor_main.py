@@ -194,7 +194,7 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
         raise ExecutorConfigError(f"{IDLE_ENV} must be a number of seconds") from None
     return MediaExecutor(store, gpu_uuid=gpu_uuid, lease_dir=lease_dir, profiles=mine,
                          adapter_factory=adapter_factory or default_adapter_factory(device, lease_dir, env),
-                         image_sink=sink, video_sink=None, idle_unload_s=idle)
+                         image_sink=sink, video_sink=None, idle_unload_s=idle, volume_root=str(volume.root))
 
 
 def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) -> int:
