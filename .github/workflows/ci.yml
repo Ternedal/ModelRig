@@ -85,7 +85,20 @@ jobs:
             if (-not $health -or $health.service -ne "modelrig-worker" -or $health.version -ne $expected) {
               throw "frozen worker health/version check failed"
             }
-            $full = Invoke-RestMethod http://127.0.0.1:8099/health/full -TimeoutSec 5
+            # A frozen worker can serve /healthz before its full capability
+            # inventory is ready. Retry transient timeouts without weakening
+            # the identity and voice capability assertions below.
+            $full = $null
+            for ($attempt = 1; $attempt -le 6; $attempt++) {
+              if ($worker.HasExited) { throw "frozen worker exited with code $($worker.ExitCode)" }
+              try {
+                $full = Invoke-RestMethod http://127.0.0.1:8099/health/full -TimeoutSec 15
+                break
+              } catch {
+                if ($attempt -eq 6) { throw }
+                Start-Sleep -Seconds 2
+              }
+            }
             if ($full.checks.worker.version -ne $expected) { throw "frozen worker full-health version check failed" }
             if ($full.build.frozen -ne $true -or $full.build.commit_sha -ne $env:EXPECTED_BUILD_SHA) { throw "frozen worker commit identity mismatch" }
             if ($full.build.code_sha256 -ne $expectedCode) { throw "frozen worker source fingerprint mismatch" }
