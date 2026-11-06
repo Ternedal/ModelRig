@@ -2,11 +2,11 @@
 
 The verified media volume is where generated media is **published**: the gallery, its index and every staged file. `worker/app/media_volume.py` is the production check for it. `MountedMediaVolume` implements the `VerifiedMediaVolume` protocol in `media_generation_contract`.
 
-**Generation happens elsewhere (Anders, 6 Nov 2026, #2275).** ComfyUI's working folders and the job database live in a private work area on the internal disk. A finished file is copied into a staged file on this volume, checked, and published to the gallery in one atomic step; only then is the copy on the internal disk removed. So nothing partial is ever visible in the gallery. That work area is a separate check, added with the wiring; this module does not cover it.
+**Generation happens elsewhere (Anders, 6 Nov 2026, #2275).** ComfyUI's working folders and the job database live in a private work area on the internal disk. A finished file is checked and copied into a staged file on this volume, and synced; only then is the copy on the internal disk removed, and the staged file is published to the gallery in one atomic step. So nothing partial is ever visible in the gallery. That work area is a separate check (`docs/MEDIA_WORK_AREA.md`); this module does not cover it.
 
 **Status: wired into the media executor's entry point** (`media_executor_main.build_from_env`).
 - **The volume:** `KALIV_MEDIA_VOLUME_ROOT` plus `KALIV_MEDIA_VOLUME_ID` build one `MountedMediaVolume` at start.
-- **The job store's guard:** checks it before every access (`volume.verify()`, then the gallery root).
+- **The job store's guard:** checks it before every access (the work area, then `volume.verify()`, then the gallery root), so the executor never claims a job it could not publish. The job database itself is in the work area, not here.
 - **The gallery sink:** uses its root.
 - **Exit codes:** a configuration that can never work is exit 78; a missing, foreign or swapped disk is exit 75.
 - **Video stays default-off:** `media_executor_main` keeps exit 78 for video until the staged sink, image-to-video and the rig evidence are in.

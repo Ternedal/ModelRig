@@ -9,10 +9,13 @@ load():   verify the pinned template (SHA-256 over the exact bytes that are
 render_to(request, sink_file):
           VRAM re-check -> empty queue (single tenant) -> bind slot values
           -> submit -> poll history with the profile deadline (interrupt on
-          timeout) -> exactly one MP4 in the ComfyUI output dir, validated
+          timeout) -> exactly one MP4 in the ComfyUI output dir (in the
+          private work area on the internal disk; Anders, 6 Nov), validated
           (no symlinks, unchanged over a settle window before the copy and
-          during it, ftyp header, size cap) -> copied into sink_file ->
-          ComfyUI's output removed.
+          during it, ftyp header, size cap) -> copied into sink_file (a
+          staged file on the external media volume, published by the sink
+          only after the copy is complete and checked) -> ComfyUI's output
+          removed.
           Cleanup (#2316 reviews 4415046066, 5702562074): after the job --
           success or failure -- remove exactly the files that are provably
           the job's: named by ComfyUI in THIS prompt's history (type
@@ -29,7 +32,7 @@ render_to(request, sink_file):
           a file without a file id (st_ino 0) is never treated as the job's.
           Foreign files created mid-job and anything that existed before are
           kept. Cleanup never raises: it cannot mask the render's own error. A symlink is
-          removed as a link, its target never. If the volume cannot be
+          removed as a link, its target never. If the work area cannot be
           verified at cleanup time, nothing is touched. Every cleanup is
           reported in last_cleanup and failures are logged (file names only;
           they are generated, never a prompt).
@@ -182,7 +185,7 @@ class ComfyVideoAdapter:
 
     def _render_one(self, request: GenerationRequest, sink_file: BinaryIO,
                     should_cancel: Callable[[], bool] | None = None) -> str:
-        self.supervisor.require_media_volume()  # ArtifactSinkUnavailable propagates: fatal
+        self.supervisor.require_work_area()  # ArtifactSinkUnavailable propagates: fatal
         before = self._entry_names()  # snapshot before anything is submitted
         owned: list[tuple[str, int, int]] = []  # (name, st_dev, st_ino) attested by THIS prompt's history
         try:
@@ -209,7 +212,7 @@ class ComfyVideoAdapter:
             raise GenerationError("ComfyUI unavailable") from exc
         owned.extend(self._attested_outputs(outputs, before))  # recorded before any validation can fail
         source = self._single_output(outputs, before)
-        self.supervisor.require_media_volume()  # still the same verified volume after the render
+        self.supervisor.require_work_area()  # still the same private work area after the render
         self._wait_quiescent(source)
         self._copy_validated(source, sink_file)
         return MIME
@@ -247,11 +250,11 @@ class ComfyVideoAdapter:
         report: dict[str, list[str]] = {"removed": [], "kept_replaced": [], "untracked": [], "failed": []}
         self.last_cleanup = report
         try:
-            self.supervisor.require_media_volume()
+            self.supervisor.require_work_area()
         except Exception:
             report["failed"] = [name for name, _, _ in owned]
-            _log.warning("comfy cleanup skipped: media volume not verified; left %s", report["failed"])
-            return  # unmounted or replaced: touch nothing on whatever is mounted now
+            _log.warning("comfy cleanup skipped: work area not verified; left %s", report["failed"])
+            return  # replaced or no longer private: touch nothing in whatever is there now
         # POSIX: stat and unlink through one directory fd (no path re-resolution between
         # the identity check and the unlink). Windows has no dir_fd: same check by path.
         use_fd = all(f in os.supports_dir_fd for f in (os.stat, os.unlink, os.rename, os.link))
@@ -441,3 +444,12 @@ class ComfyVideoAdapter:
                 or last.st_mtime_ns != first.st_mtime_ns or last.st_ino != first.st_ino):
             raise GenerationError("ComfyUI output changed while it was copied")
         sink_file.flush()
+        # The bytes must be durable on the publication volume before the work-area copy is removed:
+        # render_to's cleanup runs as soon as this returns (Anders, 6 Nov: work on C:, publish to Z:).
+        # A delayed write error (disk full, I/O error) surfaces here and fails the job, never a
+        # silent success.
+        try:
+            fileno = sink_file.fileno()
+        except (AttributeError, OSError):  # an in-memory sink (tests) has no descriptor to sync
+            return
+        os.fsync(fileno)
