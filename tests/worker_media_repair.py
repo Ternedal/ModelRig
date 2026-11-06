@@ -261,6 +261,38 @@ class MediaRepairTests(unittest.TestCase):
         self.assertNotIn(SECRET_PROMPT, json.dumps(r))
         self.assertIsNone(self.report()["work_area_residue"], "not asked for: not reported")
 
+    def test_a_file_that_vanishes_or_is_denied_while_listed_is_skipped_or_refused(self):
+        """ChatGPT 6694053328 P1: between the listing and the stat, a file can be removed, or (on
+        Windows) a locked or denied entry can refuse even its attributes."""
+        from app.media_repair import RepairRefused, work_area_residue
+        self.leftover(self.output, "gone.mp4")
+        self.leftover(self.output, "kept.mp4")
+        real = os.scandir
+
+        class Entry:
+            def __init__(self, entry, error):
+                self._entry, self._error = entry, error
+
+            def __getattr__(self, name):
+                return getattr(self._entry, name)
+
+            def stat(self, **kwargs):
+                if self._error:
+                    raise self._error
+                return self._entry.stat(**kwargs)
+
+        def listing(error):
+            def scandir(path="."):
+                with real(path) as it:
+                    return iter([Entry(e, error if e.name == "gone.mp4" else None) for e in it])
+            return patch("app.media_repair.os.scandir", side_effect=scandir)
+
+        with listing(FileNotFoundError(2, "removed")):
+            self.assertEqual([f["path"] for f in work_area_residue(self.area, [self.output])], ["kept.mp4"])
+        for error in (PermissionError(13, "Access is denied"), OSError(32, "in use by another process")):
+            with self.subTest(error=error), listing(error), self.assertRaisesRegex(RepairRefused, "^work_directory_unreadable$"):
+                work_area_residue(self.area, [self.output])
+
     def test_work_dirs_must_be_scratch_folders_inside_the_private_work_area(self):
         with self.assertRaisesRegex(RepairRefused, "not_a_work_scratch_directory"):
             self.residue(self.work)

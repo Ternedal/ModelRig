@@ -99,6 +99,8 @@ While an executor runs it classifies nothing (`status: executor_running`), becau
 | 2 | Usage |
 | 75 | The media volume is not there, or the work area failed its checks |
 
+**Access lost while it reads.** If Z: goes away, or a folder on it is denied or locked, while a report or the inventory reads, the run stops with exit 75 (`repair_volume_unreadable`). If a scanned work folder, or an entry in it, cannot be read, it stops with exit 1 (`work_directory_unreadable`). It never answers with a partial result: for example, an index it may not read is never taken as an empty gallery. A file removed between the listing and the check is simply no longer reported.
+
 ## Relation to G1
 
 The volume check here is the gallery's own (`ExternalMediaSink._root`). The work area check is `PrivateWorkArea`, the same one the executor uses. Still open: the tool should also take `KALIV_MEDIA_VOLUME_ID` and verify G1's marker and pinned identity (`MountedMediaVolume`, `docs/MEDIA_VOLUME.md`) before a repair on the volume.

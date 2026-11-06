@@ -30,6 +30,7 @@ from app.gpu_lease import acquire_executor_lock  # noqa: E402
 from app.image_job_store import ImageJobStore  # noqa: E402
 from app.media_gallery_index_writer import register_asset  # noqa: E402
 from app.media_gallery_store import ExternalMediaSink  # noqa: E402
+from app.media_generation_contract import ArtifactSinkUnavailable  # noqa: E402
 from app.media_recovery_inventory import recovery_inventory  # noqa: E402
 from app.media_work_area import PrivateWorkArea  # noqa: E402
 
@@ -323,6 +324,56 @@ class RecoveryInventoryTests(unittest.TestCase):
         finally:
             lock.release()
         self.assertEqual((report["status"], report["executors_running"], report["jobs"]), ("executor_running", [GPU], []))
+
+    # -- access lost while it reads (ChatGPT 6694053328 P1) ------------------------------------------
+
+    def failing_scandir(self, failing_dir, error):
+        real = os.scandir
+
+        def scandir(path="."):
+            if os.path.realpath(path) == os.path.realpath(failing_dir):
+                raise error
+            return real(path)
+        return patch("app.media_recovery_inventory.os.scandir", side_effect=scandir)
+
+    def test_an_unreadable_work_folder_is_a_refusal_not_a_crash(self):
+        from app.media_repair import RepairRefused
+        self.job()
+        for error in (PermissionError(13, "Access is denied"), OSError(32, "in use by another process")):
+            with self.subTest(error=error), self.failing_scandir(self.output, error), \
+                    self.assertRaisesRegex(RepairRefused, "^work_directory_unreadable$"):
+                self.inventory()
+
+    def test_a_volume_lost_while_it_reads_is_unavailable_not_a_crash(self):
+        self.job()
+        for error in (FileNotFoundError(2, "gone"), PermissionError(13, "Access is denied"), OSError(5, "I/O error")):
+            with self.subTest(error=error), self.failing_scandir(self.media, error), \
+                    self.assertRaisesRegex(ArtifactSinkUnavailable, "^repair_volume_unreadable$"):
+                self.inventory()
+        real_stat = os.stat
+
+        def stat_fails_for_the_volume(path, *args, **kwargs):
+            if os.fspath(path) == self.volume:
+                raise OSError(5, "I/O error")
+            return real_stat(path, *args, **kwargs)
+        # The sink's own check stats the volume first; either refusal is fine, a raw OSError is not.
+        with patch("app.media_recovery_inventory.os.stat", side_effect=stat_fails_for_the_volume), \
+                self.assertRaises(ArtifactSinkUnavailable):
+            self.inventory()
+
+    def test_an_index_it_may_not_read_is_unavailable_not_an_empty_gallery(self):
+        """A permission error on the index must never read as "nothing is indexed"."""
+        self.job()
+        Path(self.media, "gallery-index.json").write_text("[]")
+        real_exists = Path.exists
+
+        def denied_for_the_index(path, *args, **kwargs):
+            if path.name == "gallery-index.json":
+                raise PermissionError(13, "Access is denied")
+            return real_exists(path, *args, **kwargs)
+        with patch("app.media_recovery_inventory.Path.exists", autospec=True, side_effect=denied_for_the_index), \
+                self.assertRaisesRegex(ArtifactSinkUnavailable, "^repair_volume_unreadable$"):
+            self.inventory()
 
     def test_it_changes_nothing_and_never_shows_a_prompt_or_owner(self):
         for copied in (False, True):

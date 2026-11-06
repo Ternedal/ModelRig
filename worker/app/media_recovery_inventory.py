@@ -153,18 +153,30 @@ def recovery_inventory(sink: ExternalMediaSink, job_db: str, *, work_area: Priva
         report.update(status="executor_running", executors_running=running, jobs=[], unattributed=[])
         return report
     jobs, receipts = _read_jobs(job_db)
+    # Access can go away while this reads (Z: unplugged, a denied or locked folder on Windows). That
+    # is a refusal with a reason, never a traceback, and never a partial answer: an index it may not
+    # read must not look like an empty gallery.
     try:
-        indexed = {item["id"] for item in _index(root)} if (root / "gallery-index.json").exists() else set()
+        has_index = (root / "gallery-index.json").exists()
+        volume_now = os.stat(sink.volume_root)
+        volume_entries = sorted(os.scandir(root), key=lambda e: e.name)
+    except OSError as exc:
+        raise ArtifactSinkUnavailable("repair_volume_unreadable") from exc
+    try:
+        indexed = {item["id"] for item in _index(root)} if has_index else set()
     except GalleryUnavailable as exc:
         raise ArtifactSinkUnavailable("repair_index_unavailable") from exc
-    volume_now = os.stat(sink.volume_root)
+    try:
+        work_entries = sorted(os.scandir(output), key=lambda e: e.name)
+    except OSError as exc:
+        raise RepairRefused("work_directory_unreadable") from exc
     temps = {}
-    for entry in sorted(os.scandir(root), key=lambda e: e.name):
+    for entry in volume_entries:
         info = _regular(Path(entry.path)) if _TEMP.fullmatch(entry.name) else None
         if info is not None:
             temps[entry.name] = info
     work_files = {}
-    for entry in sorted(os.scandir(output), key=lambda e: e.name):
+    for entry in work_entries:
         info = _regular(Path(entry.path)) if _PLAIN_NAME.fullmatch(entry.name) else None
         work_files[entry.name] = info  # None: a link, a folder or an odd name, never followed
     temp_hash: dict[str, str | None] = {}
