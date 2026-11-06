@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .media_gallery_catalog import (
-    GalleryBadRequest, _ID, _MAX_PAGE, _index, _root,
+    GalleryBadRequest, GalleryUnavailable, _ID, _MAX_PAGE, _index, _root,
 )
 
 
@@ -27,6 +27,8 @@ def list_owned_gallery(jobs, authenticated_owner: str, root_path: str | Path, *,
     if cursor is not None and (not isinstance(cursor, str) or not _ID.fullmatch(cursor)):
         raise GalleryBadRequest("invalid_cursor")
 
+    if verified_volume_root is None:
+        raise GalleryUnavailable("verified_volume_required")
     # Verify volume and parse the bounded index before exposing metadata.
     entries = _index(_root(root_path, verified_volume_root=verified_volume_root))
     owned = [entry for entry in entries
