@@ -95,6 +95,8 @@ class ImageJobStore:
                 state TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL,
                 asset_id TEXT, error TEXT)""")
             db.execute("CREATE INDEX IF NOT EXISTS image_jobs_state ON image_jobs(state, created)")
+            db.execute("CREATE INDEX IF NOT EXISTS image_jobs_owner_asset_state "
+                       "ON image_jobs(owner, asset_id, state)")
             columns = {row[1] for row in db.execute("PRAGMA table_info(image_jobs)")}
             if "claimed_by" not in columns:  # additive migration, no data rewritten
                 db.execute("ALTER TABLE image_jobs ADD COLUMN claimed_by TEXT")
@@ -204,6 +206,22 @@ class ImageJobStore:
         with self._db() as db:
             row = db.execute("SELECT * FROM image_jobs WHERE id=? AND owner=?", (job_id, owner)).fetchone()
             return dict(row) if row else None
+
+    def owns_completed_asset(self, owner: str, asset_id: str) -> bool:
+        """Authorize only completed assets of the authenticated principal.
+
+        The caller must supply owner from verified pairing/auth, never a
+        client-controlled owner field. Unknown assets and other owners fail closed.
+        """
+        if (type(owner) is not str or not owner.strip() or len(owner) > 256
+                or type(asset_id) is not str
+                or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", asset_id)):
+            return False
+        with self._db() as db:
+            return db.execute(
+                "SELECT 1 FROM image_jobs WHERE owner=? AND asset_id=? "
+                "AND state='completed' LIMIT 1", (owner, asset_id)
+            ).fetchone() is not None
 
     def claim(self) -> dict | None:
         with self._db() as db:
