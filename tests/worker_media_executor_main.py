@@ -311,6 +311,33 @@ class EntryPointTests(unittest.TestCase):
         for path in cases.values():
             self.assertFalse(Path(path).exists(), f"no database was created at {path}")
 
+    def test_a_job_database_moved_in_with_its_old_permissions_is_78(self):
+        # On Windows a same-disk move keeps the file's old ACL; the per-entry check catches it there.
+        __import__("sqlite3").connect(self.env["KALIV_MEDIA_JOB_DB"]).close()
+        Path(self.env["KALIV_MEDIA_JOB_DB"] + "-wal").write_bytes(b"")
+        # Every folder and file private (POSIX modes stand in for the Windows ACL here), so the only
+        # refusal below is the one patched in.
+        for path, mode in ((self.state, 0o700), (self.env["KALIV_MEDIA_JOB_DB"], 0o600),
+                           (self.env["KALIV_MEDIA_JOB_DB"] + "-wal", 0o600)):
+            os.chmod(path, mode)
+        for leaky in ("", "-wal"):
+            refused = {self.env["KALIV_MEDIA_JOB_DB"] + leaky}
+            real_private = __import__("app.media_work_area", fromlist=["WorkAreaProbe"]).WorkAreaProbe.private
+
+            def private(probe, path, info, refused=refused, real=real_private):
+                return (False, "test: Users can read it") if path in refused else real(probe, path, info)
+            with self.subTest(file=leaky or "the database"), \
+                    patch("app.media_gallery_catalog.os.path.ismount", return_value=True), \
+                    patch("app.media_work_area.WorkAreaProbe.acl_per_entry", new=True), \
+                    patch("app.media_work_area.WorkAreaProbe.private", private), \
+                    patch("app.media_executor_main.MediaExecutor.run",
+                          side_effect=AssertionError("a refused configuration must never run")):
+                self.assertEqual(main(["--device", "cuda:0"], self.env), EXIT_CONFIG)
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True), \
+                patch("app.media_work_area.WorkAreaProbe.acl_per_entry", new=True), \
+                patch("app.media_executor_main.MediaExecutor.run", return_value=0):
+            self.assertEqual(main(["--device", "cuda:0"], self.env), 0, "private files are accepted")
+
     def test_the_work_area_must_not_be_on_the_publication_volume(self):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True), \
                 patch("app.media_executor_main._on_one_device", return_value=True):

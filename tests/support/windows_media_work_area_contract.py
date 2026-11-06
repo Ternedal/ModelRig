@@ -65,7 +65,7 @@ def main() -> int:
         base = Path(td)
         fs, remote = probe.containing_filesystem(str(base))
         check(fs in ("ntfs", "refs") and remote is False, f"the temp folder's volume is local NTFS/ReFS ({fs}, {remote})")
-        check(probe.acl_per_directory, "Windows checks the ACL of every directory used")
+        check(probe.acl_per_entry, "Windows checks the ACL of every folder and file used")
 
         _, _, process = read_lease_dir_security(base)
         counter = iter(range(1000))
@@ -95,6 +95,17 @@ def main() -> int:
         reason = config_error(inherited)
         check(bool(reason) and reason.startswith("media_work_area_not_private"),
               f"the drive root is refused: Authenticated Users can write there ({reason})")
+
+        # A file moved in from a folder Users can read keeps that ACL (same-volume rename).
+        outside = base / "outside"
+        outside.mkdir()
+        icacls(outside, "/grant", f"*{USERS}:(OI)(CI)(RX)")
+        (outside / "jobs.sqlite3").write_bytes(b"")
+        os.rename(outside / "jobs.sqlite3", root / "state" / "jobs.sqlite3")
+        check(refused(area, root / "state" / "jobs.sqlite3") == "media_work_path_not_private",
+              "a job database moved in with its old grants is refused")
+        (root / "state" / "created-here.sqlite3").write_bytes(b"")
+        check(refused(area, root / "state" / "created-here.sqlite3") is None, "a file created here inherits privacy")
 
         icacls(root / "comfy", "/grant", f"*{USERS}:(OI)(CI)(RX)")
         check(refused(area, root / "comfy" / "output") == "media_work_path_not_private",
