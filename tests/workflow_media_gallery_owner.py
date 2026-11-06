@@ -3,7 +3,8 @@ import unittest
 from unittest.mock import patch
 
 from app.media_gallery_catalog import GalleryBadRequest, GalleryUnavailable
-from app.media_gallery_owner import list_owned_gallery
+from app.media_gallery_owner import list_owned_gallery, open_owned_asset
+from app.media_gallery_asset import GalleryAssetNotFound
 
 
 class Jobs:
@@ -52,6 +53,26 @@ class OwnerGalleryTests(unittest.TestCase):
         self.entries[1]["thumbnail_url"] = "/api/v1/media/three"
         result = list_owned_gallery(Jobs({"one", "three"}), "principal", "/media")
         self.assertEqual(result["items"][0]["thumbnail_id"], "three")
+
+    def test_asset_read_foreign_and_unfinished_are_identical_not_found(self):
+        jobs = Jobs({"one"})
+        with patch("app.media_gallery_asset.open_asset") as opener:
+            for asset_id in ("foreign", "orphan", "../escape"):
+                with self.assertRaisesRegex(GalleryAssetNotFound, "unknown_asset"):
+                    open_owned_asset(jobs, "principal", "/media", "/volume", asset_id)
+            opener.assert_not_called()
+
+    def test_owned_asset_delegates_to_guarded_file_opener(self):
+        with patch("app.media_gallery_asset.open_asset", return_value=("handle", {"id": "one"})) as opener:
+            result = open_owned_asset(Jobs({"one"}), "principal", "/media", "/volume", "one")
+        self.assertEqual(result[1]["id"], "one")
+        opener.assert_called_once_with("/media", "/volume", "one")
+
+    def test_asset_read_without_principal_refused(self):
+        with patch("app.media_gallery_asset.open_asset") as opener:
+            with self.assertRaises(GalleryAssetNotFound):
+                open_owned_asset(Jobs({"one"}), "", "/media", "/volume", "one")
+            opener.assert_not_called()
 
     def test_foreign_cursor_rejected(self):
         with self.assertRaisesRegex(GalleryBadRequest, "unknown_cursor"):
