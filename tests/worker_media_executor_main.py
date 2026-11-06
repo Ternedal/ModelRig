@@ -405,6 +405,30 @@ class EntryPointTests(unittest.TestCase):
             items = list_gallery(self.env["KALIV_MEDIA_ROOT"], verified_volume_root=self.env["KALIV_MEDIA_VOLUME_ROOT"])
         self.assertEqual([item["id"] for item in items["items"]], [store.get(jobs[1], "anders")["asset_id"]])
 
+    def test_the_running_executor_logs_one_json_line_per_event_and_never_a_prompt(self):
+        import contextlib
+        import io
+        from app.image_job_store import ImageJobStore
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            ImageJobStore(self.env["KALIV_MEDIA_JOB_DB"]).submit(
+                "anders", "SECRET-PROMPT-8812", profile_id="sdxl-a", params={"width": 1024, "height": 1024, "steps": 20})
+            executor = build_from_env("cuda:0", self.env,
+                                      adapter_factory=lambda p: FakeAdapter(p, self.env["KALIV_GPU_LEASE_DIR"]))
+            real_run = executor.run
+            err = io.StringIO()
+            with patch("app.media_executor_main.build_from_env", return_value=executor), \
+                    patch.object(executor, "run", lambda idle_sleep: real_run(max_steps=2, idle_sleep=lambda: None)), \
+                    contextlib.redirect_stderr(err):
+                self.assertEqual(main(["--device", "cuda:0"], self.env), 0)
+        lines = [line for line in err.getvalue().splitlines() if line.startswith("kaliv-media-event ")]
+        events = [json.loads(line[len("kaliv-media-event "):]) for line in lines]
+        self.assertEqual({e["gpu"] for e in events}, {GPU})
+        self.assertEqual([e["event"] for e in events if e["event"] in ("recovered", "job", "exit")],
+                         ["recovered", "job", "exit"])
+        self.assertTrue(next(e for e in events if e["event"] == "job")["detail"].endswith(":sdxl-a:completed:0.0")
+                        or ":sdxl-a:completed:" in next(e for e in events if e["event"] == "job")["detail"])
+        self.assertNotIn("SECRET-PROMPT-8812", err.getvalue())
+
     def test_an_unmounted_volume_exits_75_from_the_real_process(self):
         result = self.run_entry(self.env)  # a plain temp dir is not a mount point
         self.assertEqual(result.returncode, EXIT_SINK_UNAVAILABLE, result.stderr)

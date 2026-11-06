@@ -36,6 +36,7 @@ work area that fails its checks at start).
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sqlite3
 import stat
@@ -211,6 +212,14 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
         print(f"media executor: the external media volume is not available ({exc})", file=sys.stderr)
         return EXIT_SINK_UNAVAILABLE
     poll = min(max(args.poll_seconds, 0.1), 30.0)
+    gpu = getattr(executor, "gpu_uuid", None)
+
+    def diagnostics(event: dict) -> None:
+        # One JSON line per lifecycle event on stderr, which modelrig-supervisor writes to the
+        # executor's log: job ids, profile ids, outcomes, counts and codes; never a prompt.
+        print("kaliv-media-event " + json.dumps({"gpu": gpu, **event}, sort_keys=True), file=sys.stderr, flush=True)
+    if hasattr(getattr(executor, "events", None), "sink"):
+        executor.events.sink = diagnostics
     try:
         return executor.run(idle_sleep=lambda: time.sleep(poll))
     except GpuLeaseError as exc:  # the lease directory became unusable: configuration, not a crash
