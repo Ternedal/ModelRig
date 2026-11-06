@@ -14,7 +14,9 @@ contract tests and the R17 rig pack; physical Windows proof is BLOCKED until And
 starts a new one. After every point:
 - the job is terminal (failed, with the code for where it died) and is never claimed again;
 - nothing partial is visible, and every index row has its whole file (no orphan index);
-- nobody can retrieve a file whose job did not complete;
+- nobody can retrieve a file whose job did not complete, and the store's owner authority
+  (`owns_completed_asset`, `completed_assets_for`) never counts it, so an owner-filtered gallery
+  never lists it (ChatGPT's projection is checked too once it is on this branch);
 - C6 attributes what is left to the job, with a definite class (never "unknown"), read-only;
 - a new job completes.
 
@@ -91,6 +93,25 @@ class CrashMatrix(Harness):
             db.row_factory = sqlite3.Row
             return dict(db.execute("SELECT * FROM image_jobs WHERE id=?", (job,)).fetchone())
 
+    def assert_owner_projection(self, source):
+        """ChatGPT's owner-filtered gallery (feat/media-owner-gallery-filter), once it is on this
+        branch: after any crash, only completed assets are listed or opened, and only for their owner."""
+        try:
+            from app.media_gallery_owner import list_owned_gallery, open_owned_asset
+            from app.media_gallery_asset import GalleryAssetNotFound
+        except ImportError:
+            return  # not merged here yet; the store authority above is checked either way
+        listed = list_owned_gallery(self.store, "anders", self.media, verified_volume_root=self.root, limit=50)
+        self.assertEqual([i["id"] for i in listed["items"]], [source])
+        for asset_id in self.gallery():
+            if asset_id != source:
+                with self.assertRaises(GalleryAssetNotFound):
+                    open_owned_asset(self.store, "anders", self.media, self.root, asset_id)
+        with self.assertRaises(GalleryAssetNotFound):
+            open_owned_asset(self.store, "mallory", self.media, self.root, source)
+        handle, _ = open_owned_asset(self.store, "anders", self.media, self.root, source)
+        handle.close()
+
     def run_point(self, target, crash, died_in, expected_class, c_copy_left, unindexed):
         job, source = self.crash_at(target, crash())
         dead = self.raw_row(job)
@@ -111,12 +132,18 @@ class CrashMatrix(Harness):
                            work_dirs=[self.comfy["output"]])
         self.assertEqual(report["indexed_but_missing"], [], "no orphan index row")
         self.assertEqual(report["counts"]["unindexed"], unindexed)
+        owned = self.store.completed_assets_for("anders")
+        self.assertIn(source, owned)
         for asset_id, item in self.gallery().items():
             if asset_id == source:
                 continue
             path = Path(self.media, asset_id + ".mp4")
             self.assertEqual(path.stat().st_size, item["size_bytes"], "an indexed file is whole")
             self.assertIsNone(self.retrieve("anders", asset_id), "its job failed: nobody may fetch it")
+            # The authority a gallery list filters with (#2275 6697074518): never owned, by anyone.
+            self.assertNotIn(asset_id, owned)
+            self.assertFalse(self.store.owns_completed_asset("anders", asset_id))
+        self.assert_owner_projection(source)
         self.assertEqual(bool(report["work_area_residue"]), c_copy_left, "the C: copy is kept until published")
 
         # C6 names it: attributed to the job, a definite class, and it changes nothing.
