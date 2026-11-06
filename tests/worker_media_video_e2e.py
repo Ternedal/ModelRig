@@ -201,11 +201,13 @@ class VideoPipelineEndToEnd(unittest.TestCase):
 
     def retrieve(self, owner, asset):
         """What an authenticated route does (ChatGPT owns it; used here read-only, not changed):
-        authorize the owner against the job store, then stream the asset from the gallery. The
-        route's process has its own store handle on the job database in the work area (C:), with
-        no volume guard: Z: matters only for the asset itself."""
+        validate the private work area and the job database's folder (ChatGPT 6691081245), then
+        authorize the owner against the job store, then stream the asset from the gallery, which
+        validates Z: on its own."""
         from app.media_gallery_asset import stream_open_asset
-        if not ImageJobStore(os.path.join(self.job_dir, "jobs.sqlite3")).owns_completed_asset(owner, asset):
+        job_dir = os.path.join(self.job_dir)
+        PrivateWorkArea(self.work).require(job_dir)  # ArtifactSinkUnavailable: the route refuses
+        if not ImageJobStore(os.path.join(job_dir, "jobs.sqlite3")).owns_completed_asset(owner, asset):
             return None
         return b"".join(stream_open_asset(self.media, str(self.volume.root), asset))
 
@@ -359,6 +361,56 @@ class VideoPipelineEndToEnd(unittest.TestCase):
         self.probe.mounts.clear()  # the disk is unplugged
         with self.assertRaises(GalleryUnavailable):
             self.retrieve("anders", asset)
+        self.probe.mounts.add(self.root)
+        os.chmod(self.work, 0o755)  # the work area opened up to other users: the route refuses
+        from app.media_work_area import MediaWorkAreaConfigError
+        with self.assertRaisesRegex((ArtifactSinkUnavailable, MediaWorkAreaConfigError), "media_work_area_not_private"):
+            self.retrieve("anders", asset)
+        os.chmod(self.work, 0o700)
+
+    @unittest.skipUnless(hasattr(os, "fork"), "needs fork to die without running cleanup")
+    def test_an_executor_killed_mid_render_leaves_the_gpu_to_its_comfyui_until_that_is_gone(self):
+        # Track 3, lease survival: POSIX hands the GPU lease to ComfyUI (pass_fds), so an orphaned
+        # ComfyUI keeps the GPU busy after its executor dies; on Windows the Job Objects kill it with
+        # the executor (docs/MEDIA_EXECUTOR.md). Either way no second render may share the GPU.
+        from app.gpu_lease import GpuBusy
+        source = self.owned_source()
+        job = self.submit_video(source)
+        pid = os.fork()
+        if pid == 0:
+            try:
+                ex = self.executor(render_seconds="30")
+                threading.Timer(1.5, lambda: os._exit(0)).start()  # killed while ComfyUI renders
+                ex.run(max_steps=1)
+            finally:
+                os._exit(3)
+        os.waitpid(pid, 0)
+        comfy = int(Path(self.state, "pid").read_text())
+        self.assertFalse(wait_gone(comfy, 0.5), "ComfyUI outlived its executor (POSIX)")
+        with self.assertRaises(GpuBusy):
+            acquire_gpu_lease(GPU, lease_dir=self.lease_dir).release()
+        # The restarted executor recovers the job, and refuses to share the GPU with the orphan.
+        self.boot()
+        ex = self.executor()
+        self.assertEqual(ex.start(), 1)
+        self.assertEqual(self.store.get(job, "anders")["error"], "interrupted by restart")
+        again = self.submit_video(source)
+        self.assertEqual(ex.step(), "failed", "GPU busy: never two renders on one GPU")
+        self.assertEqual(self.store.get(again, "anders")["error"], "gpu_busy")
+        os.kill(comfy, 9)  # what a reboot or the operator does
+        self.assertTrue(wait_gone(comfy, 10))
+        deadline = time.monotonic() + 5  # the kernel drops a dead process's locks within milliseconds
+        while True:
+            try:
+                self.assert_lease_free()
+                break
+            except GpuBusy:
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(0.01)
+        third = self.submit_video(source)
+        self.assertEqual(ex.step(), "completed")
+        self.assertEqual(self.store.get(third, "anders")["state"], "completed")
 
     # -- crashes in the hand-off from the work area to the volume (ChatGPT 6686968292 items 1 and 2) --
 
