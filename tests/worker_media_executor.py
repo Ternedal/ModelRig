@@ -598,6 +598,63 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(ex.events[0], "tick:500")
 
 
+class QueuedExpiryExecutorTests(unittest.TestCase):
+    """Anders, 6 Nov 2026: queued jobs nobody claimed for 24 hours expire; the executor enforces it."""
+    setUp, tearDown = ExecutorTests.setUp, ExecutorTests.tearDown
+    image, executor = ExecutorTests.image, ExecutorTests.executor
+
+    def stale_job(self, age_s=25 * 3600):
+        with patch("app.image_job_store.time.time", return_value=__import__("time").time() - age_s):
+            return self.store.submit("anders", "a red bicycle", profile_id="sdxl-a",
+                                     params={"width": 1024, "height": 1024, "steps": 20})["job_id"]
+
+    def stored_state(self, job):
+        import sqlite3
+        with sqlite3.connect(self.store.path) as db:
+            return db.execute("SELECT state, error FROM image_jobs WHERE id=?", (job,)).fetchone()
+
+    def test_an_executor_starting_after_a_long_pause_expires_instead_of_rendering(self):
+        job = self.stale_job()
+        ex = self.executor([self.image()], start=False)
+        ex.start()
+        self.assertIn("expired:1", ex.events)
+        self.assertEqual(self.stored_state(job), ("expired", "expired_unclaimed"))
+        self.assertEqual(ex.step(), "idle", "nothing to render")
+        self.assertIsNone(ex.adapter, "no model was loaded for it")
+
+    def test_a_job_that_ages_out_while_the_executor_waits_for_vram_expires(self):
+        ex = self.executor([self.image()])
+        job = self.stale_job(age_s=23 * 3600)
+        ex._claim_not_before = self.clock.now + 10 ** 6  # waiting for VRAM: no claims (G4)
+        later = __import__("time").time() + 2 * 3600
+        with patch("app.image_job_store.time.time", return_value=later):
+            self.assertEqual(ex.step(), "idle")
+            self.assertEqual(self.stored_state(job)[0], "queued", "no claim, so nothing expired it yet")
+            ex.idle_housekeeping()
+            self.assertEqual(self.stored_state(job)[0], "queued", "not due again within a minute")
+            self.clock.now += 60
+            ex.idle_housekeeping()
+        self.assertEqual(self.stored_state(job), ("expired", "expired_unclaimed"))
+        self.assertIn("expired:1", ex.events)
+
+    def test_fresh_jobs_are_rendered_as_before(self):
+        ex = self.executor([self.image()])
+        job = self.stale_job(age_s=23 * 3600)
+        self.assertEqual(ex.step(), "completed")
+        self.assertEqual(self.stored_state(job)[0], "completed")
+
+    def test_a_failing_expiry_never_stops_the_work(self):
+        ex = self.executor([self.image()], start=False)
+        with patch.object(self.store, "expire_queued", side_effect=sqlite3_error()):
+            ex.start()
+        self.assertTrue(any(e.startswith("expire_failed:") for e in ex.events))
+
+
+def sqlite3_error():
+    import sqlite3
+    return sqlite3.OperationalError("database is locked")
+
+
 class VramWaitTests(unittest.TestCase):
     """G4, Anders 5 Nov 2026: chat first, media waits. Too little free VRAM re-queues the job."""
     setUp, tearDown = ExecutorTests.setUp, ExecutorTests.tearDown
