@@ -159,6 +159,18 @@ class RecoveryInventoryTests(unittest.TestCase):
         self.assertEqual(entry["asset"], {"status": "same", "asset_id": asset, "indexed": True})
         self.assertEqual(entry["error"], "interrupted during publication")
 
+    def test_a_failed_index_registration_is_published_unindexed(self):
+        job = self.job()
+        _, output = self.work_file()
+        self.receipt(job, output)
+        self.store.begin_publish(job, DEAD)
+        asset = self.sink.job_asset_id(job)
+        Path(self.media, f"{asset}.mp4").write_bytes(MP4)  # the file, but no index row
+        self.restart()
+        entry = self.only(self.inventory())
+        self.assertEqual(entry["classification"], "published_unindexed")
+        self.assertEqual(entry["asset"], {"status": "same", "asset_id": asset, "indexed": False})
+
     def test_a_clean_job_is_not_listed(self):
         job = self.job()
         path, output = self.work_file()

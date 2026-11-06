@@ -75,7 +75,8 @@ The output is JSON, schema `kaliv-media-recovery-inventory/v1`. It lists one ent
 | `interrupted_copy` | the copy started and never finished | the work file is intact; the staged temp, if any, is a byte-exact prefix of it |
 | `crash_after_sync_before_publication` | a complete, synced copy was never published | a staged temp with the receipt's SHA-256; the work file is intact |
 | `publication_failed` | publication failed after the copy; the work file was kept | the work file is intact; nothing is staged or published |
-| `crash_after_publication_before_cleanup` | published once; the work copy was not yet removed | the job's asset has the receipt's SHA-256; the work file is intact |
+| `crash_after_publication_before_cleanup` | published and indexed once; the work copy was not yet removed | the job's asset has the receipt's SHA-256 and is indexed; the work file is intact |
+| `published_unindexed` | the file was published, but the gallery index was not updated | the job's asset has the receipt's SHA-256 and is not indexed; the work file is intact |
 | `volume_changed` | the volume root is not the one the job handed over to | nothing on it is correlated |
 | `unknown` | anything else, including two candidates for one piece or a changed file | — |
 

@@ -24,7 +24,8 @@ ties each piece to its job, using the hand-off receipt the executor stored befor
 | ``interrupted_copy`` | the copy started and never finished; the work-area file is intact |
 | ``crash_after_sync_before_publication`` | a complete, synced copy is staged; nothing is published |
 | ``publication_failed`` | the copy finished, publication failed, the work-area file was kept |
-| ``crash_after_publication_before_cleanup`` | published once (same SHA-256); the work-area copy is still there |
+| ``crash_after_publication_before_cleanup`` | published and indexed once (same SHA-256); the work-area copy is still there |
+| ``published_unindexed`` | the file is published (same SHA-256) but the gallery index was not updated; the work-area copy is kept |
 | ``volume_changed`` | the volume's root is not the one the job handed over to: nothing on it is correlated |
 | ``unknown`` | anything else, including two candidates for one piece |
 
@@ -282,6 +283,8 @@ def _decide(job: dict, stage: str, entry: dict, work_intact: bool) -> str:
     if staged == "ambiguous" or asset == "different":
         return "unknown"
     if asset == "same":
+        if work == "intact" and not entry["asset"]["indexed"]:
+            return "published_unindexed"  # the gallery index was not updated (registration failed)
         if work == "intact":
             return "crash_after_publication_before_cleanup"
         if work == "absent" and staged == "absent" and job["state"] == "completed":
