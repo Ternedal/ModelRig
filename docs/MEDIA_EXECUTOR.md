@@ -161,7 +161,7 @@ They hold ids, outcomes, counts and codes, never a prompt. A failing log never s
 |---|---|---|
 | The supervisor dies (crash, `Stop-Process -Force`, reboot) | — | — |
 | Every executor dies with it, and so does the ComfyUI each one started | All children are adopted into one Job Object with `KILL_ON_JOB_CLOSE` right after `Start()` (`main.go`; `executor.go` uses the same tree). ComfyUI is started by the executor, so it is inside the job too. | `processtree_windows_test.go` (closing the job kills its children), on the Windows gate |
-| The GPU lease, the resident lock and the executor lock are free | They are OS locks (`flock` / `LockFileEx`) held by those processes. The OS drops them when the processes die; nothing is left to clean up. | `worker_gpu_lease.py`; `windows_resident_lock_contract.py` |
+| The GPU lease, the resident lock and the executor lock are free | They are OS locks (`fcntl.flock` on POSIX, `msvcrt.locking` byte-range locks on Windows) held by those processes. The OS drops them when the processes die; nothing is left to clean up. | `worker_gpu_lease.py`; `windows_resident_lock_contract.py` |
 | The new supervisor starts a new executor per GPU | Exit 73 is impossible here, because the old one is gone. | `executor_test.go` (restart policy) |
 | The new executor fails the interrupted jobs | `recover_gpu`, under the executor lock: `interrupted by restart` or `during publication`. Its `kaliv-media-event` log says `recovered:N`. | `worker_image_job_store.py`, `worker_media_executor.py`, C2 crash tests |
 | A finished render the old executor had not published stays on C:, and a staged copy stays on Z: | Publish first, then delete. | C2; C6 `inventory` lists them |
