@@ -64,7 +64,8 @@ from typing import BinaryIO, Callable
 from .comfy_supervisor import ComfyBusy, ComfySupervisor, ComfySupervisorError, ComfyVramShortage
 from .comfy_weights import check_lookup_is_unambiguous, check_weights_unchanged, verify_weights
 from .comfy_workflow_template import MAX_TEMPLATE_BYTES, WorkflowTemplate, load_template
-from .media_generation_contract import GenerationCancelled, GenerationError, GenerationRequest, RenderedArtifact
+from .media_generation_contract import (ArtifactSinkUnavailable, GenerationCancelled, GenerationError, GenerationRequest,
+                                         RenderedArtifact)
 from .media_generation_profiles import ModelProfile, validate_request
 
 MIME = "video/mp4"
@@ -648,6 +649,14 @@ class ComfyVideoAdapter:
 
     def _notify_handoff(self, record: dict) -> None:
         """Tell the holder (holding_outputs(on_handoff=...)) what is being handed over. A failure
-        here fails the job: no hand-off goes unrecorded."""
+        here fails the job: no hand-off goes unrecorded.
+
+        A volume or store that is gone while the receipt is recorded (ArtifactSinkUnavailable) is
+        not the render's fault: like a copy the volume could not take, the finished file is kept
+        for recovery instead of removed (Codex #2357 4503161825). Any other refusal still cleans."""
         if self._on_handoff is not None:
-            self._on_handoff(dict(record))
+            try:
+                self._on_handoff(dict(record))
+            except ArtifactSinkUnavailable:
+                self._sink_failed = True
+                raise

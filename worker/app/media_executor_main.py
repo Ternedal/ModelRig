@@ -102,6 +102,30 @@ def default_adapter_factory(device: str, lease_dir: str, env: Mapping[str, str])
     return factory
 
 
+class PinnedVolumeSink:
+    """The image sink, with the pinned G1 volume verified immediately before every write.
+
+    ``ExternalMediaSink`` checks its root by path only. Wrapped here, a volume that is unplugged,
+    swapped for another disk or remounted after the job's last database access raises
+    ``ArtifactSinkUnavailable`` (exit 75) before any byte is written or indexed. A swap inside the
+    sink's own write remains the documented check-then-use window of a path check
+    (docs/MEDIA_VOLUME.md, Limits)."""
+
+    def __init__(self, sink, volume):
+        self._sink, self._volume = sink, volume
+
+    def publish(self, data: bytes, extension: str) -> str:
+        self._volume.verify()
+        return self._sink.publish(data, extension)
+
+    def publish_and_register_for_job(self, job_key: str, data: bytes, extension: str) -> str:
+        self._volume.verify()
+        return self._sink.publish_and_register_for_job(job_key, data, extension)
+
+    def __getattr__(self, name):  # read-only helpers (inspection) pass through unchanged
+        return getattr(self._sink, name)
+
+
 def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
                    adapter_factory: Callable[[ModelProfile], object] | None = None,
                    volume_probe=None, work_probe=None) -> MediaExecutor:
@@ -160,6 +184,10 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
     except ArtifactSinkUnavailable as exc:
         raise ExecutorConfigError(f"{JOB_DB_ENV} must be in an existing folder in the work area ({exc})") from None
     sink = ExternalMediaSink(media_root, str(volume.root))
+    # The sink itself only knows the root's path (mount and containment checks, no marker or pinned
+    # identity). G1 is checked again immediately before every write, so a disk replaced after
+    # begin_publish() and before publication gets nothing (Codex #2357 4503161823).
+    published_through = PinnedVolumeSink(sink, volume)
 
     def guard() -> None:
         work.require(job_dir)  # still the pinned, private work area, and the same folder in it
@@ -195,7 +223,7 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
         raise ExecutorConfigError(f"{IDLE_ENV} must be a number of seconds") from None
     return MediaExecutor(store, gpu_uuid=gpu_uuid, lease_dir=lease_dir, profiles=mine,
                          adapter_factory=adapter_factory or default_adapter_factory(device, lease_dir, env),
-                         image_sink=sink, video_sink=None, idle_unload_s=idle, volume_root=str(volume.root))
+                         image_sink=published_through, video_sink=None, idle_unload_s=idle, volume_root=str(volume.root))
 
 
 def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) -> int:
