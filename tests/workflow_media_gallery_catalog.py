@@ -73,6 +73,13 @@ class GalleryCatalogTests(unittest.TestCase):
                 with self.assertRaises(GalleryUnavailable):
                     self.page()
 
+    def test_deeply_nested_index_fails_closed(self):
+        # A bounded byte count does not bound JSON recursion depth.
+        nested = "[" * 2000 + "0" + "]" * 2000
+        (self.root / "gallery-index.json").write_text(nested, encoding="utf-8")
+        with self.assertRaisesRegex(GalleryUnavailable, "invalid_index"):
+            self.page()
+
     def test_reject_oversized_index_item_count(self):
         # Reject before validating individual records or allocating projected entries.
         (self.root / "gallery-index.json").write_text(
