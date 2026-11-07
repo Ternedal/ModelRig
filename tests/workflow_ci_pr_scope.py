@@ -181,6 +181,7 @@ GATE = "if: steps.scope.outputs.relevant == 'true'"
 for job, expected_scopes in {
     "android-compile": ["android/", "contracts/"],
     "desktop-compile": ["desktop/", "contracts/"],
+    "desktop-dpapi-windows": ["desktop/", "contracts/"],
     "windows-worker-package": ["worker/", "bodyrig/", "scripts/", "deploy/", "VERSION", "backend/"],
 }.items():
     steps = steps_of(job_block(ci_text, job))
