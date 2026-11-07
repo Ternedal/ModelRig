@@ -243,6 +243,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_browser_use_runtime_guard.py`
 - `tests/worker_build_identity.py`
 - `tests/worker_capability_schema_v2.py`
+- `tests/worker_comfy_image_to_video.py`
 - `tests/worker_comfy_resident_launcher.py`
 - `tests/worker_comfy_supervisor.py`
 - `tests/worker_comfy_video_adapter.py`
@@ -407,6 +408,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_rag_benchmark.py`
 - `tests/worker_rag_cloud.py`
 - `tests/worker_rag_corpus_contract.py`
+- `tests/worker_rag_embed_batch.py`
 - `tests/worker_rag_pdf_lifecycle.py`
 - `tests/worker_rag_source_toggle.py`
 - `tests/worker_read_connector_data_sharing_identity.py`
@@ -528,6 +530,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_candidate_freeze.py`
 - `tests/workflow_candidate_gate.py`
 - `tests/workflow_chain_argument_check.py`
+- `tests/workflow_ci_pr_scope.py`
 - `tests/workflow_client_capability_gates.py`
 - `tests/workflow_client_microcopy_parity.py`
 - `tests/workflow_client_path_segments.py`
