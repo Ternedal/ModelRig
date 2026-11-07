@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from app.media_gallery_catalog import GalleryBadRequest, GalleryUnavailable
-from app.media_gallery_owner import list_owned_gallery, open_owned_asset, stream_owned_asset
+from app.media_gallery_owner import list_owned_gallery, open_owned_asset, stream_owned_asset, prepare_owned_asset_response
 from app.media_gallery_asset import GalleryAssetNotFound
 
 
@@ -102,6 +102,31 @@ class OwnerGalleryTests(unittest.TestCase):
         with patch("app.media_gallery_asset.open_asset", return_value=(handle, {"size_bytes": 3})) as opener:
             self.assertEqual(b"".join(stream_owned_asset(Jobs({"one"}), "principal", "/media", "/volume", "one", chunk_size=2)), b"abc")
             opener.assert_called_once()
+        self.assertTrue(handle.closed)
+
+    def test_prepared_foreign_refused_eagerly(self):
+        with patch("app.media_gallery_asset.open_asset") as opener:
+            with self.assertRaises(GalleryAssetNotFound):
+                prepare_owned_asset_response(Jobs(set()), "principal", "/media", "/volume", "foreign")
+            opener.assert_not_called()
+
+    def test_prepared_owned_entry_before_iteration_and_closes(self):
+        handle = io.BytesIO(b"abcd")
+        entry = {"id": "one", "size_bytes": 4}
+        with patch("app.media_gallery_asset.open_asset", return_value=(handle, entry)):
+            metadata, chunks = prepare_owned_asset_response(
+                Jobs({"one"}), "principal", "/media", "/volume", "one", chunk_size=2)
+        self.assertEqual(metadata["size_bytes"], 4)
+        self.assertEqual(next(chunks), b"ab")
+        chunks.close()
+        self.assertTrue(handle.closed)
+
+    def test_prepared_close_before_first_chunk(self):
+        handle = io.BytesIO(b"abcd")
+        with patch("app.media_gallery_asset.open_asset", return_value=(handle, {"size_bytes": 4})):
+            _, chunks = prepare_owned_asset_response(
+                Jobs({"one"}), "principal", "/media", "/volume", "one")
+        chunks.close()
         self.assertTrue(handle.closed)
 
     def test_foreign_cursor_rejected(self):
