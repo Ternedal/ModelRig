@@ -11,6 +11,7 @@ echo Denne ene launcher:
 echo   - starter den isolerede telefonstack og laver en rigtig parringskode
 echo   - guider fem Pixel-forsog uden manuel JSON-redigering
 echo   - gemmer efter hvert forsog, saa testen kan genoptages
+echo   - guider fire forsog for aendringerne siden v2.0.15
 echo   - laver en fysisk cold-start og korer voice-baselinen
 echo   - rydder backend, worker og firewallregel op bagefter
 echo.
@@ -23,6 +24,9 @@ set "EXIT_CODE=%ERRORLEVEL%"
 echo.
 if "%EXIT_CODE%"=="0" (
   echo VOICE-TESTEN ER FAERDIG OG GROEN.
+) else if "%EXIT_CODE%"=="3" (
+  echo BASELINEN BESTOD, MEN AENDRINGSFORSOEGENE ER UFULDSTAENDIGE.
+  echo Se validation\voice-change-observations.json. Det er ikke et groent voice-bevis.
 ) else (
   echo VOICE-TESTEN STOPPEDE SIKKERT.
   echo Allerede besvarede forsog og rapporter er bevaret.

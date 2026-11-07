@@ -45,6 +45,7 @@ import dk.ternedal.modelrig.net.CloudClient
 import dk.ternedal.modelrig.logic.TurnInput
 import dk.ternedal.modelrig.logic.TurnRouter
 import dk.ternedal.modelrig.logic.TurnStatus
+import dk.ternedal.modelrig.logic.mayPersistCompletedVoiceTurn
 import dk.ternedal.modelrig.net.VoiceCapability
 import dk.ternedal.modelrig.net.WorkerCapabilities
 import dk.ternedal.modelrig.net.IngestCapability
@@ -852,6 +853,8 @@ private fun ChatScreen(
 
     val messages = remember { mutableStateListOf<Msg>() }
     var convId by remember { mutableStateOf<Long?>(null) }
+    // Navigation generation distinguishes A -> B -> A from an unchanged target.
+    var voiceNavigationRevision by remember { mutableStateOf(0) }
     var input by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var activeCall by remember { mutableStateOf<okhttp3.Call?>(null) }
@@ -1152,6 +1155,11 @@ private fun ChatScreen(
     // for the whole reply (the old buffered path felt slow with big cloud models).
     // ASR/TTS stay on the rig; only the LLM step may go to cloud. Off the main thread.
     fun runVoiceTurn(wav: ByteArray) {
+        // Capture the original target on the Compose/UI dispatcher, never from IO.
+        // A navigation change during ASR/TTS must not retarget persistence.
+        val conversationAtVoiceStart = convId
+        val navigationRevisionAtVoiceStart = voiceNavigationRevision
+        val modelAtVoiceStart = currentModel
         voiceBusy = true; voiceError = null; wasInterrupted = false
         speaking = false; playbackStop.set(false)
         voiceJob = scope.launch {
@@ -1263,6 +1271,9 @@ private fun ChatScreen(
 
                 streamError?.let { (status, detail) ->
                     voiceError = friendlyError(RuntimeException("voice ($status): $detail"))
+                    // A terminal error is not a completed assistant turn.
+                    // Never persist partial generated chunks as conversation memory.
+                    return@launch
                 }
 
                 // Persist the finished turn like a normal rig turn.
@@ -1276,11 +1287,27 @@ private fun ChatScreen(
                     messages.getOrNull(replyIdx)?.text.isNullOrBlank()) {
                     messages.removeAt(replyIdx)
                 }
+                // Preserve the original conversation target and do not save a
+                // stopped turn (including when the user navigated away).
+                if (!mayPersistCompletedVoiceTurn(
+                        conversationAtVoiceStart, convId, navigationRevisionAtVoiceStart,
+                        voiceNavigationRevision, playbackStop.get()
+                    )) return@launch
+                val cid = conversationAtVoiceStart ?: withContext(Dispatchers.IO) {
+                    db.newConversation("rig", modelAtVoiceStart, transcriptText.ifBlank { "tale" }.take(40))
+                }
+                if (!mayPersistCompletedVoiceTurn(
+                        conversationAtVoiceStart, convId, navigationRevisionAtVoiceStart,
+                        voiceNavigationRevision, playbackStop.get()
+                    )) return@launch
+                if (conversationAtVoiceStart == null) {
+                    convId = cid
+                    onConvChanged(cid)
+                }
+                // Both messages are one durable SQLite transaction. Do not
+                // read/write Compose navigation state from an IO dispatcher.
                 withContext(Dispatchers.IO) {
-                    val cid = convId ?: db.newConversation("rig", currentModel, transcriptText.ifBlank { "tale" }.take(40))
-                    if (convId == null) convId = cid
-                    if (transcriptText.isNotBlank()) db.addMessage(cid, "user", transcriptText)
-                    if (finalReply.isNotEmpty()) db.addMessage(cid, "assistant", finalReply)
+                    db.addCompletedVoiceTurn(cid, transcriptText, finalReply)
                 }
             } catch (e: CancellationException) {
                 wasInterrupted = true
@@ -1431,6 +1458,7 @@ private fun ChatScreen(
         // convId already exists). Only a switch to a DIFFERENT conversation
         // reloads; the id this screen just minted is already on screen.
         if (openConvId != null && openConvId == convId) return@LaunchedEffect
+        voiceNavigationRevision++
         messages.clear()
         // A pending confirmation belongs to the conversation that proposed it.
         // Leaving it on screen across a switch means approving an action in the

@@ -105,18 +105,24 @@ check(
     "the shared test workflow keeps Stage-B default-on and explicitly gated",
 )
 check(
-    "run_stage_b: ${{ github.event_name != 'pull_request' }}" in ci_workflow,
-    "PR CI skips only the duplicate Stage-B invocation; push/dispatch keep it",
+    "run_stage_b: ${{ github.event_name == 'workflow_dispatch' }}" in ci_workflow,
+    "CI skips the duplicate Stage-B invocation on PRs and main; only dispatch keeps it",
 )
 agent3_stage_b = agent3_full_workflow.split("  stage-b-slices:", 1)[1]
 check(
-    "if: github.event_name != 'pull_request'" in agent3_stage_b,
-    "PR Agent 3 full diagnostics delegates Stage-B ownership to exact-head qualification",
+    "if: github.event_name == 'workflow_dispatch'" in agent3_stage_b,
+    "Agent 3 full diagnostics delegates PR and main Stage-B ownership to exact-head qualification",
 )
+exact_head_stage_b = exact_head_workflow.split("  stage-b-slices:", 1)[1]
 check(
     "if: github.event_name != 'pull_request' || github.event.action != 'closed'"
-    in exact_head_workflow,
-    "exact-head qualification remains the sole PR Stage-B authority",
+    in exact_head_stage_b
+    and "uses: ./.github/workflows/_stage_b_slices.yml" in exact_head_stage_b,
+    "exact-head qualification is the sole Stage-B authority for PRs and pushes to main",
+)
+check(
+    "on:\n  push:\n    branches: [main]" in exact_head_workflow,
+    "exact-head qualification runs on every push to main, so main is still Stage-B qualified once",
 )
 release_server_tests = release_workflow.split("  server-tests:", 1)[1].split(
     "\n  android-build:", 1
@@ -240,9 +246,9 @@ check(
 )
 check(
     'name: stage-b-cache-${{ inputs.head_sha }}' in stage_b_workflow
-    and "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+    and "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9"
     in stage_b_workflow
-    and "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+    and "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333"
     in stage_b_workflow,
     "Stage-B cache handoff is exact-head named and uses pinned artifact actions",
 )
@@ -349,11 +355,17 @@ check(
     # and hazmat/primitives/asymmetric/ed25519.py are byte-identical between the
     # sdists; the only source change is a clippy allow in serialization.rs, and
     # the changelog's only entry is wheels rebuilt with OpenSSL 4.0.2.
-    worker_requirements.count("cryptography==50.0.1") == 1,
+    # Reviewed 5/11/2026 for the 50.0.1 -> 50.0.2 move (#2332): the same two files are
+    # byte-identical between the PyPI sdists (sha256 verified against the PyPI JSON);
+    # the source changes are PyO3 0.29.0 -> 0.29.2 (Cargo.lock), a no-op
+    # `use openssl_sys as _;` in cryptography-cffi, version metadata and a 3.15
+    # classifier; the changelog: wheels on OpenSSL 4.0.3, abi3t wheels for 3.15+,
+    # PyO3 0.29.2 (Cygwin/MSYS2 builds).
+    worker_requirements.count("cryptography==50.0.2") == 1,
     "the CI/runtime environment pins the reviewed Ed25519 implementation exactly once",
 )
 check(
-    pyproject.count('"cryptography==50.0.1"') == 1,
+    pyproject.count('"cryptography==50.0.2"') == 1,
     "the DevControl package metadata pins the same Ed25519 implementation",
 )
 

@@ -51,11 +51,29 @@ internal fun messagesForChatSource(
         }
     }
 
+    val turns = conversation.filterNot { it.role == "system" }
     return buildList {
         if (system.isNotBlank()) add(ChatMessage("system", system))
-        addAll(conversation.filterNot { it.role == "system" })
+        addAll(
+            when (source) {
+                ChatResult.Source.LOCAL -> turns
+                ChatResult.Source.CLOUD -> cloudCurrentMessage(turns)
+            },
+        )
     }
 }
+
+/**
+ * Anders 2026-10-26 (#2275, samarbejdsaftale v1.1 §3): only the current user
+ * message may reach Ollama Cloud; earlier turns stay local. Applied to every
+ * cloud attempt the router makes, cloud-first and fallback alike.
+ */
+internal fun cloudCurrentMessage(turns: List<ChatMessage>): List<ChatMessage> =
+    listOfNotNull(turns.lastOrNull { it.role == "user" })
+
+/** Leading instructions plus the current user message: the cloud shape without route systems. */
+internal fun cloudTurnWithoutRouteSystems(messages: List<ChatMessage>): List<ChatMessage> =
+    messages.takeWhile { it.role == "system" } + cloudCurrentMessage(messages.filterNot { it.role == "system" })
 
 /**
  * Local-first router with Ollama Cloud fallback.
@@ -92,7 +110,9 @@ class ChatRouter(
     private fun messagesFor(target: Target, messages: List<ChatMessage>): List<ChatMessage> {
         val localPrompt = localSystem
         val cloudPrompt = cloudSystem
-        if (localPrompt == null || cloudPrompt == null) return messages
+        if (localPrompt == null || cloudPrompt == null) {
+            return if (target == Target.CLOUD) cloudTurnWithoutRouteSystems(messages) else messages
+        }
         val source = when (target) {
             Target.LOCAL -> ChatResult.Source.LOCAL
             Target.CLOUD -> ChatResult.Source.CLOUD

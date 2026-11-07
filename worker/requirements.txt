@@ -2,14 +2,14 @@
 # run green against (repo analysis 1.58.40 P3 -- lock before Agent 3 grows).
 # CI installs from THIS file, so tests and the released worker exe use the
 # same versions. Bump deliberately: change here, run the suites, ship.
-fastapi==0.143.0
-uvicorn==0.52.4
+fastapi==0.162.0
+uvicorn==0.54.0
 httpx==0.28.1
-pydantic==2.13.5
+pydantic==2.14.2
 # Official public-key verification primitive used by the dormant Development
 # Control Plane DC-L10 authority boundary. Runtime code receives public keys only;
 # no private-key loader or signer is shipped in the authority package.
-cryptography==50.0.1
+cryptography==50.0.2
 # Python's zoneinfo uses the host database on Unix and this pinned first-party
 # fallback on Windows, so persisted IANA schedule zones mean the same thing.
 # The exact tzdata version is part of the durable DST schedule contract.
