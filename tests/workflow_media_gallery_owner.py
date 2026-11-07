@@ -1,9 +1,10 @@
 """Regression tests for the owner-only gallery projection."""
+import io
 import unittest
 from unittest.mock import patch
 
 from app.media_gallery_catalog import GalleryBadRequest, GalleryUnavailable
-from app.media_gallery_owner import list_owned_gallery, open_owned_asset
+from app.media_gallery_owner import list_owned_gallery, open_owned_asset, stream_owned_asset
 from app.media_gallery_asset import GalleryAssetNotFound
 
 
@@ -79,6 +80,29 @@ class OwnerGalleryTests(unittest.TestCase):
             with self.assertRaises(GalleryAssetNotFound):
                 open_owned_asset(Jobs({"one"}), "", "/media", "/volume", "one")
             opener.assert_not_called()
+
+    def test_stream_foreign_asset_never_opens(self):
+        with patch("app.media_gallery_asset.open_asset") as opener:
+            stream = stream_owned_asset(Jobs(set()), "principal", "/media", "/volume", "foreign")
+            with self.assertRaisesRegex(GalleryAssetNotFound, "unknown_asset"):
+                next(stream)
+            opener.assert_not_called()
+
+    def test_stream_checks_ownership_at_iteration_not_creation(self):
+        jobs = Jobs({"one"})
+        stream = stream_owned_asset(jobs, "principal", "/media", "/volume", "one")
+        jobs.allowed.clear()
+        with patch("app.media_gallery_asset.open_asset") as opener:
+            with self.assertRaises(GalleryAssetNotFound):
+                next(stream)
+            opener.assert_not_called()
+
+    def test_stream_owned_asset_closes_handle(self):
+        handle = io.BytesIO(b"abc")
+        with patch("app.media_gallery_asset.open_asset", return_value=(handle, {"size_bytes": 3})) as opener:
+            self.assertEqual(b"".join(stream_owned_asset(Jobs({"one"}), "principal", "/media", "/volume", "one", chunk_size=2)), b"abc")
+            opener.assert_called_once()
+        self.assertTrue(handle.closed)
 
     def test_foreign_cursor_rejected(self):
         with self.assertRaisesRegex(GalleryBadRequest, "unknown_cursor"):
