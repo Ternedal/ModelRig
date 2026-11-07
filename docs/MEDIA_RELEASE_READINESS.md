@@ -73,7 +73,7 @@ Prompts are blanked 30 days after a job finishes (#2340). A rollback does not ch
 
 | Gate | Evidence | Owner | Status |
 |---|---|---|---|
-| G1 and the work area wired: `MountedMediaVolume` for the publication volume and the sink; `PrivateWorkArea` for the job database and ComfyUI's directories (Anders, 6 Nov) | wiring PR plus rig R1, R5, R14 | Claude | G1 merged (#2349); wiring #2357 draft, qualifying, not enabled. Codex's two findings on 7 Nov (image writes not bound to the pinned volume; a volume lost while the receipt is recorded deleted the render) are fixed in `3904e8b6` |
+| G1 and the work area wired: `MountedMediaVolume` for the publication volume and the sink; `PrivateWorkArea` for the job database and ComfyUI's directories (Anders, 6 Nov) | wiring PR plus rig R1, R5, R14 | Claude | G1 merged (#2349); wiring #2357 draft, qualifying, not enabled. Codex's two findings on 7 Nov (image writes not bound to the pinned volume; a volume lost while the receipt is recorded deleted the render) are fixed in `3904e8b6`; Codex's third (a receipt the database cannot store deleted the render) in `60af733e` |
 | Staged video sink and image-to-video in the executor | #2347, #2346, #2353 | Claude | #2346, #2347 and #2353 merged 7 Nov; the sink is not yet constructed by the executor (video stays exit 78) |
 | Gallery reads bound to the verified volume: index and asset descriptors on the pinned device and the walked path (`require_descriptor`), proven on Windows/NTFS | ChatGPT's gallery branch + wiring; the Windows volume contract | ChatGPT (gallery), Claude (`require_descriptor`) | open; required before any route |
 | Gallery routes and Android gallery against real routes | ChatGPT's route PR, R11 | ChatGPT | not on main |
@@ -110,4 +110,5 @@ Prompts are blanked 30 days after a job finishes (#2340). A rollback does not ch
 - A volume lost mid-render leaves an unindexed `.kaliv-*.tmp`; C6 reports it, and an operator removes it.
 - G1 is checked immediately before each image write, but the sink's own path checks still leave a short check-then-write window inside the write. A volume swapped in exactly that window is caught by `store.complete()` (exit 76), not before the bytes land.
 - A volume lost while the hand-off receipt is being recorded stops the executor (exit 75) and keeps the finished render in the work area; the job stays `running` until the next start records it as interrupted, and C6 lists the file.
+- A hand-off receipt the job database cannot store (work disk full, database locked past its busy timeout, malformed) fails the job and keeps the finished render in the work area for recovery; C6 lists it. If the very first receipt failed, no receipt names the file, so C6 cannot tie it to a job. Only an explicit refusal (an invalid receipt, a job that is not this executor's) cleans the render at once.
 - Windows releases a dead process's byte-range lock "after a delay"; the index lock waits up to 5 s before refusing.
