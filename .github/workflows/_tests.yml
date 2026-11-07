@@ -741,6 +741,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/support/windows_cleanup_identity_contract.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/support/windows_media_volume_contract.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/support/windows_lease_dir_acl_contract.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/worker_toolhost.py
