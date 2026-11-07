@@ -696,6 +696,7 @@ native_windows_contracts = (
     "tests/worker_toolhost.py",
     "tests/support/windows_catalog_tier_a_contract.py",
     "tests/support/windows_tier_a_receipt_contract.py",
+    "tests/support/windows_lease_dir_acl_contract.py",
     "tests/worker_media_staged_video_sink.py",
 )
 check(

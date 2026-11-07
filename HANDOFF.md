@@ -820,7 +820,42 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     tiende ikke dit arbejde. `git status --short` før `git add`, og vær
     særligt mistroisk efter en testkørsel — suiter skriver tilstand.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 6/11)
+## 9. Kø — hvem har bolden (16/7, opdateret 7/11)
+
+### 7/11: PR-scopede compile-jobs, voice-pins landet, #2244 synkroniseret
+
+**[7/11 kl. ~08:00 UTC — status. main = `0431cd9f`. Landet i dag: #2352
+(HANDOFF 6/11), #2342 (piper-tts 1.8.0), #2256 (soundfile 0.14.0), #2354.]**
+
+- **#2354 — PR-scopede compile/package-jobs:** `android-compile`,
+  `desktop-compile` og `windows-worker-package` starter nu med
+  `scripts/ci_pr_scope.py` (PR'ens ændrede stier via compare base…head) og
+  springer de tunge trin over, når diffen ligger uden for jobbets inputs.
+  Scopes: `android/`+`contracts/`, `desktop/`+`contracts/`,
+  `worker/`+`bodyrig/`+`scripts/`+`deploy/`+`VERSION`+`backend/`; workflow-filen
+  og scriptet er altid i scope. Jobbet kører stadig og rapporterer sin
+  required-status (branch protection uændret); push/tag/dispatch kører alt;
+  kan diffen ikke læses (eller er den ved compare-API'ets 300-fil-cap) →
+  fail OPEN. Gate: `tests/workflow_ci_pr_scope.py`. Tre Codex-fund (cap,
+  `bodyrig/`, `contracts/`) er rettet før landing — lektie: led efter inputs
+  UDEN FOR jobbets mappe, før et job indsnævres.
+- **Voice-pins:** piper-tts 1.8.0 og soundfile 0.14.0 på main. API-fladen
+  `voice_tts.py` bruger er identisk; `windows-worker-package` (install +
+  pyinstaller-frys + verify + boot) grøn. Fysisk rest = syntese/optagelse
+  gennem den frosne pakke ved næste release-kandidats Stage B.
+- **#2244 (midchain-2-split):** synkroniseret med main som `18e6c60e`.
+  Første måling af splittet: `midchain-2b` 51 min, `midchain-1` 38, `midchain-3`
+  80 — mod 186 min for den udelte midchain-2 på main `4d6e8bb3`. Landes efter
+  fuld Stage-B med begge kohorter + re-synk.
+- **Søsterrepoer:** BodyRig CI "Test Python" 163 → 115 → 60–75 s (#1379
+  normaler ×96, #1381 eye-valg ×78 m. Python-3.12-kompenseret sum,
+  #1391 xdist `-n 2` på Linux); VisionRig #184 (draft) retter også en latent
+  crash: Starlette 1.x har fjernet `app.add_event_handler()` — ModelRig
+  bruger `app.router.add_event_handler`, som FastAPIs `APIRouter` stadig
+  shimmer, og er ikke ramt.
+- **Lektie (egen, to gange):** lokalt miljø ≠ CI-miljø. Gates må ikke
+  importere PyYAML (findes ikke i workerens testmiljø), og oracle-tests af
+  float-semantik skal køres på hele CI-matricen (3.11 OG 3.12+).
 
 ### 6/11: Stage-B kører én gang pr. main-push; RAG-ingest batcher embeddings
 
