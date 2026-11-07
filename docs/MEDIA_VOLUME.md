@@ -108,5 +108,5 @@ sink = ExternalStagedVideoSink(media_root, verified_volume_root=volume.root)   #
 ## Tests
 
 - `tests/worker_media_volume.py` runs anywhere. It uses real directories, files and symlinks. A fake probe stands in only for mount points, filesystem types, the system device, a foreign `st_dev` and the reparse attribute. On Linux it also runs the real probe against the `/dev/shm` mount.
-- `tests/support/windows_media_volume_contract.py` runs on the Windows gate with the real probe. It covers NTFS, the refused system drive, junctions, alternate data streams, trailing-dot aliases, 8.3 names and a changed marker.
+- `tests/support/windows_media_volume_contract.py` runs on the Windows gate with the real probe. It covers NTFS, the refused system drive, junctions, alternate data streams, trailing-dot aliases, 8.3 names and a changed marker. For `require_descriptor` it checks three cases: an open file on the volume passes, a descriptor on the system drive is refused, and a file opened through a junction that is then swapped for a folder is refused. These cases run only once this branch is in a PR; they have not run yet.
 - **Rig (C3, R14):** unplug the disk while an executor runs, then plug it back in. Expect exit 75, then a clean restart.
