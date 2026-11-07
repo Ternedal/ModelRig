@@ -90,12 +90,16 @@ def iter_asset_chunks(handle, entry: dict, *, chunk_size: int = 256 * 1024):
     if type(chunk_size) is not int or not 1 <= chunk_size <= 1024 * 1024:
         raise ValueError("invalid_stream_chunk")
     remaining = entry["size_bytes"]
+    initial = os.fstat(handle.fileno())
+    if not stat.S_ISREG(initial.st_mode) or initial.st_size != remaining:
+        raise GalleryUnavailable("asset_changed_during_read")
+    identity = (initial.st_dev, initial.st_ino, initial.st_size, initial.st_mtime_ns)
     handle.seek(0)
     while remaining:
         data = handle.read(min(chunk_size, remaining))
-        if not data:
-            raise GalleryUnavailable("asset_changed_during_read")
-        if len(data) > remaining:
+        current = os.fstat(handle.fileno())
+        if (not data or len(data) > remaining or
+                (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns) != identity):
             raise GalleryUnavailable("asset_changed_during_read")
         remaining -= len(data)
         yield data
