@@ -94,6 +94,10 @@ class StagedFileArtifactSink(Protocol):
 
     Required by the seam (tests/support/staged_sink_conformance.py checks them):
     - staged() hands out a writable binary handle; the generator never sees a path.
+    - The handle may offer sync(): fsync of what was written, without a path or
+      descriptor. A generator that removes its own copy of the media (the work
+      area on the internal disk; Anders, 6 Nov 2026) calls it first, so the copy
+      is durable on the volume before its source goes.
     - adopt() accepts only a live handle this sink issued, only "video/mp4",
       only within the size bound, flushes/fsyncs and atomically promotes it,
       and returns an asset id only after durable registration.
