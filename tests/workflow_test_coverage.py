@@ -104,18 +104,24 @@ check(
     "the shared test workflow keeps Stage-B default-on and explicitly gated",
 )
 check(
-    "run_stage_b: ${{ github.event_name != 'pull_request' }}" in ci_workflow,
-    "PR CI skips only the duplicate Stage-B invocation; push/dispatch keep it",
+    "run_stage_b: ${{ github.event_name == 'workflow_dispatch' }}" in ci_workflow,
+    "CI skips the duplicate Stage-B invocation on PRs and main; only dispatch keeps it",
 )
 agent3_stage_b = agent3_full_workflow.split("  stage-b-slices:", 1)[1]
 check(
-    "if: github.event_name != 'pull_request'" in agent3_stage_b,
-    "PR Agent 3 full diagnostics delegates Stage-B ownership to exact-head qualification",
+    "if: github.event_name == 'workflow_dispatch'" in agent3_stage_b,
+    "Agent 3 full diagnostics delegates PR and main Stage-B ownership to exact-head qualification",
 )
+exact_head_stage_b = exact_head_workflow.split("  stage-b-slices:", 1)[1]
 check(
     "if: github.event_name != 'pull_request' || github.event.action != 'closed'"
-    in exact_head_workflow,
-    "exact-head qualification remains the sole PR Stage-B authority",
+    in exact_head_stage_b
+    and "uses: ./.github/workflows/_stage_b_slices.yml" in exact_head_stage_b,
+    "exact-head qualification is the sole Stage-B authority for PRs and pushes to main",
+)
+check(
+    "on:\n  push:\n    branches: [main]" in exact_head_workflow,
+    "exact-head qualification runs on every push to main, so main is still Stage-B qualified once",
 )
 release_server_tests = release_workflow.split("  server-tests:", 1)[1].split(
     "\n  android-build:", 1
