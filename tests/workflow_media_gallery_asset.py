@@ -66,6 +66,26 @@ class GalleryAssetTests(unittest.TestCase):
                 with self.assertRaises(GalleryAssetNotFound):
                     open_asset(self.root, self.volume, asset_id)
 
+    def test_asset_replaced_after_open_is_refused(self):
+        import os
+        original_lstat = os.lstat
+        target = self.root / "asset_1.mp4"
+
+        def changed_inode(path, *args, **kwargs):
+            info = original_lstat(path, *args, **kwargs)
+            if os.fspath(path) == os.fspath(target):
+                class Changed:
+                    st_dev = info.st_dev
+                    st_ino = info.st_ino + 1
+                    st_mode = info.st_mode
+                return Changed()
+            return info
+
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            with patch("app.media_gallery_asset.os.lstat", side_effect=changed_inode):
+                with self.assertRaisesRegex(GalleryUnavailable, "asset_changed_during_open"):
+                    open_asset(self.root, self.volume, "asset_1")
+
     def test_symlink_is_refused(self):
         target = self.root / "asset_1.mp4"
         target.unlink()
