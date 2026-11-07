@@ -3,7 +3,8 @@
 **Status:** default-off and not wired into the worker. Nothing has been proven on the rig.
 **Ownership (6490545753):**
 - Claude owns the supervisor, the adapter, the template binding and the profiles.
-- ChatGPT owns the storage side (`StagedFileArtifactSink`), the gallery and the routes.
+- ChatGPT owns the storage side (`ExternalMediaSink`, the gallery index), the gallery and the routes.
+- The staged video sink (`ExternalStagedVideoSink`) is Claude's by Anders' work order 6667100037. It composes ChatGPT's storage code without changing it (6667142387).
 
 Design: #2296 6493077060. Prototype findings: 6493971744. Resident lock: 6495721654 and 6496114257. Seam: 6494148463.
 
@@ -93,6 +94,28 @@ An actor with write access to the volume could delete files directly anyway.
 - a swapped-in file survives;
 - the restore never overwrites;
 - an open file is not captured.
+
+## Staged video sink (`ExternalStagedVideoSink`, not wired)
+
+`worker/app/media_staged_video_sink.py` implements the seam (`StagedFileArtifactSink` + `JobKeyedStagedSink`) on the verified external volume. **Nothing constructs it yet.** The executor entry point still refuses video profiles (exit 78) until G1 (the production `VerifiedMediaVolume`), #2339 and a physical rig test are in.
+
+- **Reuses ChatGPT's code unchanged:** `ExternalMediaSink._root()` (volume and root), `job_asset_id()` (the same id an image of the same job would get) and `register_asset()` (the gallery index).
+- **Staging.** `staged(".mp4")` verifies the root, then creates `.kaliv-<16 hex>.tmp` in the media root (`O_EXCL`, `O_NOFOLLOW`, `0600`). That is the sink's own temporary naming, so its read-only temp inventory lists a crash leftover. The handle has `write`/`flush` only, and bytes past `max_bytes` are not written.
+- **Adoption.** `adopt_for_job` / `adopt` take one attempt per live handle: `video/mp4` only, 12 bytes to `max_bytes`, `ftyp` at bytes 4–8. Then:
+  - fsync, a root re-check, and the staged name must still be this sink's file at the written size;
+  - a sibling `.png` is a conflict;
+  - an existing destination with identical bytes is an idempotent retry; anything else at that name, including a symlink or a file this account cannot read, is a conflict. An I/O error while comparing is the volume failing (`staged_video_unavailable`), not a conflict;
+  - otherwise `os.link` (atomic, never overwrites), and the new name must be our file;
+  - on POSIX the media folder is then fsynced so the name is durable. This runs before every registration, whether this attempt created the link or found an identical name left by an earlier one (Codex #2347 4500732004). Only a filesystem that cannot sync a directory (`EINVAL`, `ENOTSUP`) is tolerated. Any other failure (`EIO`, a root that cannot be opened) is `external_media_write_failed` before registration: the executor stops (exit 75), and the new name is kept for C6 and an identical retry (Codex #2347 4500716706);
+  - then `register_asset`. If it raises, the index decides:
+    - our exact row means the writer failed after committing, so the asset is published;
+    - otherwise nothing is reported as published, and the asset is **kept** unindexed, never unlinked. `register_asset` validates the file before it takes its lock, so an identical adoption may be about to index it (#2347 reviews 4485232710, 4485290339).
+    - The kept asset is listed by `inspect_unindexed_assets` for reconciliation, and an identical retry adopts it. This matches what `publish_and_register_for_job` does with an image.
+  - This module never unlinks anything except its own staged name.
+  - On success the descriptor is closed at once (the published file shares its inode) and the staged name is removed.
+- **Leaving the context** removes the staged name if it is still ours. With the volume no longer verified, it touches nothing.
+- **No logging.**
+- **Stated limit:** the identity checks and the unlink are separate calls, so an actor with write access to the media root could race them. The media root is operator-only (R1's ACL).
 
 ## Template rules
 
