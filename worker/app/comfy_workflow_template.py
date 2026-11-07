@@ -9,6 +9,12 @@ graph structure, and the graph itself never comes from a request.
 Slot markers are whole input values. Each must appear exactly once, under an
 input name from its allowlist, and no other string in the graph may contain
 the marker prefix.
+
+Image-to-video (#2296 6635978072): a template that contains __KALIV_VIDEO_IMAGE__
+(on an input named "image", i.e. LoadImage) renders image_to_video and nothing
+else; one without it renders text_to_video and nothing else. The slot is bound
+to the name of the source file the adapter has just created in ComfyUI's input
+directory -- never to anything from the request.
 """
 from __future__ import annotations
 
@@ -37,6 +43,11 @@ SLOTS: Mapping[str, tuple[str, frozenset[str]]] = {
     "__KALIV_VIDEO_STEPS__": ("steps", frozenset({"steps"})),
     "__KALIV_VIDEO_SEED__": ("seed", frozenset({"seed", "noise_seed"})),
 }
+IMAGE_MARKER = "__KALIV_VIDEO_IMAGE__"
+# The image slot is the one optional slot: its presence makes the template image_to_video.
+_ALL_SLOTS: Mapping[str, tuple[str, frozenset[str]]] = {**SLOTS, IMAGE_MARKER: ("image", frozenset({"image"}))}
+# What the adapter names the source file it stages; bind() accepts nothing else.
+SOURCE_FILE_NAME = re.compile(r"kaliv-src-[0-9a-f]{16}\.png")
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 # Every extension ComfyUI lists in a model folder (folder_paths.supported_pt_extensions), plus
@@ -72,22 +83,33 @@ class WorkflowTemplate:
     sha256: str
     pinned: bool = False
 
-    def bind(self, request: GenerationRequest, *, fps: int) -> dict:
-        """A fresh graph with request values in the slots. The request must already be validated."""
+    @property
+    def task(self) -> str:
+        return "image_to_video" if IMAGE_MARKER in self.slots else "text_to_video"
+
+    def bind(self, request: GenerationRequest, *, fps: int, source_file: str | None = None) -> dict:
+        """A fresh graph with request values in the slots. The request must already be validated.
+        source_file: for image_to_video, the name of the staged source in ComfyUI's input dir."""
         if self.pinned and EMBEDDING_REFERENCE in request.prompt.casefold():
             # The prompt enters the graph here, after load_template's checks (#2328 review 4472675615).
             raise GenerationError("a prompt may not reference an embedding under a pinned profile")
-        if request.task != "text_to_video":
-            raise GenerationError("this template binds text_to_video only")
+        if request.task != self.task:
+            raise GenerationError(f"this template binds {self.task} only")
+        if self.task == "image_to_video":
+            if not isinstance(source_file, str) or not SOURCE_FILE_NAME.fullmatch(source_file):
+                raise GenerationError("image_to_video needs the staged source file name")
+        elif source_file is not None:
+            raise GenerationError("a source image is only valid for image_to_video")
         seed = request.seed if request.seed is not None else secrets.randbelow(2**32)
         values = {"prompt": request.prompt, "width": request.width, "height": request.height,
-                  "fps": fps, "frames": request.frames, "steps": request.steps, "seed": seed}
+                  "fps": fps, "frames": request.frames, "steps": request.steps, "seed": seed,
+                  "image": source_file}
         for field in ("width", "height", "frames", "steps"):
             if type(values[field]) is not int:
                 raise GenerationError(f"{field} must be filled in by validate_request first")
         graph = copy.deepcopy(dict(self.graph))
         for marker, (node_id, input_name) in self.slots.items():
-            graph[node_id]["inputs"][input_name] = values[SLOTS[marker][0]]
+            graph[node_id]["inputs"][input_name] = values[_ALL_SLOTS[marker][0]]
         return graph
 
 
@@ -144,10 +166,12 @@ def load_template(raw: bytes, expected_sha256: str, *, pinned_files=None) -> Wor
         if not isinstance(inputs, dict):
             raise _fail(f"node {node_id} has no inputs object")
         for input_name, value in inputs.items():
-            if isinstance(value, str) and value in SLOTS:
-                field, allowed = SLOTS[value]
+            if isinstance(value, str) and value in _ALL_SLOTS:
+                field, allowed = _ALL_SLOTS[value]
                 if input_name not in allowed:
                     raise _fail(f"{value} may not fill input {input_name!r}")
+                if value == IMAGE_MARKER and node["class_type"] != "LoadImage":
+                    raise _fail(f"{IMAGE_MARKER} may only fill LoadImage's image input")
                 if value in found:
                     raise _fail(f"{value} appears more than once")
                 found[value] = (node_id, input_name)
