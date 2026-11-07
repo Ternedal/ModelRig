@@ -51,6 +51,7 @@ def main() -> int:
         check(process_account(4) is None or process_account(4) == "S-1-5-18",
               "the System process (pid 4) is not readable or is SYSTEM, never this user")
         with tempfile.TemporaryDirectory(prefix="kaliv-preflight-") as td:
+            td = os.path.realpath(td)  # %TEMP% can be an 8.3 alias; the work area must be canonical
             work = Path(td) / "work"
             (work / "state").mkdir(parents=True)
             icacls(work, "/inheritance:r", "/grant:r", f"*{me}:(OI)(CI)F",
