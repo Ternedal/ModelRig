@@ -31,6 +31,48 @@ class GalleryAssetTests(unittest.TestCase):
             self.assertEqual((data, status), (b"2345", 206))
             self.assertEqual(headers["Content-Range"], "bytes 2-5/10")
 
+    def test_range_refuses_truncation_during_read(self):
+        import os
+        target = self.root / "asset_1.mp4"
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            handle, entry = open_asset(self.root, self.volume, "asset_1")
+            with handle:
+                original_fstat = os.fstat
+                calls = [0]
+
+                def truncate_after_read(fd):
+                    calls[0] += 1
+                    if calls[0] == 2:
+                        with open(target, "r+b") as writer:
+                            writer.truncate(2)
+                    return original_fstat(fd)
+
+                with patch("app.media_gallery_asset.os.fstat", side_effect=truncate_after_read):
+                    with self.assertRaisesRegex(GalleryUnavailable, "asset_changed_during_read"):
+                        read_asset_range(handle, entry, "bytes=0-1")
+
+    def test_range_refuses_same_size_in_place_rewrite(self):
+        import os
+        target = self.root / "asset_1.mp4"
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            handle, entry = open_asset(self.root, self.volume, "asset_1")
+            with handle:
+                original_fstat = os.fstat
+                calls = [0]
+
+                def rewrite_after_read(fd):
+                    calls[0] += 1
+                    if calls[0] == 2:
+                        before = original_fstat(fd)
+                        with open(target, "r+b") as writer:
+                            writer.write(b"XXXXXXXXXX")
+                        os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns + 2_000_000_000))
+                    return original_fstat(fd)
+
+                with patch("app.media_gallery_asset.os.fstat", side_effect=rewrite_after_read):
+                    with self.assertRaisesRegex(GalleryUnavailable, "asset_changed_during_read"):
+                        read_asset_range(handle, entry, "bytes=0-1")
+
     def test_full_stream_reads_in_bounded_chunks(self):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
             handle, entry = open_asset(self.root, self.volume, "asset_1")
