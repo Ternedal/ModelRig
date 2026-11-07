@@ -128,6 +128,9 @@ class SystemProbe:
     def lstat(self, path: str):
         return os.lstat(path)
 
+    def fstat(self, fd: int):
+        return os.fstat(fd)
+
     def ismount(self, path: str) -> bool:
         return os.path.ismount(path)
 
@@ -309,6 +312,36 @@ class MountedMediaVolume:
         self.verify()
         walk_within(self._root, raw, probe=self._probe, device=self._identity[0],
                     prefix="media_path", outside="media_path_outside_volume")
+
+    def require_descriptor(self, fd: int, path: str | os.PathLike) -> os.stat_result:
+        """Return only if the open descriptor ``fd`` is the file or directory ``path`` names here.
+
+        Call it right after the open and before any byte is read or served. ``require(path)``
+        proves where a name pointed when it was walked, but the descriptor is what is read.
+        Between the two, a parent swapped for a link (``O_NOFOLLOW`` covers only the last
+        component, and Windows has none), a reparse point, or an unmount that lets the mount
+        point or drive letter fall back to the system disk can hand back another file. So the
+        descriptor must be on the pinned device, be a regular file or directory, and be the very
+        file (``st_dev``, ``st_ino``) that a verified walk of ``path`` finds after the open.
+        Refuses with ``media_descriptor_unavailable|other_device|not_file_or_directory|not_path``
+        or any reason of ``verify()`` and ``require()``. Written for the gallery's reads
+        (#2275 6702693683, findings 1 and 3)."""
+        raw = check_path_syntax(os.fspath(path), windows=self._probe.windows)
+        self.verify()
+        try:
+            opened = self._probe.fstat(fd)
+        except OSError:
+            raise _refused("media_descriptor_unavailable") from None
+        if opened.st_dev != self._identity[0]:
+            raise _refused("media_descriptor_other_device")
+        if not (stat.S_ISREG(opened.st_mode) or stat.S_ISDIR(opened.st_mode)):
+            raise _refused("media_descriptor_not_file_or_directory")
+        walked = walk_within(self._root, raw, probe=self._probe, device=self._identity[0],
+                             prefix="media_path", outside="media_path_outside_volume")
+        named = walked[-1][1] if walked else self._observe_root()
+        if (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino):
+            raise _refused("media_descriptor_not_path")
+        return opened
 
 
 def normal_path(path: str, *, windows: bool) -> str:
