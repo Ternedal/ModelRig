@@ -41,8 +41,12 @@ def open_asset(media_root: str | Path, verified_volume_root: str | Path,
             info = os.fstat(descriptor)
             if not stat.S_ISREG(info.st_mode) or info.st_size != entry["size_bytes"]:
                 raise GalleryUnavailable("asset_size_mismatch")
-            if target.is_symlink():
-                raise GalleryUnavailable("asset_symlink_refused")
+            # The descriptor must still identify the file at this path.
+            # A path swap after os.open must never authorize different bytes.
+            path_info = os.lstat(target)
+            if (not stat.S_ISREG(path_info.st_mode)
+                    or (path_info.st_dev, path_info.st_ino) != (info.st_dev, info.st_ino)):
+                raise GalleryUnavailable("asset_changed_during_open")
             return os.fdopen(descriptor, "rb"), entry
         except BaseException:
             os.close(descriptor)
