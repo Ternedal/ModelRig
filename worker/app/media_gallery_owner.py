@@ -73,3 +73,23 @@ def open_owned_asset(jobs, authenticated_owner: str, root_path: str | Path,
     if not jobs.owns_completed_asset(authenticated_owner, asset_id):
         raise GalleryAssetNotFound("unknown_asset")
     return open_asset(root_path, verified_volume_root, asset_id)
+
+
+def stream_owned_asset(jobs, authenticated_owner: str, root_path: str | Path,
+                       verified_volume_root: str | Path, asset_id: str, *,
+                       chunk_size: int = 256 * 1024):
+    """Stream only an authorized completed asset; check at iteration time.
+
+    The caller must close the generator on disconnect. The authorization
+    check and file open both occur when iteration begins, not at creation.
+    """
+    from .media_gallery_asset import iter_asset_chunks
+    if type(chunk_size) is not int or not 1 <= chunk_size <= 1024 * 1024:
+        raise ValueError("invalid_stream_chunk")
+
+    def stream():
+        handle, entry = open_owned_asset(
+            jobs, authenticated_owner, root_path, verified_volume_root, asset_id)
+        with handle:
+            yield from iter_asset_chunks(handle, entry, chunk_size=chunk_size)
+    return stream()
