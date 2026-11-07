@@ -2,7 +2,7 @@
 
 Image and video generation on the rig, #2296. This page separates three questions that are easy to blur: what is merged, what is switched on, and what may be released. **A merge is not a release:** every media capability below is default-off, and turning one on is a decision Anders takes per §2. This page records the gates; it does not authorize anything.
 
-**This is a snapshot,** verified against main `54e00c97` (7 Nov evening) and the open PRs and branches named below. Merged since the previous snapshot: #2325, #2345 (G5), #2346, #2348 (F1), #2349 (G1) and #2353. When a row says "open", the PR's own exact-head evidence decides; this page does not replace it.
+**This is a snapshot,** verified against main `10a9afa3` (7 Nov evening) and the open PRs and branches named below. Merged since the previous snapshot: #2325, #2345 (G5), #2346, #2347 (staged video sink), #2348 (F1), #2349 (G1) and #2353. When a row says "open", the PR's own exact-head evidence decides; this page does not replace it.
 
 **Two different "off"s.** Most media modules are **merged but inert**: present in the code, with nothing that starts or calls them. The reachability gate is separate. There are **no media HTTP routes on main**, so no client can submit, list or fetch media.
 
@@ -20,6 +20,7 @@ Image and video generation on the rig, #2296. This page separates three question
 | Image generation (diffusers) | `diffusers_image_adapter.py` | merged | via profile | off |
 | Supervised ComfyUI (video), pins (G3) | `comfy_supervisor.py`, `comfy_video_adapter.py`, `comfy_weights.py` | merged | via profile | off |
 | Video in the executor | `media_executor_main` | **refused: exit 78 for any video profile** | none yet | off |
+| Staged, job-keyed video sink on the external volume (exclusive staging, hardlink promotion, fsync before registration) | `media_staged_video_sink.py` | merged 7 Nov (#2347, `10a9afa3`); **constructed by nothing** | none | inert |
 | Image-to-video: ComfyUI adapter (`render_to(source_png=...)`) | `comfy_video_adapter.py` | merged 7 Nov (#2346, `f20a6c2a`) | via profile | off |
 | Image-to-video through the executor, via the owner-gated source reader | `media_executor.py` | merged 7 Nov (#2353, `54e00c97`) | via profile | off (video still exit 78) |
 | Production volume check (G1): `MountedMediaVolume`, marker, pinned identity, sticky loss | `media_volume.py` | merged 7 Nov (#2349, `08d71041`); used by nothing until the wiring lands | none | inert |
@@ -32,8 +33,7 @@ Image and video generation on the rig, #2296. This page separates three question
 | Android gallery client (#2301, #2302) | `android/` | merged, fixture-driven | needs the routes | inert |
 | Android job model: proposed `kaliv-media-job/v1` parser, Danish texts, polling, drift test against the store | `feat/android-media-job-readiness` (`docs/MEDIA_ANDROID_READINESS.md`) | branch; contract not yet agreed | needs the routes | no UI |
 
-Open PRs and branches on the path to video (#2345, #2346, #2349 and #2353 are merged):
-- **#2347** staged video sink.
+Open PRs and branches on the path to video (#2345, #2346, #2347, #2349 and #2353 are merged):
 - **#2357** G1 wiring and the work area (`feat/media-volume-wiring`), draft. It is prepared, not merged and not enabled. It implements Anders' 6 Nov decision: media is generated in a private work area on the internal disk (C:), with the job database there, and published on the external volume (Z:) (`docs/MEDIA_WORK_AREA.md`).
 - **#2358** the index lock (C8 findings 2 and 3).
 - C6 repair tool (`feat/media-volume-repair`), stacked on the wiring: it also reports and removes work-area residue.
@@ -74,7 +74,7 @@ Prompts are blanked 30 days after a job finishes (#2340). A rollback does not ch
 | Gate | Evidence | Owner | Status |
 |---|---|---|---|
 | G1 and the work area wired: `MountedMediaVolume` for the publication volume and the sink; `PrivateWorkArea` for the job database and ComfyUI's directories (Anders, 6 Nov) | wiring PR plus rig R1, R5, R14 | Claude | G1 merged (#2349); wiring #2357 draft, qualifying, not enabled. Codex's two findings on 7 Nov (image writes not bound to the pinned volume; a volume lost while the receipt is recorded deleted the render) are fixed in `3904e8b6` |
-| Staged video sink and image-to-video in the executor | #2347, #2346, #2353 | Claude | #2346 and #2353 merged 7 Nov; #2347 (three durability fixes on 7 Nov) qualifying |
+| Staged video sink and image-to-video in the executor | #2347, #2346, #2353 | Claude | #2346, #2347 and #2353 merged 7 Nov; the sink is not yet constructed by the executor (video stays exit 78) |
 | Gallery reads bound to the verified volume: index and asset descriptors on the pinned device and the walked path (`require_descriptor`), proven on Windows/NTFS | ChatGPT's gallery branch + wiring; the Windows volume contract | ChatGPT (gallery), Claude (`require_descriptor`) | open; required before any route |
 | Gallery routes and Android gallery against real routes | ChatGPT's route PR, R11 | ChatGPT | not on main |
 | Rig qualification pack at the qualified SHA, with the evidence manifest | runbook #2296 6642831318, R0–R16 | Anders runs it | waiting for A1–A3 (and A2b for Wan 2.2) |
