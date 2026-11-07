@@ -234,7 +234,9 @@ class ExternalStagedVideoSink:
                     raise ArtifactSinkUnavailable("external_media_write_failed") from exc
                 if (linked.st_dev, linked.st_ino) != (ticket.dev, ticket.ino):
                     raise ArtifactSinkUnavailable("asset_job_conflict")  # not ours: never touched
-                self._sync_directory(root)
+        # On every path that ends in registration, the created link and an identical name left by
+        # an earlier attempt alike: that attempt may have failed exactly here (Codex #2347 4500732004).
+        self._sync_directory(root)
         try:
             register_asset(self._media.media_root, self._media.volume_root, asset_id, EXTENSION, ticket.written)
         except (GalleryUnavailable, OSError, ValueError) as exc:

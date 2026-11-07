@@ -277,6 +277,32 @@ class JobKeyedRules(unittest.TestCase):
         self.assertEqual(self.volume.indexed(), {self.expected})
 
     @unittest.skipIf(os.name == "nt", "no directory fsync on Windows")
+    def test_an_identical_retry_syncs_the_folder_before_it_registers(self):
+        """Codex P2 (#2347 4500732004): a retry that found the name already there skipped the
+        directory fsync, so with the fault still present it registered a name not proven durable."""
+        with self._failing_directory_fsync("EIO"):
+            for attempt in ("first", "identical retry"):
+                with self.subTest(attempt=attempt), \
+                        self.assertRaisesRegex(ArtifactSinkUnavailable, "^external_media_write_failed$"):
+                    self.adopt()
+        self.assertEqual(self.volume.indexed(), set(), "never registered while the folder cannot sync")
+        self.assertEqual(self.adopt(), self.expected, "once the folder syncs, the retry adopts it")
+
+    @unittest.skipIf(os.name == "nt", "no directory fsync on Windows")
+    def test_a_link_race_lost_to_an_identical_name_still_syncs_the_folder(self):
+        """The FileExistsError path: another attempt linked the same bytes between the check and ours."""
+        real_link = os.link
+
+        def racing_link(src, dst, *args, **kwargs):
+            real_link(src, dst, *args, **kwargs)  # the other attempt wins with identical content
+            raise FileExistsError(dst)
+        with self._failing_directory_fsync("EIO"), \
+                patch.object(sink_module.os, "link", side_effect=racing_link), \
+                self.assertRaisesRegex(ArtifactSinkUnavailable, "^external_media_write_failed$"):
+            self.adopt()
+        self.assertEqual(self.volume.indexed(), set())
+
+    @unittest.skipIf(os.name == "nt", "no directory fsync on Windows")
     def test_a_filesystem_that_cannot_sync_a_directory_still_publishes(self):
         for code in ("EINVAL", "EOPNOTSUPP"):
             with self.subTest(code=code):

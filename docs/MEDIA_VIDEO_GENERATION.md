@@ -106,7 +106,7 @@ An actor with write access to the volume could delete files directly anyway.
   - a sibling `.png` is a conflict;
   - an existing destination with identical bytes is an idempotent retry; anything else at that name, including a symlink, is a conflict;
   - otherwise `os.link` (atomic, never overwrites), and the new name must be our file;
-  - on POSIX the media folder is then fsynced so the new name is durable. Only a filesystem that cannot sync a directory (`EINVAL`, `ENOTSUP`) is tolerated. Any other failure (`EIO`, a root that cannot be opened) is `external_media_write_failed` before registration: the executor stops (exit 75), and the new name is kept for C6 and an identical retry (Codex #2347 4500716706);
+  - on POSIX the media folder is then fsynced so the name is durable. This runs before every registration, whether this attempt created the link or found an identical name left by an earlier one (Codex #2347 4500732004). Only a filesystem that cannot sync a directory (`EINVAL`, `ENOTSUP`) is tolerated. Any other failure (`EIO`, a root that cannot be opened) is `external_media_write_failed` before registration: the executor stops (exit 75), and the new name is kept for C6 and an identical retry (Codex #2347 4500716706);
   - then `register_asset`. If it raises, the index decides:
     - our exact row means the writer failed after committing, so the asset is published;
     - otherwise nothing is reported as published, and the asset is **kept** unindexed, never unlinked. `register_asset` validates the file before it takes its lock, so an identical adoption may be about to index it (#2347 reviews 4485232710, 4485290339).
