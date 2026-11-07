@@ -89,6 +89,14 @@ def _index(root: Path) -> list[dict]:
                 payload = f.read(_MAX_INDEX_BYTES + 1)
             if len(payload) > _MAX_INDEX_BYTES:
                 raise GalleryUnavailable("index_too_large")
+            after = os.fstat(descriptor)
+            current = os.lstat(index)
+            if (after.st_size != len(payload) or
+                    (after.st_dev, after.st_ino, after.st_mtime_ns, after.st_size) !=
+                    (info.st_dev, info.st_ino, info.st_mtime_ns, info.st_size) or
+                    (current.st_dev, current.st_ino) != (after.st_dev, after.st_ino) or
+                    not stat.S_ISREG(current.st_mode)):
+                raise GalleryUnavailable("index_changed_during_read")
         finally:
             os.close(descriptor)
         items = json.loads(payload, object_pairs_hook=_unique_object_pairs,
