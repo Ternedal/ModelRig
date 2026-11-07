@@ -20,7 +20,11 @@ Image and video generation on the rig, #2296. This page separates three question
 | Image generation (diffusers) | `diffusers_image_adapter.py` | merged | via profile | off |
 | Supervised ComfyUI (video), pins (G3) | `comfy_supervisor.py`, `comfy_video_adapter.py`, `comfy_weights.py` | merged | via profile | off |
 | Video in the executor | `media_executor_main` | **refused: exit 78 for any video profile** | none yet | off |
+| Image-to-video: ComfyUI adapter (`render_to(source_png=...)`) | `comfy_video_adapter.py` | merged 7 Nov (#2346, `f20a6c2a`) | via profile | off |
+| Image-to-video through the executor, via the owner-gated source reader | `media_executor.py` | PR #2353, qualifying | via profile | off (video still exit 78) |
 | Gallery catalog, store, index writer, asset streaming | `media_gallery_*.py` | merged (ChatGPT) | none (no route) | not reachable |
+| Owner-scoped gallery reads (list, open, stream) | `media_gallery_owner.py` on ChatGPT's `feat/media-owner-gallery-filter` | branch; open findings (#2275 6702693683): descriptor bound to the verified volume, ungated legacy helpers, one DB connection per entry | none (no route) | not reachable |
+| Descriptor check for readers: `MountedMediaVolume.require_descriptor(fd, path)` | `media_volume.py` | wiring branch; Windows contract cases mandatory, not yet run | none | used by nothing yet |
 | Owner-gated source image (#2339) | `media_source_image.py` | merged | none (no route) | not reachable |
 | Gallery HTTP routes, submit/get/cancel API | ChatGPT | **not on main: this is the reachability gate** | not on main | nothing is reachable |
 | Android gallery client (#2301, #2302) | `android/` | merged, fixture-driven | needs the routes | inert |
@@ -72,14 +76,15 @@ Prompts are blanked 30 days after a job finishes (#2340). A rollback does not ch
 | Gate | Evidence | Owner | Status |
 |---|---|---|---|
 | G1 and the work area wired: `MountedMediaVolume` for the publication volume and the sink; `PrivateWorkArea` for the job database and ComfyUI's directories (Anders, 6 Nov) | wiring PR plus rig R1, R5, R14 | Claude | G1 open (#2349); wiring branch prepared, not merged, not enabled |
-| Staged video sink and image-to-video in the executor | #2347, #2346, the i2v executor PR | Claude | open |
+| Staged video sink and image-to-video in the executor | #2347, #2346, #2353 | Claude | #2346 merged 7 Nov; #2347 (three durability fixes on 7 Nov) and #2353 qualifying |
+| Gallery reads bound to the verified volume: index and asset descriptors on the pinned device and the walked path (`require_descriptor`), proven on Windows/NTFS | ChatGPT's gallery branch + wiring; the Windows volume contract | ChatGPT (gallery), Claude (`require_descriptor`) | open; required before any route |
 | Gallery routes and Android gallery against real routes | ChatGPT's route PR, R11 | ChatGPT | not on main |
 | Rig qualification pack at the qualified SHA, with the evidence manifest | runbook #2296 6642831318, R0–R16 | Anders runs it | waiting for A1–A3 (and A2b for Wan 2.2) |
 | Profiles promoted to `rig-qualified` with the measured limits (C4 R16) | a profile PR citing the manifest | Claude + ChatGPT | after the rig run |
 | ComfyUI backend outbound network blocked (firewall rule) | rig item 7 | **Anders (§2)** | open |
-| Cloud: media never reaches the cloud; chat cloud payload is current-message only (D5); no fallback after Stop (F1) | `CloudCurrentMessageOnlyTest`; #2348 | Claude (F1), ChatGPT (review); Anders approved F1 | D5 implemented and tested; #2348 pending exact-head qualification |
+| Cloud: media never reaches the cloud; chat cloud payload is current-message only (D5); no fallback after Stop (F1) | `CloudCurrentMessageOnlyTest`; #2348 | Claude (F1), ChatGPT (review); Anders approved F1 | D5 implemented and tested. #2348: a consent regression (opt-in read before the rig call) was fixed on 7 Nov, so it is now read when the rig fails; qualifying |
 | Index lock survives a killed writer (C8 findings 2–3) | `fix/gallery-index-os-lock` | Claude | branch |
-| C:/Z: layout proven on the rig: private work area, one account for every process, separate disks, low space visible, residue baseline, rollback (R17) | `docs/MEDIA_R17_DEPLOYMENT_PROOF.md` | Anders runs it; ChatGPT reviews | pending: needs the wiring merged and a new `$QualSha` |
+| C:/Z: layout proven on the rig: private work area, one account for every process, separate disks, low space visible, residue baseline, rollback (R17) | `docs/MEDIA_R17_DEPLOYMENT_PROOF.md` (R17.1–R17.13; R17.10–R17.13 added 7 Nov: lease ACL, moved DB, junction root, unplug, other disk) | Anders runs it; ChatGPT reviews | pending: needs the wiring merged and a new `$QualSha` |
 | Job routes expose `expired` and Android shows it | ChatGPT's route PR; Android branch above | ChatGPT (routes), Claude (Android) | contract proposed (#2275), not agreed |
 | Production signing / release | — | **Anders (§2)** | not requested |
 
