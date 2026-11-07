@@ -25,6 +25,27 @@ class GalleryCatalogTests(unittest.TestCase):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
             return list_gallery(self.root, **kwargs)
 
+    def test_atomic_index_replace_preserves_stable_open_snapshot(self):
+        # The writer may atomically publish a new index after the reader has
+        # opened the old one. The old descriptor remains a valid snapshot.
+        index = self.root / "gallery-index.json"
+        replacement = self.root / "next-index.json"
+        replacement.write_text("[]", encoding="utf-8")
+        original_fstat = os.fstat
+        calls = 0
+
+        def publish_after_read(fd):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                os.replace(replacement, index)
+            return original_fstat(fd)
+
+        with patch("app.media_gallery_catalog.os.fstat", side_effect=publish_after_read):
+            page = self.page()
+        self.assertEqual([item["id"] for item in page["items"]], ["img_1", "vid_2"])
+        self.assertEqual(index.read_text(encoding="utf-8"), "[]")
+
     def test_index_mutated_during_read_is_refused(self):
         real_fstat = os.fstat
         calls = 0
