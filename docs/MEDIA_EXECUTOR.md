@@ -123,7 +123,7 @@ The entry point checks the configuration before it touches anything, including t
   | `ArtifactSinkUnavailable` (the volume) | stays `running`, then recovery fails it as `interrupted_by_restart` | exit 75 |
 
 - **The bytes** go to `ComfyVideoAdapter.render_to(source_png=...)`. See `docs/MEDIA_VIDEO_GENERATION.md` for the bounded decode, the exclusive staging and the cleanup.
-- **Not wired in the entry point yet.** Video through `media_executor_main` still waits on ChatGPT's staged video sink.
+- **Not wired in the entry point yet.** `media_executor_main` still refuses every video profile with exit 78. That stays so until the staged video sink (#2347), the verified volume (#2349) and the wiring are in, and Anders enables video after the rig proof.
 
 ## Exit codes and the supervisor's policy
 
