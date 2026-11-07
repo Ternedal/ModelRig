@@ -103,6 +103,22 @@ The supervisor reads them the way the children see them: the env file (`modelrig
 
 The entry point checks the configuration before it touches anything, including the GPU lease directory: one that is relative, missing, a symlink or writable by others is exit 78, not a crash. The volume is verified before the job database is first opened and again before every later database access, so a volume that goes away while the executor runs stops it (exit 75) before it claims another job (#2337 reviews 4477083816, 4477083808). A diffusers profile also requires `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` at configuration time: without them it is exit 78 and the queue is untouched, instead of every claimed job failing at load (#2337 review 4477167705). An existing job database must be a regular SQLite file: a directory, a link (which could lead off the volume), a FIFO or a file that is not SQLite is exit 78 (#2337 review 4477759300); a locked database stays a transient exit 1. A missing directory is never created.
 
+## Image-to-video (seam #2339)
+
+- **Configuration.** A profile that lists `image_to_video` needs `source_reader(owner, asset_id) -> bytes`; without it the executor refuses with `ExecutorConfigError`. In production the reader is ChatGPT's `read_owned_source_png`, which authorizes the owner before any gallery I/O.
+- **When the source is read.** Once per job, **before any GPU work**. The owner is the claimed row's (the routes took it from the authenticated pairing), never anything in the request parameters; an `owner` parameter is refused as unknown.
+- **Failures:**
+
+  | Reader outcome | Job | Executor |
+  |---|---|---|
+  | `SourceImageUnavailable` | `failed: source_image_unavailable` | continues |
+  | `ValueError` (a malformed id) | `failed: generation_request_rejected` | continues |
+  | anything other than non-empty `bytes` | `failed: source_image_unavailable` | continues |
+  | `ArtifactSinkUnavailable` (the volume) | stays `running`, then recovery fails it as interrupted by restart (`interrupted_by_restart` once the wiring lands) | exit 75 |
+
+- **The bytes** go to `ComfyVideoAdapter.render_to(source_png=...)`. See `docs/MEDIA_VIDEO_GENERATION.md` for the bounded decode, the exclusive staging and the cleanup.
+- **Not wired in the entry point yet.** `media_executor_main` still refuses every video profile with exit 78. That stays so until the staged video sink (#2347), the verified volume (#2349) and the wiring are in, and Anders enables video after the rig proof.
+
 ## Exit codes and the supervisor's policy
 
 `executorRestartPolicy` in `backend/cmd/modelrig-supervisor/executor.go`; every code is unit-tested, and real child processes prove that the code the policy sees is the code the child gave.
