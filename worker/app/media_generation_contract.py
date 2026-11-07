@@ -20,6 +20,21 @@ ARTIFACT_TYPES: Mapping[str, str] = {"image/png": ".png", "video/mp4": ".mp4"}
 
 MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
 
+MAX_FILE_NAME = 255  # characters; no NTFS or ext4 file name is longer
+
+
+def is_plain_file_name(name: object) -> bool:
+    """A file name directly inside one directory. This one rule is used wherever such a name is
+    accepted: the video adapter's output and the hand-off receipt that records it, so a render the
+    adapter accepts is never lost to a receipt that refuses its name (Codex #2357 4504060850).
+
+    A str of 1-255 characters, not "." or "..", with no path separator, no drive colon, no
+    control character and no unpaired surrogate (which SQLite cannot store). Spaces and any
+    other Unicode are fine: a workflow may name its output "rød drage.mp4"."""
+    return (type(name) is str and 0 < len(name) <= MAX_FILE_NAME and name not in (".", "..")
+            and not any(c in "/\\:" or ord(c) < 0x20 or 0x7f <= ord(c) <= 0x9f or 0xd800 <= ord(c) <= 0xdfff
+                        for c in name))
+
 
 class GenerationError(ValueError):
     """A request or artifact was refused. The message never contains a prompt."""

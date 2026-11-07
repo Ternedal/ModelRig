@@ -397,13 +397,25 @@ class HandoffReceiptTests(unittest.TestCase):
             {"stage": "copying", "output": self.OUTPUT, "source_asset_id": "../x"},
             {"stage": "copying", "output": self.OUTPUT, "source_sha256": "z" * 64},
             "not a dict",
-        ]
+        ] + [{"stage": "copying", "output": {**self.OUTPUT, "name": name}}
+             for name in ("", ".", "a\\b.mp4", "c:b.mp4", "a\nb.mp4", "a\x00b.mp4", "a\x7fb.mp4", "a\x9fb.mp4",
+                          "a\udcffb.mp4", "a" * 256, 7, None)]
         for record in bad:
             with self.subTest(record=record), self.assertRaises(ImageJobError):
                 self.store.record_handoff(job, A1, record)
         self.assertEqual(self.receipts(), {})
         self.assertTrue(self.store.record_handoff(job, A1, {"stage": "copying", "output": self.OUTPUT,
                                                              "source_asset_id": "a" * 32, "source_sha256": "c" * 64}))
+
+    def test_any_plain_file_name_is_recorded_as_it_is(self):
+        """Codex #2357 4504060850: a workflow may name its output with spaces or any Unicode. The
+        receipt keeps the exact name (C6 finds the work-area file by it), stored as JSON."""
+        job = self.claimed()
+        for name in ("rød drage.mp4", "  spaces  .mp4", "_x.mp4", ".x.mp4", "日本語 🐉.mp4", "a" * 255):
+            with self.subTest(name=name):
+                receipt = {"stage": "copying", "output": {**self.OUTPUT, "name": name}}
+                self.assertTrue(self.store.record_handoff(job, A1, receipt))
+                self.assertEqual(self.receipts(), {job: receipt})
 
 
 class QueuedExpiryTests(unittest.TestCase):

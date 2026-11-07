@@ -64,7 +64,8 @@ from typing import BinaryIO, Callable
 from .comfy_supervisor import ComfyBusy, ComfySupervisor, ComfySupervisorError, ComfyVramShortage
 from .comfy_weights import check_lookup_is_unambiguous, check_weights_unchanged, verify_weights
 from .comfy_workflow_template import MAX_TEMPLATE_BYTES, WorkflowTemplate, load_template
-from .media_generation_contract import GenerationCancelled, GenerationError, GenerationRequest, RenderedArtifact
+from .media_generation_contract import (GenerationCancelled, GenerationError, GenerationRequest, RenderedArtifact,
+                                         is_plain_file_name)
 from .media_generation_profiles import ModelProfile, validate_request
 
 MIME = "video/mp4"
@@ -558,8 +559,9 @@ class ComfyVideoAdapter:
         name, subfolder = entries[0].get("filename"), entries[0].get("subfolder", "")
         if not isinstance(name, str) or not isinstance(subfolder, str) or subfolder:
             raise GenerationError("ComfyUI output must be a file name in the output directory root")
-        if Path(name).name != name or name in ("", ".", "..") or "\\" in name or ":" in name \
-                or not name.endswith(".mp4"):
+        # The same rule as the hand-off receipt's (is_plain_file_name), so a name accepted here is
+        # never refused when the receipt records it.
+        if not is_plain_file_name(name) or Path(name).name != name or not name.endswith(".mp4"):
             raise GenerationError("ComfyUI output name is not a plain .mp4 file name")
         if name in before:
             raise GenerationError("ComfyUI output already existed before this job")
