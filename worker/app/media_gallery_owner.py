@@ -12,6 +12,16 @@ from .media_gallery_catalog import (
 )
 
 
+def _owner_safe_entry(jobs, authenticated_owner: str, entry: dict) -> dict:
+    """Copy catalog metadata and remove foreign thumbnail references."""
+    safe = dict(entry)
+    thumb = safe.get("thumbnail_id")
+    if thumb is not None and not jobs.owns_completed_asset(authenticated_owner, thumb):
+        safe["thumbnail_id"] = None
+        safe["thumbnail_url"] = None
+    return safe
+
+
 def list_owned_gallery(jobs, authenticated_owner: str, root_path: str | Path, *,
                        limit: int = 30, cursor: str | None = None,
                        verified_volume_root: str | Path | None = None) -> dict:
@@ -46,12 +56,7 @@ def list_owned_gallery(jobs, authenticated_owner: str, root_path: str | Path, *,
     # Avoid modifying the catalog's cached/index objects in place.
     page = []
     for entry in owned[start:start + limit]:
-        safe = dict(entry)
-        thumb = safe.get("thumbnail_id")
-        if thumb is not None and not jobs.owns_completed_asset(authenticated_owner, thumb):
-            safe["thumbnail_id"] = None
-            safe["thumbnail_url"] = None
-        page.append(safe)
+        page.append(_owner_safe_entry(jobs, authenticated_owner, entry))
     next_cursor = page[-1]["id"] if start + limit < len(owned) and page else None
     return {"schema": "kaliv-media-gallery/v1", "items": page, "next_cursor": next_cursor}
 
@@ -72,7 +77,12 @@ def open_owned_asset(jobs, authenticated_owner: str, root_path: str | Path,
         raise GalleryUnavailable("verified_volume_required")
     if not jobs.owns_completed_asset(authenticated_owner, asset_id):
         raise GalleryAssetNotFound("unknown_asset")
-    return open_asset(root_path, verified_volume_root, asset_id)
+    handle, entry = open_asset(root_path, verified_volume_root, asset_id)
+    try:
+        return handle, _owner_safe_entry(jobs, authenticated_owner, entry)
+    except BaseException:
+        handle.close()
+        raise
 
 
 def stream_owned_asset(jobs, authenticated_owner: str, root_path: str | Path,
