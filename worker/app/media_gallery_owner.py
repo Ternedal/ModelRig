@@ -93,3 +93,63 @@ def stream_owned_asset(jobs, authenticated_owner: str, root_path: str | Path,
         with handle:
             yield from iter_asset_chunks(handle, entry, chunk_size=chunk_size)
     return stream()
+
+
+class _OwnedAssetChunks:
+    """Closable iterator that owns an eagerly opened descriptor.
+
+    close() works even before the first next(); iteration exhaustion and
+    read failures also close the descriptor. HTTP adapters must close on
+    client disconnect.
+    """
+    def __init__(self, handle, entry, chunk_size):
+        from .media_gallery_asset import iter_asset_chunks
+        self._handle = handle
+        self._chunks = iter_asset_chunks(handle, entry, chunk_size=chunk_size)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._handle.closed:
+            raise StopIteration
+        try:
+            return next(self._chunks)
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self):
+        try:
+            self._chunks.close()
+        finally:
+            self._handle.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+
+def prepare_owned_asset_response(jobs, authenticated_owner: str,
+                                 root_path: str | Path,
+                                 verified_volume_root: str | Path,
+                                 asset_id: str, *,
+                                 chunk_size: int = 256 * 1024):
+    """Eagerly authorize and open before HTTP headers; return (entry, chunks).
+
+    Unknown/foreign assets fail before response creation. The returned chunks
+    own the descriptor; always close on disconnect, even before first next().
+    This does NOT resolve the verified-volume TOCTOU/reparse issue: do not
+    wire an HTTP route until descriptor-bound volume validation is added.
+    """
+    if type(chunk_size) is not int or not 1 <= chunk_size <= 1024 * 1024:
+        raise ValueError("invalid_stream_chunk")
+    handle, entry = open_owned_asset(
+        jobs, authenticated_owner, root_path, verified_volume_root, asset_id)
+    try:
+        return entry, _OwnedAssetChunks(handle, entry, chunk_size)
+    except BaseException:
+        handle.close()
+        raise
