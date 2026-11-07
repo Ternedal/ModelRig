@@ -57,7 +57,9 @@ class IndexWriterTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.volume = Path(self.temp.name)
+        # The Windows runner's %TEMP% is an 8.3 alias (C:\Users\RUNNER~1\...); the catalog's _root
+        # rightly refuses a root whose real path differs, so start from the canonical path.
+        self.volume = Path(os.path.realpath(self.temp.name))
         self.root = self.volume / "media"
         self.root.mkdir()
         self.mount = patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
