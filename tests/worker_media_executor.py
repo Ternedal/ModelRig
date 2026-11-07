@@ -1145,6 +1145,20 @@ class VideoExecutorTests(unittest.TestCase):
         self.assertEqual((receipt["stage"], receipt["output"]["name"]), ("copying", kept[0]),
                          "the earlier receipt names the kept file, so C6 can correlate it")
 
+    def test_an_output_named_with_spaces_and_unicode_is_published(self):
+        """Codex #2357 4504060850: "rød drage.mp4" passed the adapter but not the receipt, so the
+        job failed and the render was deleted. Now it is recorded under its exact name and published."""
+        ex = self.executor_with_fake({"FAKE_COMFY_OUTPUT_PREFIX": "rød drage "})
+        ex.volume_root = self.tmp
+        job = self.submit()
+        self.assertEqual(ex.step(), "completed")
+        with sqlite3.connect(os.path.join(self.tmp, "jobs.sqlite3")) as db:
+            receipt = json.loads(db.execute("SELECT record FROM image_jobs_handoff WHERE job_id=?", (job,)).fetchone()[0])
+        self.assertEqual(receipt["stage"], "copied")
+        self.assertRegex(receipt["output"]["name"], r"^rød drage [0-9a-f]{8}\.mp4$")
+        self.assertIn(self.store.get(job, "anders")["asset_id"], self.sink.registry)
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "removed once published")
+
     def test_an_invalid_receipt_still_cleans_the_render_at_once(self):
         """The other side of 4503721455: a receipt the store refuses as invalid (ImageJobError) is
         not an infrastructure failure. The job fails and nothing is kept."""

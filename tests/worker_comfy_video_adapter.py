@@ -628,6 +628,30 @@ class AdapterTests(unittest.TestCase):
                     self.assertNotIn("kept_for_recovery", adapter.last_cleanup)
                     adapter.close()
 
+    def test_every_output_name_the_adapter_accepts_a_receipt_accepts_too(self):
+        """Codex #2357 4504060850: a name the adapter accepted but the receipt refused failed the
+        hand-off as an explicit refusal and deleted a valid render. The two use one rule now."""
+        from app.image_job_store import ImageJobError, check_handoff_record
+        adapter = self.adapter()  # never loaded: _single_output only reads the output directory
+        names = ["kaliv_00001_.mp4", "rød drage.mp4", "  spaces  .mp4", "_x.mp4", ".x.mp4", "日本語.mp4",
+                 "emoji 🐉.mp4", "a" * 251 + ".mp4", "a" * 252 + ".mp4", "a\nb.mp4", "a\x00b.mp4", "a\x85b.mp4",
+                 "a\udcffb.mp4", "a\\b.mp4", "c:b.mp4", "a/b.mp4", "../b.mp4", ".mp4", "x.MP4"]
+        accepted = []
+        for name in names:
+            with self.subTest(name=name):
+                outputs = {"9": {"videos": [{"filename": name, "subfolder": "", "type": "output"}]}}
+                try:
+                    adapter._single_output(outputs, set())
+                except GenerationError:
+                    continue
+                accepted.append(name)
+                try:
+                    check_handoff_record({"stage": "copying", "output": {"name": name, "dev": 1, "ino": 2, "size": 3}})
+                except ImageJobError:
+                    self.fail(f"the adapter accepts {name!r} but its receipt is refused")
+        self.assertEqual(accepted, ["kaliv_00001_.mp4", "rød drage.mp4", "  spaces  .mp4", "_x.mp4", ".x.mp4",
+                                    "日本語.mp4", "emoji 🐉.mp4", "a" * 251 + ".mp4", ".mp4"])
+
     def test_receipts_go_only_to_the_current_holder(self):
         adapter = self.adapter()
         adapter.load()
