@@ -25,6 +25,25 @@ class GalleryCatalogTests(unittest.TestCase):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
             return list_gallery(self.root, **kwargs)
 
+    def test_index_replaced_between_open_and_path_check_is_refused(self):
+        index = self.root / "gallery-index.json"
+        original_lstat = os.lstat
+
+        def swapped_path_stat(path, *args, **kwargs):
+            info = original_lstat(path, *args, **kwargs)
+            if os.fspath(path) == os.fspath(index):
+                # Model a different regular file at the same pathname.
+                class Changed:
+                    st_dev = info.st_dev
+                    st_ino = info.st_ino + 1
+                    st_mode = info.st_mode
+                return Changed()
+            return info
+
+        with patch("app.media_gallery_catalog.os.lstat", side_effect=swapped_path_stat):
+            with self.assertRaisesRegex(GalleryUnavailable, "index_changed_during_open"):
+                self.page()
+
     def test_pagination(self):
         first = self.page(limit=1)
         self.assertEqual(first["schema"], "kaliv-media-gallery/v1")
