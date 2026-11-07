@@ -9,19 +9,19 @@ Every property below holds for every generated input:
 - **Owner matching** (``owns_completed_asset``) is exact. No case, whitespace, Unicode or prefix
   variant of an owner can use another owner's asset.
 - **Concurrent claims** take each queued job exactly once.
-- **A writer that crashes during an index write** leaves the previous index intact, and leaves
-  neither a lock nor a temporary file behind.
+- **A writer that crashes during an index write** leaves the previous index intact, leaves no
+  temporary file behind, and leaves the lock free: the lock file itself persists by design
+  (``fix/gallery-index-os-lock``: a process-lifetime OS lock on a never-unlinked file).
 
-**Known gaps.** Three tests are marked ``expectedFailure``. Each one documents a finding in the
-gallery writer or parser, which ChatGPT owns. Once a fix lands, the test passes unexpectedly and
-the marker has to go.
+**Known gaps.** One test is marked ``expectedFailure``; it documents a finding in the gallery
+parser, which ChatGPT owns. Once a fix lands, the test passes unexpectedly and the marker has to go.
 - ``test_deeply_nested_index_is_refused_not_a_crash``: ``_index`` lets a ``RecursionError``
   escape on a deeply nested index file.
-- ``test_two_writers_registering_at_once_are_both_indexed``: the index lock fails at once instead
-  of waiting. Two executors (two GPUs) that finish together lose one registration.
-- ``test_a_lock_left_by_a_killed_writer_does_not_block_registration_forever``: nothing recovers a
-  stale ``.gallery-index.lock``. One writer killed inside the lock window blocks every later
-  registration. On the image path that surfaces as ``publication_failed``.
+
+Fixed by ``fix/gallery-index-os-lock`` (C8 findings 2 and 3), so their markers are gone:
+``test_two_writers_registering_at_once_are_both_indexed`` (the lock now waits) and
+``test_a_lock_left_by_a_killed_writer_does_not_block_registration_forever`` (an OS lock dies with
+its process).
 
 Run: PYTHONPATH=worker python3 tests/worker_media_security_properties.py
 """
@@ -229,7 +229,6 @@ class MediaSecurityProperties(unittest.TestCase):
             t.join(60)
         self.assertEqual(sorted(claimed), sorted(jobs))
 
-    @unittest.expectedFailure  # finding: the index lock does not wait (owner: index writer)
     def test_two_writers_registering_at_once_are_both_indexed(self):
         ids = []
         for _ in range(2):
@@ -245,7 +244,6 @@ class MediaSecurityProperties(unittest.TestCase):
             timer.join()
         self.assertEqual([i["id"] for i in _index(self.media)], ids[:1])
 
-    @unittest.expectedFailure  # finding: no stale-lock recovery (owner: index writer)
     def test_a_lock_left_by_a_killed_writer_does_not_block_registration_forever(self):
         asset = self.sink.publish_for_job("job-a", PNG, ".png")
         ctx = multiprocessing.get_context("fork")
@@ -265,7 +263,7 @@ class MediaSecurityProperties(unittest.TestCase):
                 register_asset(self.media, self.volume, second, ".png", len(PNG) + 1)
         self.assertEqual((self.media / "gallery-index.json").read_bytes(), before)
         self.assertEqual([i["id"] for i in _index(self.media)], [first])
-        self.assertFalse((self.media / ".gallery-index.lock").exists())
+        # The lock file persists by design; what matters is that it is free: the retry below succeeds.
         self.assertEqual([p.name for p in self.media.glob(".gallery-index-*.tmp")], [])
         register_asset(self.media, self.volume, second, ".png", len(PNG) + 1)  # a retry succeeds
         self.assertEqual([i["id"] for i in _index(self.media)], [first, second])
