@@ -578,6 +578,56 @@ class AdapterTests(unittest.TestCase):
                     os.unlink(Path(self.dirs["output"], name))
                 adapter.close()  # release ComfyUI and the GPU lease before the next stage's adapter
 
+    def test_a_receipt_store_that_fails_keeps_the_finished_file(self):
+        """Codex #2357 4503721455: the receipt database can be full, locked or unreadable
+        (sqlite3.OperationalError / DatabaseError), or the disk can fail (OSError). None of these
+        is the render's fault: at either receipt the finished copy is kept for recovery."""
+        import errno
+        import sqlite3
+        failures = (sqlite3.OperationalError("database or disk is full"),
+                    sqlite3.OperationalError("database is locked"),
+                    sqlite3.DatabaseError("database disk image is malformed"),
+                    OSError(errno.EIO, "I/O error"))
+        for stage in ("copying", "copied"):
+            for failure in failures:
+                with self.subTest(stage=stage, failure=str(failure)):
+                    adapter = self.adapter()
+                    adapter.load()
+
+                    def broken(receipt, stage=stage, failure=failure):
+                        if receipt["stage"] == stage:
+                            raise failure
+                    with self.assertLogs("kaliv.media.comfy", level="WARNING"), \
+                            self.assertRaises(type(failure)), adapter.holding_outputs(on_handoff=broken):
+                        adapter.render_to(request(), io.BytesIO())
+                    kept = os.listdir(self.dirs["output"])
+                    self.assertEqual(len(kept), 1, "the finished render is kept")
+                    self.assertEqual(adapter.last_cleanup["kept_for_recovery"], kept)
+                    os.unlink(Path(self.dirs["output"], kept[0]))
+                    adapter.close()
+
+    def test_a_refused_receipt_still_cleans_the_render_at_once(self):
+        """The other side of 4503721455: an explicit refusal (a receipt that does not validate,
+        ImageJobError; a job that is not this executor's, GenerationError) is not an
+        infrastructure failure. At either receipt the job fails and nothing is kept."""
+        from app.image_job_store import ImageJobError
+        refusals = (ImageJobError("hand-off record is invalid"),
+                    GenerationError("the hand-off could not be recorded for this job"))
+        for stage in ("copying", "copied"):
+            for refusal in refusals:
+                with self.subTest(stage=stage, refusal=type(refusal).__name__):
+                    adapter = self.adapter()
+                    adapter.load()
+
+                    def refuse(receipt, stage=stage, refusal=refusal):
+                        if receipt["stage"] == stage:
+                            raise refusal
+                    with self.assertRaises(type(refusal)), adapter.holding_outputs(on_handoff=refuse):
+                        adapter.render_to(request(), io.BytesIO())
+                    self.assertEqual(os.listdir(self.dirs["output"]), [], "a refused hand-off is cleaned at once")
+                    self.assertNotIn("kept_for_recovery", adapter.last_cleanup)
+                    adapter.close()
+
     def test_receipts_go_only_to_the_current_holder(self):
         adapter = self.adapter()
         adapter.load()
