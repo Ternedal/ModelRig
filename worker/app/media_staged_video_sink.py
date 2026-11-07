@@ -40,6 +40,7 @@ Rules (tests/worker_media_staged_video_sink.py, plus the seam's conformance suit
 from __future__ import annotations
 
 import contextlib
+import errno
 import hashlib
 import hmac
 import os
@@ -51,6 +52,11 @@ from .media_gallery_catalog import GalleryUnavailable, _index
 from .media_gallery_index_writer import register_asset
 from .media_gallery_store import ExternalMediaSink
 from .media_generation_contract import ArtifactSinkUnavailable, MAX_ARTIFACT_BYTES
+
+# A directory fsync these errors refuse is unsupported by the filesystem, not failing (#2347 4500716706).
+_DIRECTORY_SYNC_UNSUPPORTED = frozenset(
+    code for code in (errno.EINVAL, getattr(errno, "ENOTSUP", None), getattr(errno, "EOPNOTSUPP", None))
+    if code is not None)
 
 MIME_TYPE = "video/mp4"
 EXTENSION = ".mp4"
@@ -313,17 +319,24 @@ class ExternalStagedVideoSink:
 
     @staticmethod
     def _sync_directory(root: Path) -> None:
-        """Make the new name durable where the platform allows a directory fsync (not Windows)."""
+        """Make the new name durable where the platform allows a directory fsync (not Windows).
+
+        Only "this filesystem cannot sync a directory" is tolerated. Any other failure, to open the
+        root or to sync it (EIO, ENOSPC, ...), means the published name may not be durable: it is
+        the volume failing, so ``external_media_write_failed`` reaches the executor's fatal path
+        (exit 75) before anything is registered. The new name is kept, never unlinked: C6 lists it
+        as an unindexed asset, and an identical retry adopts it (Codex #2347 4500716706)."""
         if os.name == "nt":
             return
         try:
             fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-        except OSError:
-            return
+        except OSError as exc:
+            raise ArtifactSinkUnavailable("external_media_write_failed") from exc
         try:
             os.fsync(fd)
-        except OSError:
-            pass
+        except OSError as exc:
+            if exc.errno not in _DIRECTORY_SYNC_UNSUPPORTED:
+                raise ArtifactSinkUnavailable("external_media_write_failed") from exc
         finally:
             try:
                 os.close(fd)
