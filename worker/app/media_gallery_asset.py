@@ -66,9 +66,15 @@ def read_asset_range(handle, entry: dict, header: str | None,
     length = end - start + 1
     if length > max_chunk:
         raise RangeNotSatisfiable("stream_required")
+    before = os.fstat(handle.fileno())
+    if not stat.S_ISREG(before.st_mode) or before.st_size != entry["size_bytes"]:
+        raise GalleryUnavailable("asset_changed_during_read")
     handle.seek(start)
     data = handle.read(length)
-    if len(data) != length:
+    after = os.fstat(handle.fileno())
+    if (len(data) != length or
+            (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns) !=
+            (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)):
         raise GalleryUnavailable("asset_changed_during_read")
     headers = {"Accept-Ranges": "bytes", "Content-Length": str(length)}
     if status == 206:
