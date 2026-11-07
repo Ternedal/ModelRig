@@ -316,7 +316,10 @@ class MediaExecutor:
         def record(receipt: dict) -> None:
             receipt = {**receipt, **extra}
             if self.volume_root is not None:
-                root = os.stat(self.volume_root)
+                try:
+                    root = os.stat(self.volume_root)
+                except OSError:  # the volume went away: fatal (75), and the finished file is kept
+                    raise ArtifactSinkUnavailable("media_volume_missing") from None
                 receipt = {**receipt, "volume": {"dev": root.st_dev, "ino": root.st_ino}}
             if not self.store.record_handoff(job_id, self.instance, receipt):
                 raise GenerationError("the hand-off could not be recorded for this job")

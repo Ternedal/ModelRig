@@ -557,6 +557,27 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(sink.getvalue(), b"", "nothing reached the volume")
         self.assertEqual(os.listdir(self.dirs["output"]), [], "a job that never handed over is cleaned at once")
 
+    def test_a_volume_lost_while_the_receipt_is_recorded_keeps_the_finished_file(self):
+        """Codex #2357 4503161825: the receipt callback can hit the lost volume (the store's guard,
+        or the volume's stat). That is not the render's fault: the finished copy must be kept for
+        recovery, as when the volume cannot take the copy, never deleted."""
+        from app.media_generation_contract import ArtifactSinkUnavailable
+        for stage in ("copying", "copied"):
+            with self.subTest(stage=stage):
+                adapter = self.adapter()
+                adapter.load()
+
+                def lost(receipt, stage=stage):
+                    if receipt["stage"] == stage:
+                        raise ArtifactSinkUnavailable("media_volume_lost")
+                with self.assertRaisesRegex(ArtifactSinkUnavailable, "media_volume_lost"), \
+                        adapter.holding_outputs(on_handoff=lost):
+                    adapter.render_to(request(), io.BytesIO())
+                self.assertEqual(len(os.listdir(self.dirs["output"])), 1, "the finished render is kept")
+                for name in os.listdir(self.dirs["output"]):
+                    os.unlink(Path(self.dirs["output"], name))
+                adapter.close()  # release ComfyUI and the GPU lease before the next stage's adapter
+
     def test_receipts_go_only_to_the_current_holder(self):
         adapter = self.adapter()
         adapter.load()
