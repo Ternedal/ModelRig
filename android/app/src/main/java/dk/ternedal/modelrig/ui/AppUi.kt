@@ -42,6 +42,7 @@ import dk.ternedal.modelrig.R
 import dk.ternedal.modelrig.data.ChatDb
 import dk.ternedal.modelrig.data.TokenStore
 import dk.ternedal.modelrig.net.CloudClient
+import dk.ternedal.modelrig.logic.CloudFallbackPolicy
 import dk.ternedal.modelrig.logic.TurnInput
 import dk.ternedal.modelrig.logic.TurnRouter
 import dk.ternedal.modelrig.logic.TurnStatus
@@ -1575,11 +1576,8 @@ private fun ChatScreen(
             }
             val hook: (okhttp3.Call) -> Unit = { activeCall = it }
 
-            // Track whether the rig stream emitted anything, so we only fall
-            // back to cloud on a clean pre-emit failure (never mid-stream --
-            // that would double the visible output). Mirrors desktop's
-            // ChatRouter.chatStream contract.
-            var rigEmitted = 0
+            // Set when the opt-in cloud fallback answered (CloudFallbackPolicy:
+            // only on a clean pre-emit failure that the user did not stop).
             var didFallback = false
             // Tools work in cloud mode too -- but only by routing the cloud
             // model THROUGH the rig, because that is where the gate lives. The
@@ -1667,20 +1665,24 @@ private fun ChatScreen(
                             // cloud key is set, transparently answer via cloud instead
                             // (rig down / model not pulled / HTTP error). A mid-stream
                             // rig failure is surfaced, not retried.
+                            // local-first: a rig failure does NOT auto-send to cloud
+                            // unless the user opted in, never after the user pressed
+                            // Stop, and an attached image is never sent via fallback --
+                            // it stays on the device.
                             val cloudKey = store.cloudKey
-                            try {
-                                ModelRigClient(store.baseUrl ?: "", store.token)
-                                    .chatStream(rigModel, history, registerCall = hook, imageB64 = imageB64,
-                                        onDelta = { d -> rigEmitted++; onDelta(d) })
-                            } catch (e: Exception) {
-                                // local-first: a rig failure does NOT auto-send to cloud
-                                // unless the user opted in, and an attached image is
-                                // never sent via fallback -- it stays on the device.
-                                if (rigEmitted == 0 && cloudKey != null && store.autoCloudFallback) {
-                                    didFallback = true
-                                    CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
-                                } else throw e
-                            }
+                            didFallback = CloudFallbackPolicy.runLocalFirst(
+                                hasCloudKey = cloudKey != null,
+                                optedIn = { store.autoCloudFallback },
+                                register = hook,
+                                rig = { register, onEmit ->
+                                    ModelRigClient(store.baseUrl ?: "", store.token)
+                                        .chatStream(rigModel, history, registerCall = register, imageB64 = imageB64,
+                                            onDelta = { d -> onEmit(); onDelta(d) })
+                                },
+                                cloud = { register ->
+                                    CloudClient(cloudKey!!).chatStream(cModel, history, registerCall = register, onDelta = onDelta)
+                                },
+                            )
                         }
                     }
                 }.exceptionOrNull()
@@ -1815,17 +1817,21 @@ private fun ChatScreen(
                             // should still fall back to cloud (before any
                             // output), not just fail. A mid-stream failure is
                             // surfaced, not retried.
+                            // Never after Stop: CloudFallbackPolicy.
                             val cloudKey = store.cloudKey
-                            var rigEmitted = 0
-                            try {
-                                ModelRigClient(store.baseUrl ?: "", store.token)
-                                    .chatStream(rigModel, history, registerCall = hook,
-                                        onDelta = { d -> rigEmitted++; onDelta(d) })
-                            } catch (e: Exception) {
-                                if (rigEmitted == 0 && cloudKey != null && store.autoCloudFallback) {
-                                    CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
-                                } else throw e
-                            }
+                            CloudFallbackPolicy.runLocalFirst(
+                                hasCloudKey = cloudKey != null,
+                                optedIn = { store.autoCloudFallback },
+                                register = hook,
+                                rig = { register, onEmit ->
+                                    ModelRigClient(store.baseUrl ?: "", store.token)
+                                        .chatStream(rigModel, history, registerCall = register,
+                                            onDelta = { d -> onEmit(); onDelta(d) })
+                                },
+                                cloud = { register ->
+                                    CloudClient(cloudKey!!).chatStream(cModel, history, registerCall = register, onDelta = onDelta)
+                                },
+                            )
                         }
                     }
                 }.exceptionOrNull()
