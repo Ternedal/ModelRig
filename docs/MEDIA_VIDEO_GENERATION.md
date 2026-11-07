@@ -117,8 +117,21 @@ An actor with write access to the volume could delete files directly anyway.
 - The template is operator-installed API-format JSON, and the profile pins its SHA-256.
 - Seven value slots: `__KALIV_VIDEO_{PROMPT,WIDTH,HEIGHT,FPS,FRAMES,STEPS,SEED}__`.
   - Each must appear exactly once, as a whole input value, under allowlisted input names.
+  - An eighth, `__KALIV_VIDEO_IMAGE__`, is optional and decides the template's task; see "Image-to-video, the generator side" below.
   - A marker anywhere else refuses the template: inside a longer string, in a list, as an input name, as a class or in `_meta`.
 - A prompt can never become graph structure.
+
+## Image-to-video, the generator side (#2296 6635978072)
+
+**Status:** this is the adapter and the template only, and it is default-off. The executor does not call it yet. That needs ChatGPT's `SourceImageUnavailable` seam in the owner-gated reader, so that an asset-level refusal fails the job instead of exiting 75.
+
+- **Template.** `__KALIV_VIDEO_IMAGE__`, used only on `LoadImage`'s `image` input, makes a template image-to-video. Such a template renders `image_to_video` and nothing else; a template without the slot renders `text_to_video` and nothing else. The profile must list the template's task.
+- **Input.** `render_to(request, sink, source_png=bytes)` requires the source exactly for `image_to_video`. Before anything touches disk, the decode is bounded: a PNG signature, an IHDR as the first chunk, and at most 4096 px per side (so at most 16.8 MP), within 64 MiB. Full container validation stays with ChatGPT's reader.
+- **Staging.** Right after verifying ComfyUI's input directory is on the media volume, the adapter creates `kaliv-src-<16 hex>.png` there exclusively (`O_EXCL`, `O_NOFOLLOW`, `0600`, fsync). The image slot is bound to that name and nothing from the request.
+  - The file's identity is taken from the created descriptor (`fstat`) and checked against the name before anything is written.
+  - It is recorded for cleanup at that moment, so a failing write or fsync still removes it (#2346 review 4484574398).
+  - After the write, the name must still be that file, at the expected size. A file swapped in meanwhile is refused, never submitted, and kept by the cleanup instead of deleted as job-owned (#2346 review 4484574409).
+- **Cleanup.** After success, failure or cancel, the source is removed with the same rename-capture identity check as the outputs. A replaced file is kept and reported, and nothing is touched if the volume is no longer verified.
 
 ## Version and weight pins (G3)
 
