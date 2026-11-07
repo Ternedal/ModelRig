@@ -79,6 +79,12 @@ def _index(root: Path) -> list[dict]:
             info = os.fstat(descriptor)
             if not stat.S_ISREG(info.st_mode) or info.st_size > _MAX_INDEX_BYTES:
                 raise GalleryUnavailable("invalid_index")
+            # Bind the opened descriptor to the path inspected after open. A
+            # replaced index must not be trusted, even if its bytes are valid.
+            path_info = os.lstat(index)
+            if ((path_info.st_dev, path_info.st_ino) != (info.st_dev, info.st_ino)
+                    or not stat.S_ISREG(path_info.st_mode)):
+                raise GalleryUnavailable("index_changed_during_open")
             with os.fdopen(descriptor, "rb", closefd=False) as f:
                 payload = f.read(_MAX_INDEX_BYTES + 1)
             if len(payload) > _MAX_INDEX_BYTES:
