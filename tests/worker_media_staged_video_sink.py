@@ -252,6 +252,55 @@ class JobKeyedRules(unittest.TestCase):
         self.assertEqual(asset_id, self.expected)
         self.assertEqual(self.volume.indexed(), {asset_id})
 
+    def _failing_directory_fsync(self, code):
+        import errno
+        import stat as stat_module
+        real_fsync = os.fsync
+
+        def fsync(fd):
+            if stat_module.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError(getattr(errno, code), code)
+            return real_fsync(fd)
+        return patch.object(sink_module.os, "fsync", side_effect=fsync)
+
+    @unittest.skipIf(os.name == "nt", "no directory fsync on Windows")
+    def test_a_failing_directory_sync_is_a_sink_failure_and_keeps_the_published_name(self):
+        """Codex P2 (#2347 4500716706): EIO from the directory fsync was swallowed like "unsupported",
+        and the asset was registered although its name was not proven durable."""
+        with self._failing_directory_fsync("EIO"), \
+                self.assertRaisesRegex(ArtifactSinkUnavailable, "^external_media_write_failed$"):
+            self.adopt()
+        self.assertEqual(self.volume.indexed(), set(), "nothing is registered")
+        published = self.volume.media / f"{self.expected}.mp4"
+        self.assertEqual(published.read_bytes(), MP4, "the published name is kept, never unlinked")
+        self.assertEqual(self.adopt(), self.expected, "an identical retry adopts it")
+        self.assertEqual(self.volume.indexed(), {self.expected})
+
+    @unittest.skipIf(os.name == "nt", "no directory fsync on Windows")
+    def test_a_filesystem_that_cannot_sync_a_directory_still_publishes(self):
+        for code in ("EINVAL", "EOPNOTSUPP"):
+            with self.subTest(code=code):
+                job = f"job-dirsync-{code.lower()}"
+                with self._failing_directory_fsync(code):
+                    asset_id = self.adopt(job=job)
+                self.assertIn(asset_id, self.volume.indexed())
+
+    @unittest.skipIf(os.name == "nt", "no directory fsync on Windows")
+    def test_a_root_that_cannot_be_opened_for_the_sync_is_a_sink_failure(self):
+        import errno
+        real_open = os.open
+        media = os.path.realpath(self.volume.media)
+
+        def failing_open(path, flags, *args, **kwargs):
+            if os.path.realpath(path) == media and flags & getattr(os, "O_DIRECTORY", 0):
+                raise OSError(errno.EIO, "Input/output error")
+            return real_open(path, flags, *args, **kwargs)
+        with patch.object(sink_module.os, "open", side_effect=failing_open), \
+                self.assertRaisesRegex(ArtifactSinkUnavailable, "^external_media_write_failed$"):
+            self.adopt()
+        self.assertEqual(self.volume.indexed(), set())
+        self.assertEqual((self.volume.media / f"{self.expected}.mp4").read_bytes(), MP4)
+
     @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFOs")
     def test_a_fifo_at_the_destination_is_a_conflict_and_never_blocks(self):
         """Codex P2 (#2347 4498178920): a blocking open of a FIFO with no writer never returned."""
