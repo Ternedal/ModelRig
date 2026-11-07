@@ -25,6 +25,28 @@ class GalleryCatalogTests(unittest.TestCase):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
             return list_gallery(self.root, **kwargs)
 
+    def test_index_mutated_during_read_is_refused(self):
+        real_fstat = os.fstat
+        calls = 0
+
+        def changed_after_read(fd):
+            nonlocal calls
+            calls += 1
+            info = real_fstat(fd)
+            if calls == 2:
+                class Changed:
+                    st_dev = info.st_dev
+                    st_ino = info.st_ino
+                    st_mode = info.st_mode
+                    st_size = info.st_size
+                    st_mtime_ns = info.st_mtime_ns + 1
+                return Changed()
+            return info
+
+        with patch("app.media_gallery_catalog.os.fstat", side_effect=changed_after_read):
+            with self.assertRaisesRegex(GalleryUnavailable, "index_changed_during_read"):
+                self.page()
+
     def test_index_replaced_between_open_and_path_check_is_refused(self):
         index = self.root / "gallery-index.json"
         original_lstat = os.lstat
