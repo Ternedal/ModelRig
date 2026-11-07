@@ -53,6 +53,9 @@ from .media_gallery_index_writer import register_asset
 from .media_gallery_store import ExternalMediaSink
 from .media_generation_contract import ArtifactSinkUnavailable, MAX_ARTIFACT_BYTES
 
+# An existing destination that fails with these is "not provably ours" (gone, swapped for a link,
+# or not readable by this account): a conflict. Any other error comparing it is the volume failing.
+_NOT_PROVABLY_OURS = frozenset((errno.ENOENT, errno.ELOOP, errno.EACCES, errno.EPERM, errno.ENOTDIR))
 # A directory fsync these errors refuse is unsupported by the filesystem, not failing (#2347 4500716706).
 _DIRECTORY_SYNC_UNSUPPORTED = frozenset(
     code for code in (errno.EINVAL, getattr(errno, "ENOTSUP", None), getattr(errno, "EOPNOTSUPP", None))
@@ -288,28 +291,40 @@ class ExternalStagedVideoSink:
         The type is checked before the open, so a FIFO or device is never opened (a blocking open
         of a FIFO with no writer never returns: Codex #2347 4498178920). The open is non-blocking
         all the same, and the descriptor must be the very file that was checked, so a swap in
-        between is a conflict too."""
+        between is a conflict too.
+
+        False means "not provably ours": gone, swapped, a link, unreadable to us, or other bytes.
+        An I/O failure while comparing is the volume failing, not a conflict:
+        ``staged_video_unavailable``, so the operator is not sent after a foreign file that is not
+        there."""
         try:
             before = os.lstat(destination)
-        except OSError:
-            return False
+        except OSError as exc:
+            if exc.errno in _NOT_PROVABLY_OURS:
+                return False
+            raise ArtifactSinkUnavailable("staged_video_unavailable") from exc
         if not stat.S_ISREG(before.st_mode):
             return False
         try:
             fd = os.open(destination, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
                          | getattr(os, "O_BINARY", 0))
-        except OSError:
-            return False
+        except OSError as exc:
+            if exc.errno in _NOT_PROVABLY_OURS:
+                return False
+            raise ArtifactSinkUnavailable("staged_video_unavailable") from exc
         try:
             info = os.fstat(fd)
             if (not stat.S_ISREG(info.st_mode) or (info.st_dev, info.st_ino) != (before.st_dev, before.st_ino)
                     or info.st_size != ticket.written):
                 return False
             return hmac.compare_digest(self._digest(fd), self._digest(ticket.fd))
-        except OSError:
-            return False
+        except OSError as exc:
+            raise ArtifactSinkUnavailable("staged_video_unavailable") from exc
         finally:
-            os.close(fd)
+            try:
+                os.close(fd)
+            except OSError:
+                pass  # a read-only descriptor: nothing of ours can be lost here
 
     @staticmethod
     def _digest(fd: int) -> bytes:

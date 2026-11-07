@@ -327,6 +327,59 @@ class JobKeyedRules(unittest.TestCase):
         self.assertEqual(self.volume.indexed(), set())
         self.assertEqual((self.volume.media / f"{self.expected}.mp4").read_bytes(), MP4)
 
+    def _identical_destination(self):
+        (self.volume.media / f"{self.expected}.mp4").write_bytes(MP4)
+
+    def test_an_io_error_comparing_an_identical_destination_is_the_volume_not_a_conflict(self):
+        """A retry that finds its name already there compares the bytes. EIO while reading them is
+        the volume failing: staged_video_unavailable, never asset_job_conflict."""
+        import errno
+        self._identical_destination()
+        real_read = os.read
+        destination = os.path.realpath(self.volume.media / f"{self.expected}.mp4")
+
+        def failing_read(fd, n):
+            if os.path.isdir("/proc/self/fd") and os.readlink(f"/proc/self/fd/{fd}") == destination:
+                raise OSError(errno.EIO, "Input/output error")
+            return real_read(fd, n)
+        if not os.path.isdir("/proc/self/fd"):
+            self.skipTest("needs /proc/self/fd to pick the destination's descriptor")
+        with patch.object(sink_module.os, "read", side_effect=failing_read), \
+                self.assertRaisesRegex(ArtifactSinkUnavailable, "^staged_video_unavailable$"):
+            self.adopt()
+        self.assertEqual(self.volume.indexed(), set())
+
+    def test_an_io_error_opening_or_inspecting_the_destination_is_the_volume(self):
+        import errno
+        self._identical_destination()
+        destination = str(self.volume.media / f"{self.expected}.mp4")
+        for name in ("lstat", "open"):
+            with self.subTest(call=name):
+                real = getattr(os, name)
+
+                def failing(path, *args, _real=real, **kwargs):
+                    if os.fspath(path) == destination:
+                        raise OSError(errno.EIO, "Input/output error")
+                    return _real(path, *args, **kwargs)
+                with patch.object(sink_module.os, name, side_effect=failing), \
+                        self.assertRaisesRegex(ArtifactSinkUnavailable, "^staged_video_unavailable$"):
+                    self.adopt()
+
+    def test_a_destination_we_cannot_read_is_still_a_conflict(self):
+        import errno
+        self._identical_destination()
+        destination = str(self.volume.media / f"{self.expected}.mp4")
+        real_open = os.open
+
+        def denied(path, *args, **kwargs):
+            if os.fspath(path) == destination:
+                raise OSError(errno.EACCES, "Permission denied")
+            return real_open(path, *args, **kwargs)
+        with patch.object(sink_module.os, "open", side_effect=denied), \
+                self.assertRaisesRegex(ArtifactSinkUnavailable, "^asset_job_conflict$"):
+            self.adopt()
+        self.assertEqual((self.volume.media / f"{self.expected}.mp4").read_bytes(), MP4, "never touched")
+
     @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFOs")
     def test_a_fifo_at_the_destination_is_a_conflict_and_never_blocks(self):
         """Codex P2 (#2347 4498178920): a blocking open of a FIFO with no writer never returned."""
