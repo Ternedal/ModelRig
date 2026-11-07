@@ -6,6 +6,7 @@ Anders' decision (6 Nov 2026, #2275 6686905826) is to generate media in a privat
 
 - **for R17.1 to R17.6, R17.8:** the wiring branch (`feat/media-volume-wiring`);
 - **for R17.7 and R17.9:** also the C6 repair tool (`feat/media-volume-repair`), which provides `scripts/media_volume_repair.py`. Without it, skip both and record them as not run.
+- **for R17.10–R17.13:** the wiring branch already contains #2345 (the lease-directory check) and #2349 (`MountedMediaVolume`). Neither is merged yet: running them at a branch commit is a qualification run, not a merge.
 
 ## 1. What is proven where
 
@@ -22,6 +23,11 @@ Anders' decision (6 Nov 2026, #2275 6686905826) is to generate media in a privat
 | Rollback | — | R17.8 | pending |
 | A junction in a work folder is reported as a link, never followed | POSIX symlinks only: `worker_media_repair.py` (a link inside is reported), C2 `worker_media_negative_matrix.py` (a file or folder swapped for a link at the copy) | R17.9 (optional) | pending; the only physical NTFS junction evidence |
 | Access lost while C6 reads (denied, locked, Z: unplugged) | simulated: `worker_media_recovery_inventory.py`, `worker_media_repair.py` (`OSError` injected) | **not on the rig** | simulated only |
+| Lease directory owner and DACL by SID; a junction to it is refused, not followed (#2345) | `worker_lease_dir_acl.py`; Windows runner `windows_lease_dir_acl_contract.py` (junction case included) | R17.10 | pending |
+| A job database moved into the work area keeps its old grants and is refused | `worker_media_executor_main.py`, `windows_media_work_area_contract.py` | R17.11a | pending |
+| A junction as the work-area root is refused | POSIX symlink only: `worker_media_work_area.py` | R17.11b | pending |
+| Z: unplugged and replugged while idle: refused while gone, and the loss sticks until restart (#2349) | `worker_media_volume.py` (`FakeProbe`) | R17.12 | pending; also measures whether Windows keeps the disk's identity across a replug |
+| A different disk at Z:, even with a copied marker | `worker_media_volume.py` | R17.13 (optional) | pending |
 | A crash at each of six hand-off steps | C2 `worker_media_negative_matrix.py` (`os._exit`, POSIX) | **not on the rig**: needs video on | simulated only; physical crash after video is enabled |
 
 **What "simulated" means here.** The CI rows run on Linux. They fake the Windows facts: the mount table, an `OSError` where Windows would deny or lock, a POSIX symlink where NTFS has a junction. They prove the code's decisions, not NTFS. The Windows contract tests (`tests/support/windows_*`, on the Windows gate) run on real NTFS, but on a CI runner, not this rig. Only an R17 step run on the rig is physical evidence for this machine. Every row marked "simulated only" stays unproven physically until Anders decides otherwise.
@@ -135,6 +141,122 @@ Remove-Item -Recurse $JTarget
 
 Expected: `exit=0`, and `work_area_residue` holds what R17.7 found plus one entry, `"path": "junction-test"` with `"kind": "link"`. `outside.txt` never appears in the report, and `Get-Content` still prints `outside`. `cmd /c rmdir` without `/s` removes only the junction, never its target.
 
+**R17.10 Lease directory owner and DACL (ACL/SID, #2345).** Run as the appliance account.
+
+```powershell
+Push-Location "$Qual\worker"
+$Judge = "import sys; from app.lease_dir_acl_windows import lease_dir_private as p; print(p(sys.argv[1]))"
+& $GenPy -c $Judge $LeaseDir
+New-Item -ItemType Directory C:\kaliv-lease-negative | Out-Null
+& $GenPy -c $Judge C:\kaliv-lease-negative
+Remove-Item C:\kaliv-lease-negative
+New-Item -ItemType Junction -Path C:\kaliv-lease-junction -Target $LeaseDir | Out-Null
+& $GenPy -c $Judge C:\kaliv-lease-junction
+cmd /c rmdir C:\kaliv-lease-junction
+Pop-Location
+icacls $LeaseDir
+whoami /user
+```
+
+Expected:
+1. `(True, …)` for `$LeaseDir`.
+2. `(False, "<SID> can add, replace, delete or re-permission lease files")` for the new folder under `C:\`. The SID is the inherited Users or Authenticated Users entry (`S-1-5-32-545` or `S-1-5-11`).
+3. `(False, …)` for the junction, with the reason naming a symlink or junction. It is refused, never judged by its target's ACL.
+4. `rmdir` without `/s` removes only the junction.
+
+**R17.11a A moved job database keeps its old grants (C: private DB work area).** A file moved within one NTFS volume keeps its security descriptor. The preflight must refuse it rather than trust where it now lies.
+
+```powershell
+New-Item -ItemType Directory C:\kaliv-db-negative | Out-Null
+Set-Content C:\kaliv-db-negative\moved-test.sqlite3 -Value "x"
+Move-Item C:\kaliv-db-negative\moved-test.sqlite3 "$WorkRoot\state\moved-test.sqlite3"
+icacls "$WorkRoot\state\moved-test.sqlite3"
+& $GenPy "$Qual\scripts\media_work_area_preflight.py" --work-root $WorkRoot --job-db "$WorkRoot\state\moved-test.sqlite3" --volume-root $VolumeRoot --volume-id $VolumeId; "exit=$LASTEXITCODE"
+Remove-Item "$WorkRoot\state\moved-test.sqlite3"; Remove-Item C:\kaliv-db-negative
+```
+
+Expected:
+1. `icacls` still lists the Users or Authenticated Users entry carried from `C:\`.
+2. `exit=1`, with `private:moved-test.sqlite3` false (`media_work_path_not_private`).
+3. Every other check `ok`.
+
+If `icacls` shows that the move *dropped* the broad entry, record that. The step then proves nothing, and that is itself a finding about this machine.
+
+**R17.11b A junction as the work-area root (NTFS).**
+
+```powershell
+New-Item -ItemType Junction -Path C:\kaliv-work-junction -Target $WorkRoot | Out-Null
+& $GenPy "$Qual\scripts\media_work_area_preflight.py" --work-root C:\kaliv-work-junction --job-db C:\kaliv-work-junction\state\jobs.sqlite3 --volume-root $VolumeRoot --volume-id $VolumeId; "exit=$LASTEXITCODE"
+cmd /c rmdir C:\kaliv-work-junction
+Test-Path $JobDb
+```
+
+Expected:
+1. `exit=1`, with `work_area` refused as `media_work_area_root_link` or `media_work_area_root_not_canonical`.
+2. `Test-Path` prints `True`: the real database is untouched.
+
+**R17.12 Unplugging and replugging Z: while idle (#2349's verifier).**
+
+Safety conditions:
+- Media is off, so nothing writes to Z:.
+- Close Explorer windows on Z:.
+- Use "Safely remove hardware" before pulling the cable.
+- Never do this during a copy.
+
+Window A: the verifier probe. Its script lives in `%TEMP%`, not on Z:.
+
+```powershell
+$Probe = Join-Path $env:TEMP "r17-volume-probe.py"
+@'
+import os, sys, time
+from app.media_volume import MountedMediaVolume
+from app.media_generation_contract import ArtifactSinkUnavailable
+root, vid, n = sys.argv[1], sys.argv[2], int(sys.argv[3])
+st = os.stat(root); print("start identity", st.st_dev, st.st_ino, flush=True)
+v = MountedMediaVolume(root, vid)
+for i in range(n):
+    try:
+        v.verify(); print(i, "ok", flush=True)
+    except ArtifactSinkUnavailable as exc:
+        print(i, str(exc), flush=True)
+    time.sleep(2)
+try:
+    st = os.stat(root); print("end identity", st.st_dev, st.st_ino, flush=True)
+except OSError as exc:
+    print("end identity unavailable", type(exc).__name__, flush=True)
+'@ | Set-Content -Encoding utf8 $Probe
+Push-Location "$Qual\worker"; & $GenPy $Probe $VolumeRoot $VolumeId 120 | Tee-Object "$env:TEMP\r17-unplug.log"; Pop-Location
+```
+
+Then:
+1. After a few `ok` lines, eject and unplug Z:.
+2. Window B, while Z: is unplugged:
+
+   ```powershell
+   & $GenPy "$Qual\scripts\media_work_area_preflight.py" --work-root $WorkRoot --job-db $JobDb --volume-root $VolumeRoot --volume-id $VolumeId; "exit=$LASTEXITCODE"
+   ```
+
+3. Replug Z: under the same letter, and wait for Window A to finish (4 min).
+4. Window B again, simulating an executor restart (a new verifier):
+
+   ```powershell
+   Push-Location "$Qual\worker"; & $GenPy $Probe $VolumeRoot $VolumeId 3; Pop-Location
+   ```
+
+Expected:
+- **Window A:** `ok`, then a run of `media_volume_missing` (or `media_volume_not_mounted`) while unplugged. After the replug it **stays refused**: `media_volume_lost`, or `media_volume_identity_changed` if Windows gave the disk a new identity. It never returns to `ok`.
+- **The two identity lines:** record whether `start identity` equals `end identity`.
+  - If they are equal, this machine confirms the documented Windows limit. A replug that happens entirely *between* two checks would be invisible here, because there is no mount-session id. Only the sticky loss protects against a replug that a check saw.
+  - If they differ, record that too.
+- **Window B while unplugged:** `exit=1`, with `publication_volume` false.
+- **The new verifier:** 3× `ok`.
+
+**R17.13 Optional: a different disk at Z:.** Only with a spare disk that has no data you care about.
+
+1. Plug the spare disk in as Z:, without a marker, and run the probe with `3`. Expected: `media_volume_marker_missing`.
+2. Write the same marker on the spare disk (`Set-Content -Path "Z:\.kaliv-media-volume" -Value $VolumeId -NoNewline -Encoding ascii`). Then start the probe with `120` against the **real** Z:, swap the disks while it runs, and watch the lines. Expected: `media_volume_identity_changed`, then `media_volume_lost`. A matching marker is not enough.
+3. Remove the marker from the spare disk afterwards.
+
 **R17.8 Rollback.** Stop the appliance, then:
 
 ```powershell
@@ -149,7 +271,11 @@ Expected: `exit=78`. The work area, its ACL, the marker and the gallery are unto
 
 ## 4. Evidence to post (on #2296)
 
-- **Files:** `preflight-idle.json`, `preflight-accounts.json`, `inventory-baseline.json`, `report-baseline.json`, and `report-junction.json` if R17.9 ran. They contain paths, SIDs, sizes and reason codes, never a prompt or a token.
+- **Files:** `preflight-idle.json`, `preflight-accounts.json`, `inventory-baseline.json`, `report-baseline.json`, and `report-junction.json` if R17.9 ran.
+- **R17.10:** the three tuples, `icacls $LeaseDir` and `whoami /user`.
+- **R17.11a/b:** `icacls` of the moved file, and each preflight's exit code and failing check; `Test-Path $JobDb`.
+- **R17.12:** `%TEMP%\r17-unplug.log` (codes and two identity numbers only) and Window B's exit codes.
+- **R17.13:** if run, the probe lines. They contain paths, SIDs, sizes and reason codes, never a prompt or a token.
 - **The `icacls` outputs** from R17.2.
 - **The `Get-Volume` lines** from R17.3.
 - **Every exit code** printed above.
