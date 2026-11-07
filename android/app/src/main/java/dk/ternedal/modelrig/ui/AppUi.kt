@@ -1672,7 +1672,7 @@ private fun ChatScreen(
                             val cloudKey = store.cloudKey
                             didFallback = CloudFallbackPolicy.runLocalFirst(
                                 hasCloudKey = cloudKey != null,
-                                optedIn = store.autoCloudFallback,
+                                optedIn = { store.autoCloudFallback },
                                 register = hook,
                                 rig = { register, onEmit ->
                                     ModelRigClient(store.baseUrl ?: "", store.token)
@@ -1821,7 +1821,7 @@ private fun ChatScreen(
                             val cloudKey = store.cloudKey
                             CloudFallbackPolicy.runLocalFirst(
                                 hasCloudKey = cloudKey != null,
-                                optedIn = store.autoCloudFallback,
+                                optedIn = { store.autoCloudFallback },
                                 register = hook,
                                 rig = { register, onEmit ->
                                     ModelRigClient(store.baseUrl ?: "", store.token)

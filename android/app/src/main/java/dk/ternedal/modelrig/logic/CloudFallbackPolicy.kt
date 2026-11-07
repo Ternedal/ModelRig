@@ -37,11 +37,15 @@ object CloudFallbackPolicy {
      *   Stop pressed after the rig failed but before the cloud call existed lands on the
      *   rig call. The check then cancels the cloud call before `execute()` sends anything.
      *
+     * [optedIn] is read when the rig has failed, not when the request starts. The user can
+     * turn the fallback off while waiting for the rig, and that choice must hold for the
+     * pending request.
+     *
      * Any failure that may not fall back is rethrown unchanged.
      */
     fun runLocalFirst(
         hasCloudKey: Boolean,
-        optedIn: Boolean,
+        optedIn: () -> Boolean,
         register: (Call) -> Unit,
         rig: (register: (Call) -> Unit, onEmit: () -> Unit) -> Unit,
         cloud: (register: (Call) -> Unit) -> Unit,
@@ -55,7 +59,7 @@ object CloudFallbackPolicy {
             // kotlinx.coroutines.CancellationException is this JVM type: a cancelled
             // coroutine is a stop too.
             val cancelled = e is java.util.concurrent.CancellationException || rigCall?.isCanceled() == true
-            if (!shouldFallback(emitted, cancelled, hasCloudKey, optedIn)) throw e
+            if (!shouldFallback(emitted, cancelled, hasCloudKey, optedIn())) throw e
         }
         cloud { call ->
             register(call)

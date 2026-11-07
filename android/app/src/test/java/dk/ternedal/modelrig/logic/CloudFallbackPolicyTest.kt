@@ -48,13 +48,14 @@ class CloudFallbackPolicyTest {
         cloudServer.shutdown()
     }
 
-    private fun run(optedIn: Boolean = true, hasKey: Boolean = true, out: StringBuilder = StringBuilder(),
-                    beforeCloud: () -> Unit = {}): Boolean =
+    private fun run(optedIn: () -> Boolean = { true }, hasKey: Boolean = true, out: StringBuilder = StringBuilder(),
+                    duringRig: () -> Unit = {}, beforeCloud: () -> Unit = {}): Boolean =
         CloudFallbackPolicy.runLocalFirst(
             hasCloudKey = hasKey,
             optedIn = optedIn,
             register = hook,
             rig = { register, onEmit ->
+                duringRig()
                 ModelRigClient(rigServer.url("/").toString(), "test-token")
                     .chatStream("rig-model", history, registerCall = register, onDelta = { onEmit(); out.append(it) })
             },
@@ -107,7 +108,7 @@ class CloudFallbackPolicyTest {
     fun cleanPreOutputFailureFallsBackOnlyWhenOptedIn() {
         rigServer.enqueue(MockResponse().setResponseCode(503).setBody("ollama down"))
         val out = StringBuilder()
-        assertTrue(run(optedIn = true, out = out))
+        assertTrue(run(optedIn = { true }, out = out))
         assertEquals("sky", out.toString())
         assertEquals(1, cloudServer.requestCount)
         // What reached the cloud is still only the current message (D5).
@@ -120,7 +121,7 @@ class CloudFallbackPolicyTest {
     fun cleanPreOutputFailureWithoutOptInIsSurfaced() {
         rigServer.enqueue(MockResponse().setResponseCode(503).setBody("ollama down"))
         try {
-            run(optedIn = false)
+            run(optedIn = { false })
             fail("without opt-in the rig failure must surface")
         } catch (e: Exception) {
             assertTrue(e.message.orEmpty().contains("503"))
@@ -172,7 +173,7 @@ class CloudFallbackPolicyTest {
         var cloudCalled = false
         try {
             CloudFallbackPolicy.runLocalFirst(
-                hasCloudKey = true, optedIn = true, register = hook,
+                hasCloudKey = true, optedIn = { true }, register = hook,
                 rig = { _, _ -> throw cancellation },
                 cloud = { cloudCalled = true },
             )
@@ -181,6 +182,41 @@ class CloudFallbackPolicyTest {
             assertSame(cancellation, e)
         }
         assertFalse(cloudCalled)
+    }
+
+    @Test
+    fun optOutWhileWaitingForTheRigHoldsForThePendingRequest() {
+        // Codex P1 on #2348: the opt-in was captured before the rig call. Turning the fallback
+        // off while the rig was still working then had no effect on that request.
+        rigServer.enqueue(MockResponse().setResponseCode(503).setBody("ollama down"))
+        var optIn = true
+        try {
+            run(optedIn = { optIn }, duringRig = { optIn = false }) // the overflow toggle, mid-wait
+            fail("an opt-out made before the rig failed must hold")
+        } catch (e: Exception) {
+            assertTrue(e.message.orEmpty().contains("503"))
+        }
+        assertEquals(0, cloudEntered)
+        assertEquals("nothing may reach the cloud after the user opted out", 0, cloudServer.requestCount)
+    }
+
+    @Test
+    fun optInIsReadOnlyAfterTheRigFailed() {
+        rigServer.enqueue(MockResponse().setResponseCode(503).setBody("ollama down"))
+        val events = mutableListOf<String>()
+        assertTrue(run(optedIn = { events += "read opt-in"; true }, duringRig = { events += "rig started" }))
+        assertEquals(listOf("rig started", "read opt-in"), events)
+        assertEquals(1, cloudServer.requestCount)
+    }
+
+    @Test
+    fun aSuccessfulRigAnswerNeverReadsTheOptIn() {
+        rigServer.enqueue(
+            MockResponse().setResponseCode(200).setBody("""{"message":{"content":"rig"},"done":true}""" + "\n"),
+        )
+        var reads = 0
+        assertFalse(run(optedIn = { reads++; true }))
+        assertEquals(0, reads)
     }
 
     @Test
