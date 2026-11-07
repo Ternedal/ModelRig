@@ -88,6 +88,22 @@ class GalleryAssetTests(unittest.TestCase):
                 with self.assertRaisesRegex(GalleryUnavailable, "asset_changed_during_read"):
                     list(iter_asset_chunks(handle, entry, chunk_size=3))
 
+    def test_stream_refuses_same_size_rewrite_between_chunks(self):
+        import os
+        target = self.root / "asset_1.mp4"
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            handle, entry = open_asset(self.root, self.volume, "asset_1")
+            with handle:
+                chunks = iter_asset_chunks(handle, entry, chunk_size=3)
+                self.assertEqual(next(chunks), b"012")
+                before = os.stat(target)
+                with open(target, "r+b") as writer:
+                    writer.seek(3)
+                    writer.write(b"XXX")
+                os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns + 2_000_000_000))
+                with self.assertRaisesRegex(GalleryUnavailable, "asset_changed_during_read"):
+                    next(chunks)
+
     def test_stream_rejects_unbounded_chunk(self):
         with self.assertRaises(ValueError):
             list(iter_asset_chunks(None, {"size_bytes": 1}, chunk_size=2 * 1024 * 1024))
