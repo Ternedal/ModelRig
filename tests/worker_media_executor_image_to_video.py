@@ -95,6 +95,20 @@ class ImageToVideoExecutorTests(unittest.TestCase):
         self.assertIn(row["asset_id"], self.sink.registry)
         self.assertEqual(os.listdir(self.dirs["input"]), [], "the staged source is removed")
 
+    def test_the_hand_off_receipt_names_the_source_and_its_digest(self):
+        """With the wiring, a hand-off receipt ties a leftover to its job; for image-to-video it also
+        names the source asset and its SHA-256, so the C6 inventory notices a changed source."""
+        source = png()
+        ex, _ = self.i2v_executor(lambda owner, asset: source)
+        job = self.submit(asset="b" * 32)
+        self.assertEqual(ex.step(), "completed")
+        with self.store._db() as db:
+            row = db.execute("SELECT record FROM image_jobs_handoff WHERE job_id=?", (job,)).fetchone()
+        self.assertIsNotNone(row, "the executor recorded the hand-off")
+        receipt = json.loads(row[0])
+        self.assertEqual(receipt["source_asset_id"], "b" * 32)
+        self.assertEqual(receipt["source_sha256"], hashlib.sha256(source).hexdigest())
+
     def test_an_owner_in_the_parameters_is_never_used(self):
         calls = []
         ex, _ = self.i2v_executor(lambda owner, asset: calls.append(owner) or png())
