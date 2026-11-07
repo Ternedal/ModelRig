@@ -164,6 +164,27 @@ class OwnerGalleryTests(unittest.TestCase):
         chunks.close()
         self.assertTrue(handle.closed)
 
+    def test_prepared_stream_read_failure_closes_descriptor(self):
+        class FailingReader(io.BytesIO):
+            def read(self, size=-1):
+                raise OSError("media removed during response")
+
+        handle = FailingReader(b"abcd")
+        with patch("app.media_gallery_asset.open_asset", return_value=(handle, {"size_bytes": 4})):
+            _, chunks = prepare_owned_asset_response(
+                Jobs({"one"}), "principal", "/media", "/volume", "one")
+        with self.assertRaisesRegex(OSError, "media removed"):
+            next(chunks)
+        self.assertTrue(handle.closed)
+
+    def test_prepared_stream_exhaustion_closes_descriptor(self):
+        handle = io.BytesIO(b"abcd")
+        with patch("app.media_gallery_asset.open_asset", return_value=(handle, {"size_bytes": 4})):
+            _, chunks = prepare_owned_asset_response(
+                Jobs({"one"}), "principal", "/media", "/volume", "one", chunk_size=2)
+        self.assertEqual(list(chunks), [b"ab", b"cd"])
+        self.assertTrue(handle.closed)
+
     def test_foreign_cursor_rejected(self):
         with self.assertRaisesRegex(GalleryBadRequest, "unknown_cursor"):
             list_owned_gallery(Jobs({"one"}), "principal", "/media", cursor="foreign", verified_volume_root="/volume")
