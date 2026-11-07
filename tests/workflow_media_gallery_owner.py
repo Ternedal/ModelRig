@@ -185,6 +185,26 @@ class OwnerGalleryTests(unittest.TestCase):
         self.assertEqual(list(chunks), [b"ab", b"cd"])
         self.assertTrue(handle.closed)
 
+    def test_prepared_truncated_asset_fails_closed_and_closes(self):
+        handle = io.BytesIO(b"ab")
+        with patch("app.media_gallery_asset.open_asset", return_value=(handle, {"size_bytes": 4})):
+            _, chunks = prepare_owned_asset_response(
+                Jobs({"one"}), "principal", "/media", "/volume", "one", chunk_size=2)
+        self.assertEqual(next(chunks), b"ab")
+        with self.assertRaisesRegex(GalleryUnavailable, "asset_changed_during_read"):
+            next(chunks)
+        self.assertTrue(handle.closed)
+
+    def test_prepared_explicit_close_is_idempotent(self):
+        handle = io.BytesIO(b"abcd")
+        with patch("app.media_gallery_asset.open_asset", return_value=(handle, {"size_bytes": 4})):
+            _, chunks = prepare_owned_asset_response(
+                Jobs({"one"}), "principal", "/media", "/volume", "one")
+        chunks.close()
+        chunks.close()
+        self.assertTrue(handle.closed)
+        self.assertEqual(list(chunks), [])
+
     def test_foreign_cursor_rejected(self):
         with self.assertRaisesRegex(GalleryBadRequest, "unknown_cursor"):
             list_owned_gallery(Jobs({"one"}), "principal", "/media", cursor="foreign", verified_volume_root="/volume")
