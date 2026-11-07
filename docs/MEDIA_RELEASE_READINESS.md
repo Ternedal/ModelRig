@@ -2,7 +2,7 @@
 
 Image and video generation on the rig, #2296. This page separates three questions that are easy to blur: what is merged, what is switched on, and what may be released. **A merge is not a release:** every media capability below is default-off, and turning one on is a decision Anders takes per §2. This page records the gates; it does not authorize anything.
 
-**This is a snapshot,** verified against main `4d6e8bb3` and the open PRs and branches named below. It must be refreshed after the current merge sequence (#2325, then #2345–#2349). When a row says "open", the PR's own exact-head evidence decides; this page does not replace it.
+**This is a snapshot,** verified against main `54e00c97` (7 Nov evening) and the open PRs and branches named below. Merged since the previous snapshot: #2325, #2345 (G5), #2346, #2348 (F1), #2349 (G1) and #2353. When a row says "open", the PR's own exact-head evidence decides; this page does not replace it.
 
 **Two different "off"s.** Most media modules are **merged but inert**: present in the code, with nothing that starts or calls them. The reachability gate is separate. There are **no media HTTP routes on main**, so no client can submit, list or fetch media.
 
@@ -21,7 +21,9 @@ Image and video generation on the rig, #2296. This page separates three question
 | Supervised ComfyUI (video), pins (G3) | `comfy_supervisor.py`, `comfy_video_adapter.py`, `comfy_weights.py` | merged | via profile | off |
 | Video in the executor | `media_executor_main` | **refused: exit 78 for any video profile** | none yet | off |
 | Image-to-video: ComfyUI adapter (`render_to(source_png=...)`) | `comfy_video_adapter.py` | merged 7 Nov (#2346, `f20a6c2a`) | via profile | off |
-| Image-to-video through the executor, via the owner-gated source reader | `media_executor.py` | PR #2353, qualifying | via profile | off (video still exit 78) |
+| Image-to-video through the executor, via the owner-gated source reader | `media_executor.py` | merged 7 Nov (#2353, `54e00c97`) | via profile | off (video still exit 78) |
+| Production volume check (G1): `MountedMediaVolume`, marker, pinned identity, sticky loss | `media_volume.py` | merged 7 Nov (#2349, `08d71041`); used by nothing until the wiring lands | none | inert |
+| Every image write re-checks G1 (`PinnedVolumeSink`: `verify()` immediately before `publish`) | `media_executor_main.py` | wiring branch (#2357) | none | with the executor |
 | Gallery catalog, store, index writer, asset streaming | `media_gallery_*.py` | merged (ChatGPT) | none (no route) | not reachable |
 | Owner-scoped gallery reads (list, open, stream) | `media_gallery_owner.py` on ChatGPT's `feat/media-owner-gallery-filter` | branch; open findings (#2275 6702693683): descriptor bound to the verified volume, ungated legacy helpers, one DB connection per entry | none (no route) | not reachable |
 | Descriptor check for readers: `MountedMediaVolume.require_descriptor(fd, path)` | `media_volume.py` | wiring branch; Windows contract cases mandatory, not yet run | none | used by nothing yet |
@@ -30,14 +32,10 @@ Image and video generation on the rig, #2296. This page separates three question
 | Android gallery client (#2301, #2302) | `android/` | merged, fixture-driven | needs the routes | inert |
 | Android job model: proposed `kaliv-media-job/v1` parser, Danish texts, polling, drift test against the store | `feat/android-media-job-readiness` (`docs/MEDIA_ANDROID_READINESS.md`) | branch; contract not yet agreed | needs the routes | no UI |
 
-Open PRs and branches on the path to video:
-- **#2345** G5: lease directory ACL on Windows.
-- **#2346** image-to-video adapter.
+Open PRs and branches on the path to video (#2345, #2346, #2349 and #2353 are merged):
 - **#2347** staged video sink.
-- **#2349** G1: production `VerifiedMediaVolume`.
-- `feat/media-i2v-executor`, the executor's image-to-video path.
-- **G1 wiring and the work area**, branch `feat/media-volume-wiring`. It is prepared, not merged and not enabled. It implements Anders' 6 Nov decision: media is generated in a private work area on the internal disk (C:), with the job database there, and published on the external volume (Z:) (`docs/MEDIA_WORK_AREA.md`).
-- `fix/gallery-index-os-lock`, the index lock (C8 findings).
+- **#2357** G1 wiring and the work area (`feat/media-volume-wiring`), draft. It is prepared, not merged and not enabled. It implements Anders' 6 Nov decision: media is generated in a private work area on the internal disk (C:), with the job database there, and published on the external volume (Z:) (`docs/MEDIA_WORK_AREA.md`).
+- **#2358** the index lock (C8 findings 2 and 3).
 - C6 repair tool (`feat/media-volume-repair`), stacked on the wiring: it also reports and removes work-area residue.
 
 ## 2. Data and migrations
@@ -54,7 +52,7 @@ Every change to stored data so far is **additive**. Nothing is rewritten, rename
 | `image_jobs_scrub` | one-row table: a VACUUM is owed once after `secure_delete` was enabled | #2340 | Older code never reads it |
 | Gallery index `gallery-index.json` (`kaliv-media-gallery/v1` items) | none since v1. The writer strips presentation-only fields before writing. | #2313 | — |
 | `.gallery-index.lock` | with the lock fix: a persistent, never-unlinked lock file instead of an `O_EXCL` marker | `fix/gallery-index-os-lock` | **One-way:** the old writer treats a leftover file as held. Once the new writer has run, do not downgrade without deleting the file, with no writer running. |
-| `.kaliv-media-volume` marker | new file at the volume root | G1 (#2349) | Older code ignores it |
+| `.kaliv-media-volume` marker | new file at the volume root | G1 (#2349, merged) | Older code ignores it |
 | Job database location | moves into the work area on the internal disk (`KALIV_MEDIA_WORK_ROOT`) | wiring (Anders, 6 Nov) | **An operator copy, never automatic:** stop the executor, copy the file and its `-wal`/`-shm` into `<work area>\state`, start, check the queue, then delete the old copy (`docs/MEDIA_WORK_AREA.md`). To go back, copy it back the same way |
 
 **Before any migration on the rig:** copy the job database while no executor runs (the executor lock is free). SQLite's migration is one transaction (`BEGIN IMMEDIATE` spans creation and every `ALTER`), so an interrupted start leaves the old schema.
@@ -75,15 +73,15 @@ Prompts are blanked 30 days after a job finishes (#2340). A rollback does not ch
 
 | Gate | Evidence | Owner | Status |
 |---|---|---|---|
-| G1 and the work area wired: `MountedMediaVolume` for the publication volume and the sink; `PrivateWorkArea` for the job database and ComfyUI's directories (Anders, 6 Nov) | wiring PR plus rig R1, R5, R14 | Claude | G1 open (#2349); wiring branch prepared, not merged, not enabled |
-| Staged video sink and image-to-video in the executor | #2347, #2346, #2353 | Claude | #2346 merged 7 Nov; #2347 (three durability fixes on 7 Nov) and #2353 qualifying |
+| G1 and the work area wired: `MountedMediaVolume` for the publication volume and the sink; `PrivateWorkArea` for the job database and ComfyUI's directories (Anders, 6 Nov) | wiring PR plus rig R1, R5, R14 | Claude | G1 merged (#2349); wiring #2357 draft, qualifying, not enabled. Codex's two findings on 7 Nov (image writes not bound to the pinned volume; a volume lost while the receipt is recorded deleted the render) are fixed in `3904e8b6` |
+| Staged video sink and image-to-video in the executor | #2347, #2346, #2353 | Claude | #2346 and #2353 merged 7 Nov; #2347 (three durability fixes on 7 Nov) qualifying |
 | Gallery reads bound to the verified volume: index and asset descriptors on the pinned device and the walked path (`require_descriptor`), proven on Windows/NTFS | ChatGPT's gallery branch + wiring; the Windows volume contract | ChatGPT (gallery), Claude (`require_descriptor`) | open; required before any route |
 | Gallery routes and Android gallery against real routes | ChatGPT's route PR, R11 | ChatGPT | not on main |
 | Rig qualification pack at the qualified SHA, with the evidence manifest | runbook #2296 6642831318, R0–R16 | Anders runs it | waiting for A1–A3 (and A2b for Wan 2.2) |
 | Profiles promoted to `rig-qualified` with the measured limits (C4 R16) | a profile PR citing the manifest | Claude + ChatGPT | after the rig run |
 | ComfyUI backend outbound network blocked (firewall rule) | rig item 7 | **Anders (§2)** | open |
-| Cloud: media never reaches the cloud; chat cloud payload is current-message only (D5); no fallback after Stop (F1) | `CloudCurrentMessageOnlyTest`; #2348 | Claude (F1), ChatGPT (review); Anders approved F1 | D5 implemented and tested. #2348: a consent regression (opt-in read before the rig call) was fixed on 7 Nov, so it is now read when the rig fails; qualifying |
-| Index lock survives a killed writer (C8 findings 2–3) | `fix/gallery-index-os-lock` | Claude | branch |
+| Cloud: media never reaches the cloud; chat cloud payload is current-message only (D5); no fallback after Stop (F1) | `CloudCurrentMessageOnlyTest`; #2348 | Claude (F1), ChatGPT (review); Anders approved F1 | D5 implemented and tested. #2348 merged 7 Nov (`8a7f6727`), with the consent fix: the opt-in is read when the rig fails, not before the rig call |
+| Index lock survives a killed writer (C8 findings 2–3) | #2358 | Claude | open, qualifying |
 | C:/Z: layout proven on the rig: private work area, one account for every process, separate disks, low space visible, residue baseline, rollback (R17) | `docs/MEDIA_R17_DEPLOYMENT_PROOF.md` (R17.1–R17.13; R17.10–R17.13 added 7 Nov: lease ACL, moved DB, junction root, unplug, other disk) | Anders runs it; ChatGPT reviews | pending: needs the wiring merged and a new `$QualSha` |
 | Job routes expose `expired` and Android shows it | ChatGPT's route PR; Android branch above | ChatGPT (routes), Claude (Android) | contract proposed (#2275), not agreed |
 | Production signing / release | — | **Anders (§2)** | not requested |
@@ -110,4 +108,6 @@ Prompts are blanked 30 days after a job finishes (#2340). A rollback does not ch
 - An interrupted render is failed, not re-queued; the owner resubmits.
 - A queued job nobody claims for 24 hours expires; the owner resubmits. Running and publishing jobs never expire.
 - A volume lost mid-render leaves an unindexed `.kaliv-*.tmp`; C6 reports it, and an operator removes it.
+- G1 is checked immediately before each image write, but the sink's own path checks still leave a short check-then-write window inside the write. A volume swapped in exactly that window is caught by `store.complete()` (exit 76), not before the bytes land.
+- A volume lost while the hand-off receipt is being recorded stops the executor (exit 75) and keeps the finished render in the work area; the job stays `running` until the next start records it as interrupted, and C6 lists the file.
 - Windows releases a dead process's byte-range lock "after a delay"; the index lock waits up to 5 s before refusing.
