@@ -64,8 +64,7 @@ from typing import BinaryIO, Callable
 from .comfy_supervisor import ComfyBusy, ComfySupervisor, ComfySupervisorError, ComfyVramShortage
 from .comfy_weights import check_lookup_is_unambiguous, check_weights_unchanged, verify_weights
 from .comfy_workflow_template import MAX_TEMPLATE_BYTES, WorkflowTemplate, load_template
-from .media_generation_contract import (ArtifactSinkUnavailable, GenerationCancelled, GenerationError, GenerationRequest,
-                                         RenderedArtifact)
+from .media_generation_contract import GenerationCancelled, GenerationError, GenerationRequest, RenderedArtifact
 from .media_generation_profiles import ModelProfile, validate_request
 
 MIME = "video/mp4"
@@ -651,12 +650,19 @@ class ComfyVideoAdapter:
         """Tell the holder (holding_outputs(on_handoff=...)) what is being handed over. A failure
         here fails the job: no hand-off goes unrecorded.
 
-        A volume or store that is gone while the receipt is recorded (ArtifactSinkUnavailable) is
-        not the render's fault: like a copy the volume could not take, the finished file is kept
-        for recovery instead of removed (Codex #2357 4503161825). Any other refusal still cleans."""
+        The holder refuses a receipt with a ValueError (GenerationError, ImageJobError): a receipt
+        that does not validate, or a job that is not this executor's. The job fails and the render
+        is cleaned at once, as before. Anything else is the holder's own infrastructure failing,
+        not the render: the volume or work area gone (ArtifactSinkUnavailable), the receipt
+        database full, locked or unreadable (sqlite3.OperationalError / DatabaseError), an I/O
+        error. The render is finished and was checked before the first receipt, so, like a copy
+        the volume could not take, it is kept for recovery instead of removed (Codex #2357
+        4503161825, 4503721455)."""
         if self._on_handoff is not None:
             try:
                 self._on_handoff(dict(record))
-            except ArtifactSinkUnavailable:
+            except ValueError:
+                raise  # an explicit refusal: cleaned at once
+            except BaseException:
                 self._sink_failed = True
                 raise
