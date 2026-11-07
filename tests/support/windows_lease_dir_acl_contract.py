@@ -53,6 +53,33 @@ def describe(path: Path) -> None:
         print(f"    diag: type={ace.ace_type} flags=0x{ace.flags:02x} mask=0x{ace.mask:08x} sid={ace.sid}")
 
 
+_DIAG_CHARS = 200
+
+
+def _one_line(text: str) -> str:
+    return " ".join(str(text).split())[:_DIAG_CHARS]
+
+
+def junction_case(junction: Path, target: Path) -> None:
+    """A real NTFS junction to a private directory must be refused, not followed.
+
+    Making the junction is part of the contract: a runner that cannot (no privilege, mklink
+    missing or hung) FAILS here, with a bounded one-line diagnostic, instead of skipping and
+    passing without proving anything about junctions (#2275 6699231451). `mklink /J` needs no
+    admin rights, so on the Windows gate this is expected to succeed."""
+    try:
+        made = subprocess.run(["cmd", "/c", "mklink", "/J", str(junction), str(target)], capture_output=True,
+                              text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        check(False, f"the junction case can create its junction (mklink /J: {_one_line(type(exc).__name__)})")
+        return
+    if made.returncode != 0:
+        check(False, "the junction case can create its junction "
+                     f"(mklink /J rc={made.returncode}: {_one_line(made.stdout)} | {_one_line(made.stderr)})")
+        return
+    check(lease_dir_private(junction)[0] is False, "a junction to a private directory is refused, not followed")
+
+
 def main() -> int:
     if os.name != "nt":
         print("SKIP: Windows-only contract")
@@ -102,14 +129,7 @@ def main() -> int:
         a_file.write_bytes(b"x")
         check(lease_dir_private(a_file)[0] is False, "a regular file refuses")
 
-        target = fresh(())
-        junction = root / "junction"
-        made = subprocess.run(["cmd", "/c", "mklink", "/J", str(junction), str(target)], capture_output=True,
-                              text=True, timeout=30)
-        if made.returncode != 0:
-            print(f"  info: junction not creatable here ({made.stdout.strip()} {made.stderr.strip()}); case skipped")
-        else:
-            check(lease_dir_private(junction)[0] is False, "a junction to a private directory is refused, not followed")
+        junction_case(root / "junction", fresh(()))
 
         # The real lock entry points: refused before any lock file exists, and working when private.
         writable = fresh(("/grant", f"*{USERS}:(OI)(CI)(M)"))
