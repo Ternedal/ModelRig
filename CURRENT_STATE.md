@@ -400,6 +400,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_media_recovery_inventory.py`
 - `tests/worker_media_repair.py`
 - `tests/worker_media_source_image.py`
+- `tests/worker_media_staged_video_sink.py`
 - `tests/worker_media_volume.py`
 - `tests/worker_media_work_area.py`
 - `tests/worker_migrate.py`
