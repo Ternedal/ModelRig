@@ -93,7 +93,7 @@ def _index(root: Path) -> list[dict]:
             os.close(descriptor)
         items = json.loads(payload, object_pairs_hook=_unique_object_pairs,
                            parse_constant=_reject_json_constant)
-    except (OSError, ValueError, TypeError) as exc:
+    except (OSError, ValueError, TypeError, RecursionError) as exc:
         raise GalleryUnavailable("invalid_index") from exc
     if not isinstance(items, list):
         raise GalleryUnavailable("invalid_index")
