@@ -200,6 +200,8 @@ class MediaExecutor:
         self._next_expiry = self.clock() + EXPIRE_INTERVAL_S
         try:
             expired = self.store.expire_queued()
+        except ArtifactSinkUnavailable:
+            raise  # the store's guard: the volume or the work area is gone. Fatal (75), not best effort
         except Exception as exc:
             self.events.append(f"expire_failed:{type(exc).__name__}")
             return
@@ -212,6 +214,8 @@ class MediaExecutor:
         self._next_purge = self.clock() + PURGE_INTERVAL_S
         try:
             self.events.append(f"purged:{self.store.purge_prompts()}")
+        except ArtifactSinkUnavailable:
+            raise  # as in expire_queued: a lost volume or work area stops the executor at once
         except Exception as exc:
             self.events.append(f"purge_failed:{type(exc).__name__}")
 

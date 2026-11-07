@@ -14,6 +14,11 @@ It uses the real SystemProbe throughout:
   - a canonical directory is accepted;
   - a junction, an alternate data stream, a trailing-dot alias, an 8.3 short name and a path on
     the system drive are each refused.
+  - ``require_descriptor``: an open file on the volume passes (``os.fstat`` and ``os.lstat``
+    agree on volume serial and file id on NTFS); a descriptor on the system drive is refused; a
+    file opened through a junction that is then swapped for a real folder is refused.
+    These three are mandatory: if any of them cannot run (the workspace on the system drive, no
+    junction), the contract FAILS.
 
 **What it changes:** it writes the marker ``<volume>\\.kaliv-media-volume`` for the run and removes it
 afterwards. If the workspace shares the system drive, or the volume root cannot be written, those
@@ -37,6 +42,10 @@ from app.media_volume import (  # noqa: E402
 
 VOLUME_ID = "kaliv-contract-0001"
 passed = failed = not_run = 0
+# The three require_descriptor scenarios are mandatory (ChatGPT, #2275 6704220238): a run that
+# could not reach all three is a FAIL, never a green "not run".
+DESCRIPTOR_CASES = 3
+descriptor_ran = 0
 
 
 def check(condition: bool, name: str) -> None:
@@ -61,6 +70,18 @@ def refused(volume: MountedMediaVolume, path: str) -> str | None:
     except ArtifactSinkUnavailable as exc:
         return str(exc)
     return None
+
+
+def descriptor_refused(volume: MountedMediaVolume, fd: int, path: str) -> str | None:
+    try:
+        volume.require_descriptor(fd, path)
+        return None
+    except ArtifactSinkUnavailable as exc:
+        return str(exc)
+
+
+def opened(path: str) -> int:
+    return os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
 
 
 def short_name(path: str) -> str:
@@ -136,6 +157,45 @@ def main() -> int:
             skip("8.3 short name refused", "8.3 names are disabled on this volume")
         windows_dir = os.path.join(system_root, "Windows")
         check(refused(volume, windows_dir) == "media_path_outside_volume", "a path on the system drive is refused")
+
+        # require_descriptor: the gallery's reads (#2275 6702693683). Windows has no O_NOFOLLOW, so
+        # these are the cases the descriptor check exists for.
+        on_volume = os.path.join(target, "frame.png")
+        fd = opened(on_volume)
+        try:
+            check(descriptor_refused(volume, fd, on_volume) is None,
+                  "an open file on the volume passes require_descriptor (fstat and lstat agree)")
+            descriptor_ran_one()
+        finally:
+            os.close(fd)
+        elsewhere = tempfile.NamedTemporaryFile(delete=False)  # %TEMP%: the system drive
+        elsewhere.write(b"x")
+        elsewhere.close()
+        fd = opened(elsewhere.name)
+        try:
+            reason = descriptor_refused(volume, fd, on_volume)
+            check(reason == "media_descriptor_other_device",
+                  f"a descriptor on the system drive is refused for a path on the volume ({reason})")
+            descriptor_ran_one()
+        finally:
+            os.close(fd)
+            os.unlink(elsewhere.name)
+        swap = os.path.join(work, "swap")
+        made = subprocess.run(["cmd", "/c", "mklink", "/J", swap, target], capture_output=True, text=True)
+        if made.returncode == 0:
+            fd = opened(os.path.join(swap, "frame.png"))  # follows the junction into target
+            try:
+                subprocess.run(["cmd", "/c", "rmdir", swap], check=True, capture_output=True)  # the junction only
+                os.mkdir(swap)
+                Path(swap, "frame.png").write_bytes(b"x")  # same name, same size, another file
+                reason = descriptor_refused(volume, fd, os.path.join(swap, "frame.png"))
+                check(reason == "media_descriptor_not_path",
+                      f"a file opened through a junction later swapped for a folder is refused ({reason})")
+                descriptor_ran_one()
+            finally:
+                os.close(fd)
+        else:
+            skip("junction swap refused by require_descriptor", f"mklink /J failed: {made.stdout} {made.stderr}")
         marker.write_text("kaliv-contract-9999", encoding="ascii")
         check(refused(volume, work) == "media_volume_marker_mismatch", "a changed marker is refused after start")
     finally:
@@ -146,7 +206,14 @@ def main() -> int:
     return summary()
 
 
+def descriptor_ran_one() -> None:
+    global descriptor_ran
+    descriptor_ran += 1
+
+
 def summary() -> int:
+    if descriptor_ran < DESCRIPTOR_CASES:
+        check(False, f"require_descriptor scenarios ran {descriptor_ran}/{DESCRIPTOR_CASES}: mandatory, see NOT RUN above")
     print(f"\n===== Windows media volume contract: {passed} passed, {failed} failed, {not_run} not run =====")
     return 0 if failed == 0 else 1
 
