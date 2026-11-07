@@ -272,6 +272,32 @@ class EntryPointTests(unittest.TestCase):
         self.assertEqual(len(jobs), 1)
         self.assertEqual(store.get(jobs[0], "anders")["state"], "queued", "not claimed on the other disk")
 
+    def test_a_disk_swapped_after_begin_publish_receives_nothing(self):
+        """Codex #2357 4503161823: the image sink checks its root by path only. A disk replaced
+        between begin_publish() and the write must get no file and no index entry: G1 is verified
+        again right before the sink writes, and the executor stops (75)."""
+        from app.image_job_store import ImageJobStore
+        volume = self.tmp / "volume"
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            store = ImageJobStore(self.env["KALIV_MEDIA_JOB_DB"])
+            job = store.submit("anders", "a red bicycle", profile_id="sdxl-a",
+                               params={"width": 1024, "height": 1024, "steps": 20})["job_id"]
+            executor = build_from_env("cuda:0", self.env,
+                                      adapter_factory=lambda p: FakeAdapter(p, self.env["KALIV_GPU_LEASE_DIR"]))
+            real_begin = executor.store.begin_publish
+
+            def begin_then_swap(job_id, instance):
+                ok = real_begin(job_id, instance)
+                volume.rename(self.tmp / "volume-old")  # the real disk goes; another one, same marker
+                (volume / "media").mkdir(parents=True)
+                (volume / ".kaliv-media-volume").write_text("kaliv-test-volume-1")
+                return ok
+            with patch.object(executor.store, "begin_publish", side_effect=begin_then_swap):
+                self.assertEqual(executor.run(max_steps=1, idle_sleep=lambda: None), EXIT_SINK_UNAVAILABLE)
+        self.assertEqual(sorted(p.name for p in (volume / "media").iterdir()), [],
+                         "nothing written or indexed on the replacement disk")
+        self.assertEqual(store.get(job, "anders")["state"], "publishing", "left for recovery at the next start")
+
     # -- Anders, 6 Nov 2026 (#2275 6686905826): generate on the internal disk, publish on the volume --
 
     def test_the_work_area_is_checked_at_start_and_any_failure_is_78(self):

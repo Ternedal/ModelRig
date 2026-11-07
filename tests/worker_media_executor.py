@@ -1106,6 +1106,19 @@ class VideoExecutorTests(unittest.TestCase):
         self.assertEqual((receipt["sha256"], receipt["size"]), (hashlib.sha256(published).hexdigest(), len(published)))
         self.assertNotIn("a red kite", json.dumps(receipt), "never the prompt")
 
+    def test_a_volume_gone_while_the_receipt_is_recorded_stops_and_keeps_the_render(self):
+        """Codex #2357 4503161825: the receipt stats the volume root. A volume gone at that moment is
+        fatal (75) and the finished render stays in the work area for recovery, never a failed job
+        with its output deleted."""
+        ex = self.executor()
+        ex.volume_root = os.path.join(self.tmp, "gone")  # stat() fails: the volume is not there
+        job = self.submit()
+        with self.assertRaisesRegex(ArtifactSinkUnavailable, "^media_volume_missing$"):
+            ex.step()
+        self.assertEqual(len(os.listdir(self.dirs["output"])), 1, "the finished render is kept")
+        self.assertEqual(self.sink.registry, set(), "nothing published")
+        self.assertEqual(self.store.get(job, "anders")["state"], "running", "left for recovery at the next start")
+
     def test_a_hand_off_that_cannot_be_recorded_fails_the_job_before_any_copy(self):
         ex = self.executor()
         job = self.submit()
