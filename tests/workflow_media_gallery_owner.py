@@ -75,6 +75,41 @@ class OwnerGalleryTests(unittest.TestCase):
         self.assertEqual(result[1]["id"], "one")
         opener.assert_called_once_with("/media", "/volume", "one")
 
+    def test_open_owned_asset_redacts_foreign_thumbnail_without_mutation(self):
+        raw = {"id": "one", "size_bytes": 4, "thumbnail_id": "foreign",
+               "thumbnail_url": "/api/v1/media/foreign"}
+        handle = io.BytesIO(b"abcd")
+        with patch("app.media_gallery_asset.open_asset", return_value=(handle, raw)):
+            opened, safe = open_owned_asset(Jobs({"one"}), "principal", "/media", "/volume", "one")
+        self.assertIsNone(safe["thumbnail_id"])
+        self.assertIsNone(safe["thumbnail_url"])
+        self.assertEqual(raw["thumbnail_id"], "foreign")
+        opened.close()
+
+    def test_prepared_response_redacts_foreign_thumbnail(self):
+        raw = {"id": "one", "size_bytes": 4, "thumbnail_id": "foreign",
+               "thumbnail_url": "/api/v1/media/foreign"}
+        with patch("app.media_gallery_asset.open_asset", return_value=(io.BytesIO(b"abcd"), raw)):
+            safe, chunks = prepare_owned_asset_response(
+                Jobs({"one"}), "principal", "/media", "/volume", "one")
+        self.assertIsNone(safe["thumbnail_id"])
+        self.assertIsNone(safe["thumbnail_url"])
+        self.assertEqual(raw["thumbnail_id"], "foreign")
+        chunks.close()
+
+    def test_owned_asset_sanitizer_failure_closes_handle(self):
+        class BrokenJobs(Jobs):
+            def owns_completed_asset(self, owner, asset_id):
+                if asset_id == "foreign":
+                    raise RuntimeError("db unavailable")
+                return super().owns_completed_asset(owner, asset_id)
+        handle = io.BytesIO(b"abcd")
+        raw = {"id": "one", "size_bytes": 4, "thumbnail_id": "foreign"}
+        with patch("app.media_gallery_asset.open_asset", return_value=(handle, raw)):
+            with self.assertRaisesRegex(RuntimeError, "db unavailable"):
+                open_owned_asset(BrokenJobs({"one"}), "principal", "/media", "/volume", "one")
+        self.assertTrue(handle.closed)
+
     def test_asset_read_without_principal_refused(self):
         with patch("app.media_gallery_asset.open_asset") as opener:
             with self.assertRaises(GalleryAssetNotFound):
