@@ -277,13 +277,13 @@ class RecoveryInventoryTests(unittest.TestCase):
         self.assertEqual(entries[odd]["classification"], "unknown")
 
     def test_the_hash_reads_only_the_file_it_was_given(self):
-        from app.media_recovery_inventory import _hash
+        from app.media_recovery_inventory import _hash, _in_work_area
         a, _ = self.work_file()
         b, _ = self.work_file()
-        self.assertEqual(_hash(a, a.lstat()), hashlib.sha256(MP4).hexdigest())
-        self.assertIsNone(_hash(a, b.lstat()), "another file's identity: refused, not read")
-        self.assertIsNone(_hash(a, a.lstat(), limit=len(MP4) + 1), "a prefix longer than the file")
-        self.assertEqual(_hash(a, a.lstat(), limit=10), hashlib.sha256(MP4[:10]).hexdigest())
+        self.assertEqual(_hash(a, a.lstat(), _in_work_area), hashlib.sha256(MP4).hexdigest())
+        self.assertIsNone(_hash(a, b.lstat(), _in_work_area), "another file's identity: refused, not read")
+        self.assertIsNone(_hash(a, a.lstat(), _in_work_area, limit=len(MP4) + 1), "a prefix longer than the file")
+        self.assertEqual(_hash(a, a.lstat(), _in_work_area, limit=10), hashlib.sha256(MP4[:10]).hexdigest())
 
     def test_a_different_file_under_the_assets_name_is_unknown(self):
         job = self.job()
@@ -375,6 +375,66 @@ class RecoveryInventoryTests(unittest.TestCase):
             with self.subTest(error=error), self.failing_scandir(self.output, error), \
                     self.assertRaisesRegex(RepairRefused, "^work_directory_unreadable$"):
                 self.inventory()
+
+    def failing_path_call(self, name, failing_path, errno_code):
+        real = getattr(os, name)
+        names = {os.fspath(failing_path), os.path.realpath(failing_path)}  # resolved now: lstat is patched below
+
+        def call(path, *args, **kwargs):
+            if isinstance(path, (str, os.PathLike)) and os.fspath(path) in names:
+                raise OSError(errno_code, os.strerror(errno_code))
+            return real(path, *args, **kwargs)
+        return patch(f"app.media_recovery_inventory.os.{name}", side_effect=call)
+
+    def test_an_io_error_on_a_file_is_never_reported_as_absent_or_changed(self):
+        """Gone is absent; EIO or a denied file is access lost and stops the run, as MEDIA_REPAIR.md
+        promises. Before, lstat/open swallowed every error and the report said absent or changed."""
+        import errno
+        from app.media_repair import RepairRefused
+        job = self.job()
+        work, output = self.work_file()
+        self.receipt(job, output)
+        self.store.begin_publish(job, DEAD)
+        asset = self.publish(job)
+        temp = Path(self.media, self.temp(MP4))
+        self.restart()
+        cases = [("lstat", work, RepairRefused, "^work_directory_unreadable$"),
+                 ("open", work, RepairRefused, "^work_directory_unreadable$"),
+                 ("lstat", Path(self.media, f"{asset}.mp4"), ArtifactSinkUnavailable, "^repair_volume_unreadable$"),
+                 ("open", Path(self.media, f"{asset}.mp4"), ArtifactSinkUnavailable, "^repair_volume_unreadable$"),
+                 ("lstat", temp, ArtifactSinkUnavailable, "^repair_volume_unreadable$"),
+                 ("open", temp, ArtifactSinkUnavailable, "^repair_volume_unreadable$")]
+        for name, path, error, code in cases:
+            for errno_code in (errno.EIO, errno.EACCES):
+                with self.subTest(call=name, path=path.name, errno=errno_code), \
+                        self.failing_path_call(name, path, errno_code), self.assertRaisesRegex(error, code):
+                    self.inventory()
+        entry = self.only(self.inventory())
+        self.assertEqual((entry["work_file"]["status"], entry["asset"]["status"]), ("intact", "same"))
+
+    def test_a_read_error_while_hashing_stops_the_run(self):
+        import errno
+        job = self.job()
+        _, output = self.work_file()
+        self.receipt(job, output)
+        self.store.begin_publish(job, DEAD)
+        self.publish(job)
+        self.restart()
+        with patch("app.media_recovery_inventory.os.read", side_effect=OSError(errno.EIO, "I/O error")), \
+                self.assertRaises((ArtifactSinkUnavailable,
+                                   __import__("app.media_repair", fromlist=["RepairRefused"]).RepairRefused)):
+            self.inventory()
+
+    def test_a_file_that_vanished_is_still_simply_absent(self):
+        """ENOENT stays "not there": a vanished work file with a staged copy left is reported absent."""
+        job = self.job()
+        path, output = self.work_file()
+        self.receipt(job, output)
+        self.temp(MP4)
+        path.unlink()
+        self.restart()
+        entry = self.only(self.inventory())
+        self.assertEqual((entry["work_file"]["status"], entry["staged"]["status"]), ("absent", "complete"))
 
     def test_a_volume_lost_while_it_reads_is_unavailable_not_a_crash(self):
         self.job()

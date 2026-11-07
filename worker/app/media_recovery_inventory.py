@@ -40,6 +40,7 @@ are in flight): the report says so and stops.
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -68,44 +69,74 @@ def _is_reparse(info) -> bool:
     return bool(getattr(info, "st_file_attributes", 0) & 0x400)
 
 
-def _regular(path: Path):
-    """lstat of a plain regular file (not a link or reparse point), or None."""
+# Gone, or a path component swapped for a file or link: "not there", reported as absent/changed.
+# Any other error is the disk failing or access lost, and stops the run (MEDIA_REPAIR.md): the
+# inventory never answers from a partial view, e.g. EIO taken for "absent".
+_ABSENT = frozenset((errno.ENOENT, errno.ENOTDIR))
+_SWAPPED = _ABSENT | {errno.ELOOP}
+
+
+def _on_volume() -> Exception:
+    return ArtifactSinkUnavailable("repair_volume_unreadable")  # exit 75
+
+
+def _in_work_area() -> Exception:
+    return RepairRefused("work_directory_unreadable")  # exit 1
+
+
+def _regular(path: Path, unreadable):
+    """lstat of a plain regular file (not a link or reparse point), or None if there is none.
+    An error other than "not there" raises ``unreadable()``."""
     try:
         info = os.lstat(path)
-    except OSError:
-        return None
+    except OSError as exc:
+        if exc.errno in _ABSENT:
+            return None
+        raise unreadable() from exc
     if not stat.S_ISREG(info.st_mode) or _is_reparse(info):
         return None
     return info
 
 
-def _hash(path: Path, expected, limit: int | None = None) -> str | None:
+def _hash(path: Path, expected, unreadable, limit: int | None = None) -> str | None:
     """SHA-256 of the file at ``path`` (of its first ``limit`` bytes), read through a handle that
-    is checked to be the same file as ``expected`` before and after. None if it is not."""
+    is checked to be the same file as ``expected`` before and after. None if it is not (gone,
+    swapped, or changed while read). Any other error raises ``unreadable()``."""
     try:
         fd = os.open(path, _NOFOLLOW)
-    except OSError:
-        return None
+    except OSError as exc:
+        if exc.errno in _SWAPPED:
+            return None
+        raise unreadable() from exc
     try:
-        before = os.fstat(fd)
-        if (not stat.S_ISREG(before.st_mode) or (before.st_dev, before.st_ino) != (expected.st_dev, expected.st_ino)
-                or before.st_size > MAX_ARTIFACT_BYTES):
-            return None
-        digest, remaining = hashlib.sha256(), before.st_size if limit is None else min(limit, before.st_size)
-        if limit is not None and limit > before.st_size:
-            return None
-        while remaining:
-            chunk = os.read(fd, min(_CHUNK, remaining))
-            if not chunk:
-                return None
-            digest.update(chunk)
-            remaining -= len(chunk)
-        after = os.fstat(fd)
-        if (after.st_size, after.st_mtime_ns) != (before.st_size, before.st_mtime_ns):
-            return None
-        return digest.hexdigest()
+        return _hash_open(fd, expected, limit)
+    except OSError as exc:
+        raise unreadable() from exc
     finally:
-        os.close(fd)
+        try:
+            os.close(fd)
+        except OSError:
+            pass  # read-only: nothing of ours can be lost
+
+
+def _hash_open(fd: int, expected, limit: int | None) -> str | None:
+    before = os.fstat(fd)
+    if (not stat.S_ISREG(before.st_mode) or (before.st_dev, before.st_ino) != (expected.st_dev, expected.st_ino)
+            or before.st_size > MAX_ARTIFACT_BYTES):
+        return None
+    digest, remaining = hashlib.sha256(), before.st_size if limit is None else min(limit, before.st_size)
+    if limit is not None and limit > before.st_size:
+        return None
+    while remaining:
+        chunk = os.read(fd, min(_CHUNK, remaining))
+        if not chunk:
+            return None
+        digest.update(chunk)
+        remaining -= len(chunk)
+    after = os.fstat(fd)
+    if (after.st_size, after.st_mtime_ns) != (before.st_size, before.st_mtime_ns):
+        return None
+    return digest.hexdigest()
 
 
 def _read_jobs(job_db: str) -> tuple[list[dict], dict[str, dict]]:
@@ -174,12 +205,12 @@ def recovery_inventory(sink: ExternalMediaSink, job_db: str, *, work_area: Priva
         raise RepairRefused("work_directory_unreadable") from exc
     temps = {}
     for entry in volume_entries:
-        info = _regular(Path(entry.path)) if _TEMP.fullmatch(entry.name) else None
+        info = _regular(Path(entry.path), _on_volume) if _TEMP.fullmatch(entry.name) else None
         if info is not None:
             temps[entry.name] = info
     work_files = {}
     for entry in work_entries:
-        info = _regular(Path(entry.path)) if _PLAIN_NAME.fullmatch(entry.name) else None
+        info = _regular(Path(entry.path), _in_work_area) if _PLAIN_NAME.fullmatch(entry.name) else None
         work_files[entry.name] = info  # None: a link, a folder or an odd name, never followed
     temp_hash: dict[str, str | None] = {}
     claimed_temps: set[str] = set()
@@ -234,7 +265,7 @@ def _classify(job: dict, receipt: dict, *, sink, root: Path, indexed: set[str], 
     else:
         status = "intact"
         if sha is not None:
-            status = "intact" if _hash(output / name, work_info) == sha else "changed"
+            status = "intact" if _hash(output / name, work_info, _in_work_area) == sha else "changed"
         entry["work_file"] = {"name": name, "status": status, "size_bytes": work_info.st_size}
     work_intact = entry["work_file"]["status"] == "intact"
 
@@ -242,11 +273,11 @@ def _classify(job: dict, receipt: dict, *, sink, root: Path, indexed: set[str], 
     complete, partial = [], []
     for temp, info in temps.items():
         if temp not in temp_hash:
-            temp_hash[temp] = _hash(root / temp, info)
+            temp_hash[temp] = _hash(root / temp, info, _on_volume)
         if sha is not None and temp_hash[temp] == sha:
             complete.append(temp)
         elif (work_intact and 0 < info.st_size < work_info.st_size
-              and _hash(output / name, work_info, limit=info.st_size) == temp_hash[temp]):
+              and _hash(output / name, work_info, _in_work_area, limit=info.st_size) == temp_hash[temp]):
             partial.append(temp)
     entry["_temps"].update(complete + partial)
     if len(complete) + len(partial) > 1:
@@ -261,11 +292,11 @@ def _classify(job: dict, receipt: dict, *, sink, root: Path, indexed: set[str], 
     # The published asset.
     asset_id = job["asset_id"] if job["state"] == "completed" and job["asset_id"] else _job_asset(sink, job["id"])
     asset_path = root / f"{asset_id}.mp4" if asset_id else None
-    asset_info = _regular(asset_path) if asset_path else None
+    asset_info = _regular(asset_path, _on_volume) if asset_path else None
     if asset_info is None:
         entry["asset"] = {"status": "absent"}
     else:
-        same = sha is not None and _hash(asset_path, asset_info) == sha
+        same = sha is not None and _hash(asset_path, asset_info, _on_volume) == sha
         entry["asset"] = {"status": "same" if same else "different", "asset_id": asset_id,
                           "indexed": asset_id in indexed}
 
@@ -273,11 +304,11 @@ def _classify(job: dict, receipt: dict, *, sink, root: Path, indexed: set[str], 
     source_id = job.get("source_asset_id")
     if source_id:
         source_path = root / f"{source_id}.png"
-        source_info = _regular(source_path)
+        source_info = _regular(source_path, _on_volume)
         if source_info is None or source_id not in indexed:
             entry["source"] = "missing"
         elif receipt.get("source_sha256"):
-            entry["source"] = "present" if _hash(source_path, source_info) == receipt["source_sha256"] else "changed"
+            entry["source"] = "present" if _hash(source_path, source_info, _on_volume) == receipt["source_sha256"] else "changed"
         else:
             entry["source"] = "unverified"
 
