@@ -9,7 +9,8 @@
 ## 1. Arkitekturen som den ER (verificeret 14/7-2026)
 
 Seks ingest-veje (text, PDF, DOCX, PPTX, HTML/URL, deck) → fælles pipeline:
-`chunk_text` (sætnings-foretrukne brud, overlap) → `oc.embed` pr. chunk →
+`chunk_text` (sætnings-foretrukne brud, overlap) → `oc.embed_many` (batchet
+`/api/embed`, se §4c) →
 SQLite `documents` (text, source, chunk_index, embedding). Retrieval: cosine
 over alle chunks (evt. source-filtreret) → **min_score-filter FØR top_k-cut**
 (en forespørgsel uden reelt relevante chunks returnerer færre/nul frem for at
@@ -112,6 +113,26 @@ modelskift ved samme dimension fejler lukket · fejlteksten navngiver begge side
 tomt korpus pålægger ingen kontrakt · transaktionen åbnes med `BEGIN IMMEDIATE`
 før nogen DELETE eller INSERT. Alle syv sikkerhedsegenskaber er mutationstestet:
 brudt enkeltvis i kilden, hvorefter suiten blev rød.
+
+## 4c. Batchet embedding (06/11-2026)
+
+Rig-målingen i `RAG_BENCHMARK.md` (10.000 chunks: recall@5 1,0, query p95
+3,7 ms, men ingest >35 min) pegede entydigt på ingest-siden: ét HTTP-kald og
+én frisk forbindelse pr. chunk. `oc.embed_many` sender nu chunks i batches af
+`MODELRIG_EMBED_BATCH` (default 32) til `/api/embed`, som tager en liste og
+svarer med én vektor pr. input i samme rækkefølge. Kontrakten er uændret:
+
+- atomiciteten fra §4 holder — alle vektorer findes før noget skrives;
+- et svar med færre vektorer end input er en `OllamaError`, aldrig en
+  forskudt tilknytning mellem chunk og vektor;
+- en server uden batch-ruten (404/405) falder tilbage til ét kald pr. chunk
+  via `embed_each`, så en nedgraderet Ollama stadig ingester.
+
+Gaten `tests/worker_rag_embed_batch.py` måler alt dette mod en fake transport
+(antal requests, rækkefølge, kort svar, fallback, og at `ingest` reelt går
+gennem batchvejen). Gevinsten på riggen er **ikke** målt endnu — kør
+`scripts/rag_benchmark.py` på 10k-skalaen og sæt ingest-tallet ind i
+`RAG_BENCHMARK.md`; batchstørrelsen justeres med data, ikke med gæt.
 
 ## 5. T-043 load- og kvalitetsbenchmark
 
