@@ -52,10 +52,20 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.11"
+      - name: Decide whether this PR touches the job's inputs
+        id: scope
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python scripts/ci_pr_scope.py --scope worker/ --scope scripts/ --scope deploy/ --scope VERSION --scope backend/
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: steps.scope.outputs.relevant == 'true'
         with:
           go-version: "1.23"
       - name: Build the release worker package
+        if: steps.scope.outputs.relevant == 'true'
         run: |
           $actual = (git rev-parse HEAD).Trim()
           if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_BUILD_SHA) { throw "worker package checkout identity mismatch" }
@@ -66,6 +76,7 @@ jobs:
           python scripts/verify_frozen_voice_package.py dist/modelrig-worker-windows-x64.exe
           if ($LASTEXITCODE -ne 0) { throw "frozen voice payload verification failed" }
       - name: Boot the frozen worker outside the checkout
+        if: steps.scope.outputs.relevant == 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -122,6 +133,7 @@ jobs:
           }
 
       - name: Delayed frozen worker survives supervisor and updater readiness
+        if: steps.scope.outputs.relevant == 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -254,16 +266,28 @@ jobs:
         env:
           EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Decide whether this PR touches the job's inputs
+        id: scope
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python scripts/ci_pr_scope.py --scope android/
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        if: steps.scope.outputs.relevant == 'true'
         with:
           distribution: temurin
           java-version: "21"
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        if: steps.scope.outputs.relevant == 'true'
         with:
           packages: platform-tools
       - name: Install platform + build-tools
+        if: steps.scope.outputs.relevant == 'true'
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - name: Compile Android Kotlin and run unit tests
+        if: steps.scope.outputs.relevant == 'true'
         working-directory: android
         run: |
           echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
@@ -283,11 +307,21 @@ jobs:
         env:
           EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Decide whether this PR touches the job's inputs
+        id: scope
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python scripts/ci_pr_scope.py --scope desktop/
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        if: steps.scope.outputs.relevant == 'true'
         with:
           distribution: temurin
           java-version: "21"
       - name: Compile desktop Kotlin and run unit tests
+        if: steps.scope.outputs.relevant == 'true'
         working-directory: desktop
         run: ./gradlew :composeApp:test --no-daemon --console=plain
 
