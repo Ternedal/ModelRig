@@ -55,32 +55,42 @@ def relevant(changed_paths: Iterable[str], scopes: Iterable[str]) -> bool:
     return any(path_in_scope(p, scopes) for p in paths)
 
 
+# The compare API lists changed files only in the first page of the response
+# and caps that list at 300 files for the whole comparison (pagination applies
+# to commits, not files). A list that long may therefore be truncated, and a
+# truncated list must never justify a skip.
+COMPARE_FILE_CAP = 300
+
+
+class DiffTruncated(RuntimeError):
+    """The compare API may not have returned every changed file."""
+
+
 def _pr_changed_paths(repo: str, base: str, head: str, token: str) -> list[str]:
-    url = f"https://api.github.com/repos/{repo}/compare/{base}...{head}?per_page=100"
+    url = f"https://api.github.com/repos/{repo}/compare/{base}...{head}?per_page=1"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 - api.github.com
+        data = json.load(resp)
+    files = data.get("files")
+    if not isinstance(files, list):
+        raise DiffTruncated("compare response carries no file list")
+    if len(files) >= COMPARE_FILE_CAP:
+        raise DiffTruncated(f"{len(files)} files: at the compare API cap, list may be incomplete")
     paths: list[str] = []
-    page = 1
-    while True:
-        req = urllib.request.Request(
-            f"{url}&page={page}",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 - api.github.com
-            data = json.load(resp)
-        files = data.get("files") or []
-        for entry in files:
-            name = entry.get("filename")
-            if name:
-                paths.append(name)
-            previous = entry.get("previous_filename")
-            if previous:
-                paths.append(previous)
-        if len(files) < 100:
-            break
-        page += 1
+    for entry in files:
+        name = entry.get("filename")
+        if name:
+            paths.append(name)
+        previous = entry.get("previous_filename")
+        if previous:
+            paths.append(previous)
     return paths
 
 

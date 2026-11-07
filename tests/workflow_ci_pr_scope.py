@@ -80,6 +80,54 @@ check("a failing diff loader fails open", verdict and "could not read" in reason
 verdict, reason = ci_pr_scope.decide("pull_request", ["android/"], None)
 check("no loader (missing token/shas) fails open", verdict and "missing" in reason)
 
+# --- a possibly truncated diff never justifies a skip ------------------------
+def truncated() -> list[str]:
+    raise ci_pr_scope.DiffTruncated("300 files")
+
+
+verdict, reason = ci_pr_scope.decide("pull_request", ["android/"], truncated)
+check("a truncated compare file list fails open", verdict and "DiffTruncated" in reason)
+check("the compare file cap is the documented 300", ci_pr_scope.COMPARE_FILE_CAP == 300)
+
+
+class _FakeResponse:
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self) -> bytes:
+        import json as _json
+        return _json.dumps(self._payload).encode("utf-8")
+
+
+def with_fake_compare(payload: dict):
+    real = ci_pr_scope.urllib.request.urlopen
+    ci_pr_scope.urllib.request.urlopen = lambda req, timeout=60: _FakeResponse(payload)
+    try:
+        return ci_pr_scope._pr_changed_paths("o/r", "base", "head", "token")
+    finally:
+        ci_pr_scope.urllib.request.urlopen = real
+
+
+files_ok = [{"filename": "docs/a.md"}, {"filename": "android/x.kt", "previous_filename": "android/y.kt"}]
+check("the loader returns filenames and previous filenames",
+      with_fake_compare({"files": files_ok}) == ["docs/a.md", "android/x.kt", "android/y.kt"])
+try:
+    with_fake_compare({"files": [{"filename": f"docs/{i}.md"} for i in range(300)]})
+    check("300 files raises DiffTruncated", False)
+except ci_pr_scope.DiffTruncated:
+    check("300 files raises DiffTruncated", True)
+try:
+    with_fake_compare({"commits": []})
+    check("a response without a file list raises DiffTruncated", False)
+except ci_pr_scope.DiffTruncated:
+    check("a response without a file list raises DiffTruncated", True)
+
 # --- the CLI: events other than pull_request are never narrowed -------------
 def run_cli(env: dict[str, str], *scopes: str) -> tuple[str, str]:
     with tempfile.TemporaryDirectory() as td:
@@ -131,9 +179,9 @@ def steps_of(block: str) -> list[str]:
 
 GATE = "if: steps.scope.outputs.relevant == 'true'"
 for job, expected_scopes in {
-    "android-compile": ["android/"],
-    "desktop-compile": ["desktop/"],
-    "windows-worker-package": ["worker/", "scripts/", "deploy/", "VERSION", "backend/"],
+    "android-compile": ["android/", "contracts/"],
+    "desktop-compile": ["desktop/", "contracts/"],
+    "windows-worker-package": ["worker/", "bodyrig/", "scripts/", "deploy/", "VERSION", "backend/"],
 }.items():
     steps = steps_of(job_block(ci_text, job))
     scope_idx = [i for i, st in enumerate(steps) if "id: scope" in st]
