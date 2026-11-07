@@ -71,6 +71,17 @@ The root's identity (`st_dev`, `st_ino`) is pinned. On Windows, `st_dev` is the 
 - a FIFO or device;
 - on Windows: UNC and `\\?\` / `\\.\` paths, alternate data streams, trailing dots or spaces, and reserved names (`NUL`, `COM1` and so on).
 
+**`require_descriptor(fd, path)`** is for a reader that has already opened a file, such as the gallery (#2275 6702693683). Call it right after the open and before any byte is served. A path check proves where a name pointed when it was walked, but the descriptor is what is read. It refuses:
+
+| Situation between the check and the open | Reason |
+|---|---|
+| The descriptor is on another device: a parent swapped for a link to another disk, a Windows reparse point (Windows has no `O_NOFOLLOW`), or an unmount that let the mount point or drive letter fall back to the system disk | `media_descriptor_other_device` |
+| The descriptor is not a regular file or directory | `media_descriptor_not_file_or_directory` |
+| The descriptor is not the file a verified walk of `path` finds after the open, e.g. a parent was a link to elsewhere *on the same volume* at the open and was swapped back | `media_descriptor_not_path` |
+| The descriptor cannot be read (closed) | `media_descriptor_unavailable` |
+
+It also runs `verify()`, so a lost or remounted volume refuses first. Any `require()` reason, for example `media_path_not_canonical` while a parent is still a link, refuses too.
+
 ## Error classes and exit codes
 
 | Error | Meaning | Executor exit |
@@ -92,7 +103,7 @@ sink = ExternalStagedVideoSink(media_root, verified_volume_root=volume.root)   #
 
 ## Limits
 
-These are checks, not handles. A process running as the same OS user could swap a directory between the check and its use. The private work area on the internal disk, where ComfyUI writes (rig item 9 in `MEDIA_VIDEO_GENERATION.md`), is the guard against that.
+`verify()` and `require()` are checks, not handles. A process running as the same OS user could swap a directory between the check and its use. A reader that opens first and then calls `require_descriptor` is bound to what it actually opened. Writers still rely on the work area. The private work area on the internal disk, where ComfyUI writes (rig item 9 in `MEDIA_VIDEO_GENERATION.md`), is the guard against that.
 
 ## Tests
 
