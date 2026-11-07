@@ -1119,6 +1119,43 @@ class VideoExecutorTests(unittest.TestCase):
         self.assertEqual(self.sink.registry, set(), "nothing published")
         self.assertEqual(self.store.get(job, "anders")["state"], "running", "left for recovery at the next start")
 
+    def test_a_receipt_database_that_fails_keeps_the_finished_render(self):
+        """Codex #2357 4503721455: the receipt write itself fails (work disk full, database locked
+        past its busy timeout). The job fails, nothing is published, and the finished render stays
+        in the work area for recovery -- never deleted with the staged copy."""
+        real = self.store.record_handoff
+
+        def full_after_the_copy(job_id, instance, record):
+            if record["stage"] == "copied":
+                raise sqlite3.OperationalError("database or disk is full")
+            return real(job_id, instance, record)
+        ex = self.executor()
+        job = self.submit()
+        with patch.object(self.store, "record_handoff", side_effect=full_after_the_copy), \
+                self.assertLogs("kaliv.media.comfy", level="WARNING"):
+            self.assertEqual(ex.step(), "failed")
+        kept = os.listdir(self.dirs["output"])
+        self.assertEqual(len(kept), 1, "the finished render is kept")
+        self.assertEqual(ex.adapter.last_cleanup["kept_for_recovery"], kept)
+        self.assertEqual(self.sink.registry, set(), "nothing published")
+        self.assertEqual(os.listdir(self.sink.staging), [], "the staged copy is gone")
+        self.assertEqual(self.store.get(job, "anders")["state"], "failed")
+        with sqlite3.connect(os.path.join(self.tmp, "jobs.sqlite3")) as db:
+            receipt = json.loads(db.execute("SELECT record FROM image_jobs_handoff WHERE job_id=?", (job,)).fetchone()[0])
+        self.assertEqual((receipt["stage"], receipt["output"]["name"]), ("copying", kept[0]),
+                         "the earlier receipt names the kept file, so C6 can correlate it")
+
+    def test_an_invalid_receipt_still_cleans_the_render_at_once(self):
+        """The other side of 4503721455: a receipt the store refuses as invalid (ImageJobError) is
+        not an infrastructure failure. The job fails and nothing is kept."""
+        ex = self.executor()
+        job = self.submit()
+        with patch.object(self.store, "record_handoff", side_effect=ImageJobError("hand-off record is invalid")):
+            self.assertEqual(ex.step(), "failed")
+        self.assertEqual(self.store.get(job, "anders")["state"], "failed")
+        self.assertEqual(self.sink.registry, set(), "nothing published")
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "refused: cleaned at once")
+
     def test_a_hand_off_that_cannot_be_recorded_fails_the_job_before_any_copy(self):
         ex = self.executor()
         job = self.submit()
