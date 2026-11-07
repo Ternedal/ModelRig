@@ -45,6 +45,8 @@ import uuid
 from pathlib import Path
 from typing import Callable
 
+from .media_generation_contract import is_plain_file_name
+
 
 class ImageJobError(ValueError):
     pass
@@ -81,7 +83,6 @@ def _encode_params(params: object) -> str:
 PROMPT_RETENTION_S = 30 * 24 * 3600
 
 HANDOFF_STAGES = ("copying", "copied")
-_HANDOFF_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _HANDOFF_ASSET = re.compile(r"[A-Za-z0-9_-]{1,128}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 
@@ -94,8 +95,9 @@ def _file_identity(value: object, *, named: bool) -> bool:
     keys = {"name", "dev", "ino", "size"} if named else {"dev", "ino"}
     return (isinstance(value, dict) and set(value) == keys
             and all(_nonnegative_int(value[k]) for k in keys - {"name"})
-            and (not named or (type(value["name"]) is str and bool(_HANDOFF_NAME.fullmatch(value["name"]))
-                               and value["name"] not in (".", ".."))))
+            # The adapter's own rule for its output name, so a render it accepted is never refused
+            # here and then deleted as an explicit refusal (Codex #2357 4504060850).
+            and (not named or is_plain_file_name(value["name"])))
 
 
 def check_handoff_record(record: object) -> dict:
