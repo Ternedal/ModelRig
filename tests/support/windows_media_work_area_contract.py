@@ -62,7 +62,9 @@ def main() -> int:
         return 0
     probe = WorkAreaProbe()
     with tempfile.TemporaryDirectory(prefix="kaliv-work-") as td:
-        base = Path(td)
+        # The runner's %TEMP% can be an 8.3 alias (C:\Users\RUNNER~1\...), which the work area
+        # rightly refuses as not canonical. Every case below starts from the canonical path.
+        base = Path(os.path.realpath(td))
         fs, remote = probe.containing_filesystem(str(base))
         check(fs in ("ntfs", "refs") and remote is False, f"the temp folder's volume is local NTFS/ReFS ({fs}, {remote})")
         check(probe.acl_per_entry, "Windows checks the ACL of every folder and file used")
