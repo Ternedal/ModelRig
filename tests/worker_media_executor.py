@@ -702,6 +702,17 @@ class QueuedExpiryExecutorTests(unittest.TestCase):
             ex.start()
         self.assertTrue(any(e.startswith("expire_failed:") for e in ex.events))
 
+    def test_a_lost_volume_during_housekeeping_stops_the_executor(self):
+        """Best effort covers a locked database, not the store's volume guard: a lost volume or work
+        area found by expiry or purge is exit 75 at once, never logged as expire_failed/purge_failed."""
+        for call in ("expire_queued", "purge_prompts"):
+            with self.subTest(call=call):
+                ex = self.executor([self.image()], start=False)
+                with patch.object(self.store, call, side_effect=ArtifactSinkUnavailable("media_work_area_missing")):
+                    self.assertEqual(ex.run(max_steps=1, idle_sleep=lambda: None), 75)
+                self.assertIn("sink_unavailable:media_work_area_missing", ex.events)
+                self.assertFalse(any(e.startswith(("expire_failed", "purge_failed")) for e in ex.events))
+
 
 def sqlite3_error():
     import sqlite3
