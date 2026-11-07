@@ -955,15 +955,19 @@ private fun ChatScreen(
         }
     }
     // Tap-to-stop (v1.13.0). Until now a voice turn could not be interrupted
-    // at all: barge-in is off by default and uncalibrated. Two mechanisms,
-    // because a turn has two phases with different escape routes:
-    //   voiceJob   -- cancels the coroutine (covers the rig round-trip)
-    //   playbackStop -- a flag playWav's write loop checks between chunks;
-    //                   cancelling a coroutine cannot interrupt the blocking
-    //                   AudioTrack write, so the flag is what actually stops
-    //                   the sound.
+    // at all: barge-in is off by default and uncalibrated. Three mechanisms,
+    // because a turn has phases with different escape routes:
+    //   voiceJob          -- cancels the coroutine
+    //   voiceCancellation -- one per turn. Its stopFlag is the flag playWav's
+    //                        write loop checks between chunks (cancelling a
+    //                        coroutine cannot interrupt the blocking AudioTrack
+    //                        write), and it cancels the turn's own OkHttp call:
+    //                        coroutine cancellation does not interrupt a
+    //                        blocking execute(), so without it the stream kept
+    //                        reading and calling back after Stop (ported from
+    //                        v2.0.15, which main never received).
     var voiceJob by remember { mutableStateOf<Job?>(null) }
-    val playbackStop = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    var voiceCancellation by remember { mutableStateOf<dk.ternedal.modelrig.voice.VoiceTurnCancellation?>(null) }
     var speaking by remember { mutableStateOf(false) }
     var showVoice by remember { mutableStateOf(false) }
     // Skaerm 13: rig-liveness. null = ukendt endnu; loekken auto-retry'er
@@ -1161,8 +1165,13 @@ private fun ChatScreen(
         val conversationAtVoiceStart = convId
         val navigationRevisionAtVoiceStart = voiceNavigationRevision
         val modelAtVoiceStart = currentModel
+        // Per turn: a Stop of this turn can never be undone by the next turn
+        // resetting a shared flag, and every callback below checks it.
+        val cancellation = dk.ternedal.modelrig.voice.VoiceTurnCancellation()
+        voiceCancellation = cancellation
+        val playbackStop = cancellation.stopFlag
         voiceBusy = true; voiceError = null; wasInterrupted = false
-        speaking = false; playbackStop.set(false)
+        speaking = false
         voiceJob = scope.launch {
             // Audio chunks flow from the network reader (producer) to the player
             // (consumer) through this channel. Unlimited: sentences are small and
@@ -1174,6 +1183,17 @@ private fun ChatScreen(
             var transcriptText = ""
             var transcriptShown = false
             var replyIdx = -1
+            // The assistant bubble this turn owns. Every write checks that the
+            // slot still holds it (by identity), so a list that was cleared and
+            // refilled meanwhile -- another conversation -- is never touched.
+            var replyBubble: Msg? = null
+            fun updateOwnReply(update: (Msg) -> Msg?) {
+                val mine = replyBubble ?: return
+                if (messages.getOrNull(replyIdx) !== mine) return
+                val next = update(mine)
+                if (next == null) { messages.removeAt(replyIdx); replyBubble = null }
+                else { messages[replyIdx] = next; replyBubble = next }
+            }
             val replyBuilder = StringBuilder()
             var usedModel: String? = null
             var usedCloud = false
@@ -1187,13 +1207,14 @@ private fun ChatScreen(
             val player = launch(Dispatchers.IO) {
                 for ((bytes, utteranceId) in audioChan) {
                     if (playbackStop.get()) break
-                    speaking = true
+                    if (voiceCancellation === cancellation) speaking = true
                     bodyReporter.report(utteranceId, "started")
                     val cut = dk.ternedal.modelrig.voice.VoiceCapture.playWav(bytes, detector, playbackStop)
                     bodyReporter.report(utteranceId, "ended")
-                    if (cut) { wasInterrupted = true; playbackStop.set(true); break }
+                    // Barge-in ends the turn: stop the audio and close the stream.
+                    if (cut) { wasInterrupted = true; cancellation.stop(); break }
                 }
-                speaking = false
+                if (voiceCancellation === cancellation) speaking = false
             }
             // Poll the barge-in detector at 5 Hz to drive the on-screen RMS meter
             // (liveRms / peakRms). The streaming rewrite has to carry this over
@@ -1213,8 +1234,9 @@ private fun ChatScreen(
                     val b64 = android.util.Base64.encodeToString(wav, android.util.Base64.NO_WRAP)
                     val key = if (voiceUsesCloud) store.cloudKey else null
                     // Snapshot before ASR appends the current turn; do not echo it twice.
+                    // Error bubbles are shown, never sent as history (Msg.error), as on the text path.
                     val voiceHistory = messages.filter { it.role == "user" || it.role == "assistant" }
-                        .filter { !it.streaming && it.text.isNotBlank() }
+                        .filter { !it.streaming && !it.error && it.text.isNotBlank() }
                         .takeLast(12).map { it.role to it.text.take(4000) }
                     ModelRigClient(store.baseUrl ?: "", store.token).voiceConverseStream(
                         b64,
@@ -1223,8 +1245,15 @@ private fun ChatScreen(
                         cloudBaseUrl = if (key != null) "https://ollama.com" else null,
                         cloudKey = key,
                         history = voiceHistory,
-                        registerCall = { c -> activeCall = c },
+                        // The turn's own handle, not the shared text-stream
+                        // activeCall: Stop must close THIS stream, and the
+                        // turn's cleanup must not clear a text call's handle.
+                        registerCall = { c -> cancellation.register(c) },
+                        // After Stop or barge-in nothing from this turn may
+                        // touch the message list: by then it may belong to a
+                        // new conversation ("Ny samtale" clears it in place).
                         onTranscript = { t ->
+                            if (playbackStop.get()) return@voiceConverseStream
                             val tt = t.trim()
                             if (tt.isNotEmpty() && !transcriptShown) {
                                 transcriptShown = true
@@ -1238,31 +1267,36 @@ private fun ChatScreen(
                                 messages.add(Msg("user", tt))
                                 replyIdx = messages.size
                                 // Stemme-turen har ingen turnPlan i scope; defaulten er den rigtige.
-                                messages.add(Msg("assistant", "", streaming = true))
+                                val bubble = Msg("assistant", "", streaming = true)
+                                messages.add(bubble)
+                                replyBubble = bubble
                             }
                         },
                         onChunk = { _, text, chunkB64, utteranceId ->
+                            if (playbackStop.get()) return@voiceConverseStream
                             if (replyBuilder.isNotEmpty()) replyBuilder.append(" ")
                             replyBuilder.append(text.trim())
-                            if (replyIdx in messages.indices) {
-                                messages[replyIdx] = messages[replyIdx].copy(text = stripEmojis(replyBuilder.toString()))
-                            }
+                            updateOwnReply { it.copy(text = stripEmojis(replyBuilder.toString())) }
                             if (chunkB64.isNotEmpty() && !playbackStop.get()) {
                                 val bytes = android.util.Base64.decode(chunkB64, android.util.Base64.DEFAULT)
                                 audioChan.trySend(bytes to utteranceId)
                             }
                         },
                         onDone = { reply, m, cloud ->
+                            if (playbackStop.get()) return@voiceConverseStream
                             usedModel = m; usedCloud = cloud
                             val finalText = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() })
-                            if (replyIdx in messages.indices) {
-                                messages[replyIdx] = messages[replyIdx].copy(
+                            updateOwnReply {
+                                it.copy(
                                     text = finalText,
                                     streaming = false, voiceModel = m, voiceViaCloud = cloud,
                                 )
                             }
                         },
-                        onError = { status, detail -> streamError = status to detail },
+                        onError = { status, detail ->
+                            // A stopped turn has no error to show.
+                            if (!playbackStop.get()) streamError = status to detail
+                        },
                     )
                 }
                 // The network stream is done; close the channel so the player
@@ -1284,10 +1318,7 @@ private fun ChatScreen(
                 // the user turn but skip an empty assistant row, and drop the
                 // empty bubble from the UI.
                 val finalReply = replyBuilder.toString().trim()
-                if (finalReply.isEmpty() && replyIdx in messages.indices &&
-                    messages.getOrNull(replyIdx)?.text.isNullOrBlank()) {
-                    messages.removeAt(replyIdx)
-                }
+                if (finalReply.isEmpty()) updateOwnReply { if (it.text.isBlank()) null else it }
                 // Preserve the original conversation target and do not save a
                 // stopped turn (including when the user navigated away).
                 if (!mayPersistCompletedVoiceTurn(
@@ -1312,33 +1343,51 @@ private fun ChatScreen(
                 }
             } catch (e: CancellationException) {
                 wasInterrupted = true
-                playbackStop.set(true)
+                cancellation.stop()
                 audioChan.close()
                 throw e
             } catch (e: Exception) {
-                voiceError = e.message ?: "stemme-fejl"
+                // Stop and barge-in close OkHttp on purpose; the IOException
+                // that follows is not an error to show in the voice overlay.
+                if (!playbackStop.get()) voiceError = e.message ?: "stemme-fejl"
                 audioChan.close()
             } finally {
-                activeCall = null
+                cancellation.clear()
+                // A stopped stream may have added an assistant bubble before its
+                // final onDone. Never leave it marked as streaming: it would spin
+                // forever and be left out of later history.
+                updateOwnReply { partial ->
+                    when {
+                        !partial.streaming -> partial
+                        partial.text.isBlank() -> null
+                        else -> partial.copy(streaming = false)
+                    }
+                }
                 player.cancel()
                 meter?.cancel()
                 // peakRms survives the turn: it's the measurement of the loudest
                 // barge-in attempt. liveRms resets to 0 (nothing playing now).
                 detector?.let { liveRms = 0.0; peakRms = it.peakRms }
-                speaking = false
-                voiceBusy = false
-                voiceJob = null
+                // Only the current turn resets the shared UI state; a late
+                // finish of a stopped turn must not clear a newer one.
+                if (voiceCancellation === cancellation) {
+                    voiceCancellation = null
+                    speaking = false
+                    voiceBusy = false
+                    voiceJob = null
+                }
             }
         }
     }
 
     /**
-     * Cut the current voice turn short. Order matters: raise the flag first so
-     * a blocking playWav write returns, then cancel the coroutine. Cancelling
+     * Cut the current voice turn short. Order matters: raise the turn's flag
+     * first so a blocking playWav write returns and no callback writes any
+     * more, then close its HTTP stream, then cancel the coroutine. Cancelling
      * first would leave the audio playing until the WAV ran out.
      */
     fun stopVoiceTurn() {
-        playbackStop.set(true)
+        voiceCancellation?.stop()
         voiceJob?.cancel()
     }
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -1460,6 +1509,8 @@ private fun ChatScreen(
         // reloads; the id this screen just minted is already on screen.
         if (openConvId != null && openConvId == convId) return@LaunchedEffect
         voiceNavigationRevision++
+        // A voice turn belongs to the conversation it started in.
+        stopVoiceTurn()
         messages.clear()
         // A pending confirmation belongs to the conversation that proposed it.
         // Leaving it on screen across a switch means approving an action in the
@@ -1866,7 +1917,11 @@ private fun ChatScreen(
             val chatOverflowMenu: @Composable () -> Unit = {
                 DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
                         DropdownMenuItem(text = { Text("Ny samtale") }, onClick = {
-                            overflow = false; messages.clear(); convId = null; onConvChanged(null)
+                            // A running voice turn stays with the old conversation:
+                            // stop it, and bump the revision even when convId is
+                            // already null (the switch effect does not run then).
+                            overflow = false; voiceNavigationRevision++; stopVoiceTurn()
+                            messages.clear(); convId = null; onConvChanged(null)
                         })
                         DropdownMenuItem(text = { Text("Samtaler") }, onClick = { overflow = false; onOpenConversations() })
                         DropdownMenuItem(text = { Text("Modeller") }, onClick = { overflow = false; onOpenModels() })
