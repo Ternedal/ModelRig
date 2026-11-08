@@ -29,6 +29,9 @@ on:
 # upload-artifact v4 -> v5). That change was a guess made BEFORE reading the
 # error and was not the cause. Kept: the deprecation is real. Recorded: the
 # guessing was the mistake.
+#
+# workflow_dispatch is only for rebuilding an EXISTING release tag; version-check
+# refuses any other ref (see there).
   workflow_dispatch:
     inputs:
       force_full_matrix:
@@ -50,18 +53,37 @@ jobs:
     # (worker, backend, android, desktop) and the release tag must all match the
     # VERSION file, or the release fails HERE -- before anything builds. Catches
     # the drift class that once had docs at 1.58.0 while the code shipped 1.58.2.
-    # On workflow_dispatch the ref is a branch, not a tag, so only the sites are
-    # checked then (no tag assertion).
+    #
+    # Only a release tag may run this workflow (Anders, 8 Nov 2026, #2275). Until
+    # then a workflow_dispatch on a BRANCH passed this job without a tag check,
+    # ensure-draft-release made a draft named after the branch, and the release
+    # job published it with --latest. The rig's updater and the phone's in-app
+    # updater both read releases/latest, so one click on the wrong ref would have
+    # shipped an untagged build to both. Every other job needs this one, and the
+    # release job checks the ref again before publishing.
+    # workflow_dispatch stays for rebuilding an EXISTING tag: pick the tag, not a
+    # branch, under "Use workflow from".
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Version sites (+ tag) match VERSION
+      - name: Refuse anything but a release tag
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            python3 scripts/version_tool.py check --tag "${{ github.ref_name }}"
-          else
-            python3 scripts/version_tool.py check
+          if [ "$REF_TYPE" != "tag" ]; then
+            echo "::error::build-and-release runs only on a release tag; this run is on $REF_TYPE '$REF_NAME'. Nothing was built or published."
+            exit 1
           fi
+          if ! [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tag '$REF_NAME' is not a release tag (vX.Y.Z). Nothing was built or published."
+            exit 1
+          fi
+          echo "release tag $REF_NAME"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Version sites and tag match VERSION
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: python3 scripts/version_tool.py check --tag "$REF_NAME"
 
   ensure-draft-release:
     # The ONE place a release may be created -- and only ever as a DRAFT.
@@ -376,7 +398,9 @@ jobs:
     # !failure() && !cancelled(): server-binaries may legitimately be SKIPPED
     # (patch release not touching backend/worker/deploy) -- that must not
     # block the release; an actual failure anywhere still does.
-    if: ${{ !failure() && !cancelled() }}
+    # The ref is checked again here, independently of version-check: this is
+    # the job that publishes, so it must not depend on one guard alone.
+    if: ${{ !failure() && !cancelled() && github.ref_type == 'tag' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
