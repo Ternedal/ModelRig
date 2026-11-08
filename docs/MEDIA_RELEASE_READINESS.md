@@ -2,7 +2,7 @@
 
 Image and video generation on the rig, #2296. This page separates three questions that are easy to blur: what is merged, what is switched on, and what may be released. **A merge is not a release:** every media capability below is default-off, and turning one on is a decision Anders takes per §2. This page records the gates; it does not authorize anything.
 
-**This is a snapshot,** verified against main `6b5ec26e` (8 Nov, night) and the open PRs and branches named below. Merged since the previous snapshot: #2325, #2345 (G5), #2346, #2347 (staged video sink), #2348 (F1), #2349 (G1), #2353 and #2359 (F2: Android reads worker capabilities from the authenticated health route; no media change). When a row says "open", the PR's own exact-head evidence decides; this page does not replace it.
+**This is a snapshot,** verified against main `99ccedc4` (8 Nov, morning) and the open PRs and branches named below. Merged since the previous snapshot: #2358 (the index lock, C8 findings 2 and 3). Before that: #2325, #2345 (G5), #2346, #2347 (staged video sink), #2348 (F1), #2349 (G1), #2353 and #2359 (F2: Android reads worker capabilities from the authenticated health route; no media change). When a row says "open", the PR's own exact-head evidence decides; this page does not replace it.
 
 **Two different "off"s.** Most media modules are **merged but inert**: present in the code, with nothing that starts or calls them. The reachability gate is separate. There are **no media HTTP routes on main**, so no client can submit, list or fetch media.
 
@@ -33,9 +33,9 @@ Image and video generation on the rig, #2296. This page separates three question
 | Android gallery client (#2301, #2302) | `android/` | merged, fixture-driven | needs the routes | inert |
 | Android job model: proposed `kaliv-media-job/v1` parser, Danish texts, polling, drift test against the store | `feat/android-media-job-readiness` (`docs/MEDIA_ANDROID_READINESS.md`) | branch; contract not yet agreed | needs the routes | no UI |
 
-Open PRs and branches on the path to video (#2345, #2346, #2347, #2349 and #2353 are merged):
+Open PRs and branches on the path to video (#2345, #2346, #2347, #2349, #2353 and #2358 are merged):
 - **#2357** G1 wiring and the work area (`feat/media-volume-wiring`), draft. It is prepared, not merged and not enabled. It implements Anders' 6 Nov decision: media is generated in a private work area on the internal disk (C:), with the job database there, and published on the external volume (Z:) (`docs/MEDIA_WORK_AREA.md`).
-- **#2358** the index lock (C8 findings 2 and 3).
+- **#2361** C8's security properties as tests (fixed-seed fuzzing, real OS-lock contention), test-only. One `expectedFailure` remains for the gallery parser's deep-nesting finding; it goes when ChatGPT's parser fix or #2361, whichever lands second, is merged.
 - C6 repair tool (`feat/media-volume-repair`), stacked on the wiring: it also reports and removes work-area residue.
 
 ## 2. Data and migrations
@@ -51,7 +51,7 @@ Every change to stored data so far is **additive**. Nothing is rewritten, rename
 | `image_jobs.error` after a restart | the codes `interrupted_by_restart` and `interrupted_during_publication` instead of sentences; existing rows are **not** rewritten | wiring | Older code writes the sentences again. `public_error()` maps both forms, so the route and Android show the same thing either way |
 | `image_jobs_scrub` | one-row table: a VACUUM is owed once after `secure_delete` was enabled | #2340 | Older code never reads it |
 | Gallery index `gallery-index.json` (`kaliv-media-gallery/v1` items) | none since v1. The writer strips presentation-only fields before writing. | #2313 | — |
-| `.gallery-index.lock` | with the lock fix: a persistent, never-unlinked lock file instead of an `O_EXCL` marker | `fix/gallery-index-os-lock` | **One-way:** the old writer treats a leftover file as held. Once the new writer has run, do not downgrade without deleting the file, with no writer running. |
+| `.gallery-index.lock` | a persistent, never-unlinked lock file instead of an `O_EXCL` marker | #2358 (merged `99ccedc4`) | **One-way:** the old writer treats a leftover file as held. Once the new writer has run, do not downgrade without deleting the file, with no writer running. |
 | `.kaliv-media-volume` marker | new file at the volume root | G1 (#2349, merged) | Older code ignores it |
 | Job database location | moves into the work area on the internal disk (`KALIV_MEDIA_WORK_ROOT`) | wiring (Anders, 6 Nov) | **An operator copy, never automatic:** stop the executor, copy the file and its `-wal`/`-shm` into `<work area>\state`, start, check the queue, then delete the old copy (`docs/MEDIA_WORK_AREA.md`). To go back, copy it back the same way |
 
@@ -81,7 +81,7 @@ Prompts are blanked 30 days after a job finishes (#2340). A rollback does not ch
 | Profiles promoted to `rig-qualified` with the measured limits (C4 R16) | a profile PR citing the manifest | Claude + ChatGPT | after the rig run |
 | ComfyUI backend outbound network blocked (firewall rule) | rig item 7 | **Anders (§2)** | open |
 | Cloud: media never reaches the cloud; chat cloud payload is current-message only (D5); no fallback after Stop (F1) | `CloudCurrentMessageOnlyTest`; #2348 | Claude (F1), ChatGPT (review); Anders approved F1 | D5 implemented and tested. #2348 merged 7 Nov (`8a7f6727`), with the consent fix: the opt-in is read when the rig fails, not before the rig call |
-| Index lock survives a killed writer (C8 findings 2–3) | #2358 | Claude | open, qualifying |
+| Index lock survives a killed writer (C8 findings 2–3) | #2358 | Claude | merged `99ccedc4` (8 Nov); tested as a property in #2361 |
 | C:/Z: layout proven on the rig: private work area, one account for every process, separate disks, low space visible, residue baseline, rollback (R17) | `docs/MEDIA_R17_DEPLOYMENT_PROOF.md` (R17.1–R17.13; R17.10–R17.13 added 7 Nov: lease ACL, moved DB, junction root, unplug, other disk) | Anders runs it; ChatGPT reviews | pending: needs the wiring merged and a new `$QualSha` |
 | Job routes expose `expired` and Android shows it | ChatGPT's route PR; Android branch above | ChatGPT (routes), Claude (Android) | contract proposed (#2275), not agreed |
 | Production signing / release | — | **Anders (§2)** | not requested |
