@@ -2,7 +2,7 @@
 
 Image and video generation on the rig, #2296. This page separates three questions that are easy to blur: what is merged, what is switched on, and what may be released. **A merge is not a release:** every media capability below is default-off, and turning one on is a decision Anders takes per §2. This page records the gates; it does not authorize anything.
 
-**This is a snapshot,** verified against main `10a9afa3` (7 Nov evening) and the open PRs and branches named below. Merged since the previous snapshot: #2325, #2345 (G5), #2346, #2347 (staged video sink), #2348 (F1), #2349 (G1) and #2353. When a row says "open", the PR's own exact-head evidence decides; this page does not replace it.
+**This is a snapshot,** verified against main `6b5ec26e` (8 Nov, night) and the open PRs and branches named below. Merged since the previous snapshot: #2325, #2345 (G5), #2346, #2347 (staged video sink), #2348 (F1), #2349 (G1), #2353 and #2359 (F2: Android reads worker capabilities from the authenticated health route; no media change). When a row says "open", the PR's own exact-head evidence decides; this page does not replace it.
 
 **Two different "off"s.** Most media modules are **merged but inert**: present in the code, with nothing that starts or calls them. The reachability gate is separate. There are **no media HTTP routes on main**, so no client can submit, list or fetch media.
 
