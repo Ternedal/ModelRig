@@ -60,7 +60,7 @@ jobs:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         # bodyrig/ is bundled into the frozen worker (build_identity fingerprints it)
-        run: python scripts/ci_pr_scope.py --scope worker/ --scope bodyrig/ --scope scripts/ --scope deploy/ --scope VERSION --scope backend/ --scope tests/fixtures/piper/
+        run: python scripts/ci_pr_scope.py --scope worker/ --scope bodyrig/ --scope scripts/ --scope deploy/ --scope VERSION --scope backend/ --scope tests/fixtures/piper/ --scope tests/support/check_wav.py
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: steps.scope.outputs.relevant == 'true'
         with:
@@ -94,7 +94,8 @@ jobs:
           # The frozen package must synthesize, not only report TTS as installed (#2275, v2.0.19
           # T4: piper-tts 1.8.0 inside PyInstaller). The voice is the committed offline fixture from
           # tests/support/make_piper_ci_voice.py: Piper's real espeak phonemizer and onnxruntime
-          # run, with no download. Piper is forced so an absent VoiceRig cannot satisfy the check.
+          # run, with no download, and return a 440 Hz tone -- a package smoke test, not speech
+          # quality. Piper is forced so an absent VoiceRig cannot satisfy the check.
           $voices = (Resolve-Path tests/fixtures/piper).Path
           $voice = "kaliv-ci-tone"
           foreach ($file in @("$voice.onnx", "$voice.onnx.json")) {
@@ -144,15 +145,13 @@ jobs:
             } catch {
               throw "frozen Piper synthesis refused (501 = piper missing from the package, 503 = voice not loadable): $($_.ErrorDetails.Message) $($_.Exception.Message)"
             }
-            if (-not (Test-Path $wav)) { throw "frozen Piper synthesis wrote no file: $($spoken | ConvertTo-Json -Compress)" }
-            $bytes = [System.IO.File]::ReadAllBytes($wav)
-            $riff = [System.Text.Encoding]::ASCII.GetString($bytes, 0, 4)
-            $wave = [System.Text.Encoding]::ASCII.GetString($bytes, 8, 4)
-            $audible = @($bytes[44..($bytes.Length - 1)] | Where-Object { $_ -ne 0 }).Count
-            if ($spoken.provider -ne "piper" -or $spoken.voice -ne $voice -or $spoken.sample_rate -ne 22050 -or $spoken.duration -lt 0.1 -or $riff -ne "RIFF" -or $wave -ne "WAVE" -or $audible -lt 1000) {
-              throw "frozen Piper synthesis gave no valid audio: $($spoken | ConvertTo-Json -Compress), header=$riff/$wave, non-zero bytes=$audible"
+            if ($spoken.provider -ne "piper" -or $spoken.voice -ne $voice) {
+              throw "frozen synthesis did not use the Piper fixture voice: $($spoken | ConvertTo-Json -Compress)"
             }
-            Write-Host "frozen worker synthesized $($spoken.duration) s ($($bytes.Length) bytes) with Piper"
+            # Parses the RIFF structure (PCM fmt and data chunks) instead of assuming a 44-byte header.
+            $verdict = python tests/support/check_wav.py $wav --rate 22050 --min-seconds 0.1
+            if ($LASTEXITCODE -ne 0) { throw "frozen Piper synthesis gave no valid audio: $verdict" }
+            Write-Host "frozen worker ran Piper (offline tone fixture, not real speech): $verdict"
             Write-Host "frozen worker started outside the checkout: $expected"
           }
           finally {
