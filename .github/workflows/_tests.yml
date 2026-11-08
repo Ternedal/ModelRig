@@ -751,6 +751,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/support/windows_lease_dir_acl_contract.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/workflow_media_gallery_index_writer.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests/worker_toolhost.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
