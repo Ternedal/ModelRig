@@ -1188,11 +1188,7 @@ private fun ChatScreen(
             // refilled meanwhile -- another conversation -- is never touched.
             var replyBubble: Msg? = null
             fun updateOwnReply(update: (Msg) -> Msg?) {
-                val mine = replyBubble ?: return
-                if (messages.getOrNull(replyIdx) !== mine) return
-                val next = update(mine)
-                if (next == null) { messages.removeAt(replyIdx); replyBubble = null }
-                else { messages[replyIdx] = next; replyBubble = next }
+                replyBubble = dk.ternedal.modelrig.voice.updateOwnedSlot(messages, replyIdx, replyBubble, update)
             }
             val replyBuilder = StringBuilder()
             var usedModel: String? = null
