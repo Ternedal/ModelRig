@@ -9,14 +9,18 @@ on:
   pull_request:
     paths:
       - scripts/Recover-UpdaterV2018.ps1
+      - scripts/Get-UpdaterState.ps1
       - tests/updater_recovery_windows.ps1
+      - tests/updater_state_diagnosis.ps1
       - .github/workflows/updater-v18-recovery-check.yml
       - backend/cmd/modelrig-updater/self_update*.go
   push:
     branches: [main, fix/updater-self-replacement-20261020]
     paths:
       - scripts/Recover-UpdaterV2018.ps1
+      - scripts/Get-UpdaterState.ps1
       - tests/updater_recovery_windows.ps1
+      - tests/updater_state_diagnosis.ps1
       - .github/workflows/updater-v18-recovery-check.yml
       - backend/cmd/modelrig-updater/self_update*.go
 permissions:
@@ -81,3 +85,7 @@ jobs:
           $probe = '${{ inputs.probe_legacy }}' -eq 'true'
           & .\tests\updater_recovery_windows.ps1 -AssetRoot (Join-Path $env:RUNNER_TEMP 'signed-updater-assets') -ProbeReleasedV16:$probe
           if ($LASTEXITCODE -ne 0) { throw 'Native updater recovery checks failed' }
+      - name: Read-only updater diagnosis names every state and changes nothing
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\tests\updater_state_diagnosis.ps1 -AssetRoot (Join-Path $env:RUNNER_TEMP 'signed-updater-assets')
