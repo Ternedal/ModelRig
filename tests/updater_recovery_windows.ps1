@@ -76,6 +76,49 @@ Remove-Item -LiteralPath ((Join-Path $root $name) + '.pending')
 Assert-Refused $root 'pending updater is missing'
 Write-Host 'PASS: bad hash, live owner, unknown lock, unfinished transaction and missing pending all refuse without replacing old updater'
 
+# The next release (#2241 6724065058): every updater up to v2.0.18 strands its successor the same
+# way, so the recovery takes the target as a parameter. The real signed v2.0.16 bytes stand in for
+# "the next release": the swap, the backup and the -version check are the same in either direction.
+# Here v2.0.18 is the stranded updater and v2.0.16 the verified .pending.
+function New-NextFixture([string]$Case) {
+    $root = Join-Path $suite $Case
+    [IO.Directory]::CreateDirectory($root) | Out-Null
+    Copy-Item -LiteralPath $newAsset -Destination (Join-Path $root $name)
+    Copy-Item -LiteralPath $oldAsset -Destination ((Join-Path $root $name) + '.pending')
+    return $root
+}
+$next = @{ ExpectedVersion = '2.0.16'; ExpectedSha256 = $oldHash.ToLowerInvariant() }
+$root = New-NextFixture 'next-release'
+Set-Content -LiteralPath (Join-Path $root 'updater.lock') -Value "pid $deadId started 2026-11-12T10:00:00Z"
+& $script -RigRoot $root -InstallOnly @next
+Assert ((Get-FileHash (Join-Path $root $name) -Algorithm SHA256).Hash -ceq $oldHash) 'The named release was not installed'
+Assert (-not (Test-Path (Join-Path $root 'updater.lock'))) 'Recovery stranded its lock'
+$backups = @(Get-ChildItem (Join-Path $root 'backups') -Filter 'updater-before-v2.0.16-*.exe')
+Assert ($backups.Count -eq 1) 'The backup of the stranded updater is missing or ambiguous'
+Assert ((Get-FileHash $backups[0].FullName -Algorithm SHA256).Hash -ceq $newHash) 'The backup is not the stranded updater'
+Write-Host 'PASS: the named release installed by parameter, with the stranded updater kept as backup'
+
+function Assert-NextRefused([hashtable]$Parameters, [string]$Pattern, [string]$PendingText) {
+    $root = New-NextFixture ('next-refused-' + [Guid]::NewGuid().ToString('N'))
+    if ($PendingText) { Set-Content -LiteralPath ((Join-Path $root $name) + '.pending') -Value $PendingText }
+    $caught = $null
+    try { & $script -RigRoot $root -InstallOnly @Parameters } catch { $caught = $_ }
+    Assert ($null -ne $caught) 'Unsafe recovery was accepted'
+    Assert ($caught.Exception.Message -match $Pattern) ('Unexpected refusal: ' + $caught.Exception.Message)
+    Assert ((Get-FileHash (Join-Path $root $name) -Algorithm SHA256).Hash -ceq $newHash) 'Refused recovery changed the installed updater'
+    Assert (-not (Test-Path (Join-Path $root 'backups'))) 'Refused recovery made a backup'
+    Assert (-not (Test-Path (Join-Path $root 'updater.lock'))) 'Refused recovery left a lock'
+}
+Assert-NextRefused @{ ExpectedVersion = '2.0.19' } 'needs -ExpectedSha256' $null
+Assert-NextRefused @{ ExpectedVersion = '2.0.19'; ExpectedSha256 = 'abc' } 'not a 64-digit' $null
+Assert-NextRefused @{ ExpectedVersion = '2.0'; ExpectedSha256 = $oldHash } 'not X\.Y\.Z' $null
+Assert-NextRefused @{ ExpectedSha256 = $oldHash } 'not the attested v2\.0\.18' $null
+Assert-NextRefused $next 'differs from the verified v2\.0\.16' 'wrong bytes'
+# The installed updater's own hash under another release's name: the hash matches, so nothing is
+# swapped, and the -version check refuses it.
+Assert-NextRefused @{ ExpectedVersion = '2.0.16'; ExpectedSha256 = $newHash } 'did not report version 2\.0\.16' $null
+Write-Host 'PASS: missing or malformed parameters, the wrong .pending and a mislabelled hash are all refused without replacing the updater'
+
 # Execute the old helper's actual PowerShell body while a Windows file handle
 # denies FILE_SHARE_DELETE, then show recovery survives the same transient lock.
 $root = New-Fixture 'legacy-sharing-lock'

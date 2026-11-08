@@ -33,9 +33,9 @@ function Get-Snapshot([string]$Root) {
     }
     return ($lines -join "`n")
 }
-function Test-Case([string]$Root, [string]$Expected) {
+function Test-Case([string]$Root, [string]$Expected, [hashtable]$Target = @{}) {
     $before = Get-Snapshot $Root
-    $result = (& $script -RigRoot $Root -SkipHealth -Json | Out-String) | ConvertFrom-Json
+    $result = (& $script -RigRoot $Root -SkipHealth -Json @Target | Out-String) | ConvertFrom-Json
     Assert ((Get-Snapshot $Root) -ceq $before) "the diagnosis changed files in $Root"
     Assert ($result.Verdict -ceq $Expected) ("expected $Expected, got " + $result.Verdict + " in $Root")
     Write-Host "PASS: $Expected, nothing changed"
@@ -96,4 +96,40 @@ $null = Test-Case $root 'installed_v2018'
 
 $null = Test-Case (New-Fixture 'not-staged' $oldAsset $null) 'not_staged'
 $null = Test-Case (New-Fixture 'empty' $null $null) 'updater_missing'
+
+# The next release (#2241 6724065058). Every updater up to v2.0.18 strands its successor the same
+# way, so the target is a parameter. The real signed v2.0.16 bytes stand in for "the next release"
+# here: what the diagnosis compares (installed, staged, target) is the same in either direction.
+$oldHash = (Get-FileHash -LiteralPath $oldAsset -Algorithm SHA256).Hash.ToLowerInvariant()
+$next = @{ ExpectedVersion = '2.0.16'; ExpectedSha256 = $oldHash }
+$root = New-Fixture 'next-release-stranded' $newAsset $oldAsset
+Set-Content -LiteralPath (Join-Path $root 'updater.lock') -Value "pid $deadId started 2026-11-12T10:00:00Z"
+$r = Test-Case $root 'pending_other_version'
+Assert ($r.Pending.Release -ceq '2.0.16') 'without parameters, the other staged updater is named'
+Assert ($r.Advice -match 'ExpectedSha256') 'and the advice says to pass the next release'
+$r = Test-Case $root 'stranded_v2016_pending' $next
+Assert ($r.Target.Version -ceq '2.0.16' -and $r.Target.Sha256 -ceq $oldHash) 'the target is reported'
+Assert ($r.Advice -match [regex]::Escape("Recover-UpdaterV2018.ps1 -ExpectedVersion 2.0.16 -ExpectedSha256 $oldHash")) 'the advice names the exact recovery call'
+$null = Test-Case (New-Fixture 'next-release-installed' $oldAsset $null) 'installed_v2016' $next
+$root = New-Fixture 'next-release-wrong-bytes' $newAsset $null
+Set-Content -LiteralPath ((Join-Path $root $name) + '.pending') -Value 'wrong bytes'
+$null = Test-Case $root 'pending_unknown' $next
+
+# Refused parameters, the same rules as the recovery: a later release without its hash, a
+# malformed hash or version, and a 2.0.18 hash that is not the attested one.
+$refusals = @(
+    @{ ExpectedVersion = '2.0.19' },
+    @{ ExpectedVersion = '2.0.19'; ExpectedSha256 = 'abc' },
+    @{ ExpectedVersion = '2.0'; ExpectedSha256 = $oldHash },
+    @{ ExpectedSha256 = $oldHash }
+)
+foreach ($bad in $refusals) {
+    $root = New-Fixture ('refused-' + [Guid]::NewGuid().ToString('N')) $newAsset $oldAsset
+    $before = Get-Snapshot $root
+    $caught = $null
+    try { $null = & $script -RigRoot $root -SkipHealth -Json @bad } catch { $caught = $_ }
+    Assert ($null -ne $caught) ('parameters were accepted: ' + ($bad | ConvertTo-Json -Compress))
+    Assert ((Get-Snapshot $root) -ceq $before) 'a refused diagnosis changed files'
+}
+Write-Host 'PASS: the next release is diagnosed by parameter, and bad parameters are refused'
 Write-Host 'PASS: every updater state named, and the diagnosis wrote, moved and deleted nothing'

@@ -5,17 +5,24 @@
 # -SkipHealth, sends GET requests to the local health endpoints.
 #
 # It answers: which release is each installed executable (by SHA-256 against the published
-# SHA256SUMS), is the updater stranded (old executable, verified v2.0.18 .pending, updater.lock),
+# SHA256SUMS), is the updater stranded (old executable, verified target .pending, updater.lock),
 # who holds the lock, and is an updater, a replacement helper or an appliance transaction active.
 # The Verdict says whether Recover-UpdaterV2018.ps1 applies; it never runs it.
 #
+# The target is v2.0.18 by default. After the move to a later release (whose updater the v2.0.18
+# helper can strand the same way, #2241 6724065058), pass that release's version and updater
+# SHA-256 from its attested SHA256SUMS.txt, the same values the recovery takes.
+#
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Get-UpdaterState.ps1
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Get-UpdaterState.ps1 -RigRoot 'D:\Rig\ModelRig' -Json
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\Get-UpdaterState.ps1 -ExpectedVersion 2.0.19 -ExpectedSha256 <64 hex>
 [CmdletBinding()]
 param(
     [string]$RigRoot = 'C:\Rig\ModelRig',
     [switch]$SkipHealth,
-    [switch]$Json
+    [switch]$Json,
+    [string]$ExpectedVersion = '2.0.18',
+    [string]$ExpectedSha256
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -54,16 +61,35 @@ $Known = @{
 $UpdaterName = 'modelrig-updater-windows-x64.exe'
 $V2018Updater = 'a62716e195d5fb4a33f14f045a7e7217ec8d5797f12d1a7eb8bd0db092b41b2d'
 
+# The same parameter rules as Recover-UpdaterV2018.ps1, so the verdict names exactly the call
+# that would apply.
+if ($ExpectedVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { throw "ExpectedVersion '$ExpectedVersion' is not X.Y.Z." }
+if (-not $ExpectedSha256) {
+    if ($ExpectedVersion -cne '2.0.18') { throw "Updater $ExpectedVersion needs -ExpectedSha256 from that release's attested SHA256SUMS.txt." }
+    $ExpectedSha256 = $V2018Updater
+}
+$Target = $ExpectedSha256.Trim().ToLowerInvariant()
+if ($Target -notmatch '^[0-9a-f]{64}$') { throw 'ExpectedSha256 is not a 64-digit SHA-256.' }
+if ($ExpectedVersion -ceq '2.0.18' -and $Target -cne $V2018Updater) { throw 'ExpectedSha256 is not the attested v2.0.18 updater.' }
+$Tag = 'v' + ($ExpectedVersion -replace '\.', '')   # 2.0.18 -> v2018, as in stranded_v2018_pending
+$Recover = 'Recover-UpdaterV2018.ps1'
+if ($ExpectedVersion -cne '2.0.18') { $Recover += " -ExpectedVersion $ExpectedVersion -ExpectedSha256 $Target" }
+
 function Get-Release([string]$Name, [string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return [pscustomobject]@{ Present = $false; Sha256 = $null; Release = $null } }
     $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
     $release = 'unknown'
-    if ($Known.ContainsKey($Name) -and $Known[$Name].ContainsKey($hash)) { $release = $Known[$Name][$hash] }
+    if ($Known.ContainsKey($Name) -and $Known[$Name].ContainsKey($hash)) {
+        $release = $Known[$Name][$hash]
+    } elseif ($Name -ceq $UpdaterName -and $hash -ceq $Target) {
+        $release = $ExpectedVersion
+    }
     return [pscustomobject]@{ Present = $true; Sha256 = $hash; Release = $release }
 }
 
 $RigRoot = [IO.Path]::GetFullPath($RigRoot)
-$state = [ordered]@{ RigRoot = $RigRoot; Executables = [ordered]@{}; Pending = $null; Lock = $null;
+$state = [ordered]@{ RigRoot = $RigRoot; Target = [ordered]@{ Version = $ExpectedVersion; Sha256 = $Target };
+                     Executables = [ordered]@{}; Pending = $null; Lock = $null;
                      Transactions = @(); UpdaterProcesses = @(); HelperProcesses = @(); Health = [ordered]@{};
                      Verdict = $null; Advice = $null }
 
@@ -140,16 +166,21 @@ if ($state.UpdaterProcesses.Count -gt 0) {
     $state.Verdict = 'lock_unrecognized'; $state.Advice = 'updater.lock has unknown content. Do not run the recovery; report this output.'
 } elseif ($state.Lock.Present -and $state.Lock.OwnerAlive) {
     $state.Verdict = 'lock_owner_alive'; $state.Advice = 'The lock owner is alive. Do not run the recovery; report this output.'
-} elseif ($updater.Sha256 -ceq $V2018Updater) {
+} elseif ($updater.Sha256 -ceq $Target -and $pending.Present -and $pending.Sha256 -cne $Target) {
+    # The target is installed, but a DIFFERENT updater is staged: what the next release's automatic
+    # self-update leaves behind when the target's own helper strands it (#2241 6724065058).
+    $state.Verdict = 'pending_other_version'
+    $state.Advice = "Updater $ExpectedVersion is installed, but another updater ($($pending.Release)) is staged as .pending. If it is the next release's updater, run this again with -ExpectedVersion and -ExpectedSha256 from that release's attested SHA256SUMS.txt. Otherwise do not run the recovery; report this output."
+} elseif ($updater.Sha256 -ceq $Target) {
     if ($state.Lock.Present) {
-        $state.Verdict = 'installed_v2018_stale_lock'; $state.Advice = 'Updater 2.0.18 is installed; a dead owner left updater.lock. The recovery would archive the lock, not replace anything.'
+        $state.Verdict = "installed_${Tag}_stale_lock"; $state.Advice = "Updater $ExpectedVersion is installed; a dead owner left updater.lock. $Recover would archive the lock, not replace anything."
     } else {
-        $state.Verdict = 'installed_v2018'; $state.Advice = 'Updater 2.0.18 is installed and not stranded. No recovery needed.'
+        $state.Verdict = "installed_$Tag"; $state.Advice = "Updater $ExpectedVersion is installed and not stranded. No recovery needed."
     }
-} elseif ($pending.Present -and $pending.Sha256 -ceq $V2018Updater) {
-    $state.Verdict = 'stranded_v2018_pending'; $state.Advice = "Stranded: updater $($updater.Release) with the verified 2.0.18 .pending. Recover-UpdaterV2018.ps1 applies."
+} elseif ($pending.Present -and $pending.Sha256 -ceq $Target) {
+    $state.Verdict = "stranded_${Tag}_pending"; $state.Advice = "Stranded: updater $($updater.Release) with the verified $ExpectedVersion .pending. $Recover applies."
 } elseif ($pending.Present) {
-    $state.Verdict = 'pending_unknown'; $state.Advice = 'The .pending file is not the verified 2.0.18 updater. Do not run the recovery; report this output.'
+    $state.Verdict = 'pending_unknown'; $state.Advice = "The .pending file is not the verified $ExpectedVersion updater. Do not run the recovery; report this output."
 } else {
     $state.Verdict = 'not_staged'; $state.Advice = "Updater $($updater.Release) with no .pending: no update was staged. The recovery does not apply."
 }
@@ -158,6 +189,7 @@ if ($Json) {
     [pscustomobject]$state | ConvertTo-Json -Depth 5
 } else {
     Write-Host "RigRoot: $RigRoot"
+    Write-Host "Target updater: $ExpectedVersion ($Target)"
     foreach ($name in $state.Executables.Keys) {
         $e = $state.Executables[$name]
         if ($e.Present) { Write-Host ("  {0}: {1} ({2})" -f $name, $e.Release, $e.Sha256) } else { Write-Host ("  {0}: missing" -f $name) }

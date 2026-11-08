@@ -1,14 +1,35 @@
-# Recovery for the verified v2.0.18 updater stranded by the legacy one-shot helper.
-# The pinned bytes are from the release-bound, cryptographically verified asset
-# built at 5d535a8d391f25677c0e3d85e82eb8a9360c796b. No verification flags change.
+# Recovery for a verified updater stranded as .pending by the legacy one-shot helper.
+# By default the target is v2.0.18, whose bytes are pinned below: the release-bound,
+# cryptographically verified asset built at 5d535a8d391f25677c0e3d85e82eb8a9360c796b.
+#
+# Every updater up to and including v2.0.18 has that helper and runs a self-update by itself after
+# an appliance update, so the move to the NEXT release strands the same way (#2241 6724065058).
+# For that release, pass its version and the updater's SHA-256 from its attested SHA256SUMS.txt
+# (printed in its release notes):
+#   Recover-UpdaterV2018.ps1 -ExpectedVersion 2.0.19 -ExpectedSha256 <64 hex>
+# The checks are the same for every target, and no verification flags change.
 [CmdletBinding()]
 param(
     [string]$RigRoot = 'C:\Rig\ModelRig',
-    [switch]$InstallOnly
+    [switch]$InstallOnly,
+    [string]$ExpectedVersion = '2.0.18',
+    [string]$ExpectedSha256
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$expectedHash = 'a62716e195d5fb4a33f14f045a7e7217ec8d5797f12d1a7eb8bd0db092b41b2d'
+$V2018Updater = 'a62716e195d5fb4a33f14f045a7e7217ec8d5797f12d1a7eb8bd0db092b41b2d'
+if ($ExpectedVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { throw "ExpectedVersion '$ExpectedVersion' is not X.Y.Z. No files changed." }
+if (-not $ExpectedSha256) {
+    if ($ExpectedVersion -cne '2.0.18') {
+        throw "Updater $ExpectedVersion needs -ExpectedSha256 from that release's attested SHA256SUMS.txt. No files changed."
+    }
+    $ExpectedSha256 = $V2018Updater
+}
+$expectedHash = $ExpectedSha256.Trim().ToLowerInvariant()
+if ($expectedHash -notmatch '^[0-9a-f]{64}$') { throw 'ExpectedSha256 is not a 64-digit SHA-256. No files changed.' }
+if ($ExpectedVersion -ceq '2.0.18' -and $expectedHash -cne $V2018Updater) {
+    throw 'ExpectedSha256 is not the attested v2.0.18 updater. No files changed.'
+}
 $RigRoot = [IO.Path]::GetFullPath($RigRoot)
 $live = Join-Path $RigRoot 'modelrig-updater-windows-x64.exe'
 $pending = $live + '.pending'
@@ -47,7 +68,7 @@ if (-not $alreadyInstalled) {
     if (-not (Test-Path -LiteralPath $pending -PathType Leaf)) {
         throw "The verified pending updater is missing: $pending. No files changed."
     }
-    if ((Get-SHA256 $pending) -cne $expectedHash) { throw 'Pending updater differs from the verified v2.0.18 release. No files changed.' }
+    if ((Get-SHA256 $pending) -cne $expectedHash) { throw "Pending updater differs from the verified v$ExpectedVersion release. No files changed." }
 }
 
 $suffix = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + [Guid]::NewGuid().ToString('N')
@@ -71,7 +92,7 @@ try {
     if (-not $alreadyInstalled) {
         $backupDirectory = Join-Path $RigRoot 'backups'
         [IO.Directory]::CreateDirectory($backupDirectory) | Out-Null
-        $backup = Join-Path $backupDirectory ('updater-before-v2.0.18-' + $suffix + '.exe')
+        $backup = Join-Path $backupDirectory ('updater-before-v' + $ExpectedVersion + '-' + $suffix + '.exe')
         $deadline = [DateTime]::UtcNow.AddSeconds(30)
         while ($true) {
             try {
@@ -89,10 +110,10 @@ try {
         }
         Write-Host "Original updater kept at $backup"
     }
-    if ((Get-SHA256 $live) -cne $expectedHash) { throw 'Installed updater SHA256 differs from v2.0.18.' }
+    if ((Get-SHA256 $live) -cne $expectedHash) { throw "Installed updater SHA256 differs from v$ExpectedVersion." }
     $version = (& $live -version | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $version -cne '2.0.18') { throw 'Installed updater did not report version 2.0.18.' }
-    Write-Host 'Updater 2.0.18 installed and verified.'
+    if ($LASTEXITCODE -ne 0 -or $version -cne $ExpectedVersion) { throw "Installed updater did not report version $ExpectedVersion." }
+    Write-Host "Updater $ExpectedVersion installed and verified."
 } finally {
     $guard.Dispose()
     Remove-Item -LiteralPath $lockPath -Force
