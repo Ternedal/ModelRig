@@ -7,6 +7,11 @@ updates:
     directory: /
     schedule: { interval: weekly }
     open-pull-requests-limit: 3
+    groups:
+      # init, autobuild and analyze must run the same CodeQL version, or analysis fails
+      # ("All steps ... must use the same version"); one PR moves all three.
+      codeql-action:
+        patterns: ["github/codeql-action*"]
   - package-ecosystem: pip
     directory: /worker
     schedule: { interval: weekly }

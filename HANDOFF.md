@@ -127,6 +127,46 @@ de gengives IKKE her (A4-005's stopregel gælder ogsaa for denne fil):
     Model-hurtigskift, Tænke-tilstand (riggen har FASER, ikke modellens
     tanker — en tankestrøm ville være attrap). Afventer: Eksport & backup,
     KalivDev.
+18. **Cloud får kun den aktuelle brugerbesked.** Anders besluttede det
+    26/10 i samarbejdsaftale v1.1 og i #2275. Reglen gælder **både tale og
+    tekst**. Den bindende ordlyd er: *"Kun den aktuelle brugerbesked må
+    sendes til cloud. Tidligere voice-historik må ikke medsendes. Politikken
+    skal håndhæves i ModelRig-backend/worker, ikke alene i Android-klienten.
+    Regressionstests skal dokumentere, at historik ikke utilsigtet sendes
+    videre til cloud. Andre datatyper, eksempelvis systeminstruktioner og
+    nødvendige protokolmetadata, skal vurderes særskilt og må ikke bruges til
+    at omgå begrænsningen."*
+
+    - **Håndhævelse:** i workeren for tale (`voice_pipeline`, #2248) og tekst
+      (`_tools_chat_turn`, #2276), og i klienterne (`CloudClient` på Android,
+      `ChatRouter` på desktop).
+    - **Bevis på wire-niveau:** `worker_voice_cloud_history_wire`,
+      `worker_tools_cloud_history_wire`, `CloudCurrentMessageOnlyTest` og
+      `ChatRouterSystemAuthorityTest`. Beslutningen er registreret som D5 i
+      `SECURITY.md`.
+    - **Uændrede grænser, som skal vurderes særskilt:** systemprompts,
+      read-tool-resultater fra samme tur (SECURITY.md åbent punkt 6) og RAG,
+      som kræver D4-samtykke.
+    - **Konsekvens, som er accepteret:** cloud kan ikke besvare
+      opfølgningsspørgsmål, der afhænger af tidligere kontekst i samtalen. Et
+      spørgsmål, der kan stå alene, virker som før. Den fysiske verifikation
+      venter på rig-vinduet (#2274/#2278).
+19. **Claude og ChatGPT koordinerer på GitHub, ikke gennem Anders.**
+    Grundlaget er samarbejdsaftale v1.1 og #2275, som Anders besluttede 26/10.
+    - **Hvor:** #2275 er den overordnede koordinering. Overdragelser skrives
+      som kommentarer på opgavens issue eller PR. Hver agent gennemgår selv
+      sin issue- og PR-kø ved starten af sin næste session, som en bruger har
+      startet. En GitHub-kommentar vækker ikke en session; det er en
+      begrænsning i driften, ikke en del af protokollen.
+    - **Grænser for arbejdet:** højst 5 aktive feature-punkter, delt mellem
+      begge. Labels `owner:claude`/`owner:chatgpt` og
+      `review:claude`/`review:chatgpt`. Ingen direkte push til `main`.
+    - **Kræver Anders' eksplicitte godkendelse:**
+      - produktions-releases og ændring af signing-nøgler;
+      - sikkerhed og ekstern dataoverførsel;
+      - destruktive migrationer og sletning af branches eller historik;
+      - juridiske eller persondata-konsekvenser;
+      - aktivering af slået-fra højrisiko-funktionalitet.
 
 ---
 
@@ -780,7 +820,84 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     tiende ikke dit arbejde. `git status --short` før `git add`, og vær
     særligt mistroisk efter en testkørsel — suiter skriver tilstand.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 3/9)
+## 9. Kø — hvem har bolden (16/7, opdateret 7/11)
+
+### 7/11: PR-scopede compile-jobs, voice-pins landet, #2244 synkroniseret
+
+**[7/11 kl. ~08:00 UTC — status. main = `0431cd9f`. Landet i dag: #2352
+(HANDOFF 6/11), #2342 (piper-tts 1.8.0), #2256 (soundfile 0.14.0), #2354.]**
+
+- **#2354 — PR-scopede compile/package-jobs:** `android-compile`,
+  `desktop-compile` og `windows-worker-package` starter nu med
+  `scripts/ci_pr_scope.py` (PR'ens ændrede stier via compare base…head) og
+  springer de tunge trin over, når diffen ligger uden for jobbets inputs.
+  Scopes: `android/`+`contracts/`, `desktop/`+`contracts/`,
+  `worker/`+`bodyrig/`+`scripts/`+`deploy/`+`VERSION`+`backend/`; workflow-filen
+  og scriptet er altid i scope. Jobbet kører stadig og rapporterer sin
+  required-status (branch protection uændret); push/tag/dispatch kører alt;
+  kan diffen ikke læses (eller er den ved compare-API'ets 300-fil-cap) →
+  fail OPEN. Gate: `tests/workflow_ci_pr_scope.py`. Tre Codex-fund (cap,
+  `bodyrig/`, `contracts/`) er rettet før landing — lektie: led efter inputs
+  UDEN FOR jobbets mappe, før et job indsnævres.
+- **Voice-pins:** piper-tts 1.8.0 og soundfile 0.14.0 på main. API-fladen
+  `voice_tts.py` bruger er identisk; `windows-worker-package` (install +
+  pyinstaller-frys + verify + boot) grøn. Fysisk rest = syntese/optagelse
+  gennem den frosne pakke ved næste release-kandidats Stage B.
+- **#2244 (midchain-2-split):** synkroniseret med main som `18e6c60e`.
+  Første måling af splittet: `midchain-2b` 51 min, `midchain-1` 38, `midchain-3`
+  80 — mod 186 min for den udelte midchain-2 på main `4d6e8bb3`. Landes efter
+  fuld Stage-B med begge kohorter + re-synk.
+- **Søsterrepoer:** BodyRig CI "Test Python" 163 → 115 → 60–75 s (#1379
+  normaler ×96, #1381 eye-valg ×78 m. Python-3.12-kompenseret sum,
+  #1391 xdist `-n 2` på Linux); VisionRig #184 (draft) retter også en latent
+  crash: Starlette 1.x har fjernet `app.add_event_handler()` — ModelRig
+  bruger `app.router.add_event_handler`, som FastAPIs `APIRouter` stadig
+  shimmer, og er ikke ramt.
+- **Lektie (egen, to gange):** lokalt miljø ≠ CI-miljø. Gates må ikke
+  importere PyYAML (findes ikke i workerens testmiljø), og oracle-tests af
+  float-semantik skal køres på hele CI-matricen (3.11 OG 3.12+).
+
+### 6/11: Stage-B kører én gang pr. main-push; RAG-ingest batcher embeddings
+
+**[6/11 kl. ~20:00 UTC — status. main = `4d6e8bb3`. Landet i dag: #2344
+(pydantic), #2343 (gradle-wrapper 9.8.2), #2351, #2350.]**
+
+- **CI-autoritet (#2351):** et push til main startede Stage-B-kæden TRE gange
+  (ci→_tests, agent3-full-diagnostics, exact-head-qualification) for samme sha
+  — målt 58–84 min admission + 6 shards pr. kæde, ingen ekstra dom. Nu er
+  `exact-head-qualification` eneste Stage-B-autoritet for PRs OG main-push;
+  `ci` og `agent3-full-diagnostics` starter kun Stage-B ved manuel
+  `workflow_dispatch`. Release-tags er uændrede (`build-and-release` →
+  `_tests.yml` default-on). Kontrakt: `tests/workflow_test_coverage.py`.
+  Efterslæbet af den gamle tredobling (7 kæder i luften kl. 17:28–17:53)
+  fyldte kontoens runner-kø resten af aftenen — det er sidste gang.
+- **RAG (#2350):** `oc.embed_many()` sender chunks i batches af
+  `MODELRIG_EMBED_BATCH` (default 32) til `/api/embed`; `rag.ingest` bruger
+  den. Atomicitet uændret (alle vektorer før skrivning); kort svar =
+  `OllamaError`; 404/405 → `embed_each` (ét kald pr. chunk, e2e's fake
+  Ollama kører den vej). Gate: `tests/worker_rag_embed_batch.py`. **Rig-
+  gevinsten er IKKE målt** — kør `scripts/rag_benchmark.py` på 10k og sæt
+  ingest-tallet i `RAG_BENCHMARK.md` (før: >35 min). Design i
+  `RAG_DESIGN.md` §4c.
+- **Landingsafvigelse (dokumenteret på hver PR):** #2343/#2351/#2350 blev
+  landet som lineær stack ved fast-forward af main til `4d6e8bb3` på Anders'
+  "Kør", med alle 14 required checks grønne og nul fejlede check-runs, MENS
+  ikke-required Stage-B-kørsler stadig kørte. Reglen "alle check-runs
+  completed" står; afvigelsen var eksplicit og bevidst. REST-PATCH af
+  `refs/heads/main` er blokeret af sessionens proxy — fast-forward sker via
+  `git push origin <sha>:refs/heads/main` (branch protection håndhæver
+  stadig required checks på target-sha).
+- **Lektie (egen):** `tests/workflow_gates_read_code.py` (raw-source-ratchet)
+  fældede første #2350-push, fordi en ny gate læste `ollama_client.py` som
+  tekst. Den gate SKAL med i det lokale kørselssæt før push.
+- **Står til Anders:** #2342 (piper-tts 1.8.0) og #2256 (soundfile 0.14) er
+  pins i `requirements-release-voice.txt` (den validerede 2.0.15-stemmepakke)
+  — ikke landet. #2262 ligner #2263 tematisk, men tilføjer en anden fil —
+  hans disposition.
+- **Søsterrepoer 6/11:** BodyRig #1379 + #1381 (vektoriseret normaler/eye-
+  valg, byte-identisk; suite 41→22 s), KalivNexus #45/#47/#48, LanguageRig
+  #3, Dependabot i syv repoer; VoiceRig #30/#32/#33 og VisionRig #182/#183 er
+  drafts, fordi deres `main` er frosne V1-kandidater.
 
 **[3/9 kl. 07:00 UTC — status. main = `#844`-landing, VERSION 2.0.13. Frosset
 kandidat uændret (`4f80693f`). 2/9-aftenblokken nedenfor er historik.]**

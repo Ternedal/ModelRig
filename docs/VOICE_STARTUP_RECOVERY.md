@@ -12,8 +12,10 @@ proved the old v2.0.16 backend, worker and supervisor healthy again. These logs
 establish interruption during startup, not the eventual outcome of an
 uninterrupted worker boot.
 
-The v2.0.18 startup policy gives a live child three minutes before its first
-healthy response. A crash still triggers immediate recovery. The first healthy
+The v2.0.18 startup policy originally gave a live child three minutes before
+its first healthy response. The subsequent cold-start fix (#2251) raises the
+default grace to four minutes and thirty seconds, still below the updater's
+five-minute per-service health deadline. A crash still triggers immediate recovery. The first healthy
 response ends grace, so later failures keep the existing three-poll recovery
 rule. A never-ready child receives the normal failure count after grace expires.
 `-startup-grace` changes the duration; zero retains the earlier behavior.

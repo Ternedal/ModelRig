@@ -207,6 +207,14 @@ gengæld atomiske i samme transaktion (T-014).
 - **D4b — auto-cloud-fallback (LUKKET som sikker default, 1.58.19):** begge klienter falder kun
   tilbage til cloud når `autoCloudFallback`/`autoFallback` eksplicit er slået til; et billede sendes
   aldrig via fallback. Synligt opt-in-UI + "spørg før cloud"-kort udestår (kommer med #2a).
+- **D5 — samtalehistorik→cloud (LUKKET, Anders 2026-10-26, #2275):** kun den aktuelle
+  brugerbesked må nå Ollama Cloud — for tekst som for voice. Tidligere ture bliver lokale.
+  Håndhæves hvor egress sker: i workeren for alt der går gennem riggen (`/tools/chat*`,
+  `/voice/converse*`), og i klienternes eneste direkte cloud-veje (Android `CloudClient`,
+  desktop `ChatRouter`). Instruktioner (system-prompt) sendes stadig; de er ikke samtale.
+  Konsekvens: en cloud-model kan ikke svare på opfølgende spørgsmål, der bygger på tidligere
+  ture. Tests: `tests/worker_tools_cloud_history_wire.py`, `tests/worker_voice_cloud_history_wire.py` (#2248),
+  `CloudCurrentMessageOnlyTest`, `ChatRouterSystemAuthorityTest`.
 - **Cloud-read egress (ÅBEN — men nu klassificeret, 1.58.57):** read-tools kræver stadig ingen
   godkendelse for cloud-modeller. Det nye er, at det ikke længere er usagt: hvert tool har en
   `sensitivity`, der siger hvor dets **resultat** må rejse (ortogonalt på `risk`, som styrer hvad

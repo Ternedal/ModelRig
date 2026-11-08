@@ -1,3 +1,4 @@
+import java.io.File
 import java.util.Properties
 
 plugins {
@@ -6,13 +7,29 @@ plugins {
     id("io.github.takahirom.roborazzi")
 }
 
-// Stable signing identity across build machines/sessions. Keystore + properties
-// live in the (private) repo on purpose: this is a personal, sideloaded app —
-// the win is that every APK, from any session or CI, installs over the previous
-// one. Keep a copy of the password in Notion Secrets as backup.
+// The historical signing identity is exposed in public Git history.
+// This compatibility fallback is temporary: see security migration issue #2269.
+// Prefer an external properties file, and never log its contents.
+val externalSigningProperties = providers.environmentVariable("KALIV_SIGNING_PROPERTIES_FILE").orNull
+val signingPropertiesFile = externalSigningProperties?.let { File(it) }
+    ?: rootProject.file("signing/keystore.properties")
+if (externalSigningProperties != null) {
+    require(signingPropertiesFile.isFile) { "KALIV_SIGNING_PROPERTIES_FILE must point to an existing file" }
+}
 val ksProps = Properties().apply {
-    val f = rootProject.file("signing/keystore.properties")
-    if (f.exists()) f.inputStream().use { load(it) }
+    if (signingPropertiesFile.isFile) signingPropertiesFile.inputStream().use { load(it) }
+}
+val signingKeystorePath = providers.environmentVariable("KALIV_SIGNING_KEYSTORE_FILE").orNull
+if (signingKeystorePath != null) {
+    require(externalSigningProperties != null) { "External signing keystore requires KALIV_SIGNING_PROPERTIES_FILE" }
+}
+if (externalSigningProperties != null) {
+    require(signingKeystorePath != null) { "External signing properties require KALIV_SIGNING_KEYSTORE_FILE" }
+}
+val signingKeystoreFile = signingKeystorePath?.let { File(it) }
+    ?: rootProject.file(ksProps.getProperty("storeFile") ?: "signing/modelrig.keystore")
+if (signingKeystorePath != null) {
+    require(signingKeystoreFile.isFile) { "KALIV_SIGNING_KEYSTORE_FILE must point to an existing file" }
 }
 
 android {
@@ -36,7 +53,7 @@ android {
 
     signingConfigs {
         create("modelrig") {
-            storeFile = rootProject.file(ksProps.getProperty("storeFile") ?: "signing/modelrig.keystore")
+            storeFile = signingKeystoreFile
             storePassword = ksProps.getProperty("storePassword")
             keyAlias = ksProps.getProperty("keyAlias") ?: "modelrig"
             keyPassword = ksProps.getProperty("keyPassword")
@@ -79,6 +96,11 @@ android.testOptions {
     unitTests {
         // Robolectric skal bruge rigtige ressourcer (temaer, fonte) til screenshots.
         isIncludeAndroidResources = true
+        // Robolectric 4.17 kalder jdk.internal.access.SharedSecrets fra
+        // AndroidInterceptors (FileDescriptor.setInt$), som JDK 17+ ikke
+        // eksporterer til unnamed modules. Uden flaget fejler alle screenshot-
+        // tests med IllegalAccessException (#1866). Gaelder kun test-JVM'en.
+        all { it.jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED") }
     }
 }
 
@@ -100,10 +122,10 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.4.2")
     implementation("androidx.camera:camera-view:1.4.2")
     testImplementation("junit:junit:4.13.2")
-    // Screenshot-regression: Robolectric 4.16 (SDK 36 + JDK 21) + Roborazzi.
-    testImplementation("org.robolectric:robolectric:4.16.1")
-    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.73.0")
-    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.73.0")
+    // Screenshot-regression: Robolectric 4.17 (SDK 36 + JDK 21) + Roborazzi.
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.77.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.77.0")
     testImplementation(platform("androidx.compose:compose-bom:2026.08.00"))
     testImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("androidx.test.ext:junit:1.3.0")
@@ -114,7 +136,7 @@ dependencies {
     testImplementation("org.json:json:20260814")
     // Scheduler client contracts need a real HTTP boundary without relying on
     // JDK-only com.sun.net.httpserver, which is absent from AGP's test compiler.
-    testImplementation("com.squareup.okhttp3:mockwebserver:5.5.0")
+    testImplementation("com.squareup.okhttp3:mockwebserver:5.5.1")
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     implementation(composeBom)
     implementation("androidx.compose.material3:material3")
@@ -122,7 +144,14 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
-    implementation("com.squareup.okhttp3:okhttp:5.5.0")
+    implementation("com.squareup.okhttp3:okhttp:5.5.1")
+    // Videoafspilning i mediegalleriet (ModelRig #2275, godkendt af Anders
+    // 28/10-2026): samme bibliotek som SkyPlayer (Media3/ExoPlayer). OkHttp-
+    // modulet saa video gaar gennem galleriets egen klient: token kun til den
+    // parrede rig, ingen redirects, Range-streaming. Ingen disk-cache.
+    implementation("androidx.media3:media3-exoplayer:1.11.1")
+    implementation("androidx.media3:media3-datasource-okhttp:1.11.1")
+    implementation("androidx.media3:media3-ui:1.11.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     // Android 12+ splash. Without this the app only set windowBackground, which
     // the system splash overrides on 12+ -- so on a Pixel there was effectively

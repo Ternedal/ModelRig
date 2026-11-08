@@ -309,7 +309,9 @@ card says who asked: *"Cloud-modellen foreslår: …"*
 
 **Voice** — audio never leaves the house. ASR (faster-whisper, CUDA) and TTS
 (Piper, Danish) always run on the rig. Only the transcribed question may go to
-the cloud, and only with the toggle on.
+the cloud, and only with the toggle on. Earlier voice turns stay on the rig: the
+worker drops them for any cloud request, whatever the client sends
+(`tests/worker_voice_cloud_history_wire.py` checks the body that leaves).
 
 **Agent 4** — the campaign/read stack now extends beyond the original A4-14
 summary. The foundation, product-read and immutable snapshot-authority software

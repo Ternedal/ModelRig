@@ -105,6 +105,48 @@ def run():
         check("Held og lykke" in result["reply"], "returned reply is the full text")
         check(len(result["chunks"]) == 3, "returned dict still carries all chunks")
 
+        # Cloud permission is per spoken transcript, not authorization to
+        # export the prior local conversation to a separate LLM provider.
+        captured = []
+        original_stream = oc.chat_stream
+        async def record_stream(messages, model=None, base_url=None, api_key=None):
+            captured.append((messages, base_url))
+            async for data in original_stream(
+                messages, model=model, base_url=base_url, api_key=api_key
+            ):
+                yield data
+        oc.chat_stream = record_stream
+        try:
+            history = [
+                {"role": "user", "content": "blå elefant"},
+                {"role": "assistant", "content": "Jeg husker det."},
+                {"role": "system", "content": "NOT AN AUTHORIZED SYSTEM INSTRUCTION"},
+            ]
+            asyncio.run(vp.converse(
+                in_wav, language="da", out_dir=tmp, history=history
+            ))
+            check(captured[-1] == ([
+                {"role": "user", "content": "blå elefant"},
+                {"role": "assistant", "content": "Jeg husker det."},
+                {"role": "user", "content": "hvad er klokken"},
+            ], None), "local voice retains only allowed prior chat roles")
+            asyncio.run(vp.converse(
+                in_wav, language="da", out_dir=tmp, history=history,
+                llm_base_url="https://ollama.com", llm_api_key="test-only",
+            ))
+            check(captured[-1] == ([
+                {"role": "user", "content": "hvad er klokken"},
+            ], "https://ollama.com"), "cloud receives current transcript only")
+            asyncio.run(vp.converse(
+                in_wav, language="da", out_dir=tmp, history=history,
+                llm_base_url="https://ollama.com",
+            ))
+            check(captured[-1][0] == [
+                {"role": "user", "content": "hvad er klokken"},
+            ], "cloud URL alone also blocks earlier local history")
+        finally:
+            oc.chat_stream = original_stream
+
         # Backward compat: calling without callbacks must not raise.
         restore2 = _install_stubs(deltas)
         try:

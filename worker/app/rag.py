@@ -95,15 +95,25 @@ async def ingest(store: DocStore, documents: list[dict],
     rolls back as a unit."""
     cleared: list[str] = []
     seen: set[str] = set()
-    rows: list[tuple[str, list[float], str | None, int]] = []
+    pending: list[tuple[str, str | None, int]] = []
     for d in documents:
         source = d.get("source")
         if source and source not in seen:
             seen.add(source)
             cleared.append(source)
         for idx, piece in enumerate(chunk_text(d.get("text") or "", chunk_size, overlap)):
-            emb = await oc.embed(piece)
-            rows.append((piece, emb, source, idx))
+            pending.append((piece, source, idx))
+    # BATCHED: all chunks of the call go to Ollama in a few /api/embed requests
+    # instead of one round trip per chunk (the measured ingest bottleneck). The
+    # atomicity above is unchanged -- nothing is written until every vector exists.
+    embeddings = await oc.embed_many([piece for piece, _, _ in pending])
+    if len(embeddings) != len(pending):
+        raise oc.OllamaError(f"embedding count mismatch: {len(embeddings)} vectors "
+                             f"for {len(pending)} chunks")
+    rows: list[tuple[str, list[float], str | None, int]] = [
+        (piece, emb, source, idx)
+        for (piece, source, idx), emb in zip(pending, embeddings)
+    ]
     if not rows and not cleared:
         return 0, 0
     replaced = store.apply_ingest(cleared, rows)

@@ -22,15 +22,14 @@ from __future__ import annotations
 
 import http.client
 import ipaddress
-import os
 import socket
 import ssl
-import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol, Sequence
 from urllib.parse import urlsplit
 
+from .credential_file import CredentialFileRefused, read_private_credential
 from .data_sharing import DataSharingLedger
 from .home_assistant_state_contract import HomeAssistantStateEvidence, parse_home_assistant_state
 from .home_rig_connector_contract import (
@@ -172,21 +171,24 @@ def _resolve_connection(connection: HomeAssistantConnection, resolver: Resolver)
     return scheme, host, port, normalized[0]
 
 
+_REFUSAL_MESSAGES = {
+    "unavailable": "file is unavailable",
+    "not_regular": "path must be a regular file",
+    "size": "file size is invalid",
+    "permissions": "file permissions are too broad",
+    "unverifiable": "file permissions could not be verified",
+    "read": "file could not be read",
+}
+
+
 def _load_bearer(path: Path) -> str:
+    # One rule for every bearer loader (docs/T038_WINDOWS_TOKEN_ACL_DESIGN.md):
+    # POSIX mode bits, or on Windows the file's owner and DACL, judged on the
+    # same open handle the bytes are read from.
     try:
-        info = path.stat()
-    except OSError as exc:
-        raise HomeAssistantTransportError("Home Assistant credential file is unavailable") from exc
-    if not stat.S_ISREG(info.st_mode):
-        raise HomeAssistantTransportError("Home Assistant credential path must be a regular file")
-    if info.st_size < 1 or info.st_size > _MAX_BEARER_BYTES + 2:
-        raise HomeAssistantTransportError("Home Assistant credential file size is invalid")
-    if os.name == "posix" and (info.st_mode & 0o077):
-        raise HomeAssistantTransportError("Home Assistant credential file permissions are too broad")
-    try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        raise HomeAssistantTransportError("Home Assistant credential file could not be read") from exc
+        raw = read_private_credential(path, max_bytes=_MAX_BEARER_BYTES + 2)
+    except CredentialFileRefused as exc:
+        raise HomeAssistantTransportError(f"Home Assistant credential {_REFUSAL_MESSAGES[exc.kind]}") from None
     token_bytes = raw[:-2] if raw.endswith(b"\r\n") else raw[:-1] if raw.endswith(b"\n") else raw
     if raw not in {token_bytes, token_bytes + b"\n", token_bytes + b"\r\n"}:
         raise HomeAssistantTransportError("Home Assistant credential file format is invalid")

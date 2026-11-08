@@ -17,6 +17,7 @@ import dk.ternedal.modelrig.ui.Agent3TaskScreen
 import dk.ternedal.modelrig.ui.PersonsScreen
 import dk.ternedal.modelrig.ui.Agent3ValidationScreen
 import dk.ternedal.modelrig.ui.AppEntryUi
+import dk.ternedal.modelrig.ui.MediaGalleryScreen
 import dk.ternedal.modelrig.ui.ScheduleScreen
 import dk.ternedal.modelrig.ui.theme.ModelRigTheme
 
@@ -49,6 +50,9 @@ class MainActivity : ComponentActivity() {
         val openAgent3Capabilities = intent?.getBooleanExtra(EXTRA_AGENT3_CAPABILITIES, false) == true
         val openAgent3Replan = intent?.getBooleanExtra(EXTRA_AGENT3_REPLAN, false) == true
         val openAgent3Review = intent?.getBooleanExtra(EXTRA_AGENT3_REVIEW, false) == true
+        // Developer-only ADB entry while kaliv-media-gallery/v1 has no backend
+        // on main (ModelRig #2275). Deliberately no kaliv:// link or shortcut.
+        val openMediaGallery = intent?.getBooleanExtra(EXTRA_MEDIA_GALLERY, false) == true
         // kaliv://pair?url=...&code=... — parseren er fail-closed; et ugyldigt
         // link giver null og dermed helt almindelig opstart.
         val pairingLink = dk.ternedal.modelrig.net.PairingLink.parse(intent?.data?.toString())
@@ -86,6 +90,12 @@ class MainActivity : ComponentActivity() {
                     val store = remember { TokenStore(this) }
                     ModelRigTheme(dark = store.darkMode) {
                         PersonsScreen(store = store, onClose = { finish() })
+                    }
+                }
+                openMediaGallery -> {
+                    val store = remember { TokenStore(this) }
+                    ModelRigTheme(dark = store.darkMode) {
+                        MediaGalleryScreen(store = store, onClose = { finish() })
                     }
                 }
                 openAgent3Task -> {
@@ -166,5 +176,6 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_AGENT3_CAPABILITIES = "dk.ternedal.modelrig.extra.AGENT3_CAPABILITIES"
         const val EXTRA_AGENT3_REPLAN = "dk.ternedal.modelrig.extra.AGENT3_REPLAN"
         const val EXTRA_AGENT3_REVIEW = "dk.ternedal.modelrig.extra.AGENT3_REVIEW"
+        const val EXTRA_MEDIA_GALLERY = "dk.ternedal.modelrig.extra.MEDIA_GALLERY"
     }
 }
