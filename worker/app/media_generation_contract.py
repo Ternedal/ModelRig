@@ -20,7 +20,14 @@ ARTIFACT_TYPES: Mapping[str, str] = {"image/png": ".png", "video/mp4": ".mp4"}
 
 MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
 
-MAX_FILE_NAME = 255  # characters; no NTFS or ext4 file name is longer
+MAX_FILE_NAME = 255  # UTF-16 code units: NTFS's limit for one name (ext4's is 255 UTF-8 bytes)
+
+# Characters Win32 refuses in a file name, besides control characters.
+_WINDOWS_FORBIDDEN = frozenset('<>:"/\\|?*')
+# Names Win32 resolves to a device rather than a file, also with any extension ("CON.mp4") and
+# in any case. The superscript digits are reserved too.
+_WINDOWS_DEVICES = frozenset({"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+                             | {f"{p}{d}" for p in ("COM", "LPT") for d in "0123456789¹²³"})
 
 
 def is_plain_file_name(name: object) -> bool:
@@ -28,12 +35,19 @@ def is_plain_file_name(name: object) -> bool:
     accepted: the video adapter's output and the hand-off receipt that records it, so a render the
     adapter accepts is never lost to a receipt that refuses its name (Codex #2357 4504060850).
 
-    A str of 1-255 characters, not "." or "..", with no path separator, no drive colon, no
-    control character and no unpaired surrogate (which SQLite cannot store). Spaces and any
-    other Unicode are fine: a workflow may name its output "rød drage.mp4"."""
-    return (type(name) is str and 0 < len(name) <= MAX_FILE_NAME and name not in (".", "..")
-            and not any(c in "/\\:" or ord(c) < 0x20 or 0x7f <= ord(c) <= 0x9f or 0xd800 <= ord(c) <= 0xdfff
-                        for c in name))
+    A str of 1-255 UTF-16 code units, not "." or "..", with no control character, no unpaired
+    surrogate (SQLite cannot store one) and nothing Win32 would read as other than this one name in
+    this one directory (ChatGPT #2357 6716735710): no `< > : " / \\ | ? *`, no trailing space or
+    dot (Win32 strips them, so "x.mp4." opens "x.mp4"), and no device name (CON, NUL, COM1, ...).
+    Spaces and any other Unicode are fine: a workflow may name its output "rød drage.mp4"."""
+    if type(name) is not str or not name or name in (".", "..") or name[-1] in " .":
+        return False
+    if any(c in _WINDOWS_FORBIDDEN or ord(c) < 0x20 or 0x7f <= ord(c) <= 0x9f or 0xd800 <= ord(c) <= 0xdfff
+           for c in name):
+        return False
+    if len(name.encode("utf-16-le")) // 2 > MAX_FILE_NAME:
+        return False
+    return name.split(".", 1)[0].rstrip(" ").upper() not in _WINDOWS_DEVICES
 
 
 class GenerationError(ValueError):

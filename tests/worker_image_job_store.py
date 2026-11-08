@@ -399,7 +399,11 @@ class HandoffReceiptTests(unittest.TestCase):
             "not a dict",
         ] + [{"stage": "copying", "output": {**self.OUTPUT, "name": name}}
              for name in ("", ".", "a\\b.mp4", "c:b.mp4", "a\nb.mp4", "a\x00b.mp4", "a\x7fb.mp4", "a\x9fb.mp4",
-                          "a\udcffb.mp4", "a" * 256, 7, None)]
+                          "a\udcffb.mp4", "a" * 256, 7, None,
+                          # Windows (ChatGPT #2357 6716735710): devices, Win32-refused characters,
+                          # a trailing dot or space, more than 255 UTF-16 code units
+                          "CON.mp4", "nul", "Com9.mp4", "LPT³.mp4", "CONIN$", "prn .x.mp4", 'a"b.mp4',
+                          "a<b", "a>b", "a|b", "a?b", "a*b", "x.mp4.", "x.mp4 ", "🐉" * 128, "ab" + "🐉" * 127)]
         for record in bad:
             with self.subTest(record=record), self.assertRaises(ImageJobError):
                 self.store.record_handoff(job, A1, record)
@@ -411,7 +415,8 @@ class HandoffReceiptTests(unittest.TestCase):
         """Codex #2357 4504060850: a workflow may name its output with spaces or any Unicode. The
         receipt keeps the exact name (C6 finds the work-area file by it), stored as JSON."""
         job = self.claimed()
-        for name in ("rød drage.mp4", "  spaces  .mp4", "_x.mp4", ".x.mp4", "日本語 🐉.mp4", "a" * 255):
+        for name in ("rød drage.mp4", "  spaces  .mp4", "_x.mp4", ".x.mp4", "日本語 🐉.mp4", "a" * 255,
+                     "🐉" * 127 + "a", "console.mp4", "com10.mp4", "nul_x.mp4", "lpt", "CON_old.mp4"):
             with self.subTest(name=name):
                 receipt = {"stage": "copying", "output": {**self.OUTPUT, "name": name}}
                 self.assertTrue(self.store.record_handoff(job, A1, receipt))
