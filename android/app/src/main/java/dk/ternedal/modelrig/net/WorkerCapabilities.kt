@@ -3,7 +3,13 @@ package dk.ternedal.modelrig.net
 import org.json.JSONObject
 
 /**
- * Hvad den TILSLUTTEDE worker faktisk kan — riggens svar på `GET /capabilities`.
+ * Hvad den TILSLUTTEDE worker faktisk kan: workerens `capabilities`-objekt.
+ *
+ * Telefonen henter det via backendens Bearer-beskyttede `GET /api/v1/health/full`, som
+ * proxier workerens `/health/full`; dens `capabilities` er det samme objekt som workerens
+ * `/capabilities`. Backenden har ingen `/capabilities`-rute, så det gamle kald fik altid 404
+ * og dermed [UNKNOWN] (C5 F2, #2275). En egen rute ville kræve en ændring af
+ * `backend/internal/httpapi/server.go`, som er bundet af DC-L16-inventaret.
  *
  * Formålet er døde-knapper-princippet: en flade må ikke love noget riggen ikke
  * kan. Den udgivne core-worker sendes UDEN ASR/TTS/PDF/DOCX/PPTX, så en telefon
@@ -81,6 +87,21 @@ class WorkerCapabilities private constructor(
                 if (v is Boolean) out[key] = v
             }
             return if (out.isEmpty()) UNKNOWN else WorkerCapabilities(out)
+        }
+
+        /**
+         * Læser `capabilities` ud af et `/health/full`-svar. Kun det indre objekt tæller:
+         * top-niveauets `ok` og andre booleans er ikke evner. Mangler objektet (en ældre
+         * worker), eller er svaret ulæseligt, giver det [UNKNOWN], ligesom [parse].
+         */
+        fun fromHealthFull(body: String?): WorkerCapabilities {
+            if (body.isNullOrBlank()) return UNKNOWN
+            val inner = try {
+                JSONObject(body).optJSONObject("capabilities")
+            } catch (_: Exception) {
+                return UNKNOWN
+            } ?: return UNKNOWN
+            return parse(inner.toString())
         }
     }
 }
