@@ -91,6 +91,21 @@ jobs:
           $env:MODELRIG_WORKER_HOST = "127.0.0.1"
           $env:MODELRIG_WORKER_PORT = "8099"
           $env:MODELRIG_OLLAMA_URL = "http://127.0.0.1:9"
+          # A real Piper voice, so the frozen package must synthesize, not only report TTS as
+          # installed (#2275, v2.0.19 T4: piper-tts 1.8.0 inside PyInstaller). Piper is forced so
+          # an absent VoiceRig cannot satisfy the check.
+          $voices = Join-Path $env:RUNNER_TEMP "piper-voices"
+          New-Item -ItemType Directory -Path $voices -Force | Out-Null
+          $voice = "da_DK-talesyntese-medium"
+          foreach ($attempt in 1..3) {
+            python -m piper.download_voices --download-dir $voices $voice
+            if ($LASTEXITCODE -eq 0 -and (Test-Path (Join-Path $voices "$voice.onnx"))) { break }
+            if ($attempt -eq 3) { throw "Piper voice download failed" }
+            Start-Sleep -Seconds 10
+          }
+          $env:KALIV_TTS_VOICES_DIR = $voices
+          $env:KALIV_TTS_VOICE = $voice
+          $env:KALIV_TTS_PROVIDER = "piper"
           $worker = Start-Process -FilePath $exe -WorkingDirectory $env:RUNNER_TEMP -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
           try {
             $health = $null
@@ -125,6 +140,14 @@ jobs:
             $asr = Invoke-RestMethod http://127.0.0.1:8099/voice/asr/status -TimeoutSec 10
             $tts = Invoke-RestMethod http://127.0.0.1:8099/voice/tts/status -TimeoutSec 10
             if ($asr.available -ne $true -or $tts.available -ne $true) { throw "frozen voice providers are unavailable" }
+            $wav = Join-Path $env:RUNNER_TEMP "frozen-tts.wav"
+            $body = @{ text = "Hej fra Kaliv."; out_path = $wav } | ConvertTo-Json
+            $spoken = Invoke-RestMethod -Method Post http://127.0.0.1:8099/voice/tts/synthesize -ContentType "application/json" -Body $body -TimeoutSec 120
+            $header = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($wav), 0, 4)
+            if ($spoken.provider -ne "piper" -or $spoken.voice -ne $voice -or $spoken.duration -le 0 -or $header -ne "RIFF" -or (Get-Item $wav).Length -lt 10000) {
+              throw "frozen Piper synthesis failed: $($spoken | ConvertTo-Json -Compress)"
+            }
+            Write-Host "frozen worker synthesized $($spoken.duration) s of speech with $voice"
             Write-Host "frozen worker started outside the checkout: $expected"
           }
           finally {
