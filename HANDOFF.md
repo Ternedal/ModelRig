@@ -401,6 +401,14 @@ halv release og lignede en hel. Flowet nu:
    public release tilbage til draft). Build-jobs uploader; release-jobbet
    verificerer asset-listen og publicerer **som sidste step**
    (`--draft=false --latest`).
+   **Kun et release-tag (`vX.Y.Z`) kan køre workflowet** (8/11-2026, #2275).
+   Indtil da kunne en `workflow_dispatch` på en gren publicere en release med
+   grenens navn som `--latest`, og den ville nå både riggen og telefonen.
+   - `version-check` stopper nu alt andet end et release-tag, og release-jobbet
+     tjekker ref'en igen.
+   - Manuel dispatch er kun til at genbygge et EKSISTERENDE tag: vælg tagget
+     under "Use workflow from", ikke en gren.
+   - Kontrakttesten er `tests/workflow_release_tag_guard.py`.
 7. Poll autentificeret med bounded sleeps (≤250s):
    `?head_sha=<full-sha>` for ci/codeql, `?branch=vX.Y.Z` for release-runnet.
    **Mellemlæsninger kan vise 5 assets — det er upload-racet, ikke en fejl.**
