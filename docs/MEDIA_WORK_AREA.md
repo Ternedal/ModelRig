@@ -123,7 +123,7 @@ A Linux name check does not prove a Windows name safe (ChatGPT #2357 6716735710)
 **On a refusal:**
 - The adapter fails the job with a `GenerationError`.
 - No byte reaches Z:, and no receipt names the file.
-- Cleanup deletes only names it accepts and the directory lists. A file it cannot tie to the job is kept and reported as untracked.
+- Cleanup deletes only names it accepts and the directory lists, and only a file or a link (removing a link leaves its target alone). A directory, FIFO, socket or device node is never the render. Like a file it cannot tie to the job, it is kept and reported as untracked.
 - The operator's workflow template picks the name through its `filename_prefix`. Keep that prefix free of the refused cases above, and a refusal then means ComfyUI reported a name it did not write.
 
 **Rig check (with R1):**

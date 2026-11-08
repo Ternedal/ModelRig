@@ -370,7 +370,12 @@ class ComfyVideoAdapter:
                 info = os.stat(self.output_directory / name, follow_symlinks=False)
             except OSError:
                 continue  # named but not there: nothing to clean
-            if not stat.S_ISDIR(info.st_mode) and info.st_ino != 0:  # no file id: identity unprovable, kept
+            # Only a file (the render) or a link the job made: removing a link never touches its
+            # target. A directory, FIFO, socket or device node is not provably the render, so it
+            # is kept and reported as untracked (ChatGPT #2357 6718447424).
+            if not (stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)):
+                continue
+            if info.st_ino != 0:  # no file id: identity unprovable, kept
                 found.append((name, info.st_dev, info.st_ino))
         return found
 

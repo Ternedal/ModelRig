@@ -683,7 +683,7 @@ class AdapterTests(unittest.TestCase):
         from unittest.mock import patch
         import app.comfy_video_adapter as module
         adapter = self.adapter()
-        older =Path(self.dirs["output"], "kaliv_older_job.mp4")
+        older = Path(self.dirs["output"], "kaliv_older_job.mp4")
         older.write_bytes(b"another job's finished render")
         real_stat = os.stat
 
@@ -705,6 +705,29 @@ class AdapterTests(unittest.TestCase):
         Path(self.dirs["output"], "CON.mp4").write_bytes(b"x")
         outputs = {"9": {"videos": [{"filename": "CON.mp4", "subfolder": "", "type": "output"}]}}
         self.assertEqual(adapter._attested_outputs(outputs, set()), [])
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "needs a FIFO (POSIX)")
+    def test_cleanup_keeps_a_node_that_is_neither_a_file_nor_a_link(self):
+        """ChatGPT #2357 6718447424: ComfyUI writes its output as a file. A FIFO (or socket or
+        device node) that a history names is not provably the render, so cleanup keeps it and
+        reports it as untracked. A file and a link the job made are still removed; removing a link
+        never touches what it points to."""
+        adapter = self.adapter()
+        out = Path(self.dirs["output"])
+        os.mkfifo(out / "pipe.mp4")
+        (out / "render.mp4").write_bytes(b"x")
+        target = Path(self.state, "elsewhere.mp4")
+        target.write_bytes(b"not the job's")
+        os.symlink(target, out / "link.mp4")
+        outputs = {"9": {"videos": [{"filename": n, "subfolder": "", "type": "output"}
+                                    for n in ("pipe.mp4", "render.mp4", "link.mp4")]}}
+        owned = adapter._attested_outputs(outputs, set())
+        self.assertEqual([name for name, _, _ in owned], ["render.mp4", "link.mp4"])
+        adapter._remove_job_outputs(set(), owned)
+        self.assertEqual(sorted(os.listdir(out)), ["pipe.mp4"])
+        self.assertEqual(adapter.last_cleanup["removed"], ["render.mp4", "link.mp4"])
+        self.assertEqual(adapter.last_cleanup["untracked"], ["pipe.mp4"])
+        self.assertEqual(target.read_bytes(), b"not the job's")
 
     def test_receipts_go_only_to_the_current_holder(self):
         adapter = self.adapter()
