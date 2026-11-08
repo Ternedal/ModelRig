@@ -67,8 +67,13 @@ $state = [ordered]@{ RigRoot = $RigRoot; Executables = [ordered]@{}; Pending = $
                      Transactions = @(); UpdaterProcesses = @(); HelperProcesses = @(); Health = [ordered]@{};
                      Verdict = $null; Advice = $null }
 
+# Where the updater installs each executable (modelrig-updater main.go targets; bootstrap-new-rig.ps1):
+# the worker lives in its own subdirectory, everything else in RigRoot.
+$InstalledAt = @{ 'modelrig-worker-windows-x64.exe' = 'worker' }
 foreach ($name in $Known.Keys | Sort-Object) {
-    $state.Executables[$name] = Get-Release $name (Join-Path $RigRoot $name)
+    $directory = $RigRoot
+    if ($InstalledAt.ContainsKey($name)) { $directory = Join-Path $RigRoot $InstalledAt[$name] }
+    $state.Executables[$name] = Get-Release $name (Join-Path $directory $name)
 }
 $live = Join-Path $RigRoot $UpdaterName
 $pendingPath = $live + '.pending'

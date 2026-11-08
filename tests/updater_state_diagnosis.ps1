@@ -61,6 +61,22 @@ $null = Test-Case $root 'lock_unrecognized'
 
 $null = Test-Case (New-Fixture 'installed' $newAsset $null) 'installed_v2018'
 
+# The installed layout (Codex #2241 4505567754): the worker lives in RigRoot\worker, as the updater
+# and bootstrap-new-rig.ps1 install it. A stray copy in RigRoot itself is not the installed worker.
+$root = New-Fixture 'installed-layout' $newAsset $null
+$workerName = 'modelrig-worker-windows-x64.exe'
+$workerPath = Join-Path (Join-Path $root 'worker') $workerName
+[IO.Directory]::CreateDirectory((Split-Path -Parent $workerPath)) | Out-Null
+Set-Content -LiteralPath $workerPath -Value 'the installed worker'
+Set-Content -LiteralPath (Join-Path $root $workerName) -Value 'a stray copy'
+$r = Test-Case $root 'installed_v2018'
+$worker = $r.Executables.$workerName
+Assert ($worker.Present -eq $true) 'the worker in RigRoot\worker is found'
+Assert ($worker.Sha256 -ceq (Get-FileHash -LiteralPath $workerPath -Algorithm SHA256).Hash.ToLowerInvariant()) 'the worker is hashed from RigRoot\worker, not from RigRoot'
+Assert ($worker.Release -ceq 'unknown') 'bytes that match no release are named unknown'
+$r = Test-Case (New-Fixture 'no-worker-dir' $newAsset $null) 'installed_v2018'
+Assert ($r.Executables.$workerName.Present -eq $false) 'without RigRoot\worker the worker is reported missing'
+
 $root = New-Fixture 'installed-stale-lock' $newAsset $null
 Set-Content -LiteralPath (Join-Path $root 'updater.lock') -Value "pid $deadId started 2026-10-20T15:55:30Z"
 $null = Test-Case $root 'installed_v2018_stale_lock'
