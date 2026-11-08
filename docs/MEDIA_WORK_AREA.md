@@ -105,6 +105,35 @@ Expected: `modelrig-supervisor`, `modelrig-worker-windows-x64`, `modelrig-server
 - **After a crash**, residue can remain in the work area: a render's output that was not yet removed, ComfyUI's temp files, a staged source image. See the crash table above; C6 reports it.
 - Media never reaches the cloud; that rule is unchanged.
 
+## Output names on Windows
+
+ComfyUI names its output in the work area. That name is used in two places: the adapter opens the file by it, and the hand-off receipt records it so C6 can find the file after a crash. **The published file on Z: never carries it:** the sink names the file after a new asset id.
+
+A Linux name check does not prove a Windows name safe (ChatGPT #2357 6716735710). The two places therefore share one rule, `is_plain_file_name`. The adapter adds one more check before it opens anything by name: the name must be one the directory itself lists. Each case is handled like this:
+
+| Case | Example | What happens |
+|---|---|---|
+| Device name, any case, any extension | `CON.mp4`, `nul.mp4`, `COM1.mp4`, `LPT¹.mp4`, `aux .mp4` | Refused by the rule before any filesystem call, so nothing opens a device |
+| Character Win32 refuses | `a?b.mp4`, `a"b.mp4`, `a|b.mp4` | Refused by the rule |
+| Trailing space or dot (Win32 strips them, so `x.mp4.` would open `x.mp4`) | `x.mp4.` | Refused by the rule. A video output must also end in `.mp4` |
+| Longer than NTFS allows | more than 255 UTF-16 code units; an emoji is two | Refused by the rule. The limit is counted in UTF-16, as NTFS counts it |
+| 8.3 alias or another case of an existing name | `KALIV_~1.MP4` for `kaliv_00001_.mp4` | Not listed by the directory, so it is refused. Cleanup skips such a name, so it never deletes the older file the alias reaches |
+| Spaces, accents, any script, emoji | `rød drage 🐉.mp4` | Accepted. The receipt keeps the exact name; nothing is normalized |
+
+**On a refusal:**
+- The adapter fails the job with a `GenerationError`.
+- No byte reaches Z:, and no receipt names the file.
+- Cleanup deletes only names it accepts and the directory lists, and only a file or a link (removing a link leaves its target alone). A directory, FIFO, socket or device node is never the render. Like a file it cannot tie to the job, it is kept and reported as untracked.
+- The operator's workflow template picks the name through its `filename_prefix`. Keep that prefix free of the refused cases above, and a refusal then means ComfyUI reported a name it did not write.
+
+**Rig check (with R1):**
+1. Set the workflow's `filename_prefix` to `rød drage 🐉` and run one video job.
+2. Expect the file to be published on Z: under an asset id.
+3. Expect the receipt to hold the exact name.
+4. Expect nothing left in the work area.
+
+The Linux tests cannot show this, because ext4 has no device names, no 8.3 aliases and is case-sensitive.
+
 ## Exit codes
 
 | Code | Work area |
@@ -129,4 +158,5 @@ Expected: `modelrig-supervisor`, `modelrig-worker-windows-x64`, `modelrig-server
   - a root opened after start refused;
   - junctions;
   - UNC, `\\?\` and alternate-stream paths.
-- Rig (runbook): R1 and R5 use this setup. R14 still unplugs the publication volume.
+- `tests/worker_comfy_video_adapter.py` and `tests/worker_image_job_store.py` cover the output-name rule: device names, Win32-refused characters, a trailing dot or space, the UTF-16 length, and a name the directory does not list. Windows' alias lookup is simulated, because ext4 has none.
+- Rig (runbook): R1 and R5 use this setup, and R1 adds the Unicode output name above. R14 still unplugs the publication volume.
