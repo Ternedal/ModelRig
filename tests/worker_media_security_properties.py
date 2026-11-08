@@ -11,14 +11,14 @@ Every property below holds for every generated input:
 - **Concurrent claims** take each queued job exactly once.
 - **A writer that crashes during an index write** leaves the previous index intact, leaves no
   temporary file behind, and leaves the lock free: the lock file itself persists by design
-  (``fix/gallery-index-os-lock``: a process-lifetime OS lock on a never-unlinked file).
+  (#2358: a process-lifetime OS lock on a never-unlinked file).
 
 **Known gaps.** One test is marked ``expectedFailure``; it documents a finding in the gallery
 parser, which ChatGPT owns. Once a fix lands, the test passes unexpectedly and the marker has to go.
 - ``test_deeply_nested_index_is_refused_not_a_crash``: ``_index`` lets a ``RecursionError``
   escape on a deeply nested index file.
 
-Fixed by ``fix/gallery-index-os-lock`` (C8 findings 2 and 3), so their markers are gone:
+Fixed by #2358 (``fix/gallery-index-os-lock``, C8 findings 2 and 3), so their markers are gone:
 ``test_two_writers_registering_at_once_are_both_indexed`` (the lock now waits) and
 ``test_a_lock_left_by_a_killed_writer_does_not_block_registration_forever`` (an OS lock dies with
 its process).
@@ -37,6 +37,7 @@ import struct
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import zlib
 from pathlib import Path
@@ -48,7 +49,7 @@ sys.path.insert(0, str(ROOT / "worker"))
 from app.image_job_store import ImageJobStore  # noqa: E402
 from app.media_gallery_asset import GalleryAssetNotFound, open_asset  # noqa: E402
 from app.media_gallery_catalog import GalleryUnavailable, _ID, _index  # noqa: E402
-from app.media_gallery_index_writer import register_asset  # noqa: E402
+from app.media_gallery_index_writer import _write_entry, index_lock, register_asset  # noqa: E402
 from app.media_gallery_store import ExternalMediaSink  # noqa: E402
 from app.media_generation_contract import ArtifactSinkUnavailable, SourceImageUnavailable  # noqa: E402
 from app.media_source_image import read_owned_source_png, read_source_png  # noqa: E402
@@ -230,19 +231,31 @@ class MediaSecurityProperties(unittest.TestCase):
         self.assertEqual(sorted(claimed), sorted(jobs))
 
     def test_two_writers_registering_at_once_are_both_indexed(self):
-        ids = []
-        for _ in range(2):
-            asset = self.sink.publish_for_job(f"job{len(ids)}", PNG + bytes([len(ids)]), ".png")
-            ids.append(asset)
-        lock = self.media / ".gallery-index.lock"
-        lock.write_text("held by the other executor")  # the other writer is inside its lock window
-        timer = threading.Timer(0.3, lock.unlink)
+        """Two executors finishing together (Codex #2361 4505429672). The other one is a real
+        process inside its lock window, holding the OS lock. This one must wait for it rather than
+        fail, then write after it, keeping its entry."""
+        ids = [self.sink.publish_for_job(f"job{n}", PNG + bytes([n]), ".png") for n in range(2)]
+        ctx = multiprocessing.get_context("fork")
+        held, release = ctx.Event(), ctx.Event()
+        child = ctx.Process(target=_register_inside_the_lock,
+                            args=(str(self.media), str(self.volume), ids[0], len(PNG) + 1, held, release))
+        child.start()
+        self.addCleanup(child.kill)
+        self.assertTrue(held.wait(10), "the other writer took the lock")
+        hold = 0.5
+        timer = threading.Timer(hold, release.set)
+        started = time.monotonic()
         timer.start()
         try:
-            register_asset(self.media, self.volume, ids[0], ".png", len(PNG) + 1)
+            register_asset(self.media, self.volume, ids[1], ".png", len(PNG) + 1)
         finally:
-            timer.join()
-        self.assertEqual([i["id"] for i in _index(self.media)], ids[:1])
+            timer.cancel()
+            release.set()
+        waited = time.monotonic() - started
+        child.join(10)
+        self.assertEqual(child.exitcode, 0, "the other writer registered its asset")
+        self.assertGreaterEqual(waited, hold * 0.9, "this writer waited for the lock instead of going ahead")
+        self.assertEqual([i["id"] for i in _index(self.media)], ids, "both kept, in lock order")
 
     def test_a_lock_left_by_a_killed_writer_does_not_block_registration_forever(self):
         asset = self.sink.publish_for_job("job-a", PNG, ".png")
@@ -250,7 +263,8 @@ class MediaSecurityProperties(unittest.TestCase):
         child = ctx.Process(target=_hold_lock_then_die, args=(str(self.media),))
         child.start()
         child.join(10)
-        self.assertTrue((self.media / ".gallery-index.lock").exists(), "the killed writer left its lock")
+        self.assertEqual(child.exitcode, 137, "the writer was killed while holding the lock")
+        self.assertTrue((self.media / ".gallery-index.lock").exists(), "the killed writer left its lock file")
         register_asset(self.media, self.volume, asset, ".png", len(PNG))
         self.assertEqual([i["id"] for i in _index(self.media)], [asset])
 
@@ -269,11 +283,23 @@ class MediaSecurityProperties(unittest.TestCase):
         self.assertEqual([i["id"] for i in _index(self.media)], [first, second])
 
 
+def _register_inside_the_lock(media: str, volume: str, asset_id: str, size: int, held, release) -> None:
+    """The other executor: it takes the real lock, waits to be released, then registers its asset."""
+    try:
+        with index_lock(Path(media)):
+            held.set()
+            release.wait(10)
+            _write_entry(media, volume, Path(media), asset_id, ".png", size)
+    except BaseException:
+        os._exit(1)
+    os._exit(0)
+
+
 def _hold_lock_then_die(media: str) -> None:
-    """A writer killed inside its lock window (SIGKILL, power loss): the lock file stays."""
-    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
-    os.close(os.open(os.path.join(media, ".gallery-index.lock"), flags, 0o600))
-    os._exit(137)
+    """A writer killed inside its lock window (SIGKILL, power loss): it dies holding the OS lock,
+    and its lock file stays."""
+    with index_lock(Path(media)):
+        os._exit(137)
 
 
 if __name__ == "__main__":
