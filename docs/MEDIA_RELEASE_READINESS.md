@@ -2,7 +2,7 @@
 
 Image and video generation on the rig, #2296. This page separates three questions that are easy to blur: what is merged, what is switched on, and what may be released. **A merge is not a release:** every media capability below is default-off, and turning one on is a decision Anders takes per §2. This page records the gates; it does not authorize anything.
 
-**This is a snapshot,** verified against main `99ccedc4` (8 Nov, morning) and the open PRs and branches named below. Merged since the previous snapshot: #2358 (the index lock, C8 findings 2 and 3). Before that: #2325, #2345 (G5), #2346, #2347 (staged video sink), #2348 (F1), #2349 (G1), #2353 and #2359 (F2: Android reads worker capabilities from the authenticated health route; no media change). When a row says "open", the PR's own exact-head evidence decides; this page does not replace it.
+**This is a snapshot,** verified against main `08ae2f16` (8 Nov, afternoon) and the open PRs and branches named below. Merged since the previous snapshot: #2361 (C8's security properties as tests; test-only) and #2362 (CI: the frozen worker runs Piper with an offline tone fixture; no media change). Before that: #2358 (the index lock, C8 findings 2 and 3), #2325, #2345 (G5), #2346, #2347 (staged video sink), #2348 (F1), #2349 (G1), #2353 and #2359 (F2: Android reads worker capabilities from the authenticated health route; no media change). When a row says "open", the PR's own exact-head evidence decides; this page does not replace it.
 
 **Two different "off"s.** Most media modules are **merged but inert**: present in the code, with nothing that starts or calls them. The reachability gate is separate. There are **no media HTTP routes on main**, so no client can submit, list or fetch media.
 
@@ -33,9 +33,8 @@ Image and video generation on the rig, #2296. This page separates three question
 | Android gallery client (#2301, #2302) | `android/` | merged, fixture-driven | needs the routes | inert |
 | Android job model: proposed `kaliv-media-job/v1` parser, Danish texts, polling, drift test against the store | `feat/android-media-job-readiness` (`docs/MEDIA_ANDROID_READINESS.md`) | branch; contract not yet agreed | needs the routes | no UI |
 
-Open PRs and branches on the path to video (#2345, #2346, #2347, #2349, #2353 and #2358 are merged):
+Open PRs and branches on the path to video (#2345, #2346, #2347, #2349, #2353, #2358 and #2361 are merged):
 - **#2357** G1 wiring and the work area (`feat/media-volume-wiring`), draft. It is prepared, not merged and not enabled. It implements Anders' 6 Nov decision: media is generated in a private work area on the internal disk (C:), with the job database there, and published on the external volume (Z:) (`docs/MEDIA_WORK_AREA.md`).
-- **#2361** C8's security properties as tests (fixed-seed fuzzing, real OS-lock contention), test-only. One `expectedFailure` remains for the gallery parser's deep-nesting finding; it goes when ChatGPT's parser fix or #2361, whichever lands second, is merged.
 - C6 repair tool (`feat/media-volume-repair`), stacked on the wiring: it also reports and removes work-area residue.
 
 ## 2. Data and migrations
@@ -81,7 +80,8 @@ Prompts are blanked 30 days after a job finishes (#2340). A rollback does not ch
 | Profiles promoted to `rig-qualified` with the measured limits (C4 R16) | a profile PR citing the manifest | Claude + ChatGPT | after the rig run |
 | ComfyUI backend outbound network blocked (firewall rule) | rig item 7 | **Anders (§2)** | open |
 | Cloud: media never reaches the cloud; chat cloud payload is current-message only (D5); no fallback after Stop (F1) | `CloudCurrentMessageOnlyTest`; #2348 | Claude (F1), ChatGPT (review); Anders approved F1 | D5 implemented and tested. #2348 merged 7 Nov (`8a7f6727`), with the consent fix: the opt-in is read when the rig fails, not before the rig call |
-| Index lock survives a killed writer (C8 findings 2–3) | #2358 | Claude | merged `99ccedc4` (8 Nov); tested as a property in #2361 |
+| Index lock survives a killed writer (C8 findings 2–3) | #2358 | Claude | merged `99ccedc4` (8 Nov); tested as a property by #2361, merged `08ae2f16` (8 Nov) |
+| Gallery parser refuses a deeply nested index file instead of letting a `RecursionError` escape `_index` (C8 finding) | ChatGPT's gallery parser; the `expectedFailure` on `test_deeply_nested_index_is_refused_not_a_crash` in `tests/worker_media_security_properties.py` (#2361) | ChatGPT (parser), Claude (removing the marker) | **open, known defect** (ChatGPT 6722854524). The test documents it and is not a fix; when the fix lands, the test passes unexpectedly and the marker must go in the same PR |
 | C:/Z: layout proven on the rig: private work area, one account for every process, separate disks, low space visible, residue baseline, rollback (R17) | `docs/MEDIA_R17_DEPLOYMENT_PROOF.md` (R17.1–R17.13; R17.10–R17.13 added 7 Nov: lease ACL, moved DB, junction root, unplug, other disk) | Anders runs it; ChatGPT reviews | pending: needs the wiring merged and a new `$QualSha` |
 | Job routes expose `expired` and Android shows it | ChatGPT's route PR; Android branch above | ChatGPT (routes), Claude (Android) | contract proposed (#2275), not agreed |
 | Production signing / release | — | **Anders (§2)** | not requested |
