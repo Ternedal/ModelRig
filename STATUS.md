@@ -1052,6 +1052,11 @@ DLL'erne havner i `site-packages/nvidia/...` som Windows ikke søger i. Noteret 
   ikke selv testet — hvis det dispatches fra en branch uden et tag, kan
   release-jobbet fejle (ingen tag at hænge assets på). Mindre risiko, da det
   ikke er hovedstien.
+  - **Rettelse 8/11-2026:** forbeholdet var forkert. Fra en gren ville
+    `ensure-draft-release` oprette en release med grenens navn, og
+    release-jobbet ville publicere den som `--latest`.
+  - Workflowet afviser nu alt andet end et release-tag (`vX.Y.Z`); se
+    `tests/workflow_release_tag_guard.py`.
 - **Denne release ER selve testen**: v0.20.10 er bevidst en patch (ikke en
   milepæl), så CI-kørslen for denne tag bekræfter reelt at kun Ubuntu bygges
   — ikke bare antaget.

@@ -395,7 +395,9 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_media_generation_profiles.py`
 - `tests/worker_media_generation_reconciliation.py`
 - `tests/worker_media_generation_runner.py`
+- `tests/worker_media_security_properties.py`
 - `tests/worker_media_source_image.py`
+- `tests/worker_media_staged_video_sink.py`
 - `tests/worker_media_volume.py`
 - `tests/worker_migrate.py`
 - `tests/worker_netguard.py`
@@ -584,6 +586,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_proof_scope_git_fail_closed.py`
 - `tests/workflow_ps1_encoding.py`
 - `tests/workflow_release.py`
+- `tests/workflow_release_tag_guard.py`
 - `tests/workflow_remaining_physical_pilots.py`
 - `tests/workflow_repository_authority.py`
 - `tests/workflow_rig_preflight.py`
@@ -620,6 +623,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_voice_change_observations.py`
 - `tests/workflow_voice_runtime_preflight.py`
 - `tests/workflow_voicerig_cross_repo_contract.py`
+- `tests/workflow_wav_check.py`
 - `tests/workflow_web_research_parity.py`
 - `tests/workflow_windows_lease_dir_acl_junction.py`
 - `tests/workflow_worker_entrypoints.py`
