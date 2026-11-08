@@ -354,11 +354,17 @@ class ComfyVideoAdapter:
     def _attested_outputs(self, outputs: object, before: set[str]) -> list[tuple[str, int, int]]:
         """Files ComfyUI says THIS prompt wrote to the output root, with their identity right now."""
         found = []
+        try:
+            listed = set(self._entry_names())
+        except OSError:
+            return found  # the directory cannot be listed: nothing is provably this job's
         for item in self._history_entries(outputs):
             name, subfolder = item.get("filename"), item.get("subfolder", "")
             if item.get("type") != "output" or subfolder != "" or not isinstance(name, str):
                 continue
-            if Path(name).name != name or name in ("", ".", "..") or "\\" in name or ":" in name or name in before:
+            # Only a name the directory itself lists, so an 8.3 alias or another case of an older
+            # file's name never makes cleanup delete that file (ChatGPT #2357 6716735710).
+            if not is_plain_file_name(name) or Path(name).name != name or name in before or name not in listed:
                 continue
             try:
                 info = os.stat(self.output_directory / name, follow_symlinks=False)
@@ -565,6 +571,11 @@ class ComfyVideoAdapter:
             raise GenerationError("ComfyUI output name is not a plain .mp4 file name")
         if name in before:
             raise GenerationError("ComfyUI output already existed before this job")
+        # The name must be one the directory itself lists, before anything opens it by name. On
+        # Windows a name can reach another file than the one it spells: an 8.3 alias
+        # ("KALIV_~1.MP4") or a different case of an existing name (ChatGPT #2357 6716735710).
+        if name not in self._entry_names():
+            raise GenerationError("ComfyUI output is not listed in the output directory")
         return self.output_directory / name
 
     def _wait_quiescent(self, source: Path) -> None:

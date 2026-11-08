@@ -635,7 +635,19 @@ class AdapterTests(unittest.TestCase):
         adapter = self.adapter()  # never loaded: _single_output only reads the output directory
         names = ["kaliv_00001_.mp4", "rød drage.mp4", "  spaces  .mp4", "_x.mp4", ".x.mp4", "日本語.mp4",
                  "emoji 🐉.mp4", "a" * 251 + ".mp4", "a" * 252 + ".mp4", "a\nb.mp4", "a\x00b.mp4", "a\x85b.mp4",
-                 "a\udcffb.mp4", "a\\b.mp4", "c:b.mp4", "a/b.mp4", "../b.mp4", ".mp4", "x.MP4"]
+                 "a\udcffb.mp4", "a\\b.mp4", "c:b.mp4", "a/b.mp4", "../b.mp4", ".mp4", "x.MP4",
+                 # Windows (ChatGPT #2357 6716735710): device names, characters Win32 refuses, and
+                 # names that are not devices. Each dragon is two UTF-16 code units.
+                 "CON.mp4", "nul.mp4", "Com1.mp4", "lpt¹.mp4", "aux .mp4", "CONOUT$.mp4", "con.tar.mp4",
+                 'a"b.mp4', "a<b.mp4", "a|b.mp4", "a?b.mp4", "a*b.mp4", "🐉" * 62 + ".mp4",
+                 "console.mp4", "com10.mp4", "lpt.mp4", "nul_x.mp4"]
+        for name in names:  # every name is a real file there, as it is after a render
+            if "/" in name:
+                continue
+            try:
+                Path(self.dirs["output"], name).write_bytes(b"x")
+            except (OSError, ValueError):
+                pass  # not creatable on this system: refused by the rule before the directory matters
         accepted = []
         for name in names:
             with self.subTest(name=name):
@@ -650,7 +662,49 @@ class AdapterTests(unittest.TestCase):
                 except ImageJobError:
                     self.fail(f"the adapter accepts {name!r} but its receipt is refused")
         self.assertEqual(accepted, ["kaliv_00001_.mp4", "rød drage.mp4", "  spaces  .mp4", "_x.mp4", ".x.mp4",
-                                    "日本語.mp4", "emoji 🐉.mp4", "a" * 251 + ".mp4", ".mp4"])
+                                    "日本語.mp4", "emoji 🐉.mp4", "a" * 251 + ".mp4", ".mp4", "🐉" * 62 + ".mp4",
+                                    "console.mp4", "com10.mp4", "lpt.mp4", "nul_x.mp4"])
+
+    def test_an_output_name_the_directory_does_not_list_is_refused(self):
+        """ChatGPT #2357 6716735710: on Windows a name can reach a file it does not spell, such as
+        another case of an older file's name or its 8.3 alias. The adapter takes only a name the
+        output directory itself lists, so it never adopts an older file."""
+        adapter = self.adapter()
+        Path(self.dirs["output"], "kaliv_old.mp4").write_bytes(b"older")
+        for name in ("KALIV_OLD.mp4", "Kaliv_old.mp4", "never_written.mp4"):
+            with self.subTest(name=name), self.assertRaises(GenerationError):
+                adapter._single_output({"9": {"videos": [{"filename": name, "subfolder": "", "type": "output"}]}},
+                                       {"kaliv_old.mp4"})
+
+    def test_cleanup_never_deletes_through_a_name_the_directory_does_not_list(self):
+        """ChatGPT #2357 6716735710: a history naming an 8.3 alias of an older file
+        ("KALIV_~1.MP4") must not make cleanup delete that older file. Windows' alias lookup is
+        simulated here: stat resolves the alias to the older file, as NTFS would."""
+        from unittest.mock import patch
+        import app.comfy_video_adapter as module
+        adapter = self.adapter()
+        older =Path(self.dirs["output"], "kaliv_older_job.mp4")
+        older.write_bytes(b"another job's finished render")
+        real_stat = os.stat
+
+        def windows_stat(path, *args, **kwargs):
+            if Path(path).name in ("KALIV_~1.MP4", "Kaliv_Older_Job.mp4"):
+                path = older
+            return real_stat(path, *args, **kwargs)
+
+        outputs = {"9": {"videos": [{"filename": "KALIV_~1.MP4", "subfolder": "", "type": "output"},
+                                    {"filename": "Kaliv_Older_Job.mp4", "subfolder": "", "type": "output"}]}}
+        with patch.object(module.os, "stat", windows_stat):
+            self.assertEqual(adapter._attested_outputs(outputs, {"kaliv_older_job.mp4"}), [])
+        self.assertEqual(older.read_bytes(), b"another job's finished render")
+
+    def test_cleanup_skips_a_device_name_even_when_such_a_file_exists(self):
+        """On Linux "CON.mp4" is a file; on Windows the same name opens the console. Cleanup never
+        stats or deletes by such a name, so the file is kept."""
+        adapter = self.adapter()
+        Path(self.dirs["output"], "CON.mp4").write_bytes(b"x")
+        outputs = {"9": {"videos": [{"filename": "CON.mp4", "subfolder": "", "type": "output"}]}}
+        self.assertEqual(adapter._attested_outputs(outputs, set()), [])
 
     def test_receipts_go_only_to_the_current_holder(self):
         adapter = self.adapter()
