@@ -1,5 +1,6 @@
 """Regression tests for the owner-only gallery projection."""
 import io
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -28,6 +29,13 @@ class OwnerGalleryTests(unittest.TestCase):
         self.index.start()
         self.addCleanup(self.root.stop)
         self.addCleanup(self.index.stop)
+
+    def _disk_handle(self, data: bytes):
+        handle = tempfile.TemporaryFile(mode="w+b")
+        handle.write(data)
+        handle.seek(0)
+        self.addCleanup(handle.close)
+        return handle
 
     def test_filters_before_paging_and_keeps_cursor_private(self):
         jobs = Jobs({"one", "two", "three"})
@@ -133,7 +141,7 @@ class OwnerGalleryTests(unittest.TestCase):
             opener.assert_not_called()
 
     def test_stream_owned_asset_closes_handle(self):
-        handle = io.BytesIO(b"abc")
+        handle = self._disk_handle(b"abc")
         with patch("app.media_gallery_asset.open_asset", return_value=(handle, {"size_bytes": 3})) as opener:
             self.assertEqual(b"".join(stream_owned_asset(Jobs({"one"}), "principal", "/media", "/volume", "one", chunk_size=2)), b"abc")
             opener.assert_called_once()
@@ -146,7 +154,7 @@ class OwnerGalleryTests(unittest.TestCase):
             opener.assert_not_called()
 
     def test_prepared_owned_entry_before_iteration_and_closes(self):
-        handle = io.BytesIO(b"abcd")
+        handle = self._disk_handle(b"abcd")
         entry = {"id": "one", "size_bytes": 4}
         with patch("app.media_gallery_asset.open_asset", return_value=(handle, entry)):
             metadata, chunks = prepare_owned_asset_response(
@@ -165,11 +173,22 @@ class OwnerGalleryTests(unittest.TestCase):
         self.assertTrue(handle.closed)
 
     def test_prepared_stream_read_failure_closes_descriptor(self):
-        class FailingReader(io.BytesIO):
+        class FailingReader:
+            def __init__(self, file):
+                self.file = file
+            def fileno(self):
+                return self.file.fileno()
+            def seek(self, *args):
+                return self.file.seek(*args)
             def read(self, size=-1):
                 raise OSError("media removed during response")
+            def close(self):
+                self.file.close()
+            @property
+            def closed(self):
+                return self.file.closed
 
-        handle = FailingReader(b"abcd")
+        handle = FailingReader(self._disk_handle(b"abcd"))
         with patch("app.media_gallery_asset.open_asset", return_value=(handle, {"size_bytes": 4})):
             _, chunks = prepare_owned_asset_response(
                 Jobs({"one"}), "principal", "/media", "/volume", "one")
@@ -178,7 +197,7 @@ class OwnerGalleryTests(unittest.TestCase):
         self.assertTrue(handle.closed)
 
     def test_prepared_stream_exhaustion_closes_descriptor(self):
-        handle = io.BytesIO(b"abcd")
+        handle = self._disk_handle(b"abcd")
         with patch("app.media_gallery_asset.open_asset", return_value=(handle, {"size_bytes": 4})):
             _, chunks = prepare_owned_asset_response(
                 Jobs({"one"}), "principal", "/media", "/volume", "one", chunk_size=2)
@@ -186,11 +205,12 @@ class OwnerGalleryTests(unittest.TestCase):
         self.assertTrue(handle.closed)
 
     def test_prepared_truncated_asset_fails_closed_and_closes(self):
-        handle = io.BytesIO(b"ab")
+        handle = self._disk_handle(b"abcd")
         with patch("app.media_gallery_asset.open_asset", return_value=(handle, {"size_bytes": 4})):
             _, chunks = prepare_owned_asset_response(
                 Jobs({"one"}), "principal", "/media", "/volume", "one", chunk_size=2)
         self.assertEqual(next(chunks), b"ab")
+        handle.truncate(2)
         with self.assertRaisesRegex(GalleryUnavailable, "asset_changed_during_read"):
             next(chunks)
         self.assertTrue(handle.closed)
