@@ -21,6 +21,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECK = ROOT / "tests" / "support" / "check_wav.py"
+sys.path.insert(0, str(ROOT / "tests" / "support"))
+from source_code import code_of  # noqa: E402
 
 passed = failed = 0
 
@@ -85,7 +87,8 @@ for name, (data, reason) in cases.items():
     code, out = run(data)
     check(code == 1 and reason in out and "Traceback" not in out, f"{name} is refused as '{reason}' ({out.strip()})")
 
-workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+# Read as code, not raw text: a commented-out line must not satisfy these (workflow_gates_read_code).
+workflow = code_of(ROOT / ".github" / "workflows" / "ci.yml")
 check("python tests/support/check_wav.py $wav --rate 22050 --min-seconds 0.1" in workflow,
       "ci.yml's frozen-worker step uses this check")
 check("[44.." not in workflow, "ci.yml no longer slices the WAV at a fixed 44-byte offset")
