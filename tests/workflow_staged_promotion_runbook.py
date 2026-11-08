@@ -46,6 +46,21 @@ _live_contracts = (
         and "origin/release/kaliv-v2.0.19-prep-20261108" in staged,
         "both operator runbooks name the active remote candidate authority",
     ),
+    # ChatGPT #2364 6727590513: Anders' D3 (#2275 6726564262) releases 2.0.19 on green RC CI plus
+    # his release go. The physical procedure must not read as a prerequisite for the tag, and must
+    # still keep production off and the release behind his go.
+    (
+        all(
+            "v2.0.19: Anders' release-beslutning (D3" in doc
+            and "**ikke** en forudsætning for tagget `v2.0.19`" in doc
+            and "**efter** publicering" in doc
+            and "Anders' særskilte release-go" in doc
+            and "production_activation=false" in doc
+            and doc.index("v2.0.19: Anders' release-beslutning (D3") < doc.index("## ")
+            for doc in (rigdag, staged)
+        ),
+        "both operator runbooks state D3 before any procedure: physical validation after publication, release only on Anders' go",
+    ),
 )
 for condition, message in _live_contracts:
     if not condition:

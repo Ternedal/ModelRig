@@ -2,6 +2,11 @@
 
 > **Release-forberedelse, ikke fysisk godkendelse:** Denne branch er endnu ikke fysisk kvalificeret. Kør ikke promotion/tagging alene ud fra denne vejledning; kræv ny exact-head- og rig-evidens for v2.0.19.
 
+> **v2.0.19: Anders' release-beslutning (D3, 8/11-2026, #2275 6726564262).**
+> - **Det kræves før tag og publicering:** grøn exact-head CI på RC-SHA'en og Anders' særskilte release-go. RC-SHA'en er `main` efter merge af bump-PR'en #2364, ikke denne gren via fast-forward. Proceduren står i #2275.
+> - **Hvad denne vejledning så er:** Stage A/B nedenfor er **ikke** en forudsætning for tagget `v2.0.19`. Den er den fysiske validering, der kører **efter** publicering.
+> - **Det gælder stadig:** ingen launcher aktiverer produktion (`production_activation=false`), og der skabes intet release uden Anders' go.
+
 Dette er den korte operatorindgang. Den autoritative rækkefølge og alle
 fail-closed grænser står i `STAGED_PHYSICAL_PROMOTION.md`; Stage B-detaljerne
 står i `STAGE_B_UPDATER_EVIDENCE.md`.

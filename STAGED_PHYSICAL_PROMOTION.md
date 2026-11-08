@@ -2,6 +2,11 @@
 
 > **Release-forberedelse, ikke fysisk godkendelse:** Denne branch er endnu ikke fysisk kvalificeret. Kør ikke promotion/tagging alene ud fra denne vejledning; kræv ny exact-head- og rig-evidens for v2.0.19.
 
+> **v2.0.19: Anders' release-beslutning (D3, 8/11-2026, #2275 6726564262).**
+> - **Det kræves før tag og publicering:** grøn exact-head CI på RC-SHA'en og Anders' særskilte release-go. RC-SHA'en er `main` efter merge af bump-PR'en #2364, ikke denne gren via fast-forward. Proceduren står i #2275.
+> - **Hvad denne vejledning så er:** Stage A/B nedenfor er **ikke** en forudsætning for tagget `v2.0.19`. Den er den fysiske validering, der kører **efter** publicering.
+> - **Det gælder stadig:** ingen launcher aktiverer produktion (`production_activation=false`), og der skabes intet release uden Anders' go.
+
 Denne fil er den autoritative rækkefølge for fysisk promotion af ModelRig
 `2.0.19`. Kandidaten ligger på `release/kaliv-v2.0.19-prep-20261108`; den eksakte SHA skal
 altid læses fra den fetch'ede `origin/release/kaliv-v2.0.19-prep-20261108`, matches mod lokal
