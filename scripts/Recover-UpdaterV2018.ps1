@@ -30,6 +30,44 @@ if ($expectedHash -notmatch '^[0-9a-f]{64}$') { throw 'ExpectedSha256 is not a 6
 if ($ExpectedVersion -ceq '2.0.18' -and $expectedHash -cne $V2018Updater) {
     throw 'ExpectedSha256 is not the attested v2.0.18 updater. No files changed.'
 }
+
+# A hash copied from release notes is not proof (ChatGPT, #2241 6724418920). For any target but the
+# pinned v2.0.18, GitHub must hold a build-provenance attestation for exactly this digest, whose
+# signing certificate names build-and-release.yml at the tag v<ExpectedVersion>. That is the question
+# the updater itself asks before it swaps a binary (F-523), over the same TLS connection. Offline,
+# rate-limited or no such attestation: refuse before anything is touched.
+function Assert-ReleaseProvenance([string]$Digest, [string]$Version) {
+    $uri = "https://api.github.com/repos/Ternedal/ModelRig/attestations/sha256:$Digest"
+    $headers = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'modelrig-updater-recovery' }
+    if ($env:GH_TOKEN) { $headers['Authorization'] = 'Bearer ' + $env:GH_TOKEN }
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        $reply = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -TimeoutSec 30 -UseBasicParsing
+    } catch {
+        throw "Could not get GitHub's attestation for $Digest ($($_.Exception.Message)). No files changed."
+    }
+    $signer = "https://github.com/Ternedal/ModelRig/.github/workflows/build-and-release.yml@refs/tags/v$Version"
+    $attestations = @()
+    if ($reply -and ($reply.PSObject.Properties.Name -contains 'attestations')) { $attestations = @($reply.attestations) }
+    foreach ($attestation in $attestations) {
+        try {
+            $bundle = $attestation.bundle
+            $payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$bundle.dsseEnvelope.payload))
+            $subjects = @(($payload | ConvertFrom-Json).subject | Where-Object { [string]$_.digest.sha256 -ceq $Digest })
+            if ($subjects.Count -eq 0) { continue }
+            $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new([Convert]::FromBase64String([string]$bundle.verificationMaterial.certificate.rawBytes))
+            $san = @($cert.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.17' })
+            if ($san.Count -ne 1) { continue }
+            $uris = @([regex]::Matches($san[0].Format($false), 'https://[^\s,]+') | ForEach-Object { $_.Value })
+            if ($uris -ccontains $signer) { return }
+        } catch {
+            continue   # a malformed attestation proves nothing; keep looking, refuse if none qualifies
+        }
+    }
+    throw "GitHub holds no attestation for $Digest signed by build-and-release.yml at v$Version. No files changed."
+}
+if ($ExpectedVersion -cne '2.0.18') { Assert-ReleaseProvenance $expectedHash $ExpectedVersion }
+
 $RigRoot = [IO.Path]::GetFullPath($RigRoot)
 $live = Join-Path $RigRoot 'modelrig-updater-windows-x64.exe'
 $pending = $live + '.pending'

@@ -114,10 +114,19 @@ Assert-NextRefused @{ ExpectedVersion = '2.0.19'; ExpectedSha256 = 'abc' } 'not 
 Assert-NextRefused @{ ExpectedVersion = '2.0'; ExpectedSha256 = $oldHash } 'not X\.Y\.Z' $null
 Assert-NextRefused @{ ExpectedSha256 = $oldHash } 'not the attested v2\.0\.18' $null
 Assert-NextRefused $next 'differs from the verified v2\.0\.16' 'wrong bytes'
-# The installed updater's own hash under another release's name: the hash matches, so nothing is
-# swapped, and the -version check refuses it.
-Assert-NextRefused @{ ExpectedVersion = '2.0.16'; ExpectedSha256 = $newHash } 'did not report version 2\.0\.16' $null
-Write-Host 'PASS: missing or malformed parameters, the wrong .pending and a mislabelled hash are all refused without replacing the updater'
+# Provenance (ChatGPT 6724418920): a hash is only accepted for a release whose attestation signs it
+# at that release's tag. These ask GitHub's attestation API, as the updater does.
+Assert-NextRefused @{ ExpectedVersion = '2.0.17'; ExpectedSha256 = $oldHash } 'no attestation .* at v2\.0\.17' $null
+Assert-NextRefused @{ ExpectedVersion = '2.0.16'; ExpectedSha256 = $newHash } 'no attestation .* at v2\.0\.16' $null
+Assert-NextRefused @{ ExpectedVersion = '2.0.19'; ExpectedSha256 = ('ab' * 32) } 'Could not get GitHub.s attestation' $null
+# The same lock rules as for 2.0.18: a live owner stops it.
+$root = New-NextFixture 'next-live-owner'
+Set-Content -LiteralPath (Join-Path $root 'updater.lock') -Value "pid $PID started 2026-11-12T10:00:00Z"
+$caught = $null
+try { & $script -RigRoot $root -InstallOnly @next } catch { $caught = $_ }
+Assert ($null -ne $caught -and $caught.Exception.Message -match 'owner is still alive') 'A live lock owner did not stop the next-release recovery'
+Assert ((Get-FileHash (Join-Path $root $name) -Algorithm SHA256).Hash -ceq $newHash) 'Refused recovery changed the installed updater'
+Write-Host 'PASS: missing or malformed parameters, the wrong .pending, an unattested or mislabelled hash and a live owner are all refused without replacing the updater'
 
 # Execute the old helper's actual PowerShell body while a Windows file handle
 # denies FILE_SHARE_DELETE, then show recovery survives the same transient lock.
