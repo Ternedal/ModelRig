@@ -60,7 +60,7 @@ jobs:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         # bodyrig/ is bundled into the frozen worker (build_identity fingerprints it)
-        run: python scripts/ci_pr_scope.py --scope worker/ --scope bodyrig/ --scope scripts/ --scope deploy/ --scope VERSION --scope backend/
+        run: python scripts/ci_pr_scope.py --scope worker/ --scope bodyrig/ --scope scripts/ --scope deploy/ --scope VERSION --scope backend/ --scope tests/fixtures/piper/
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: steps.scope.outputs.relevant == 'true'
         with:
@@ -91,17 +91,14 @@ jobs:
           $env:MODELRIG_WORKER_HOST = "127.0.0.1"
           $env:MODELRIG_WORKER_PORT = "8099"
           $env:MODELRIG_OLLAMA_URL = "http://127.0.0.1:9"
-          # A real Piper voice, so the frozen package must synthesize, not only report TTS as
-          # installed (#2275, v2.0.19 T4: piper-tts 1.8.0 inside PyInstaller). Piper is forced so
-          # an absent VoiceRig cannot satisfy the check.
-          $voices = Join-Path $env:RUNNER_TEMP "piper-voices"
-          New-Item -ItemType Directory -Path $voices -Force | Out-Null
-          $voice = "da_DK-talesyntese-medium"
-          foreach ($attempt in 1..3) {
-            python -m piper.download_voices --download-dir $voices $voice
-            if ($LASTEXITCODE -eq 0 -and (Test-Path (Join-Path $voices "$voice.onnx"))) { break }
-            if ($attempt -eq 3) { throw "Piper voice download failed" }
-            Start-Sleep -Seconds 10
+          # The frozen package must synthesize, not only report TTS as installed (#2275, v2.0.19
+          # T4: piper-tts 1.8.0 inside PyInstaller). The voice is the committed offline fixture from
+          # tests/support/make_piper_ci_voice.py: Piper's real espeak phonemizer and onnxruntime
+          # run, with no download. Piper is forced so an absent VoiceRig cannot satisfy the check.
+          $voices = (Resolve-Path tests/fixtures/piper).Path
+          $voice = "kaliv-ci-tone"
+          foreach ($file in @("$voice.onnx", "$voice.onnx.json")) {
+            if (-not (Test-Path (Join-Path $voices $file))) { throw "CI Piper fixture missing: tests/fixtures/piper/$file" }
           }
           $env:KALIV_TTS_VOICES_DIR = $voices
           $env:KALIV_TTS_VOICE = $voice
@@ -142,12 +139,20 @@ jobs:
             if ($asr.available -ne $true -or $tts.available -ne $true) { throw "frozen voice providers are unavailable" }
             $wav = Join-Path $env:RUNNER_TEMP "frozen-tts.wav"
             $body = @{ text = "Hej fra Kaliv."; out_path = $wav } | ConvertTo-Json
-            $spoken = Invoke-RestMethod -Method Post http://127.0.0.1:8099/voice/tts/synthesize -ContentType "application/json" -Body $body -TimeoutSec 120
-            $header = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($wav), 0, 4)
-            if ($spoken.provider -ne "piper" -or $spoken.voice -ne $voice -or $spoken.duration -le 0 -or $header -ne "RIFF" -or (Get-Item $wav).Length -lt 10000) {
-              throw "frozen Piper synthesis failed: $($spoken | ConvertTo-Json -Compress)"
+            try {
+              $spoken = Invoke-RestMethod -Method Post http://127.0.0.1:8099/voice/tts/synthesize -ContentType "application/json" -Body $body -TimeoutSec 120
+            } catch {
+              throw "frozen Piper synthesis refused (501 = piper missing from the package, 503 = voice not loadable): $($_.ErrorDetails.Message) $($_.Exception.Message)"
             }
-            Write-Host "frozen worker synthesized $($spoken.duration) s of speech with $voice"
+            if (-not (Test-Path $wav)) { throw "frozen Piper synthesis wrote no file: $($spoken | ConvertTo-Json -Compress)" }
+            $bytes = [System.IO.File]::ReadAllBytes($wav)
+            $riff = [System.Text.Encoding]::ASCII.GetString($bytes, 0, 4)
+            $wave = [System.Text.Encoding]::ASCII.GetString($bytes, 8, 4)
+            $audible = @($bytes[44..($bytes.Length - 1)] | Where-Object { $_ -ne 0 }).Count
+            if ($spoken.provider -ne "piper" -or $spoken.voice -ne $voice -or $spoken.sample_rate -ne 22050 -or $spoken.duration -lt 0.1 -or $riff -ne "RIFF" -or $wave -ne "WAVE" -or $audible -lt 1000) {
+              throw "frozen Piper synthesis gave no valid audio: $($spoken | ConvertTo-Json -Compress), header=$riff/$wave, non-zero bytes=$audible"
+            }
+            Write-Host "frozen worker synthesized $($spoken.duration) s ($($bytes.Length) bytes) with Piper"
             Write-Host "frozen worker started outside the checkout: $expected"
           }
           finally {
