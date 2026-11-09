@@ -159,6 +159,8 @@ Tests: `tests/worker_media_executor_main_video.py` (fake ComfyUI child, real sup
 
 **Not proven on the rig.** Everything in `docs/MEDIA_VIDEO_GENERATION.md` "Must be proven on the rig before any activation" still applies. `KALIV_MEDIA_VIDEO` stays unset until Anders enables it after that proof.
 
+The model manifest, the memory profile for 2× RTX 3060 12 GB, the minimum viable settings and the qualification steps are in `docs/MEDIA_VIDEO_RIG_QUALIFICATION.md`.
+
 ## Exit codes and the supervisor's policy
 
 `executorRestartPolicy` in `backend/cmd/modelrig-supervisor/executor.go`; every code is unit-tested, and real child processes prove that the code the policy sees is the code the child gave.
