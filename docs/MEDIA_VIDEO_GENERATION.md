@@ -1,6 +1,6 @@
 # Video generation (ComfyUI) — slice 2 of #2296
 
-**Status:** default-off and not wired into the worker. Nothing has been proven on the rig.
+**Status:** text-to-video is wired into `media_executor_main` behind its own switch, `KALIV_MEDIA_VIDEO=1`. It is default-off (`docs/MEDIA_EXECUTOR.md`, "Video"). Image-to-video is not served by the entry point. Nothing has been proven on the rig.
 **Ownership (6490545753):**
 - Claude owns the supervisor, the adapter, the template binding and the profiles.
 - ChatGPT owns the storage side (`ExternalMediaSink`, the gallery index), the gallery and the routes.
@@ -95,9 +95,9 @@ An actor with write access to the volume could delete files directly anyway.
 - the restore never overwrites;
 - an open file is not captured.
 
-## Staged video sink (`ExternalStagedVideoSink`, not wired)
+## Staged video sink (`ExternalStagedVideoSink`)
 
-`worker/app/media_staged_video_sink.py` implements the seam (`StagedFileArtifactSink` + `JobKeyedStagedSink`) on the verified external volume. **Nothing constructs it yet.** The executor entry point still refuses video profiles (exit 78) until G1 (the production `VerifiedMediaVolume`), #2339 and a physical rig test are in.
+`worker/app/media_staged_video_sink.py` implements the seam (`StagedFileArtifactSink` + `JobKeyedStagedSink`) on the verified external volume. `media_executor_main` constructs it only when video is switched on (`KALIV_MEDIA_VIDEO=1`). It is wrapped so that the pinned G1 volume is verified before every staging and every adoption.
 
 - **Reuses ChatGPT's code unchanged:** `ExternalMediaSink._root()` (volume and root), `job_asset_id()` (the same id an image of the same job would get) and `register_asset()` (the gallery index).
 - **Staging.** `staged(".mp4")` verifies the root, then creates `.kaliv-<16 hex>.tmp` in the media root (`O_EXCL`, `O_NOFOLLOW`, `0600`). That is the sink's own temporary naming, so its read-only temp inventory lists a crash leftover. The handle has `write`/`flush` only, and bytes past `max_bytes` are not written.

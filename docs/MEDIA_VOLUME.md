@@ -9,7 +9,7 @@ The verified media volume is where generated media is **published**: the gallery
 - **The job store's guard:** checks it before every access (the work area, then `volume.verify()`, then the gallery root), so the executor never claims a job it could not publish. The job database itself is in the work area, not here.
 - **The gallery sink:** uses its root.
 - **Exit codes:** a configuration that can never work is exit 78; a missing, foreign or swapped disk is exit 75.
-- **Video stays default-off:** `media_executor_main` keeps exit 78 for video until the staged sink, image-to-video and the rig evidence are in.
+- **Video is default-off:** `media_executor_main` serves text-to-video only with `KALIV_MEDIA_VIDEO=1`, which stays unset until the rig evidence is in. The staged video sink verifies this pinned volume before every staging and every adoption.
 
 ## Operator setup (once per disk)
 

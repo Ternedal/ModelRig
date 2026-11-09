@@ -393,6 +393,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_media_executor.py`
 - `tests/worker_media_executor_image_to_video.py`
 - `tests/worker_media_executor_main.py`
+- `tests/worker_media_executor_main_video.py`
 - `tests/worker_media_generation_profiles.py`
 - `tests/worker_media_generation_reconciliation.py`
 - `tests/worker_media_generation_runner.py`

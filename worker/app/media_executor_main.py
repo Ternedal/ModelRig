@@ -19,9 +19,20 @@ Configuration (all from the environment; shared names agreed in 6636684138):
   KALIV_GPU_DEVICE_UUIDS, CUDA_DEVICE_ORDER, HF_HUB_OFFLINE, TRANSFORMERS_OFFLINE  (existing)
   KALIV_MEDIA_IDLE_UNLOAD_S           optional, default 300
 
-First version: images only, published job-keyed through ExternalMediaSink.
-A video profile for this device is a configuration error (exit 78) until a
-staged video sink exists; there is no bytes fallback.
+Video (text-to-video through the supervised ComfyUI; docs/MEDIA_VIDEO_GENERATION.md) is
+default-off behind its own switch. An enabled video profile for this device is a
+configuration error (exit 78) unless all of this holds:
+  KALIV_MEDIA_VIDEO=1                 the video switch (separate from the master switch)
+  KALIV_COMFY_PYTHON                  absolute python of the pinned ComfyUI environment
+  KALIV_COMFY_MAIN                    absolute path of that ComfyUI's main.py
+  KALIV_COMFY_DIR                     this executor's ComfyUI folder in the work area, with existing
+                                      input/, output/, temp/ and user/ folders (one per executor)
+  KALIV_COMFY_TEMPLATE_DIR            the operator's workflow template directory
+  KALIV_COMFY_WEIGHTS_CACHE           optional: the weight-hash cache file, in the work area
+  and every served video profile is text_to_video only (image_to_video needs the owner-gated
+  source reader, not wired here), uses the comfyui backend, and pins comfyui_version and weights.
+Images are published job-keyed through ExternalMediaSink; video through ExternalStagedVideoSink,
+with the pinned G1 volume verified before every staging and adoption. There is no bytes fallback.
 
 Where things live (Anders, 6 Nov 2026, #2275 6686905826): media is generated in
 the private work area on the internal disk, and published on the external volume.
@@ -36,6 +47,7 @@ work area that fails its checks at start).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sqlite3
@@ -49,8 +61,9 @@ from .gpu_lease import GpuLeaseError, check_lease_dir, device_uuid_map, lease_di
 from .image_job_store import ImageJobError, ImageJobStore
 from .media_executor import EXIT_CONFIG, EXIT_SINK_UNAVAILABLE, ExecutorConfigError, MediaExecutor
 from .media_gallery_store import ExternalMediaSink
-from .media_generation_contract import ArtifactSinkUnavailable, GenerationError
+from .media_generation_contract import MAX_ARTIFACT_BYTES, ArtifactSinkUnavailable, GenerationError
 from .media_generation_profiles import ModelProfile, enabled_profiles, load_profile_dir
+from .media_staged_video_sink import ExternalStagedVideoSink
 from .media_volume import VOLUME_ID_ENV, MediaVolumeConfigError, MountedMediaVolume, media_volume_from_env
 from .media_work_area import MediaWorkAreaConfigError, PrivateWorkArea, work_area_from_env
 
@@ -61,6 +74,13 @@ VOLUME_ROOT_ENV = "KALIV_MEDIA_VOLUME_ROOT"
 WORK_ROOT_ENV = "KALIV_MEDIA_WORK_ROOT"
 PROFILE_DIR_ENV = "KALIV_MEDIA_PROFILE_DIR"
 IDLE_ENV = "KALIV_MEDIA_IDLE_UNLOAD_S"
+VIDEO_SWITCH_ENV = "KALIV_MEDIA_VIDEO"
+COMFY_PYTHON_ENV = "KALIV_COMFY_PYTHON"
+COMFY_MAIN_ENV = "KALIV_COMFY_MAIN"
+COMFY_DIR_ENV = "KALIV_COMFY_DIR"
+COMFY_TEMPLATE_DIR_ENV = "KALIV_COMFY_TEMPLATE_DIR"
+COMFY_WEIGHTS_CACHE_ENV = "KALIV_COMFY_WEIGHTS_CACHE"
+COMFY_FOLDERS = ("input", "output", "temp", "user")
 
 
 def _absolute(env: Mapping[str, str], name: str) -> str:
@@ -93,11 +113,93 @@ def _check_job_db(path: str) -> None:
 OFFLINE_FLAGS = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")  # what DiffusersImageAdapter.load() requires
 
 
-def default_adapter_factory(device: str, lease_dir: str, env: Mapping[str, str]) -> Callable[[ModelProfile], object]:
+class VideoConfig:
+    """The checked ComfyUI side of one executor (built only when video is switched on)."""
+
+    def __init__(self, *, python: str, main_py: str, comfy_dir: str, template_dir: str,
+                 weights_cache: str | None, work: PrivateWorkArea, gpu_uuid: str):
+        self.python, self.main_py, self.comfy_dir, self.template_dir = python, main_py, comfy_dir, template_dir
+        self.weights_cache, self.work, self.gpu_uuid = weights_cache, work, gpu_uuid
+        self.folders = {name: os.path.join(comfy_dir, name) for name in COMFY_FOLDERS}
+
+
+def _video_config(env: Mapping[str, str], video: Mapping[str, ModelProfile], work: PrivateWorkArea,
+                  gpu_uuid: str) -> VideoConfig:
+    """Fail closed (78) unless every served video profile and the ComfyUI side are fully specified."""
+    if env.get(VIDEO_SWITCH_ENV) != "1":
+        raise ExecutorConfigError(f"{VIDEO_SWITCH_ENV}=1 is required for the video profile(s) "
+                                  f"{', '.join(sorted(video))}: video is off")
+    ports = []
+    for profile_id, profile in sorted(video.items()):
+        options = profile.backend_options
+        if profile.backend != "comfyui" or options is None:
+            raise ExecutorConfigError(f"{profile_id}: video is served through the supervised ComfyUI only")
+        if "image_to_video" in profile.tasks:
+            raise ExecutorConfigError(f"{profile_id}: image_to_video is not served yet (the owner-gated source "
+                                      "reader is not wired); a served video profile lists text_to_video only")
+        if options.comfyui_version is None or not options.weights:
+            raise ExecutorConfigError(f"{profile_id}: a served video profile must pin comfyui_version and weights")
+        ports.append(options.port)
+    if len(set(ports)) != len(ports):
+        raise ExecutorConfigError("two served video profiles use the same ComfyUI port")
+    python = _absolute(env, COMFY_PYTHON_ENV)
+    main_py = _absolute(env, COMFY_MAIN_ENV)
+    comfy_dir = _absolute(env, COMFY_DIR_ENV)
+    template_dir = _absolute(env, COMFY_TEMPLATE_DIR_ENV)
+    if not os.path.isfile(python):  # a venv's python is a link on POSIX: that is fine
+        raise ExecutorConfigError(f"{COMFY_PYTHON_ENV} must be an existing file")
+    if not os.path.isfile(main_py) or os.path.islink(main_py):
+        raise ExecutorConfigError(f"{COMFY_MAIN_ENV} must be an existing file, not a link")
+    if os.path.basename(main_py) != "main.py":
+        raise ExecutorConfigError(f"{COMFY_MAIN_ENV} must name ComfyUI's main.py")
+    if not os.path.isdir(template_dir) or os.path.islink(template_dir):
+        raise ExecutorConfigError(f"{COMFY_TEMPLATE_DIR_ENV} must be an existing directory, not a link")
+    # ComfyUI writes frames, the unfinished MP4 and temp files here: the private work area on the
+    # internal disk (Anders, 6 Nov 2026), checked here and again by the supervisor before every job.
+    for name in COMFY_FOLDERS:
+        try:
+            work.require(os.path.join(comfy_dir, name))
+        except ArtifactSinkUnavailable as exc:
+            raise ExecutorConfigError(f"{COMFY_DIR_ENV}/{name} must be an existing folder in the work area "
+                                      f"({exc})") from None
+    weights_cache = env.get(COMFY_WEIGHTS_CACHE_ENV) or None
+    if weights_cache is not None:
+        _absolute(env, COMFY_WEIGHTS_CACHE_ENV)
+        try:
+            work.require(os.path.dirname(weights_cache))
+        except ArtifactSinkUnavailable as exc:
+            raise ExecutorConfigError(f"{COMFY_WEIGHTS_CACHE_ENV} must be in an existing folder in the work area "
+                                      f"({exc})") from None
+    return VideoConfig(python=python, main_py=main_py, comfy_dir=comfy_dir, template_dir=template_dir,
+                       weights_cache=weights_cache, work=work, gpu_uuid=gpu_uuid)
+
+
+def default_adapter_factory(device: str, lease_dir: str, env: Mapping[str, str], *,
+                            video: VideoConfig | None = None, supervisor_class=None,
+                            image_adapter_factory: Callable[[ModelProfile], object] | None = None,
+                            ) -> Callable[[ModelProfile], object]:
+    """``supervisor_class`` and ``image_adapter_factory`` exist for the tests (a fake ComfyUI child,
+    a fake image pipeline); production passes neither."""
     def factory(profile: ModelProfile):
         if profile.backend == "diffusers":
+            if image_adapter_factory is not None:
+                return image_adapter_factory(profile)
             from .diffusers_image_adapter import DiffusersImageAdapter
             return DiffusersImageAdapter(profile, device=device, lease_dir=lease_dir, env=env)
+        if profile.backend == "comfyui" and video is not None:
+            from .comfy_supervisor import ComfyLaunch, ComfySupervisor
+            from .comfy_video_adapter import ComfyVideoAdapter
+            folders = video.folders
+            launch = ComfyLaunch(python_executable=video.python, main_py=video.main_py,
+                                 port=profile.backend_options.port, input_directory=folders["input"],
+                                 output_directory=folders["output"], temp_directory=folders["temp"],
+                                 user_directory=folders["user"])
+            supervisor = (supervisor_class or ComfySupervisor)(
+                gpu_uuid=video.gpu_uuid, lease_dir=lease_dir, launch=launch, work_area=video.work,
+                reserve_gib=profile.resources.reserve_gib, min_usable_gib=profile.resources.min_usable_gib,
+                base_env=env)
+            return ComfyVideoAdapter(profile, supervisor=supervisor, template_dir=video.template_dir,
+                                     output_directory=folders["output"], weights_cache=video.weights_cache)
         raise ExecutorConfigError(f"{profile.profile_id}: backend {profile.backend} is not served by this executor yet")
     return factory
 
@@ -126,9 +228,34 @@ class PinnedVolumeSink:
         return getattr(self._sink, name)
 
 
+class PinnedStagedVideoSink:
+    """The staged video sink, with the pinned G1 volume verified before staging and before adoption.
+
+    ``ExternalStagedVideoSink`` re-checks its root by path; this adds the pinned identity, as
+    ``PinnedVolumeSink`` does for images, so a disk swapped during a render gets nothing."""
+
+    def __init__(self, sink, volume):
+        self._sink, self._volume = sink, volume
+
+    @contextlib.contextmanager
+    def staged(self, extension: str):
+        self._volume.verify()
+        with self._sink.staged(extension) as output:
+            yield output
+
+    def adopt(self, handle, mime_type: str) -> str:
+        self._volume.verify()
+        return self._sink.adopt(handle, mime_type)
+
+    def adopt_for_job(self, handle, mime_type: str, job_key: str) -> str:
+        self._volume.verify()
+        return self._sink.adopt_for_job(handle, mime_type, job_key)
+
+
 def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
                    adapter_factory: Callable[[ModelProfile], object] | None = None,
-                   volume_probe=None, work_probe=None) -> MediaExecutor:
+                   volume_probe=None, work_probe=None, supervisor_class=None,
+                   image_adapter_factory: Callable[[ModelProfile], object] | None = None) -> MediaExecutor:
     """Everything the executor needs, from the environment. Raises ExecutorConfigError or
     ArtifactSinkUnavailable (the volume is not there); never creates a missing directory."""
     env = os.environ if env is None else env
@@ -183,6 +310,9 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
         work.require(job_dir)
     except ArtifactSinkUnavailable as exc:
         raise ExecutorConfigError(f"{JOB_DB_ENV} must be in an existing folder in the work area ({exc})") from None
+    # Video: everything is checked before the job database is first looked at, like the rest.
+    video_profiles = {pid: p for pid, p in mine.items() if p.modality == "video"}
+    video = _video_config(env, video_profiles, work, gpu_uuid) if video_profiles else None
     sink = ExternalMediaSink(media_root, str(volume.root))
     # The sink itself only knows the root's path (mount and containment checks, no marker or pinned
     # identity). G1 is checked again immediately before every write, so a disk replaced after
@@ -221,9 +351,17 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
         idle = float(env.get(IDLE_ENV, "300"))
     except ValueError:
         raise ExecutorConfigError(f"{IDLE_ENV} must be a number of seconds") from None
-    return MediaExecutor(store, gpu_uuid=gpu_uuid, lease_dir=lease_dir, profiles=mine,
-                         adapter_factory=adapter_factory or default_adapter_factory(device, lease_dir, env),
-                         image_sink=published_through, video_sink=None, idle_unload_s=idle, volume_root=str(volume.root))
+    video_sink = None
+    if video is not None:
+        largest = max(p.backend_options.max_output_bytes for p in video_profiles.values())
+        video_sink = PinnedStagedVideoSink(
+            ExternalStagedVideoSink(media_root, str(volume.root), max_bytes=min(largest, MAX_ARTIFACT_BYTES)), volume)
+    factory = adapter_factory or default_adapter_factory(device, lease_dir, env, video=video,
+                                                         supervisor_class=supervisor_class,
+                                                         image_adapter_factory=image_adapter_factory)
+    return MediaExecutor(store, gpu_uuid=gpu_uuid, lease_dir=lease_dir, profiles=mine, adapter_factory=factory,
+                         image_sink=published_through, video_sink=video_sink, idle_unload_s=idle,
+                         volume_root=str(volume.root))
 
 
 def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) -> int:
