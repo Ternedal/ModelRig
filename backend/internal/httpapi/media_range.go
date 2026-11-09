@@ -58,3 +58,14 @@ func mediaRangeHeaders(start, end, size int64, partial bool) (int, string, int64
     }
     return 200, "", length, nil
 }
+
+ 
+// mediaUnsatisfiedContentRange formats the RFC 9110 unsatisfied range value.
+// A 416 response must not reveal an asset's size until the caller has been
+// authenticated and authorized to read that exact completed asset.
+func mediaUnsatisfiedContentRange(size int64) (string, error) {
+    if size < 0 {
+        return "", errors.New("invalid verified asset size")
+    }
+    return "bytes */" + strconv.FormatInt(size, 10), nil
+}
