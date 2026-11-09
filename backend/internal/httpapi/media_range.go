@@ -24,6 +24,11 @@ func mediaByteRange(header string, size int64) (start, end int64, partial bool, 
     }
     parts := strings.SplitN(spec, "-", 2)
     if parts[0] == "" { return 0, 0, false, errors.New("suffix range unsupported") }
+    for _, part := range parts {
+        for _, ch := range part {
+            if ch < '0' || ch > '9' { return 0, 0, false, errors.New("nondecimal byte range") }
+        }
+    }
     start, err = strconv.ParseInt(parts[0], 10, 64)
     if err != nil || start < 0 || start >= size { return 0, 0, false, errors.New("invalid range start") }
     if parts[1] == "" { return start, size - 1, true, nil }
