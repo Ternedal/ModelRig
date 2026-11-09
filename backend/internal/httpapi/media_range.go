@@ -37,3 +37,24 @@ func mediaByteRange(header string, size int64) (start, end int64, partial bool, 
     if end >= size { end = size - 1 }
     return start, end, true, nil
 }
+
+// mediaRangeHeaders returns the status and exact byte metadata for a verified
+// asset descriptor. Call only after authorization and mediaByteRange succeed.
+// The caller must stream from the same opened descriptor, never reopen by path.
+func mediaRangeHeaders(start, end, size int64, partial bool) (int, string, int64, error) {
+    if size < 0 || start < 0 || (size == 0 && (end != -1 || partial)) ||
+        (size > 0 && (end < start || end >= size)) ||
+        (!partial && size > 0 && (start != 0 || end != size-1)) {
+        return 0, "", 0, errors.New("invalid verified media range")
+    }
+    if size == 0 {
+        if start != 0 { return 0, "", 0, errors.New("invalid empty media range") }
+        return 200, "", 0, nil
+    }
+    length := end - start + 1
+    if partial {
+        return 206, "bytes " + strconv.FormatInt(start, 10) + "-" +
+            strconv.FormatInt(end, 10) + "/" + strconv.FormatInt(size, 10), length, nil
+    }
+    return 200, "", length, nil
+}
