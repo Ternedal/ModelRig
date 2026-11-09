@@ -8,45 +8,64 @@
 > - **Det gælder stadig:** ingen launcher aktiverer produktion (`production_activation=false`), og der skabes intet release uden Anders' go.
 
 Denne fil er den autoritative rækkefølge for fysisk promotion af ModelRig
-`2.0.19`. Kandidaten ligger på `release/kaliv-v2.0.19-prep-20261108`; den eksakte SHA skal
-altid læses fra den fetch'ede `origin/release/kaliv-v2.0.19-prep-20261108`, matches mod lokal
-HEAD og bevises med `candidate_freeze_check.py`. Den må aldrig gættes eller
+`2.0.19`. Under D3 er kandidaten den publicerede RC-SHA: den commit, tagget
+`v2.0.19` peger på. Den checkes ud på `physical-proof/2.0.19`, den gren
+Stage A-operatoren og wizarden kræver. Den eksakte SHA skal altid læses fra
+den fetch'ede `origin/physical-proof/2.0.19`, matches mod tagget og lokal HEAD
+og bevises med `candidate_freeze_check.py`. Den må aldrig gættes eller
 kopieres fra ældre evidens.
 
 ## Ufravigelige grænser
 
-- Stage A kører mod én upubliceret, kvalificeret kandidat-SHA.
-- Samme SHA bruges senere til fast-forward, tag `v2.0.19` og release.
+- Stage A kører mod præcis den commit, den publicerede `v2.0.19` peger på.
+- `physical-proof/2.0.19` oprettes efter publicering på den samme SHA og flyttes
+  aldrig.
 - Efter fysisk evidens er begyndt, er squash, rebase, mergecommit, amend og
   enhver anden SHA-ændring forbudt.
 - Enhver bevægelse af kandidatbranch eller `origin/main` kræver ny freeze og ny
   evidens.
+- Fra tagget, til A3's kandidatgate er grøn, merges intet til `main` (se A0).
 - Alle receipts og rapporter skal bevare `production_activation=false`.
 - Ingen launcher i dette flow merger, pusher, tagger, releaser eller aktiverer.
 
-## Stage A — upubliceret kandidat
+## Stage A — den publicerede RC-SHA
 
 ### A0. Lås checkouten
+
+Kør først, når `v2.0.19` er publiceret og verificeret, og
+`physical-proof/2.0.19` findes på origin (#2275).
 
 ```powershell
 cd C:\Users\admin\Desktop\ModelRig-git
 git fetch origin
-git switch release/kaliv-v2.0.19-prep-20261108
-git pull --ff-only origin release/kaliv-v2.0.19-prep-20261108
+git fetch --force origin tag v2.0.19
+$RcSha = (git rev-parse "v2.0.19^{commit}").Trim()
+if ($RcSha.Length -ne 40) { throw "v2.0.19 er ikke tagget paa origin" }
+git switch physical-proof/2.0.19
+git pull --ff-only origin physical-proof/2.0.19
 $CandidateSha = (git rev-parse HEAD).Trim()
-$RemoteCandidateSha = (git rev-parse origin/release/kaliv-v2.0.19-prep-20261108).Trim()
+$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.19).Trim()
 if ($CandidateSha.Length -ne 40) { throw "Ugyldig kandidat-SHA" }
-if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/release/kaliv-v2.0.19-prep-20261108: local=$CandidateSha remote=$RemoteCandidateSha" }
+if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/physical-proof/2.0.19: local=$CandidateSha remote=$RemoteCandidateSha" }
+if ($CandidateSha -ne $RcSha) { throw "physical-proof/2.0.19 peger ikke paa den publicerede v2.0.19: branch=$CandidateSha tag=$RcSha" }
 if (git status --short) { throw "Working tree er ikke ren" }
 if ((Get-Content VERSION -Raw).Trim() -ne "2.0.19") { throw "Forkert version" }
 python scripts/candidate_freeze_check.py --expected-sha $CandidateSha
 if ($LASTEXITCODE -ne 0) { throw "Candidate er ikke frozen paa exact SHA $CandidateSha" }
 ```
 
-`origin/release/kaliv-v2.0.19-prep-20261108`, lokal exact HEAD og den grønne
-`candidate_freeze_check.py` skal alle pege på samme kandidat-SHA. Stop ved
-enhver forskel. Historiske freeze-PR'er og tidligere 2.0.19-heads er ikke
-SHA-authority.
+`v2.0.19`, `origin/physical-proof/2.0.19`, lokal exact HEAD og den grønne
+`candidate_freeze_check.py` skal alle pege på samme SHA, RC-SHA'en. Stop ved
+enhver forskel. Release-prep-grenen `release/kaliv-v2.0.19-prep-20261108`,
+historiske freeze-PR'er og tidligere 2.0.19-heads er ikke SHA-authority: efter
+merge af #2364 er prep-grenens SHA ikke den taggede.
+
+Både `candidate_freeze_check.py` og operatoren kræver, at den aktuelle
+`origin/main` er indeholdt i kandidaten, og hver receipt-consumer refetcher
+`main`. Efter publicering holder det kun, så længe `main` står på RC-SHA'en.
+Derfor merges intet til `main` fra tagget, til A3's kandidatgate er grøn. Er
+`main` alligevel flyttet, stopper kontrollen fail-closed. Den må ikke omgås;
+stop og rapportér i #2275.
 
 ### A1. Opret en frisk freeze-receipt
 
@@ -129,13 +148,20 @@ production_activation=false
 summary.total=7
 ```
 
+Feltnavnene er gate-værktøjets. Under D3 er releasen allerede publiceret:
+`candidate_ready_for_fast_forward=true` betyder kun, at kandidatgaten er grøn
+på RC-SHA'en. Der fast-forwardes intet.
+
 Stop her. Stage A udfører ingen repository- eller releaseoperationer.
 
 ## Beslutningspunkt
 
-Kun efter en særskilt eksplicit beslutning må `main` fast-forwardes til præcis
-Stage A-SHA'en, samme SHA tagges som `v2.0.19`, og det komplette signerede
-release-sæt publiceres. Ændres SHA'en, er Stage A ugyldig.
+Under D3 ligger beslutningspunktet før Stage A: Anders' særskilte release-go
+på grøn exact-head CI på RC-SHA'en, `main` efter merge af #2364. Først derefter
+tagges `v2.0.19` på den SHA, og det komplette signerede release-sæt publiceres.
+Der fast-forwardes ingen gren til `main`. Et rødt fysisk resultat ændrer ikke
+den publicerede release af sig selv; det rapporteres i #2275, og den videre
+handling er Anders' beslutning.
 
 ## Stage B — publiceret 2.0.19
 

@@ -14,9 +14,10 @@ står i `STAGE_B_UPDATER_EVIDENCE.md`.
 ## Kandidat
 
 - version: `2.0.19`;
-- branch: `release/kaliv-v2.0.19-prep-20261108`;
+- kandidat: den publicerede RC-SHA, den commit tagget `v2.0.19` peger på;
+- branch: `physical-proof/2.0.19`, oprettet efter publicering på RC-SHA'en; den gren Stage A-operatoren kræver;
 - freeze: `candidate_freeze_check.py` grøn på exact SHA;
-- exact SHA: læses fra den fetch'ede `origin/release/kaliv-v2.0.19-prep-20261108` og må aldrig gættes eller kopieres fra ældre evidens;
+- exact SHA: læses fra den fetch'ede `origin/physical-proof/2.0.19`, matches mod tagget og må aldrig gættes eller kopieres fra ældre evidens;
 - produktion: ikke aktiveret.
 
 Evidens fra 2.0.12 eller fra en tidligere ugyldiggjort 2.0.13-head må ikke
@@ -24,23 +25,37 @@ genbruges.
 
 ## Blok 0 — lås checkouten
 
+Kør først, når `v2.0.19` er publiceret og verificeret, og
+`physical-proof/2.0.19` findes på origin (#2275).
+
 ```powershell
 cd C:\Users\admin\Desktop\ModelRig-git
 git fetch origin
-git switch release/kaliv-v2.0.19-prep-20261108
-git pull --ff-only origin release/kaliv-v2.0.19-prep-20261108
+git fetch --force origin tag v2.0.19
+$RcSha = (git rev-parse "v2.0.19^{commit}").Trim()
+if ($RcSha.Length -ne 40) { throw "v2.0.19 er ikke tagget paa origin" }
+git switch physical-proof/2.0.19
+git pull --ff-only origin physical-proof/2.0.19
 $CandidateSha = (git rev-parse HEAD).Trim()
-$RemoteCandidateSha = (git rev-parse origin/release/kaliv-v2.0.19-prep-20261108).Trim()
-if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/release/kaliv-v2.0.19-prep-20261108: local=$CandidateSha remote=$RemoteCandidateSha" }
+$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.19).Trim()
+if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/physical-proof/2.0.19: local=$CandidateSha remote=$RemoteCandidateSha" }
+if ($CandidateSha -ne $RcSha) { throw "physical-proof/2.0.19 peger ikke paa den publicerede v2.0.19: branch=$CandidateSha tag=$RcSha" }
 if (git status --short) { throw "Working tree er ikke ren" }
 if ((Get-Content VERSION -Raw).Trim() -ne "2.0.19") { throw "Forkert version" }
 python scripts/candidate_freeze_check.py --expected-sha $CandidateSha
 if ($LASTEXITCODE -ne 0) { throw "Candidate er ikke frozen paa exact SHA $CandidateSha" }
 ```
 
-`origin/release/kaliv-v2.0.19-prep-20261108` og den grønne `candidate_freeze_check.py` er den
-aktuelle kandidat-authority. Historiske freeze-PR'er eller ældre 2.0.13-heads
-må ikke bruges som SHA-reference.
+`v2.0.19`, `origin/physical-proof/2.0.19` og den grønne
+`candidate_freeze_check.py` er den aktuelle kandidat-authority. Release-prep-grenen
+`release/kaliv-v2.0.19-prep-20261108`, historiske freeze-PR'er eller ældre
+2.0.13-heads må ikke bruges som SHA-reference.
+
+Freeze-kontrollen og operatoren kræver, at den aktuelle `origin/main` er
+indeholdt i kandidaten. Efter publicering holder det kun, så længe `main` står
+på RC-SHA'en, så fra tagget, til Stage A er grøn, merges intet til `main`. Er
+`main` alligevel flyttet, stopper kontrollen. Den må ikke omgås; stop og
+rapportér i #2275.
 
 Fra første fysiske bevis til promotion eller abandonment må branchen ikke
 pushes, rebases, force-pushes, merges, amendes eller redigeres. Enhver head-
@@ -80,13 +95,19 @@ production_activation=false
 summary.total=7
 ```
 
+Feltnavnene er gate-værktøjets. Under D3 betyder
+`candidate_ready_for_fast_forward=true` kun, at kandidatgaten er grøn på
+RC-SHA'en; der fast-forwardes intet.
+
 Stage A merger, tagger, releaser og aktiverer intet.
 
 ## Beslutningspunkt
 
-Kun efter en særskilt eksplicit beslutning må præcis Stage A-SHA'en
-fast-forwardes til `main`, tagges `v2.0.19` og publiceres som et komplet
-signeret release-sæt.
+Under D3 ligger beslutningspunktet før Stage A: Anders' særskilte release-go på
+grøn exact-head CI på RC-SHA'en. Først derefter tagges `v2.0.19` og publiceres
+som et komplet signeret release-sæt. Et rødt fysisk resultat ændrer ikke den
+publicerede release af sig selv; det rapporteres i #2275, og den videre
+handling er Anders' beslutning.
 
 ## Blok 2 — Stage B
 

@@ -94,7 +94,7 @@ _source = _source.replace(
     'for forbidden in (\n',
     'rigdag = (ROOT / "RIGDAG_SIMPEL.md").read_text(encoding="utf-8")\n'
     'check(\n'
-    '    "origin/release/kaliv-v2.0.19-prep-20261108" in rigdag,\n'
+    '    "origin/physical-proof/2.0.19" in rigdag,\n'
     '    "rig-day authority is the fetched remote 2.0.19 candidate branch",\n'
     ')\n'
     'check(\n'
