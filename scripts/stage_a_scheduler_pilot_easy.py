@@ -7,8 +7,8 @@ Only candidate branch and version authority are shifted for the current era.
 # ruff: noqa: F821 -- main is injected by the retained implementation at runtime.
 from pathlib import Path as _Path
 
-CANDIDATE_BRANCH_PREFIX = "physical-proof/2.0.13"
-EXPECTED_VERSION = "2.0.13"
+CANDIDATE_BRANCH_PREFIX = "physical-proof/2.0.19"
+EXPECTED_VERSION = "2.0.19"
 _RETAINED = _Path(__file__).with_name("stage_a_scheduler_pilot_easy.retained")
 _source = _RETAINED.read_text(encoding="utf-8")
 _old_branch = 'CANDIDATE_BRANCH_PREFIX = "physical-proof/2.0.12"'
@@ -27,8 +27,8 @@ _name = __name__
 globals()["__name__"] = "_stage_a_scheduler_pilot_easy_retained"
 exec(compile(_source, str(_RETAINED), "exec"), globals(), globals())
 globals()["__name__"] = _name
-CANDIDATE_BRANCH_PREFIX = "physical-proof/2.0.13"
-EXPECTED_VERSION = "2.0.13"
+CANDIDATE_BRANCH_PREFIX = "physical-proof/2.0.19"
+EXPECTED_VERSION = "2.0.19"
 
 # Static contract marker: current != CANDIDATE_BRANCH_PREFIX
 
