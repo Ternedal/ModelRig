@@ -144,6 +144,12 @@ def run():
             check(captured[-1][0] == [
                 {"role": "user", "content": "hvad er klokken"},
             ], "cloud URL alone also blocks earlier local history")
+            # A request without history is stateless: nothing an earlier call
+            # sent (another conversation) can reach the LLM (ported from #2213).
+            asyncio.run(vp.converse(in_wav, language="da", out_dir=tmp))
+            check(captured[-1] == ([
+                {"role": "user", "content": "hvad er klokken"},
+            ], None), "a request without history carries no earlier turn")
         finally:
             oc.chat_stream = original_stream
 
