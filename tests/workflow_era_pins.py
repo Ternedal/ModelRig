@@ -61,8 +61,20 @@ def run(source: str, target: str, reader) -> None:
             f"{path}: BRANCH pins physical-proof/{target} (found {sorted(set(pins)) or 'none'})",
         )
 
+    # The scheduler pilot the Stage A wizard sends the operator to
+    # (RUN_STAGE_A_SCHEDULER_PILOT.cmd). It sat on 2.0.13 through 2.0.18 because
+    # this gate did not list it.
+    scheduler_pin = re.compile(r'^CANDIDATE_BRANCH_PREFIX = "physical-proof/(?P<v>[0-9.]+)"', re.M)
+    pins = scheduler_pin.findall(reader("scripts/stage_a_scheduler_pilot_easy.py"))
+    check(
+        bool(pins) and all(v == target for v in pins),
+        "scripts/stage_a_scheduler_pilot_easy.py: CANDIDATE_BRANCH_PREFIX pins "
+        f"physical-proof/{target} (found {sorted(set(pins)) or 'none'})",
+    )
+
     for path, name, want in (
         ("scripts/stage_a_physical_operator.py", "EXPECTED_VERSION", target),
+        ("scripts/stage_a_scheduler_pilot_easy.py", "EXPECTED_VERSION", target),
         ("scripts/agent3_readonly_pilot_one_click.py", "VERSION", target),
         ("scripts/stage_b_one_click_v2.py", "EXPECTED_SOURCE_VERSION", source),
         ("scripts/stage_b_strict_evidence.py", "EXPECTED_SOURCE_VERSION", source),
