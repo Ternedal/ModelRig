@@ -81,3 +81,20 @@ func TestMediaRangeHeadersRejectsInvalidBounds(t *testing.T) {
         }
     }
 }
+
+func TestMediaUnsatisfiedContentRange(t *testing.T) {
+    for _, tc := range []struct { size int64; want string }{
+        {0, "bytes */0"},
+        {1, "bytes */1"},
+        {100, "bytes */100"},
+        {9223372036854775807, "bytes */9223372036854775807"},
+    } {
+        got, err := mediaUnsatisfiedContentRange(tc.size)
+        if err != nil || got != tc.want {
+            t.Fatalf("size %d: got %q err %v", tc.size, got, err)
+        }
+    }
+    if _, err := mediaUnsatisfiedContentRange(-1); err == nil {
+        t.Fatal("negative asset size accepted")
+    }
+}
