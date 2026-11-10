@@ -174,7 +174,7 @@ def build_media_job_router(service: Callable[[], MediaJobService], *,
                 "tasks": tasks,
                 "sizes": [list(size) for size in profile.limits.sizes],
                 "max_steps": profile.limits.max_steps,
-                "max_prompt_chars": profile.limits.max_prompt_chars,
+                "max_prompt_chars": min(profile.limits.max_prompt_chars, 4000),
             })
         return {"schema": "kaliv-media-job/v1", "profiles": available}
 
