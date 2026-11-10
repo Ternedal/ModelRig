@@ -142,13 +142,11 @@ class WorkAreaTests(unittest.TestCase):
                  ("nfs4", False): "media_work_area_filesystem_refused",
                  ("cifs", False): "media_work_area_filesystem_refused",
                  ("9p", False): "media_work_area_filesystem_refused",
-                 ("tmpfs", False): "media_work_area_filesystem_refused",
-                 # 128-bit ids would not fit a receipt (#2357 review P3-1): refused at start.
-                 ("refs", False): "media_work_area_filesystem_refused"}
+                 ("tmpfs", False): "media_work_area_filesystem_refused"}
         for fs, reason in cases.items():
             with self.subTest(fs=fs):
                 self.assertEqual(self.config_error(probe=Probe(fs)), reason)
-        for fs in ("ntfs", "ext4", "xfs", "btrfs"):
+        for fs in ("ntfs", "refs", "ext4", "xfs", "btrfs"):
             self.area(probe=Probe((fs, False)))
 
     # -- require ----------------------------------------------------------------------------------

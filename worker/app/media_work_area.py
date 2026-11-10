@@ -22,7 +22,7 @@ the folder is local, so a failure is a configuration that will not fix itself.
 - The path is absolute and canonical: no symlink, junction, 8.3 alias, ``..`` or Windows namespace
   prefix (``check_path_syntax`` and a ``realpath`` round trip).
 - It is an existing directory, not a link or reparse point.
-- It is on a local disk with stable file ids that fit a receipt (NTFS, ext4, xfs or btrfs; not ReFS), never a network
+- It is on a local disk with stable file ids (NTFS, ReFS, ext4, xfs or btrfs), never a network
   share: the cleanup after a render deletes only files whose ``(st_dev, st_ino)`` it recorded.
 - It is **private**. On POSIX: owned by the process user, and no access at all for group or others
   (mode ``0700`` or stricter). On Windows: owned by the process user, SYSTEM or Administrators, and
@@ -63,11 +63,6 @@ from .media_volume import (STABLE_ID_FILESYSTEMS, SystemProbe, _is_link, check_p
                            walk_within)
 
 WORK_ROOT_ENV = "KALIV_MEDIA_WORK_ROOT"
-# ReFS is left out (#2357 review P3-1). Its file ids can be 128-bit, and a hand-off receipt
-# stores (st_dev, st_ino) as integers below 2**64 (image_job_store._nonnegative_int). Every
-# video receipt on a ReFS work area would then be refused and the job failed. The refusal
-# belongs at start, as 78. The media volume (Z:) keeps ReFS: its ids are compared, not stored.
-WORK_AREA_FILESYSTEMS = STABLE_ID_FILESYSTEMS - {"refs"}
 DRIVE_REMOTE = 4  # GetDriveTypeW
 
 
@@ -151,7 +146,7 @@ class PrivateWorkArea:
     """Where generation happens: implements ``MediaWorkArea`` in ``media_generation_contract``."""
 
     def __init__(self, root: str, *, probe: WorkAreaProbe | None = None,
-                 allowed_filesystems: frozenset[str] = WORK_AREA_FILESYSTEMS):
+                 allowed_filesystems: frozenset[str] = STABLE_ID_FILESYSTEMS):
         self._probe = probe or WorkAreaProbe()
         self._paths = ntpath if self._probe.windows else posixpath
         try:

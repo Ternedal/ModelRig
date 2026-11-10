@@ -91,10 +91,18 @@ def _nonnegative_int(value: object) -> bool:
     return type(value) is int and 0 <= value < 2 ** 64
 
 
+def _file_id(value: object) -> bool:
+    # st_dev/st_ino: ReFS file ids are 128-bit (FILE_ID_128), and the receipt is JSON text, so
+    # wide ids are kept exactly. #2357 review P3-1 and Codex 4522272230: a 64-bit bound refused
+    # every receipt on a ReFS work area or publication volume, and the render was deleted.
+    return type(value) is int and 0 <= value < 2 ** 128
+
+
 def _file_identity(value: object, *, named: bool) -> bool:
     keys = {"name", "dev", "ino", "size"} if named else {"dev", "ino"}
     return (isinstance(value, dict) and set(value) == keys
-            and all(_nonnegative_int(value[k]) for k in keys - {"name"})
+            and all(_file_id(value[k]) for k in ("dev", "ino"))
+            and (not named or _nonnegative_int(value["size"]))
             # The adapter's own rule for its output name, so a render it accepted is never refused
             # here and then deleted as an explicit refusal (Codex #2357 4504060850).
             and (not named or is_plain_file_name(value["name"])))
