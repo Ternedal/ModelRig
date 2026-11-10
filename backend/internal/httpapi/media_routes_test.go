@@ -181,3 +181,21 @@ func TestMediaSeekFailureDoesNotPublishStaleRangeHeaders(t *testing.T){
  }
  if !asset.closed {t.Fatal("failed asset was not closed")}
 }
+
+func TestMediaPrivateNoStoreWrapsEveryResponse(t *testing.T) {
+    for _, status := range []int{http.StatusOK, http.StatusUnauthorized, http.StatusNotFound, http.StatusServiceUnavailable} {
+        called := false
+        handler := mediaPrivateNoStore(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            called = true
+            w.WriteHeader(status)
+        }))
+        recorder := httptest.NewRecorder()
+        handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/media", nil))
+        if !called || recorder.Code != status {
+            t.Fatalf("status %d: called=%v got=%d", status, called, recorder.Code)
+        }
+        if got := recorder.Header().Get("Cache-Control"); got != "private, no-store" {
+            t.Fatalf("status %d: Cache-Control=%q", status, got)
+        }
+    }
+}
