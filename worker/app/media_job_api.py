@@ -119,6 +119,7 @@ def job_view(job: dict) -> dict:
     """What a device may see of a job: no prompt, no parameters, no internal claim."""
     asset_id = job.get("asset_id") if job.get("state") == "completed" else None
     return {
+        "schema": "kaliv-media-job/v1",
         "id": job["id"],
         "state": job["state"],
         "profile_id": job.get("profile_id"),
