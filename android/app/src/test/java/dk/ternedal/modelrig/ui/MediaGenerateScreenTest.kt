@@ -87,6 +87,48 @@ class MediaGenerateScreenTest {
     }
 
     @Test
+    fun `a rig with no image profile says so and offers nothing`() {
+        show(FakeRig(profileList = { emptyList() }))
+        compose.onNodeWithText("Riggen har ingen billedprofil slået til").assertExists()
+        compose.onNodeWithTag("generate-submit").assertDoesNotExist()
+    }
+
+    @Test
+    fun `an absent backend (404 from the real client) is unavailable, not an error loop`() {
+        val server = okhttp3.mockwebserver.MockWebServer()
+        server.start()
+        try {
+            server.enqueue(okhttp3.mockwebserver.MockResponse().setResponseCode(404)
+                .setHeader("Content-Type", "application/json").setBody("""{"error":"not found"}"""))
+            show(dk.ternedal.modelrig.net.MediaJobClient(server.url("/").toString().trimEnd('/'), "device-token"))
+            compose.onNodeWithText("Billedgenerering er ikke tilgængelig på denne rig").assertExists()
+            compose.onNodeWithTag("generate-submit").assertDoesNotExist()
+            assertEquals("one request, no retry loop", 1, server.requestCount)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `the prompt never reaches the log, through a whole job and through every failure`() {
+        val prompt = "secret-prompt-7f3a a red bicycle"
+        org.robolectric.shadows.ShadowLog.clear()
+        val rig = FakeRig(statuses = listOf(job(MediaJobState.RUNNING), job(MediaJobState.COMPLETED, assetId = "asset_1")))
+        show(rig)
+        compose.onNodeWithTag("generate-prompt").performTextInput(prompt)
+        compose.onNodeWithTag("generate-submit").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTagExists("generate-open-gallery") }
+        assertEquals(prompt, rig.submitted.single().prompt)
+        for (reason in Reason.entries) {
+            val e = MediaJobException(reason, "x", "queue_full")
+            val texts = listOf(MediaGenerate.message(e), e.message.orEmpty(), e.toString())
+            assertTrue(texts.none { it.contains("secret-prompt") })
+        }
+        val logged = org.robolectric.shadows.ShadowLog.getLogs().joinToString("\n") { "${it.tag} ${it.msg} ${it.throwable}" }
+        assertTrue("prompt in log: $logged", !logged.contains("secret-prompt"))
+    }
+
+    @Test
     fun `generate follows the job to completion and only then offers the gallery`() {
         val rig = FakeRig(statuses = listOf(job(MediaJobState.RUNNING), job(MediaJobState.COMPLETED, assetId = "asset_1")))
         show(rig)
