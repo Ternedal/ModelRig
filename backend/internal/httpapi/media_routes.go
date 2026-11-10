@@ -32,6 +32,7 @@ func (s *server) handleMediaList(w http.ResponseWriter, r *http.Request) {
     items, next, err := s.Media.ListMedia(mediaInstallationOwner, limit, query.Get("cursor"))
     if err != nil { http.Error(w, "media unavailable", http.StatusServiceUnavailable); return }
     if items == nil { items = []map[string]any{} }
+    w.Header().Set("Cache-Control", "private, no-store")
     w.Header().Set("Content-Type", "application/json")
     _ = json.NewEncoder(w).Encode(map[string]any{
         "schema": "kaliv-media-gallery/v1", "items": items, "next_cursor": next,
@@ -49,7 +50,11 @@ func (s *server) handleMediaAsset(w http.ResponseWriter, r *http.Request) {
     if size < 0 || (mime != "video/mp4" && mime != "image/png" && mime != "image/jpeg" && mime != "image/webp") {
         http.Error(w, "invalid verified media", http.StatusServiceUnavailable); return
     }
-    start, end, partial, err := mediaByteRange(r.Header.Get("Range"), size)
+    rangeHeader := r.Header.Get("Range")
+    // No ETag or Last-Modified validator is issued by this endpoint.
+    // Any If-Range therefore cannot match and requires a full response.
+    if r.Header.Get("If-Range") != "" { rangeHeader = "" }
+    start, end, partial, err := mediaByteRange(rangeHeader, size)
     if errors.Is(err, errRangeIgnore) {
         start, end, partial, err = mediaByteRange("", size)
     }
@@ -63,6 +68,7 @@ func (s *server) handleMediaAsset(w http.ResponseWriter, r *http.Request) {
     if err != nil { http.Error(w, "invalid verified media", http.StatusServiceUnavailable); return }
     status, contentRange, length, err := mediaRangeHeaders(start, end, size, partial)
     if err != nil { http.Error(w, "invalid verified media", http.StatusServiceUnavailable); return }
+    w.Header().Set("Cache-Control", "private, no-store")
     w.Header().Set("Content-Type", mime)
     w.Header().Set("Accept-Ranges", "bytes")
     w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
