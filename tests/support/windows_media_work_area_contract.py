@@ -87,6 +87,28 @@ def main() -> int:
         check(refused(area, root / "comfy" / "output") is None, "an inherited subfolder is private and accepted")
         check(refused(area, root / "state") is None, "the job database's folder is accepted")
 
+        # The documented setup (docs/MEDIA_WORK_AREA.md), run as written: one /grant:r with three
+        # principals on the root, then /reset of everything below it so it inherits exactly that.
+        # Folders made before the commands (as New-Item does there) must end up private (#2357 P3-4).
+        documented = base / f"documented-{next(counter)}"
+        for sub in (("state",), ("comfy", "input"), ("comfy", "output"), ("comfy", "temp"), ("comfy", "user")):
+            documented.joinpath(*sub).mkdir(parents=True)
+        icacls(documented, "/inheritance:r", "/grant:r", f"*{process}:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F",
+               "*S-1-5-32-544:(OI)(CI)F")
+        reset = subprocess.run(["icacls", str(documented) + "\\*", "/T", "/C", "/reset"], capture_output=True,
+                               text=True, timeout=60)
+        check(reset.returncode == 0, f"the documented /reset of everything below the root succeeds ({reset.returncode})")
+        documented_area = None
+        try:
+            documented_area = PrivateWorkArea(str(documented))
+        except MediaWorkAreaConfigError as exc:
+            check(False, f"the documented setup gives an accepted work area ({exc})")
+        if documented_area is not None:
+            check(True, "the documented setup gives an accepted work area")
+            for sub in (("state",), ("comfy", "output"), ("comfy", "user")):
+                check(refused(documented_area, documented.joinpath(*sub)) is None,
+                      f"a folder made before the documented commands is private afterwards ({'/'.join(sub)})")
+
         readable = private_dir()
         icacls(readable, "/grant", f"*{USERS}:(OI)(CI)(RX)")
         reason = config_error(str(readable))
