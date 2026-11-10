@@ -222,3 +222,35 @@ func TestMediaJobRoutesRefuseBadIDsAndBodiesBeforeTheWorker(t *testing.T) {
 		t.Fatalf("reached the worker: %+v", hits)
 	}
 }
+
+func TestMediaJobProfilesRouteRequiresBearerAndIsDefaultOff(t *testing.T) {
+	var hits []mediaJobsHit
+	worker := mediaJobsWorker(t, &hits)
+	off := mediaJobsHandler(t, worker.URL, "0", mediaJobsTestSecret)
+	rec := doMediaJobs(off, http.MethodGet, "/api/v1/media/jobs/profiles", mediaJobsTestToken, "", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("disabled profile route: %d", rec.Code)
+	}
+	on := mediaJobsHandler(t, worker.URL, "1", mediaJobsTestSecret)
+	for _, token := range []string{"", "wrong-token"} {
+		rec = doMediaJobs(on, http.MethodGet, "/api/v1/media/jobs/profiles", token, "", nil)
+		if rec.Code != http.StatusUnauthorized || rec.Header().Get("Cache-Control") != "private, no-store" {
+			t.Fatalf("unauthorized profile route: %d, cache=%q", rec.Code, rec.Header().Get("Cache-Control"))
+		}
+	}
+	if len(hits) != 0 {
+		t.Fatalf("profile route forwarded without authentication: %+v", hits)
+	}
+	rec = doMediaJobs(on, http.MethodGet, "/api/v1/media/jobs/profiles?owner=spoof", mediaJobsTestToken, "", nil)
+	if rec.Code != http.StatusAccepted || len(hits) != 1 {
+		t.Fatalf("profile route: status=%d hits=%d", rec.Code, len(hits))
+	}
+	hit := hits[0]
+	if hit.Method != http.MethodGet || hit.Path != "/internal/media/jobs/profiles" || hit.RawQuery != "" ||
+		hit.Secret != mediaJobsTestSecret || hit.Owner != "" {
+		t.Fatalf("profile forwarding boundary: %+v", hit)
+	}
+	if rec.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("profile route cache=%q", rec.Header().Get("Cache-Control"))
+	}
+}
