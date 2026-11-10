@@ -109,6 +109,10 @@ func (s *server) handleMediaJobSubmit(w http.ResponseWriter, r *http.Request) {
 	s.forwardMediaJobs(w, r, "/internal/media/jobs")
 }
 
+func (s *server) handleMediaJobProfiles(w http.ResponseWriter, r *http.Request) {
+	s.forwardMediaJobs(w, r, "/internal/media/jobs/profiles")
+}
+
 func (s *server) handleMediaJobStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !validMediaJobID(id) {
@@ -132,6 +136,7 @@ func (s *server) registerMediaJobRoutes() {
 		return
 	}
 	s.mux.Handle("POST /api/v1/media/jobs", mediaJobsNoStore(s.authMW(http.HandlerFunc(s.handleMediaJobSubmit))))
+	s.mux.Handle("GET /api/v1/media/jobs/profiles", mediaJobsNoStore(s.authMW(http.HandlerFunc(s.handleMediaJobProfiles))))
 	s.mux.Handle("GET /api/v1/media/jobs/{id}", mediaJobsNoStore(s.authMW(http.HandlerFunc(s.handleMediaJobStatus))))
 	s.mux.Handle("POST /api/v1/media/jobs/{id}/cancel", mediaJobsNoStore(s.authMW(http.HandlerFunc(s.handleMediaJobCancel))))
 }
