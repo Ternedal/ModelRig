@@ -126,3 +126,21 @@ func TestMediaRoutesRequireBearerThroughRealMux(t *testing.T) {
   t.Fatalf("unauthenticated request reached trusted catalog: list=%d open=%d",m.listCalls,m.openCalls)
  }
 }
+
+func TestMediaErrorResponsesNeverCache(t *testing.T) {
+ for _,tc:=range []struct{method,path string;catalog MediaCatalog;want int}{
+  {"GET","/api/v1/media",nil,503},
+  {"GET","/api/v1/media?limit=0",&mediaTestCatalog{},400},
+  {"GET","/api/v1/media/asset_1",nil,503},
+  {"GET","/api/v1/media/bad.dot",&mediaTestCatalog{},404},
+  {"GET","/api/v1/media/missing",&mediaTestCatalog{},404},
+  {"GET","/api/v1/media/asset_1",&mediaTestCatalog{data:[]byte("123")},200},
+ } {
+  s:=&server{Deps:Deps{Media:tc.catalog}}
+  w:=httptest.NewRecorder()
+  s.handleMediaRequestForTest(w,httptest.NewRequest(tc.method,tc.path,nil))
+  if w.Code!=tc.want || w.Header().Get("Cache-Control")!="private, no-store" {
+   t.Errorf("%s: status=%d cache=%q",tc.path,w.Code,w.Header().Get("Cache-Control"))
+  }
+ }
+}
