@@ -158,6 +158,26 @@ def build_media_job_router(service: Callable[[], MediaJobService], *,
         except ArtifactSinkUnavailable as exc:  # the work area failed its check: nothing was read
             raise HTTPException(status_code=503, detail=str(exc).split(":", 1)[0]) from None
 
+    @router.get("/profiles")
+    def profiles(configured: MediaJobService = Depends(ready)) -> dict:
+        """Only profiles whose tasks are currently served; never expose model paths or pins."""
+        available = []
+        for profile in sorted(configured.profiles.values(), key=lambda p: p.profile_id):
+            if profile.modality == "video" and not configured.video_enabled:
+                continue
+            tasks = sorted(profile.tasks - NOT_SERVED_TASKS)
+            if not tasks:
+                continue
+            available.append({
+                "profile_id": profile.profile_id,
+                "modality": profile.modality,
+                "tasks": tasks,
+                "sizes": [list(size) for size in profile.limits.sizes],
+                "max_steps": profile.limits.max_steps,
+                "max_prompt_chars": profile.limits.max_prompt_chars,
+            })
+        return {"schema": "kaliv-media-job/v1", "profiles": available}
+
     @router.post("", status_code=202)
     def submit(body: SubmitRequest, configured: MediaJobService = Depends(ready)) -> dict:
         profile, generation = configured.request_for(body)
