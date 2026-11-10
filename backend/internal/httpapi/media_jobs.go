@@ -84,7 +84,11 @@ type mediaJobsResponseWriter struct {
 func (w *mediaJobsResponseWriter) WriteHeader(status int) {
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
 		w.blocked = true
-		w.Header().Del("X-Bodyrig-Implementation")
+		for name := range w.Header() {
+			if strings.HasPrefix(http.CanonicalHeaderKey(name), "X-Bodyrig-") {
+				w.Header().Del(name)
+			}
+		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.ResponseWriter.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = io.WriteString(w.ResponseWriter, "media jobs unavailable\\n")
