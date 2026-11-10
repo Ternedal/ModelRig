@@ -106,3 +106,23 @@ func TestMediaAssetIfRangeAndNoStore(t *testing.T) {
  s.handleMediaList(list,httptest.NewRequest("GET","/api/v1/media",nil))
  if list.Header().Get("Cache-Control")!="private, no-store" {t.Fatal("gallery may be cached")}
 }
+
+func TestMediaRoutesRequireBearerThroughRealMux(t *testing.T) {
+ m:=&mediaTestCatalog{data:[]byte("0123456789")}
+ handler:=New(Deps{Media:m})
+ for _,tc:=range []struct{method,path string}{
+  {"GET","/api/v1/media"},
+  {"GET","/api/v1/media/asset_1"},
+  {"HEAD","/api/v1/media/asset_1"},
+ } {
+  r:=httptest.NewRequest(tc.method,tc.path,nil)
+  w:=httptest.NewRecorder()
+  handler.ServeHTTP(w,r)
+  if w.Code!=http.StatusUnauthorized {
+   t.Errorf("%s %s: want 401, got %d",tc.method,tc.path,w.Code)
+  }
+ }
+ if m.listCalls!=0 || m.openCalls!=0 {
+  t.Fatalf("unauthenticated request reached trusted catalog: list=%d open=%d",m.listCalls,m.openCalls)
+ }
+}
