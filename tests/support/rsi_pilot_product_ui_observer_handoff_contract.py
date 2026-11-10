@@ -91,7 +91,7 @@ def run_contract() -> None:
         successor = _load(SENSOR_CONTROL_HANDOFF)
         server_transition = successor["tracked_source_transition"]
         assert server_transition["from_git_blob_sha"] == "582b163d7a71a934b43671ddad62a5644df3087e"
-        assert server_transition["to_git_blob_sha"] == server_sha
+        assert server_transition["to_git_blob_sha"] == "f9b646350c70900ec256387b7a7e544d2de3eb0b"
         run_sensor_control_handoff_contract()
     assert _git_blob_sha(PILOT) == "ddbdbb0aba2c95a63d42d6b89aeb5fbd85fd134d"
 
