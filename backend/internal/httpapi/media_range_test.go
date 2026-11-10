@@ -1,6 +1,9 @@
 package httpapi
 
-import "testing"
+import (
+    "errors"
+    "testing"
+)
 
 func TestMediaByteRange(t *testing.T) {
     cases := []struct {
@@ -15,6 +18,8 @@ func TestMediaByteRange(t *testing.T) {
         {"bytes=50-", 100, 50, 99, true},
         {"bytes=90-999", 100, 90, 99, true},
         {"bytes=0-0", 1, 0, 0, true},
+        {"bytes=-500", 100, 0, 99, true},
+        {"bytes=-10", 100, 90, 99, true},
     }
     for _, c := range cases {
         a, b, partial, err := mediaByteRange(c.header, c.size)
@@ -23,23 +28,31 @@ func TestMediaByteRange(t *testing.T) {
         }
     }
 }
-func TestMediaByteRangeRefusesUnsafe(t *testing.T) {
-    for _, c := range []struct{ header string; size int64 }{
-        {"bytes=0-1,4-5", 100},
-        {"bytes=-10", 100},
-        {"bytes=100-", 100},
-        {"bytes=9-8", 100},
-        {"bytes=abc-def", 100},
-        {"bytes=0-0", 0},
-        {"bytes=0-0", -1},
-        {"bytes=+1-2", 100},
-        {"bytes=0--1", 100},
-        {"bytes=0-999999999999999999999999", 100},
-        {"items=0-1", 100},
+func TestMediaByteRangeOutcomeClass(t *testing.T) {
+    for _, tc := range []struct {
+        header string
+        size int64
+        want error
+    }{
+        {"bytes=0-1,4-5", 100, errRangeIgnore},
+        {"items=0-1", 100, errRangeIgnore},
+        {"bytes=abc", 100, errRangeIgnore},
+        {"bytes=9-8", 100, errRangeIgnore},
+        {"bytes=+1-2", 100, errRangeIgnore},
+        {"bytes=0--1", 100, errRangeIgnore},
+        {"bytes=0-999999999999999999999999", 100, errRangeIgnore},
+        {"bytes=100-", 100, errRangeUnsatisfiable},
+        {"bytes=0-0", 0, errRangeUnsatisfiable},
+        {"bytes=-0", 100, errRangeUnsatisfiable},
+        {"bytes=-1", 0, errRangeUnsatisfiable},
     } {
-        if _, _, _, err := mediaByteRange(c.header, c.size); err == nil {
-            t.Fatalf("accepted invalid range %q size %d", c.header, c.size)
+        _, _, _, err := mediaByteRange(tc.header, tc.size)
+        if !errors.Is(err, tc.want) {
+            t.Errorf("%q size %d: got %v, want %v", tc.header, tc.size, err, tc.want)
         }
+    }
+    if _, _, _, err := mediaByteRange("bytes=0-0", -1); err == nil || errors.Is(err, errRangeUnsatisfiable) || errors.Is(err, errRangeIgnore) {
+        t.Fatal("negative verified asset size must be a distinct internal error")
     }
 }
 
