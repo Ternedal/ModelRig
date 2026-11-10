@@ -23,6 +23,26 @@ from app.gpu_lease import acquire_gpu_lease  # noqa: E402
 from app.media_executor import EXIT_CONFIG, EXIT_SINK_UNAVAILABLE  # noqa: E402
 from app.media_executor_main import _on_one_device as real_on_one_device, build_from_env, main  # noqa: E402
 from app.media_generation_contract import ArtifactSinkUnavailable, RenderedArtifact  # noqa: E402
+from app.media_volume import STABLE_ID_FILESYSTEMS  # noqa: E402
+from app.media_work_area import WorkAreaProbe  # noqa: E402
+
+# Saved before setUp patches it: the real-process test needs the real answer for the host.
+_REAL_CONTAINING_FILESYSTEM = WorkAreaProbe.containing_filesystem
+
+
+def _real_process_work_base() -> Path | None:
+    """A writable directory on a filesystem the work area accepts, for tests that run the real
+    process (which cannot be patched). /tmp is tmpfs on newer Ubuntu images, and the work area
+    rightly refuses tmpfs, so the real process would exit 78 before reaching what the test checks."""
+    probe = WorkAreaProbe()
+    for candidate in (Path(tempfile.gettempdir()), Path.home(), ROOT.parent):
+        try:
+            filesystem, remote = _REAL_CONTAINING_FILESYSTEM(probe, str(candidate.resolve()))
+        except OSError:
+            continue
+        if not remote and filesystem in STABLE_ID_FILESYSTEMS and os.access(candidate, os.W_OK):
+            return candidate
+    return None
 from worker_media_generation_profiles import image_profile, video_profile  # noqa: E402
 
 GPU = "GPU-6a7f0c2e-1b2d-4c3e-8f9a-0123456789ab"
@@ -469,10 +489,20 @@ class EntryPointTests(unittest.TestCase):
         self.assertNotIn("SECRET-PROMPT-8812", err.getvalue())
 
     def test_an_unmounted_volume_exits_75_from_the_real_process(self):
-        result = self.run_entry(self.env)  # a plain temp dir is not a mount point
+        # The real process checks the work area's filesystem first (unpatchable here), so its work
+        # area must be on an accepted filesystem for the volume check to be what decides.
+        base = _real_process_work_base()
+        if base is None:
+            self.skipTest("no writable ext4/xfs/btrfs directory for a real-process work area")
+        work = Path(tempfile.mkdtemp(prefix="kaliv-media-work-", dir=base))
+        self.addCleanup(shutil.rmtree, work, True)
+        os.chmod(work, 0o700)
+        (work / "state").mkdir()
+        env = {**self.env, "KALIV_MEDIA_WORK_ROOT": str(work), "KALIV_MEDIA_JOB_DB": str(work / "state" / "jobs.sqlite3")}
+        result = self.run_entry(env)  # a plain temp dir is not a mount point
         self.assertEqual(result.returncode, EXIT_SINK_UNAVAILABLE, result.stderr)
         self.assertIn("volume is not available", result.stderr)
-        self.assertFalse(Path(self.env["KALIV_MEDIA_JOB_DB"]).exists(), "nothing written before the volume is proven")
+        self.assertFalse(Path(env["KALIV_MEDIA_JOB_DB"]).exists(), "nothing written before the volume is proven")
 
     def test_end_to_end_a_job_is_published_job_keyed_to_the_gallery(self):
         from app.image_job_store import ImageJobStore
