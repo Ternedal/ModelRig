@@ -57,7 +57,9 @@ Windows, as the account that runs the executor. Groups are named by SID, so this
 
 ```powershell
 $Work = 'C:\Kaliv\media-work'
-New-Item -ItemType Directory -Force "$Work\state", "$Work\comfy\input", "$Work\comfy\output", "$Work\comfy\temp", "$Work\comfy\user" | Out-Null
+New-Item -ItemType Directory -Force "$Work\state" | Out-Null
+# One ComfyUI folder set per GPU (KALIV_COMFY_DIR = "$Work\comfy"; each executor uses cuda<N>).
+foreach ($Gpu in "cuda0", "cuda1") { foreach ($Dir in "input", "output", "temp", "user") { New-Item -ItemType Directory -Force "$Work\comfy\$Gpu\$Dir" | Out-Null } }
 $Me = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
 icacls $Work /inheritance:r /grant:r "*${Me}:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F"
 icacls "$Work\*" /T /C /reset   # everything below inherits exactly that (never /reset the root itself)

@@ -120,8 +120,8 @@ Expected: `exit=1`, with only `free_space:publication_volume` false and its real
 **R17.7 Residue baseline.** Video is off, so there can be no hand-off residue yet. This records the starting point:
 
 ```powershell
-& $GenPy "$Qual\scripts\media_volume_repair.py" inventory --media-root $Gallery --volume-root $VolumeRoot --job-db $JobDb --lease-dir $LeaseDir --work-root $WorkRoot --work-dir "$WorkRoot\comfy\output" > "$Out\inventory-baseline.json"; "exit=$LASTEXITCODE"
-& $GenPy "$Qual\scripts\media_volume_repair.py" report --media-root $Gallery --volume-root $VolumeRoot --job-db $JobDb --lease-dir $LeaseDir --work-root $WorkRoot --work-dir "$WorkRoot\comfy\output" --work-dir "$WorkRoot\comfy\temp" --work-dir "$WorkRoot\comfy\input" > "$Out\report-baseline.json"
+& $GenPy "$Qual\scripts\media_volume_repair.py" inventory --media-root $Gallery --volume-root $VolumeRoot --job-db $JobDb --lease-dir $LeaseDir --work-root $WorkRoot --work-dir "$WorkRoot\comfy\cuda0\output" --work-dir "$WorkRoot\comfy\cuda1\output" > "$Out\inventory-baseline.json"; "exit=$LASTEXITCODE"
+& $GenPy "$Qual\scripts\media_volume_repair.py" report --media-root $Gallery --volume-root $VolumeRoot --job-db $JobDb --lease-dir $LeaseDir --work-root $WorkRoot --work-dir "$WorkRoot\comfy\cuda0\output" --work-dir "$WorkRoot\comfy\cuda0\temp" --work-dir "$WorkRoot\comfy\cuda0\input" --work-dir "$WorkRoot\comfy\cuda1\output" --work-dir "$WorkRoot\comfy\cuda1\temp" --work-dir "$WorkRoot\comfy\cuda1\input" > "$Out\report-baseline.json"
 ```
 
 Expected: `exit=0`, `"status": "ok"`, and `jobs: []`, `unattributed: []`, `work_area_residue: []`. A physical crash test (kill the executor during a copy, then run the inventory) follows only after Anders decides to enable video.
