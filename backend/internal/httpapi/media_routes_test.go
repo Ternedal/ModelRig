@@ -118,8 +118,8 @@ func TestMediaRoutesRequireBearerThroughRealMux(t *testing.T) {
   r:=httptest.NewRequest(tc.method,tc.path,nil)
   w:=httptest.NewRecorder()
   handler.ServeHTTP(w,r)
-  if w.Code!=http.StatusUnauthorized {
-   t.Errorf("%s %s: want 401, got %d",tc.method,tc.path,w.Code)
+  if w.Code!=http.StatusUnauthorized || w.Header().Get("Cache-Control")!="private, no-store" {
+   t.Errorf("%s %s: want uncached 401, got %d cache=%q",tc.method,tc.path,w.Code,w.Header().Get("Cache-Control"))
   }
  }
  if m.listCalls!=0 || m.openCalls!=0 {
