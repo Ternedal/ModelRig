@@ -151,6 +151,17 @@ class MediaJobContractTest {
     }
 
     @Test
+    fun `the shape decided in 6767302533 parses, and an empty list is a valid answer`() {
+        val decided = """{"schema":"kaliv-media-job/v1","profiles":[{"profile_id":"sdxl-a","modality":"image",""" +
+            """"tasks":["text_to_image"],"sizes":[[512,512]],"max_steps":30,"max_prompt_chars":1000}]}"""
+        val p = MediaJobContract.parseProfiles(decided).single()
+        assertEquals(listOf(512 to 512), p.sizes)
+        assertEquals(30, p.maxSteps)
+        assertEquals(1000, p.maxPromptChars)
+        assertTrue(MediaJobContract.parseProfiles("""{"schema":"kaliv-media-job/v1","profiles":[]}""").isEmpty())
+    }
+
+    @Test
     fun `a profile list with another schema or shape is unavailable`() {
         unavailable { MediaJobContract.parseProfiles(profiles(profile(), schema = "kaliv-media-job/v2")) }
         unavailable { MediaJobContract.parseProfiles("""{"schema":"kaliv-media-job/v1"}""") }
