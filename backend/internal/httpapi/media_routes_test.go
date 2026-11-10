@@ -160,3 +160,24 @@ func TestMediaNilDescriptorFailsClosed(t *testing.T){
   t.Fatalf("nil descriptor: status=%d cache=%q",w.Code,w.Header().Get("Cache-Control"))
  }
 }
+
+type mediaSeekFailure struct { closed bool }
+func (m *mediaSeekFailure) Read([]byte)(int,error){return 0,io.EOF}
+func (m *mediaSeekFailure) Seek(int64,int)(int64,error){return 0,io.ErrUnexpectedEOF}
+func (m *mediaSeekFailure) Close()error{m.closed=true;return nil}
+type mediaSeekFailureCatalog struct{ asset *mediaSeekFailure }
+func (m *mediaSeekFailureCatalog) ListMedia(string,int,string)([]map[string]any,*string,error){return nil,nil,nil}
+func (m *mediaSeekFailureCatalog) OpenMedia(string,string)(io.ReadSeekCloser,string,int64,error){return m.asset,"video/mp4",10,nil}
+func TestMediaSeekFailureDoesNotPublishStaleRangeHeaders(t *testing.T){
+ asset:=&mediaSeekFailure{}
+ s:=&server{Deps:Deps{Media:&mediaSeekFailureCatalog{asset:asset}}}
+ r:=httptest.NewRequest("GET","/api/v1/media/asset_1",nil)
+ r.SetPathValue("id","asset_1")
+ r.Header.Set("Range","bytes=2-5")
+ w:=httptest.NewRecorder()
+ s.handleMediaAsset(w,r)
+ if w.Code!=503 || w.Header().Get("Content-Length")!="" || w.Header().Get("Content-Range")!="" {
+  t.Fatalf("seek failure leaked range metadata: status=%d length=%q range=%q",w.Code,w.Header().Get("Content-Length"),w.Header().Get("Content-Range"))
+ }
+ if !asset.closed {t.Fatal("failed asset was not closed")}
+}
