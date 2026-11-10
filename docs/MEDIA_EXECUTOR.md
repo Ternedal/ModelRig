@@ -141,6 +141,11 @@ The entry point checks the configuration before it touches anything, including t
 - No two served video profiles share a ComfyUI port.
 - `KALIV_COMFY_PYTHON`, `KALIV_COMFY_MAIN`, `KALIV_COMFY_DIR` and `KALIV_COMFY_TEMPLATE_DIR` are set and valid.
 - The four ComfyUI folders of this GPU, `KALIV_COMFY_DIR/cuda<N>/{input,output,temp,user}`, exist inside the work area (`PrivateWorkArea.require`) and are directories. A regular file there is 78 at start, not a failed job later.
+- Across **all** enabled ComfyUI video profiles, not only this GPU's:
+  - each profile lists exactly one GPU;
+  - no two profiles share a port.
+
+  This is checked across every GPU because each executor serves only its own profiles. Without it, a port shared between GPUs would pass both starts, and then fail every job on the second GPU.
 
 When video is served:
 

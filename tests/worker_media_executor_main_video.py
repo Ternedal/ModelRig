@@ -262,6 +262,34 @@ class VideoEntryPointTests(unittest.TestCase):
             self.assertEqual(main(["--device", "cuda:0"], {**self.env, "KALIV_MEDIA_PROFILES_ENABLED": "wan-a,wan-b"}),
                              EXIT_CONFIG, "two video profiles on one ComfyUI port")
 
+    def test_comfyui_ports_are_checked_across_gpus(self):
+        # Codex #2366 4520747821: each executor serves only its own profiles, so a port shared
+        # between GPUs passed both starts and the second ComfyUI refused it. Every executor now
+        # checks all enabled video profiles before it opens the queue.
+        profiles = self.tmp / "profiles"
+        self.write_video_profile()
+        base = json.loads((profiles / "wan-a.json").read_text())
+
+        def write(profile_id, devices, port):
+            profile = json.loads(json.dumps(base))
+            profile["profile_id"] = profile_id
+            profile["resources"]["devices"] = devices
+            profile["backend_options"]["port"] = port
+            (profiles / f"{profile_id}.json").write_text(json.dumps(profile))
+
+        both = {**self.env, "KALIV_MEDIA_PROFILES_ENABLED": "wan-a,wan-b"}
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            write("wan-a", ["cuda:0", "cuda:1"], self.port)
+            with self.assertRaisesRegex(ExecutorConfigError, "serves exactly one GPU"):
+                self.build()
+            write("wan-a", ["cuda:0"], self.port)
+            write("wan-b", ["cuda:1"], self.port)  # another GPU's profile, the same port
+            with self.assertRaisesRegex(ExecutorConfigError, f"wan-a and wan-b use the same ComfyUI port {self.port}"):
+                self.build(both)
+            self.assertFalse(Path(self.env["KALIV_MEDIA_JOB_DB"]).exists(), "the queue is untouched")
+            write("wan-b", ["cuda:1"], free_port())
+            self.build(both)  # one port per GPU: accepted
+
     def test_an_unmounted_volume_is_still_75_with_video_on(self):
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=False):
             self.assertEqual(main(["--device", "cuda:0"], self.env), EXIT_SINK_UNAVAILABLE)

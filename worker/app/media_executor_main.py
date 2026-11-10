@@ -132,13 +132,32 @@ def _comfy_device_folder(device: str) -> str:
     return f"cuda{parse_cuda_device(device)}"
 
 
+def _check_comfy_ports(enabled: Mapping[str, ModelProfile]) -> None:
+    """Every enabled ComfyUI video profile, on every GPU: one GPU each, and no two on one port.
+
+    Each executor sees only its own profiles when serving, so a port shared between GPUs would pass
+    both starts. The second ComfyUI would then refuse the port, and that executor's jobs would fail
+    (Codex #2366 4520747821). All enabled profiles are checked, so every executor refuses the
+    same configuration before it opens the queue."""
+    owners: dict[int, str] = {}
+    for profile_id, profile in sorted(enabled.items()):
+        if profile.modality != "video" or profile.backend != "comfyui" or profile.backend_options is None:
+            continue
+        if len(profile.resources.devices) != 1:
+            raise ExecutorConfigError(f"{profile_id}: a ComfyUI video profile serves exactly one GPU (its port is "
+                                      "fixed); write one profile per GPU, each with its own port")
+        port = profile.backend_options.port
+        if port in owners:
+            raise ExecutorConfigError(f"{owners[port]} and {profile_id} use the same ComfyUI port {port}")
+        owners[port] = profile_id
+
+
 def _video_config(env: Mapping[str, str], video: Mapping[str, ModelProfile], work: PrivateWorkArea,
                   gpu_uuid: str, device: str) -> VideoConfig:
     """Fail closed (78) unless every served video profile and the ComfyUI side are fully specified."""
     if env.get(VIDEO_SWITCH_ENV) != "1":
         raise ExecutorConfigError(f"{VIDEO_SWITCH_ENV}=1 is required for the video profile(s) "
                                   f"{', '.join(sorted(video))}: video is off")
-    ports = []
     for profile_id, profile in sorted(video.items()):
         options = profile.backend_options
         if profile.backend != "comfyui" or options is None:
@@ -148,9 +167,6 @@ def _video_config(env: Mapping[str, str], video: Mapping[str, ModelProfile], wor
                                       "reader is not wired); a served video profile lists text_to_video only")
         if options.comfyui_version is None or not options.weights:
             raise ExecutorConfigError(f"{profile_id}: a served video profile must pin comfyui_version and weights")
-        ports.append(options.port)
-    if len(set(ports)) != len(ports):
-        raise ExecutorConfigError("two served video profiles use the same ComfyUI port")
     python = _absolute(env, COMFY_PYTHON_ENV)
     main_py = _absolute(env, COMFY_MAIN_ENV)
     device_folder = _comfy_device_folder(device)
@@ -328,6 +344,8 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
         raise ExecutorConfigError(f"{JOB_DB_ENV} must be in an existing folder in the work area ({exc})") from None
     # Video: everything is checked before the job database is first looked at, like the rest.
     video_profiles = {pid: p for pid, p in mine.items() if p.modality == "video"}
+    if video_profiles:
+        _check_comfy_ports(profiles)  # all enabled profiles, every GPU: not only this executor's
     video = _video_config(env, video_profiles, work, gpu_uuid, device) if video_profiles else None
     sink = ExternalMediaSink(media_root, str(volume.root))
     # The sink itself only knows the root's path (mount and containment checks, no marker or pinned

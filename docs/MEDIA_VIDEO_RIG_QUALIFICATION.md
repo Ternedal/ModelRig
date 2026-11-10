@@ -43,7 +43,7 @@ Source for every file: Hugging Face `Comfy-Org/Wan_2.1_ComfyUI_repackaged`, `spl
 
 ## 3. Memory profile: 2× RTX 3060 12 GB
 
-- **One executor per GPU.** `KALIV_MEDIA_EXECUTOR_DEVICES=cuda:0,cuda:1`. Each executor has its own ComfyUI: its own port (`8188`, `8189`) and its own folders. The supervisor gives every executor the same environment, so one `KALIV_COMFY_DIR` is set and each executor uses `KALIV_COMFY_DIR\cuda<N>\` in it, chosen by `--device`. The executor refuses two served video profiles on one port [repo].
+- **One executor per GPU.** `KALIV_MEDIA_EXECUTOR_DEVICES=cuda:0,cuda:1`. Each executor has its own ComfyUI: its own port (`8188`, `8189`) and its own folders. The supervisor gives every executor the same environment, so one `KALIV_COMFY_DIR` is set and each executor uses `KALIV_COMFY_DIR\cuda<N>\` in it, chosen by `--device`. Every executor checks all enabled ComfyUI video profiles, on every GPU, before it opens the queue. A profile that lists more than one GPU, or two profiles on one port, is refused with 78 [repo].
 - **There is no model parallelism.** A job runs on one card [repo: one ComfyUI per GPU lease].
 - **VRAM per job** [estimate, to be replaced by §5, step 7]:
 
