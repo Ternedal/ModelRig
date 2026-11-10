@@ -191,7 +191,11 @@ Every restartable code doubles its delay for each exit in a row, capped at 5 min
 - Reconciliation itself: ChatGPT's read-only `inspect_generation_consistency` (#2313) classifies the recovered job. There is no automatic completion from file presence, and no inference retry.
 - G3 pinning: ComfyUI version and weight manifest.
 - Retiring `GenerationJobRunner`.
-- **Assumed, to be verified on the pinned diffusers in rig R5:** every allowlisted pipeline honours `callback_on_step_end` and `_interrupt`.
+- **Checked offline against the pinned diffusers 0.35.2** (`scripts/media_image_env_check.py`, `docs/MEDIA_IMAGE_RIG_QUALIFICATION.md` §1):
+  - every allowlisted pipeline's `__call__` takes `callback_on_step_end`;
+  - it resets `self._interrupt` and checks it between steps.
+
+  **Still to be shown on the rig:** that a cancel stops a render on the GPU.
 
 ## Diagnostics (Track 3)
 

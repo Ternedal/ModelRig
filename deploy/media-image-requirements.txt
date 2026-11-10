@@ -1,0 +1,20 @@
+# The image engine of the media executor (diffusers). Not part of the base worker, not installed by CI,
+# and deliberately outside worker/requirements*.txt (tests/workflow_media_generation_boundary.py keeps
+# GPU libraries out of the release build). Install it into its own venv on the rig (docs/MEDIA_IMAGE_RIG_QUALIFICATION.md):
+#
+#   py -3.11 -m venv C:\Kaliv\media-venv
+#   C:\Kaliv\media-venv\Scripts\python -m pip install --index-url https://download.pytorch.org/whl/cu126 torch==2.8.0
+#   C:\Kaliv\media-venv\Scripts\python -m pip install -r deploy\media-image-requirements.txt
+#
+# torch comes first from the CUDA 12.6 index (Windows/Linux wheels exist for 2.8.0+cu126); the pin
+# below has no local label, so it is satisfied by 2.8.0+cu126 and pip keeps that wheel.
+# These versions install together without conflicts (pip check) and their pipelines match what the
+# adapter relies on (scripts/media_image_env_check.py). Keep them equal to
+# worker/app/media_image_env.PINNED_VERSIONS. Record `pip freeze` on the rig as evidence:
+# transitive dependencies are resolved by pip.
+torch==2.8.0
+diffusers==0.35.2
+transformers==4.56.2
+accelerate==1.10.1
+safetensors==0.6.2
+huggingface-hub==0.35.3
