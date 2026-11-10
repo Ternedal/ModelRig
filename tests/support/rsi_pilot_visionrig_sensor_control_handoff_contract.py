@@ -59,7 +59,15 @@ def run_contract() -> None:
         "from_git_blob_sha": PREDECESSOR_SHA,
         "to_git_blob_sha": SUCCESSOR_SHA,
     }
-    server_sha = _git_blob_sha(SERVER)\n    if server_sha != SUCCESSOR_SHA:\n        media = _load(ROOT / "docs/devcontrol/dc-l16/media-gallery-server-transition.json")\n        assert media["schema"] == "kaliv-media-server-source-transition/v1"\n        assert media["repository"] == "Ternedal/ModelRig"\n        media_transition = media["tracked_source_transition"]\n        assert media_transition["path"] == "backend/internal/httpapi/server.go"\n        assert media_transition["from_git_blob_sha"] == SUCCESSOR_SHA\n        assert media_transition["to_git_blob_sha"] == server_sha
+    server_sha = _git_blob_sha(SERVER)
+    if server_sha != SUCCESSOR_SHA:
+        media = _load(ROOT / "docs/devcontrol/dc-l16/media-gallery-server-transition.json")
+        assert media["schema"] == "kaliv-media-server-source-transition/v1"
+        assert media["repository"] == "Ternedal/ModelRig"
+        media_transition = media["tracked_source_transition"]
+        assert media_transition["path"] == "backend/internal/httpapi/server.go"
+        assert media_transition["from_git_blob_sha"] == SUCCESSOR_SHA
+        assert media_transition["to_git_blob_sha"] == server_sha
 
     server = code_of(SERVER)
     control = code_of(CONTROL_CENTER)
