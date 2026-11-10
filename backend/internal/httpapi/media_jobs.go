@@ -69,7 +69,35 @@ func (s *server) forwardMediaJobs(w http.ResponseWriter, r *http.Request, upstre
 		return
 	}
 	r.URL.RawQuery = "" // these routes take no query; nothing extra reaches the worker
-	s.Worker.ForwardWithHeaders(w, r, upstream, map[string]string{mediaJobsSecretHeader: secret})
+	s.Worker.ForwardWithHeaders(&mediaJobsResponseWriter{ResponseWriter: w}, r, upstream, map[string]string{mediaJobsSecretHeader: secret})
+}
+
+// mediaJobsResponseWriter keeps worker-internal authentication failures on the
+// internal trust boundary. A paired device's Bearer token was already checked
+// by authMW; an upstream 401/403 must not masquerade as a device pairing error.
+// Do not expose the upstream error body (which may contain internal details).
+type mediaJobsResponseWriter struct {
+	http.ResponseWriter
+	blocked bool
+}
+
+func (w *mediaJobsResponseWriter) WriteHeader(status int) {
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		w.blocked = true
+		w.Header().Del("X-Bodyrig-Implementation")
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.ResponseWriter.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w.ResponseWriter, "media jobs unavailable\\n")
+		return
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *mediaJobsResponseWriter) Write(body []byte) (int, error) {
+	if w.blocked {
+		return len(body), nil
+	}
+	return w.ResponseWriter.Write(body)
 }
 
 // mediaJobsJSON accepts exactly application/json, with an optional utf-8 charset (ChatGPT
