@@ -18,6 +18,7 @@ import (
 
 // Deps are the collaborators the HTTP layer needs.
 type Deps struct {
+	Media MediaCatalog // nil until a verified installation-scoped catalog adapter is configured
 	Cfg    config.Config
 	Store  *store.Store
 	Ollama *proxy.Client
@@ -66,6 +67,7 @@ func (s *server) routes() {
 	}
 
 	// Protected (Bearer token required)
+	s.registerMediaRoutes()
 	s.mux.Handle("GET /api/v1/status", s.authMW(http.HandlerFunc(s.handleStatus)))
 	s.mux.Handle("GET /api/v1/health/deep", s.authMW(http.HandlerFunc(s.handleHealthDeep)))
 	s.mux.Handle("GET /api/v1/health/full", s.authMW(http.HandlerFunc(s.handleHealthFull)))
