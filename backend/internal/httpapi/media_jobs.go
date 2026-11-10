@@ -1,6 +1,10 @@
 package httpapi
 
 import (
+	"bytes"
+	"errors"
+	"io"
+	"mime"
 	"net/http"
 	"os"
 	"strings"
@@ -64,22 +68,44 @@ func (s *server) forwardMediaJobs(w http.ResponseWriter, r *http.Request, upstre
 		writeErr(w, http.StatusServiceUnavailable, "media jobs unavailable")
 		return
 	}
-	if r.Body != nil {
-		r.Body = http.MaxBytesReader(w, r.Body, mediaJobsMaxBody)
-	}
 	r.URL.RawQuery = "" // these routes take no query; nothing extra reaches the worker
 	s.Worker.ForwardWithHeaders(w, r, upstream, map[string]string{mediaJobsSecretHeader: secret})
 }
 
-func (s *server) handleMediaJobSubmit(w http.ResponseWriter, r *http.Request) {
-	if r.ContentLength > mediaJobsMaxBody {
-		writeErr(w, http.StatusRequestEntityTooLarge, "media job request too large")
-		return
+// mediaJobsJSON accepts exactly application/json, with an optional utf-8 charset (ChatGPT
+// 6764300677: a prefix check let "application/jsonp" through).
+func mediaJobsJSON(contentType string) bool {
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil || mediaType != "application/json" {
+		return false
 	}
-	if !strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
+	for name, value := range params {
+		if name != "charset" || !strings.EqualFold(value, "utf-8") {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *server) handleMediaJobSubmit(w http.ResponseWriter, r *http.Request) {
+	if !mediaJobsJSON(r.Header.Get("Content-Type")) {
 		writeErr(w, http.StatusUnsupportedMediaType, "media job request must be JSON")
 		return
 	}
+	// The whole body is read here, bounded, before anything is forwarded: a chunked or
+	// unknown-length body over the cap is a 413 and never reaches the worker in part.
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, mediaJobsMaxBody))
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeErr(w, http.StatusRequestEntityTooLarge, "media job request too large")
+		} else {
+			writeErr(w, http.StatusBadRequest, "media job request could not be read")
+		}
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.ContentLength = int64(len(body))
 	s.forwardMediaJobs(w, r, "/internal/media/jobs")
 }
 

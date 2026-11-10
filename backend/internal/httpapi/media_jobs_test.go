@@ -122,11 +122,16 @@ func TestMediaJobRoutesForwardWithTheSecretOnlyAndNoOwnerClaim(t *testing.T) {
 	body := `{"profile_id":"sdxl-a","prompt":"a red bicycle"}`
 	for _, tc := range []struct{ method, path, body, upstream string }{
 		{http.MethodPost, "/api/v1/media/jobs?owner=x", body, "/internal/media/jobs"},
+		{http.MethodPost, "/api/v1/media/jobs", body, "/internal/media/jobs"}, // with an explicit utf-8 charset below
 		{http.MethodGet, "/api/v1/media/jobs/" + mediaJobsTestID + "?x=1", "", "/internal/media/jobs/" + mediaJobsTestID},
 		{http.MethodPost, "/api/v1/media/jobs/" + mediaJobsTestID + "/cancel", "", "/internal/media/jobs/" + mediaJobsTestID + "/cancel"},
 	} {
 		hits = hits[:0]
-		rec := doMediaJobs(h, tc.method, tc.path, mediaJobsTestToken, tc.body, spoof)
+		headers := spoof
+		if tc.path == "/api/v1/media/jobs" {
+			headers = map[string]string{"Content-Type": "application/json; charset=UTF-8"}
+		}
+		rec := doMediaJobs(h, tc.method, tc.path, mediaJobsTestToken, tc.body, headers)
 		if rec.Code != http.StatusAccepted {
 			t.Fatalf("%s %s: %d %s", tc.method, tc.path, rec.Code, rec.Body.String())
 		}
@@ -181,6 +186,29 @@ func TestMediaJobRoutesRefuseBadIDsAndBodiesBeforeTheWorker(t *testing.T) {
 	big := `{"profile_id":"sdxl-a","prompt":"` + strings.Repeat("x", mediaJobsMaxBody) + `"}`
 	if rec := doMediaJobs(h, http.MethodPost, "/api/v1/media/jobs", mediaJobsTestToken, big, nil); rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized body: %d", rec.Code)
+	}
+	// Chunked (unknown length) and over the cap: refused whole, the worker never sees a part.
+	chunked := httptest.NewRequest(http.MethodPost, "/api/v1/media/jobs", io.MultiReader(strings.NewReader(big)))
+	chunked.ContentLength = -1
+	chunked.Header.Set("Authorization", "Bearer "+mediaJobsTestToken)
+	chunked.Header.Set("Content-Type", "application/json")
+	chunkedRec := httptest.NewRecorder()
+	h.ServeHTTP(chunkedRec, chunked)
+	if chunkedRec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("chunked oversized body: %d", chunkedRec.Code)
+	}
+	for _, ct := range []string{"application/jsonp", "application/jsonanything", "application/json; charset=latin-1",
+		"application/json; boundary=x", "text/json", ""} {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/media/jobs", strings.NewReader(`{"profile_id":"sdxl-a","prompt":"x"}`))
+		r.Header.Set("Authorization", "Bearer "+mediaJobsTestToken)
+		if ct != "" {
+			r.Header.Set("Content-Type", ct)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r)
+		if rec.Code != http.StatusUnsupportedMediaType {
+			t.Fatalf("Content-Type %q: %d", ct, rec.Code)
+		}
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/media/jobs", strings.NewReader("prompt=x"))
 	req.Header.Set("Authorization", "Bearer "+mediaJobsTestToken)
