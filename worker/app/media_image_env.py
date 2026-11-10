@@ -80,6 +80,11 @@ def _check(checks: list[dict[str, Any]], name: str, ok: bool, detail: Any) -> No
     checks.append({"name": name, "ok": bool(ok), "detail": detail})
 
 
+def _error_text(error: BaseException) -> str:
+    first = str(error).splitlines()[0][:160] if str(error) else ""
+    return f"{type(error).__name__}: {first}" if first else type(error).__name__
+
+
 def _public_version(value: object) -> str:
     return str(value).split("+", 1)[0]
 
@@ -122,7 +127,13 @@ def check_environment(modules: Mapping[str, ModuleType | str], env: Mapping[str,
         if not isinstance(diffusers, ModuleType):
             _check(checks, f"pipeline:{pipeline}", False, "diffusers is not importable")
             continue
-        cls = getattr(diffusers, pipeline, None)
+        try:
+            # diffusers resolves pipelines lazily: a broken transitive dependency raises here, not at
+            # import time, and must become a failed check rather than end the report (Codex #2366).
+            cls = getattr(diffusers, pipeline, None)
+        except Exception as exc:
+            _check(checks, f"pipeline:{pipeline}", False, f"cannot import ({_error_text(exc)})")
+            continue
         if cls is None:
             _check(checks, f"pipeline:{pipeline}", False, "not in this diffusers")
             continue
@@ -162,6 +173,33 @@ def hub_cache(env: Mapping[str, str], modules: Mapping[str, ModuleType | str]) -
     return Path.home() / ".cache" / "huggingface" / "hub"
 
 
+# Components that always carry weights; any other component with a model config.json does too.
+WEIGHTED_COMPONENTS = ("unet", "transformer", "vae", "text_encoder", "text_encoder_2")
+# The default (variant=None) safetensors names: the adapter calls from_pretrained without a variant,
+# so fp16/other variant files do not count. Pickle .bin weights are deliberately not accepted.
+DEFAULT_WEIGHTS = {"diffusers": "diffusion_pytorch_model.safetensors", "transformers": "model.safetensors"}
+
+
+def _missing_default_weights(name: str, part: Path, library: object) -> list[str]:
+    """What is missing of the weights from_pretrained (no variant) loads for one component."""
+    weights = DEFAULT_WEIGHTS.get(str(library), DEFAULT_WEIGHTS["diffusers"])
+    if (part / weights).is_file():
+        return []
+    index = part / f"{weights}.index.json"
+    if not index.is_file():
+        return [f"{name}/ has no {weights} (variant-only or missing weights)"]
+    try:
+        weight_map = json.loads(index.read_text(encoding="utf-8")).get("weight_map")
+        shards = sorted(set(weight_map.values()))
+    except (OSError, UnicodeError, json.JSONDecodeError, AttributeError, TypeError) as exc:
+        return [f"{name}/{index.name} unreadable ({type(exc).__name__})"]
+    if not shards or not all(isinstance(shard, str) and shard and "/" not in shard and "\\" not in shard
+                             for shard in shards):
+        return [f"{name}/{index.name} lists no valid shards"]
+    absent = [shard for shard in shards if not (part / shard).is_file()]
+    return [f"{name}/ lacks shard {shard}" for shard in absent]
+
+
 def check_profile_snapshot(profile: ModelProfile, cache: Path) -> list[dict[str, Any]]:
     """The pinned revision is in the local cache with every component model_index.json names."""
     checks: list[dict[str, Any]] = []
@@ -187,8 +225,8 @@ def check_profile_snapshot(profile: ModelProfile, cache: Path) -> list[dict[str,
                                                                   "tokenizer_config.json", "preprocessor_config.json"))
         if not has_config:
             missing.append(f"{name}/ has no config")
-        if name in ("unet", "transformer", "vae", "text_encoder", "text_encoder_2") and not any(part.glob("*.safetensors")):
-            missing.append(f"{name}/ has no .safetensors weights")
+        if (part / "config.json").is_file() or name in WEIGHTED_COMPONENTS:
+            missing += _missing_default_weights(name, part, value[0])
     _check(checks, f"snapshot:{profile.profile_id}", not missing, missing or f"complete at {folder.name}")
     return checks
 

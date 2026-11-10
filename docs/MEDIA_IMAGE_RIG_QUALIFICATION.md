@@ -109,7 +109,11 @@ No profile ships enabled, and nothing in this document changes a default.
    C:\Kaliv\media-venv\Scripts\python scripts\media_image_env_check.py --profile <profile dir>\sdxl-base-1-0.json
    ```
 
-   `snapshot:sdxl-base-1-0` must be ok: every component named in `model_index.json` is present, with its config and `.safetensors` weights.
+   `snapshot:sdxl-base-1-0` must be ok: every component named in `model_index.json` is present with its config, and every model component has the default weights that `from_pretrained` loads without a `variant` [repo]:
+   - `diffusion_pytorch_model.safetensors` for a diffusers component, `model.safetensors` for a transformers one;
+   - or, when sharded, the `.index.json` and every shard it names.
+
+   Variant files such as `*.fp16.safetensors` do not count, and pickle `.bin` weights are not accepted, even though the loader could fall back to them.
 
 6. **Switches.** These are in `docs/MEDIA_EXECUTOR.md` and the R17 layout in `docs/MEDIA_R17_DEPLOYMENT_PROOF.md`:
    - `KALIV_MEDIA_EXECUTOR_PYTHON=C:\Kaliv\media-venv\Scripts\python.exe`

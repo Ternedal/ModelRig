@@ -132,6 +132,23 @@ class EnvironmentTests(unittest.TestCase):
                 self.assertIn(problem, checks["pipeline:FluxPipeline"]["detail"])
                 self.assertTrue(checks["pipeline:StableDiffusionXLPipeline"]["ok"])
 
+    def test_a_pipeline_whose_lazy_import_fails_is_a_failed_check_not_a_crash(self):
+        class LazyDiffusers(ModuleType):
+            def __getattr__(self, name):
+                if name == "FluxPipeline":
+                    raise ImportError("broken transitive dependency\nsecond line")
+                raise AttributeError(name)
+
+        diffusers = LazyDiffusers("diffusers")
+        diffusers.__version__ = PINNED_VERSIONS["diffusers"]
+        diffusers.StableDiffusionXLPipeline = GoodPipeline
+        diffusers.QwenImagePipeline = GoodPipeline
+        checks = check_environment(good_modules(diffusers=diffusers), {})
+        flux = by_name(checks)["pipeline:FluxPipeline"]
+        self.assertEqual((flux["ok"], flux["detail"]), (False, "cannot import (ImportError: broken transitive dependency)"))
+        self.assertTrue(by_name(checks)["pipeline:StableDiffusionXLPipeline"]["ok"], "the other checks still run")
+        self.assertFalse(report(checks, {})["ok"])
+
     def test_a_missing_pipeline_class_fails(self):
         diffusers = module("diffusers", PINNED_VERSIONS["diffusers"], StableDiffusionXLPipeline=GoodPipeline)
         checks = by_name(check_environment(good_modules(diffusers=diffusers), {}))
@@ -199,11 +216,48 @@ class SnapshotTests(unittest.TestCase):
     def test_a_missing_revision_or_weights_fail(self):
         (self.snapshot / "unet" / "diffusion_pytorch_model.safetensors").unlink()
         (check,) = check_profile_snapshot(self.profile, self.tmp)
-        self.assertEqual(check["detail"], ["unet/ has no .safetensors weights"])
+        self.assertEqual(check["detail"], ["unet/ has no diffusion_pytorch_model.safetensors (variant-only or missing weights)"])
         other = parse_profile({**json.loads(TEMPLATE.read_text(encoding="utf-8")), "revision": "f" * 40})
         (check,) = check_profile_snapshot(other, self.tmp)
         self.assertFalse(check["ok"])
         self.assertIn("no model_index.json", check["detail"])
+
+    def test_variant_only_weights_do_not_count(self):
+        # Codex #2366: the adapter loads without a variant, so only the default file name counts.
+        unet = self.snapshot / "unet"
+        (unet / "diffusion_pytorch_model.safetensors").rename(unet / "diffusion_pytorch_model.fp16.safetensors")
+        (check,) = check_profile_snapshot(self.profile, self.tmp)
+        self.assertEqual(check["detail"], ["unet/ has no diffusion_pytorch_model.safetensors (variant-only or missing weights)"])
+
+    def test_a_sharded_component_needs_every_shard_its_index_names(self):
+        unet = self.snapshot / "unet"
+        (unet / "diffusion_pytorch_model.safetensors").unlink()
+        shards = ["diffusion_pytorch_model-00001-of-00002.safetensors", "diffusion_pytorch_model-00002-of-00002.safetensors"]
+        (unet / "diffusion_pytorch_model.safetensors.index.json").write_text(
+            json.dumps({"metadata": {}, "weight_map": {"a": shards[0], "b": shards[1], "c": shards[1]}}), encoding="utf-8")
+        (unet / shards[0]).write_bytes(b"x")
+        (check,) = check_profile_snapshot(self.profile, self.tmp)
+        self.assertEqual(check["detail"], [f"unet/ lacks shard {shards[1]}"])
+        (unet / shards[1]).write_bytes(b"x")
+        (check,) = check_profile_snapshot(self.profile, self.tmp)
+        self.assertTrue(check["ok"], check)
+        (unet / "diffusion_pytorch_model.safetensors.index.json").write_text("{\"weight_map\": []}", encoding="utf-8")
+        (check,) = check_profile_snapshot(self.profile, self.tmp)
+        self.assertEqual(check["detail"], ["unet/diffusion_pytorch_model.safetensors.index.json unreadable (AttributeError)"])
+
+    def test_a_transformers_component_needs_its_own_default_file(self):
+        index = json.loads((self.snapshot / "model_index.json").read_text(encoding="utf-8"))
+        index["text_encoder"] = ["transformers", "CLIPTextModel"]
+        (self.snapshot / "model_index.json").write_text(json.dumps(index), encoding="utf-8")
+        encoder = self.snapshot / "text_encoder"
+        encoder.mkdir()
+        (encoder / "config.json").write_text("{}", encoding="utf-8")
+        (encoder / "diffusion_pytorch_model.safetensors").write_bytes(b"x")  # the wrong library's name
+        (check,) = check_profile_snapshot(self.profile, self.tmp)
+        self.assertEqual(check["detail"], ["text_encoder/ has no model.safetensors (variant-only or missing weights)"])
+        (encoder / "model.safetensors").write_bytes(b"x")
+        (check,) = check_profile_snapshot(self.profile, self.tmp)
+        self.assertTrue(check["ok"], check)
 
     def test_the_cache_location_follows_the_hub_and_the_environment(self):
         hub = module("huggingface_hub", "0.35.3", constants=SimpleNamespace(HF_HUB_CACHE="/x/hub"))
