@@ -156,7 +156,7 @@ func executorRestartPolicy(code, consecutive int) executorDecision {
 	case executorExitGPURetained:
 		base, why = 5*time.Second, "exit 70: GPU memory was not proven free"
 	case executorExitSinkUnavailable:
-		base, why = 30*time.Second, "exit 75: the external media volume is not available"
+		base, why = 30*time.Second, "exit 75: the external media volume or the private work area is not available (the executor log names which)"
 	case executorExitUnrecorded:
 		base, why = 5*time.Second, "exit 76: a publication was not recorded"
 	default:

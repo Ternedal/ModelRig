@@ -237,7 +237,9 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
         print(f"media executor: configuration refused: {exc}", file=sys.stderr)
         return EXIT_CONFIG
     except ArtifactSinkUnavailable as exc:  # a reason code, never a prompt
-        print(f"media executor: the external media volume is not available ({exc})", file=sys.stderr)
+        # 75 covers both the media volume and the private work area (#2357 review P3-2).
+        what = "the private work area" if str(exc).startswith("media_work_") else "the external media volume"
+        print(f"media executor: {what} is not available ({exc})", file=sys.stderr)
         return EXIT_SINK_UNAVAILABLE
     poll = min(max(args.poll_seconds, 0.1), 30.0)
     gpu = getattr(executor, "gpu_uuid", None)
