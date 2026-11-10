@@ -25,8 +25,8 @@ configuration error (exit 78) unless all of this holds:
   KALIV_MEDIA_VIDEO=1                 the video switch (separate from the master switch)
   KALIV_COMFY_PYTHON                  absolute python of the pinned ComfyUI environment
   KALIV_COMFY_MAIN                    absolute path of that ComfyUI's main.py
-  KALIV_COMFY_DIR                     this executor's ComfyUI folder in the work area, with existing
-                                      input/, output/, temp/ and user/ folders (one per executor)
+  KALIV_COMFY_DIR                     the ComfyUI folder in the work area; each executor uses its own
+                                      cuda<N>/ in it, with existing input/, output/, temp/ and user/
   KALIV_COMFY_TEMPLATE_DIR            the operator's workflow template directory
   KALIV_COMFY_WEIGHTS_CACHE           optional: the weight-hash cache file, in the work area
   and every served video profile is text_to_video only (image_to_video needs the owner-gated
@@ -123,8 +123,17 @@ class VideoConfig:
         self.folders = {name: os.path.join(comfy_dir, name) for name in COMFY_FOLDERS}
 
 
+def _comfy_device_folder(device: str) -> str:
+    """``cuda:1`` -> ``cuda1``: this executor's own folder under ``KALIV_COMFY_DIR``.
+
+    The supervisor gives every executor the same environment (``executorsFrom``), so one
+    ``KALIV_COMFY_DIR`` would make two GPUs' ComfyUI processes share their input, output, temp and
+    user folders (Codex #2366 4520670217). Each executor uses ``<KALIV_COMFY_DIR>/cuda<N>/``."""
+    return f"cuda{parse_cuda_device(device)}"
+
+
 def _video_config(env: Mapping[str, str], video: Mapping[str, ModelProfile], work: PrivateWorkArea,
-                  gpu_uuid: str) -> VideoConfig:
+                  gpu_uuid: str, device: str) -> VideoConfig:
     """Fail closed (78) unless every served video profile and the ComfyUI side are fully specified."""
     if env.get(VIDEO_SWITCH_ENV) != "1":
         raise ExecutorConfigError(f"{VIDEO_SWITCH_ENV}=1 is required for the video profile(s) "
@@ -144,7 +153,8 @@ def _video_config(env: Mapping[str, str], video: Mapping[str, ModelProfile], wor
         raise ExecutorConfigError("two served video profiles use the same ComfyUI port")
     python = _absolute(env, COMFY_PYTHON_ENV)
     main_py = _absolute(env, COMFY_MAIN_ENV)
-    comfy_dir = _absolute(env, COMFY_DIR_ENV)
+    device_folder = _comfy_device_folder(device)
+    comfy_dir = os.path.join(_absolute(env, COMFY_DIR_ENV), device_folder)
     template_dir = _absolute(env, COMFY_TEMPLATE_DIR_ENV)
     if not os.path.isfile(python):  # a venv's python is a link on POSIX: that is fine
         raise ExecutorConfigError(f"{COMFY_PYTHON_ENV} must be an existing file")
@@ -157,11 +167,17 @@ def _video_config(env: Mapping[str, str], video: Mapping[str, ModelProfile], wor
     # ComfyUI writes frames, the unfinished MP4 and temp files here: the private work area on the
     # internal disk (Anders, 6 Nov 2026), checked here and again by the supervisor before every job.
     for name in COMFY_FOLDERS:
+        folder = os.path.join(comfy_dir, name)
         try:
-            work.require(os.path.join(comfy_dir, name))
+            work.require(folder)
         except ArtifactSinkUnavailable as exc:
-            raise ExecutorConfigError(f"{COMFY_DIR_ENV}/{name} must be an existing folder in the work area "
-                                      f"({exc})") from None
+            raise ExecutorConfigError(f"{COMFY_DIR_ENV}/{device_folder}/{name} must be an existing folder in the "
+                                      f"work area ({exc})") from None
+        # require() also accepts a regular file. ComfyUI would only fail on it after a job was
+        # claimed (ComfyLaunch.argv), so a file here is refused at start (Codex #2366 4520670221).
+        if not os.path.isdir(folder) or os.path.islink(folder):
+            raise ExecutorConfigError(f"{COMFY_DIR_ENV}/{device_folder}/{name} must be a directory, not a file "
+                                      "or a link")
     weights_cache = env.get(COMFY_WEIGHTS_CACHE_ENV) or None
     if weights_cache is not None:
         _absolute(env, COMFY_WEIGHTS_CACHE_ENV)
@@ -312,7 +328,7 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
         raise ExecutorConfigError(f"{JOB_DB_ENV} must be in an existing folder in the work area ({exc})") from None
     # Video: everything is checked before the job database is first looked at, like the rest.
     video_profiles = {pid: p for pid, p in mine.items() if p.modality == "video"}
-    video = _video_config(env, video_profiles, work, gpu_uuid) if video_profiles else None
+    video = _video_config(env, video_profiles, work, gpu_uuid, device) if video_profiles else None
     sink = ExternalMediaSink(media_root, str(volume.root))
     # The sink itself only knows the root's path (mount and containment checks, no marker or pinned
     # identity). G1 is checked again immediately before every write, so a disk replaced after

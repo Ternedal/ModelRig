@@ -43,7 +43,7 @@ Source for every file: Hugging Face `Comfy-Org/Wan_2.1_ComfyUI_repackaged`, `spl
 
 ## 3. Memory profile: 2× RTX 3060 12 GB
 
-- **One executor per GPU.** `KALIV_MEDIA_EXECUTOR_DEVICES=cuda:0,cuda:1`. Each executor has its own ComfyUI: its own port (`8188`, `8189`) and its own `KALIV_COMFY_DIR` in the work area. The executor refuses two served video profiles on one port [repo].
+- **One executor per GPU.** `KALIV_MEDIA_EXECUTOR_DEVICES=cuda:0,cuda:1`. Each executor has its own ComfyUI: its own port (`8188`, `8189`) and its own folders. The supervisor gives every executor the same environment, so one `KALIV_COMFY_DIR` is set and each executor uses `KALIV_COMFY_DIR\cuda<N>\` in it, chosen by `--device`. The executor refuses two served video profiles on one port [repo].
 - **There is no model parallelism.** A job runs on one card [repo: one ComfyUI per GPU lease].
 - **VRAM per job** [estimate, to be replaced by §5, step 7]:
 
@@ -108,7 +108,7 @@ These steps change the rig and download about 10 GB of Apache-2.0 weights. Run t
    - Keep `filename_prefix` ASCII [repo: `docs/MEDIA_WORK_AREA.md`].
    - Then `Get-FileHash` the template, which gives the profile's `template_sha256`.
 5. **Work area.**
-   - Create `"$Work\comfy0\{input,output,temp,user}"` and the same for `comfy1`, private to the executor account [repo: `docs/MEDIA_WORK_AREA.md`].
+   - Create `"$Work\comfy\cuda0\{input,output,temp,user}"` and the same for `cuda1`, private to the executor account [repo: `docs/MEDIA_WORK_AREA.md`]. `KALIV_COMFY_DIR` is `$Work\comfy`.
    - Run `scripts/media_work_area_preflight.py`.
 6. **Profile and switches.**
    - Write one candidate profile per GPU (`wan21-t2v-1p3b-gpu0` on port 8188 and `…-gpu1` on port 8189). They are identical apart from `devices`, `port` and `profile_id`.

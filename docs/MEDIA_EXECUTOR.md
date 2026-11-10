@@ -106,7 +106,7 @@ Each executor runs in the supervisor's process tree (a Windows Job Object), so s
 | `KALIV_MEDIA_IDLE_UNLOAD_S` | executor | Optional; default 300 |
 | `KALIV_MEDIA_VIDEO=1` | executor | The video switch. It is separate from the master switch. With any other value, an enabled video profile is exit 78 |
 | `KALIV_COMFY_PYTHON`, `KALIV_COMFY_MAIN` | executor (video) | Absolute paths of the pinned ComfyUI environment's python and of its `main.py`. `main.py` must not be a link |
-| `KALIV_COMFY_DIR` | executor (video) | This executor's ComfyUI folder, in the work area. It must contain existing `input/`, `output/`, `temp/` and `user/` folders. Use one per executor. Nothing is created |
+| `KALIV_COMFY_DIR` | executor (video) | The ComfyUI folder, in the work area. Every executor gets the same environment from the supervisor, so each uses its own `cuda<N>/` in it, chosen by `--device`: `<dir>/cuda0/`, `<dir>/cuda1/`. That folder must contain existing `input/`, `output/`, `temp/` and `user/` directories (not files, not links). Nothing is created |
 | `KALIV_COMFY_TEMPLATE_DIR` | executor (video) | The operator's workflow template directory. Each profile pins its template's SHA-256 |
 | `KALIV_COMFY_WEIGHTS_CACHE` | executor (video) | Optional. The weight-hash cache file, in a folder in the work area. If it is not set, the weights are re-hashed at every start |
 | `KALIV_MEDIA_PROFILES_ENABLED`, `KALIV_MEDIA_ALLOW_CANDIDATE_PROFILES`, `KALIV_GPU_LEASE_DIR`, `KALIV_GPU_DEVICE_UUIDS`, `CUDA_DEVICE_ORDER`, `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE` | executor | Existing |
@@ -139,7 +139,8 @@ The entry point checks the configuration before it touches anything, including t
 - The profile lists `text_to_video` only.
 - The profile pins `comfyui_version` and `weights`. This holds even for a candidate profile, which the profile schema alone does not require.
 - No two served video profiles share a ComfyUI port.
-- `KALIV_COMFY_PYTHON`, `KALIV_COMFY_MAIN`, `KALIV_COMFY_DIR` and `KALIV_COMFY_TEMPLATE_DIR` are set and valid, and the four ComfyUI folders exist inside the work area (`PrivateWorkArea.require`).
+- `KALIV_COMFY_PYTHON`, `KALIV_COMFY_MAIN`, `KALIV_COMFY_DIR` and `KALIV_COMFY_TEMPLATE_DIR` are set and valid.
+- The four ComfyUI folders of this GPU, `KALIV_COMFY_DIR/cuda<N>/{input,output,temp,user}`, exist inside the work area (`PrivateWorkArea.require`) and are directories. A regular file there is 78 at start, not a failed job later.
 
 When video is served:
 

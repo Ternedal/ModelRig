@@ -31,7 +31,7 @@ The copy between the two disks is **not** atomic, which is why the gallery never
 
 `scripts/media_volume_repair.py` reports all of these (C6); nothing is deleted or republished automatically. An operator removes each leftover by name, and the owner resubmits. A removal that fails is logged and reported in the adapter's `last_cleanup`, never ignored.
 
-**Status:** the executor's entry point builds the work area at start and keeps the job database in it. Video is default-off behind `KALIV_MEDIA_VIDEO=1`. When it is on, the supervisor gets the work area (`ComfySupervisor(work_area=...)`), and ComfyUI's four folders (`KALIV_COMFY_DIR`/`input`, `output`, `temp`, `user`) must already exist inside it. Otherwise the result is exit 78.
+**Status:** the executor's entry point builds the work area at start and keeps the job database in it. Video is default-off behind `KALIV_MEDIA_VIDEO=1`. When it is on, the supervisor gets the work area (`ComfySupervisor(work_area=...)`), and ComfyUI's four folders for that GPU (`KALIV_COMFY_DIR`/`cuda<N>`/`input`, `output`, `temp`, `user`) must already exist inside it as directories. Otherwise the result is exit 78.
 
 ## What is checked
 

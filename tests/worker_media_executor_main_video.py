@@ -9,8 +9,10 @@ Run: PYTHONPATH=worker python3 tests/worker_media_executor_main_video.py
 """
 from __future__ import annotations
 
+import contextlib
 import functools
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -27,11 +29,13 @@ for extra in (ROOT / "worker", ROOT / "tests"):
 
 from app.gpu_lease import GpuBusy, acquire_gpu_lease  # noqa: E402
 from app.image_job_store import ImageJobStore  # noqa: E402
-from app.media_executor import EXIT_CONFIG, EXIT_SINK_UNAVAILABLE  # noqa: E402
-from app.media_executor_main import build_from_env, main  # noqa: E402
+from app.media_executor import EXIT_CONFIG, EXIT_SINK_UNAVAILABLE, ExecutorConfigError  # noqa: E402
+from app.media_executor_main import _comfy_device_folder, _video_config, build_from_env, main  # noqa: E402
 from app.media_gallery_catalog import list_gallery  # noqa: E402
 from app.media_gallery_store import ExternalMediaSink  # noqa: E402
 from app.media_generation_contract import ArtifactSinkUnavailable, RenderedArtifact  # noqa: E402
+from app.media_generation_profiles import load_profile_dir  # noqa: E402
+from app.media_work_area import work_area_from_env  # noqa: E402
 from worker_comfy_supervisor import FAKE_MAIN, FakeSupervisor, free_port  # noqa: E402
 from worker_comfy_video_adapter import raw, sha  # noqa: E402
 import worker_media_executor_main as image_suite  # noqa: E402  (its fixture; not its tests)
@@ -70,8 +74,9 @@ class VideoEntryPointTests(unittest.TestCase):
     def setUp(self):
         image_suite.EntryPointTests.setUp(self)
         self.comfy = self.tmp / "work" / "comfy"
+        self.comfy_gpu = self.comfy / "cuda0"  # this executor's own folder (--device cuda:0)
         for name in ("input", "output", "temp", "user"):
-            (self.comfy / name).mkdir(parents=True)
+            (self.comfy_gpu / name).mkdir(parents=True)
         os.chmod(self.comfy, 0o700)
         root = self.tmp / "comfy-root"
         (root / "models" / "diffusion_models").mkdir(parents=True)
@@ -182,15 +187,54 @@ class VideoEntryPointTests(unittest.TestCase):
     def test_comfyui_folders_must_be_existing_folders_in_the_work_area(self):
         outside = self.tmp / "elsewhere"
         for name in ("input", "output", "temp", "user"):
-            (outside / name).mkdir(parents=True)
+            (outside / "cuda0" / name).mkdir(parents=True)
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
             self.assertEqual(main(["--device", "cuda:0"], {**self.env, "KALIV_COMFY_DIR": str(outside)}), EXIT_CONFIG)
-            os.rmdir(self.comfy / "temp")
+            os.rmdir(self.comfy_gpu / "temp")
             self.assertEqual(main(["--device", "cuda:0"], self.env), EXIT_CONFIG)
-            self.assertFalse((self.comfy / "temp").exists(), "a missing folder is never created")
-            (self.comfy / "temp").mkdir()
+            self.assertFalse((self.comfy_gpu / "temp").exists(), "a missing folder is never created")
+            (self.comfy_gpu / "temp").mkdir()
             cache_outside = {**self.env, "KALIV_COMFY_WEIGHTS_CACHE": str(outside / "weights.json")}
             self.assertEqual(main(["--device", "cuda:0"], cache_outside), EXIT_CONFIG)
+
+    def test_a_file_where_a_comfyui_folder_belongs_is_refused_at_start(self):
+        # Codex #2366 4520670221: the work-area check accepts a regular file, and ComfyUI would only
+        # fail on it after a job was claimed. It is 78 at start, before the job database is opened.
+        for name in ("input", "output", "temp", "user"):
+            with self.subTest(folder=name), patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+                folder = self.comfy_gpu / name
+                os.rmdir(folder)
+                folder.write_text("not a folder")
+                try:
+                    # build_from_env, not main(): a missed check returns an executor instead of running one.
+                    with self.assertRaisesRegex(ExecutorConfigError, f"KALIV_COMFY_DIR/cuda0/{name} must be a directory"):
+                        self.build()
+                    self.assertFalse(Path(self.env["KALIV_MEDIA_JOB_DB"]).exists(), "the queue is untouched")
+                    err = io.StringIO()
+                    with contextlib.redirect_stderr(err):
+                        self.assertEqual(main(["--device", "cuda:0"], self.env), EXIT_CONFIG)
+                finally:
+                    folder.unlink()
+                    folder.mkdir()
+
+    def test_each_gpu_uses_its_own_comfyui_folders(self):
+        # Codex #2366 4520670217: the supervisor gives every executor the same environment, so the
+        # folders are chosen by --device: cuda:0 and cuda:1 never share input/output/temp/user.
+        self.assertEqual(_comfy_device_folder("cuda:0"), "cuda0")
+        self.assertEqual(_comfy_device_folder("cuda:1"), "cuda1")
+        for name in ("input", "output", "temp", "user"):
+            (self.comfy / "cuda1" / name).mkdir(parents=True)
+        work = work_area_from_env(self.env)
+        video = {"wan-a": load_profile_dir(self.env["KALIV_MEDIA_PROFILE_DIR"])["wan-a"]}
+        first = _video_config(self.env, video, work, "GPU-0", "cuda:0")
+        second = _video_config(self.env, video, work, "GPU-1", "cuda:1")
+        self.assertEqual(first.folders["output"], str(self.comfy / "cuda0" / "output"))
+        self.assertEqual(second.folders["output"], str(self.comfy / "cuda1" / "output"))
+        self.assertFalse(set(first.folders.values()) & set(second.folders.values()))
+        # A GPU without its own folders is refused, never pointed at another GPU's.
+        shutil.rmtree(self.comfy / "cuda1")
+        with self.assertRaisesRegex(ExecutorConfigError, "KALIV_COMFY_DIR/cuda1/input"):
+            _video_config(self.env, video, work, "GPU-1", "cuda:1")
 
     def test_unpinned_image_to_video_or_clashing_profiles_are_refused(self):
         cases = {
@@ -237,7 +281,7 @@ class VideoEntryPointTests(unittest.TestCase):
                              [(row["asset_id"], "video", "video/mp4")])
             published = Path(self.env["KALIV_MEDIA_ROOT"], f"{row['asset_id']}.mp4")
             self.assertEqual(published.read_bytes()[4:8], b"ftyp")
-            self.assertEqual(os.listdir(self.comfy / "output"), [], "the work-area copy is removed after publication")
+            self.assertEqual(os.listdir(self.comfy_gpu / "output"), [], "the work-area copy is removed after publication")
             self.assertEqual([n for n in os.listdir(self.env["KALIV_MEDIA_ROOT"]) if n.endswith(".tmp")], [],
                              "no staged leftover on the volume")
             sent = json.loads((self.fake_state / "last_prompt.json").read_text())["prompt"]
@@ -291,7 +335,7 @@ class VideoEntryPointTests(unittest.TestCase):
             canceller.join(5)
             self.assertEqual(store.get(job, "anders")["state"], "cancelled")
             self.assertEqual(self.published(), [])
-            self.assertEqual(os.listdir(self.comfy / "output"), [], "the cancelled render's file is removed")
+            self.assertEqual(os.listdir(self.comfy_gpu / "output"), [], "the cancelled render's file is removed")
 
     def test_a_volume_lost_during_the_render_stops_the_executor_and_a_restart_recovers_the_job(self):
         from app import media_volume
