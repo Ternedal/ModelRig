@@ -25,10 +25,10 @@ func TestMediaPageLimitContract(t *testing.T) {
 }
 
 func TestMediaCursorContract(t *testing.T) {
-    for _, cursor := range []string{"", "abc-DEF_123", strings.Repeat("x", 1024)} {
+    for _, cursor := range []string{"", "abc-DEF_123", strings.Repeat("x", 128)} {
         if err := validateMediaCursor(cursor); err != nil { t.Fatalf("refused valid cursor: %v", err) }
     }
-    for _, cursor := range []string{"hello world", "a\n", "é", strings.Repeat("x", 1025)} {
+    for _, cursor := range []string{"hello world", "a\n", "é", strings.Repeat("x", 129)} {
         if err := validateMediaCursor(cursor); err == nil { t.Fatalf("accepted invalid cursor %q", cursor) }
     }
 }
