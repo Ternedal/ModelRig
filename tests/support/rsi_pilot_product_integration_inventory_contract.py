@@ -224,6 +224,18 @@ def run_contract() -> None:
         )
         transitions.setdefault(sensor_transition["path"], []).append(sensor_transition)
 
+    # Explicitly recorded media route integration extends the sealed server
+    # transition chain. Never relax the final blob equality assertion.
+    media_transition_path = ROOT / "docs" / "devcontrol" / "dc-l16" / "media-gallery-server-transition.json"
+    if media_transition_path.is_file():
+        media_transition = _load(media_transition_path)
+        assert media_transition["schema"] == "kaliv-media-server-source-transition/v1"
+        assert media_transition["repository"] == "Ternedal/ModelRig"
+        transition = media_transition["tracked_source_transition"]
+        assert transition["path"] == "backend/internal/httpapi/server.go"
+        assert transition["from_git_blob_sha"] == "f9b646350c70900ec256387b7a7e544d2de3eb0b"
+        transitions.setdefault(transition["path"], []).append(transition)
+
     candidates = inventory["candidate_surfaces"]
     assert len(candidates) == len(EXPECTED) == 3
     for item, (candidate_id, relative_path, expected_sha) in zip(candidates, EXPECTED, strict=True):
