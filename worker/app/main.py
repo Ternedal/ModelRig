@@ -92,6 +92,16 @@ if _os.getenv("KALIV_HOME_RIG_PILOT", "0").strip().lower() in {"1", "true", "on"
 
     _register_home_rig_pilot(_impl.app)
 
+# Media generation job routes (#2275 6764090458): submit, status and cancel, default-off. The
+# literal switch keeps the new surface visible to activation_readiness. The routes are internal:
+# loopback plus KALIV_MEDIA_INTERNAL_SECRET, reached only through the Go backend's authMW. With
+# the switch on but the configuration unusable they answer 503 and never open the database.
+if _os.getenv("KALIV_MEDIA_JOBS_API", "0").strip() == "1":
+    from .media_job_api import build_media_job_router as _build_media_job_router
+    from .media_job_api import cached_service as _media_job_service
+
+    _impl.app.include_router(_build_media_job_router(_media_job_service()))
+
 # Return the implementation module for every import of app.main. This preserves
 # module-global monkeypatching and private helper access instead of copying names
 # into a wrapper namespace whose functions would still close over main_impl.
