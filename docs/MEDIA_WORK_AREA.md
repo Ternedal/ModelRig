@@ -39,8 +39,8 @@ At start, a failure is exit 78. The folder is local, so a failure there is a con
 
 - `KALIV_MEDIA_WORK_ROOT` is set, absolute and canonical. That excludes a symlink, a junction, an 8.3 alias, `..`, a UNC path and a `\\?\` prefix.
 - It is an existing directory, not a link or reparse point.
-- It is on a local disk with stable file ids: NTFS, ext4, xfs or btrfs. A network drive or share is refused, and so are FAT32, exFAT and tmpfs.
-- ReFS is refused too, with 78 at start. Its file ids can be 128-bit, and a hand-off receipt stores them as integers below 2⁶⁴. Every video job would otherwise fail on its receipt (#2357 review P3-1). The media volume itself may still be ReFS. The cleanup after a render deletes only files whose `(st_dev, st_ino)` it recorded, which needs stable file ids.
+- It is on a local disk with stable file ids: NTFS, ReFS, ext4, xfs or btrfs. A network drive or share is refused, and so are FAT32, exFAT and tmpfs.
+- ReFS file ids can be 128-bit. A hand-off receipt is JSON text and accepts file ids below 2¹²⁸ for both the work area and the publication volume (#2357 review P3-1, Codex 4522272230). The cleanup after a render deletes only files whose `(st_dev, st_ino)` it recorded, which needs stable file ids.
 - It is **private**:
   - **Windows:** owned by the executor's account, SYSTEM or Administrators. No other principal holds any right beyond `SYNCHRONIZE`, `READ_CONTROL` or `FILE_READ_ATTRIBUTES`, so nobody else can list, read, write, delete or re-permission anything. This is the same rule as for credential files.
   - **POSIX:** owned by the executor's user, mode `0700`.

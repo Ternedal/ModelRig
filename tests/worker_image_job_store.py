@@ -370,6 +370,22 @@ class HandoffReceiptTests(unittest.TestCase):
         self.assertEqual(self.receipts(), {job: copied})
         self.assertNotIn("record", self.row(job), "image_jobs is unchanged: a separate table")
 
+    def test_a_receipt_keeps_128_bit_refs_file_ids_exactly(self):
+        # #2357 review P3-1 and Codex 4522272230: ReFS ids are 128-bit, on the work area (output)
+        # and on the publication volume (volume). A 64-bit bound refused the receipt and the
+        # finished render was deleted unpublished. Sizes stay 64-bit.
+        job = self.claimed()
+        wide = 2 ** 128 - 1
+        receipt = {"stage": "copying", "output": {**self.OUTPUT, "dev": 2 ** 64 + 3, "ino": wide},
+                   "volume": {"dev": 2 ** 64 + 4, "ino": wide - 1}}
+        self.assertTrue(self.store.record_handoff(job, A1, receipt))
+        self.assertEqual(self.receipts(), {job: receipt}, "stored and read back exactly")
+        for bad in ({"stage": "copying", "output": {**self.OUTPUT, "ino": 2 ** 128}},
+                    {"stage": "copying", "output": self.OUTPUT, "volume": {"dev": 1, "ino": 2 ** 128}},
+                    {"stage": "copying", "output": {**self.OUTPUT, "size": 2 ** 64}}):
+            with self.subTest(bad=bad), self.assertRaises(ImageJobError):
+                self.store.record_handoff(job, A1, bad)
+
     def test_only_the_claiming_instance_of_an_active_job(self):
         job = self.claimed()
         receipt = {"stage": "copying", "output": self.OUTPUT}
