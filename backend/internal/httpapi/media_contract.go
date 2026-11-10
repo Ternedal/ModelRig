@@ -30,11 +30,7 @@ func parseMediaLimit(raw string) (int, error) {
 // Its meaning is owned by the catalog; this function does not decode it.
 func validateMediaCursor(cursor string) error {
     if cursor == "" { return nil }
-    if len(cursor) > 1024 { return errors.New("invalid media cursor") }
-    for i := 0; i < len(cursor); i++ {
-        if cursor[i] < 0x21 || cursor[i] > 0x7e {
-            return errors.New("invalid media cursor")
-        }
-    }
+    // Python catalog cursors are exact asset IDs, never paths or offsets.
+    if !validMediaID(cursor) { return errors.New("invalid media cursor") }
     return nil
 }
