@@ -97,3 +97,12 @@ func (s *server) registerMediaRoutes() {
         s.mux.Handle(method+" /api/v1/media/{id}", mediaPrivateNoStore(s.authMW(http.HandlerFunc(s.handleMediaAsset))))
     }
 }
+
+// mediaPrivateNoStore ensures private gallery responses, including auth failures,
+// are never stored by intermediate caches or clients.
+func mediaPrivateNoStore(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Cache-Control", "private, no-store")
+        next.ServeHTTP(w, r)
+    })
+}
