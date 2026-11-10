@@ -61,6 +61,7 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 202, response.text)
         job = response.json()
         self.assertEqual((job["state"], job["profile_id"], job["asset_id"], job["error"]), ("queued", "sdxl-a", None, None))
+        self.assertEqual(job["schema"], "kaliv-media-job/v1")
         self.assertNotIn(PROMPT, response.text)
         self.assertNotIn("prompt", job)
         row = self.store.get(job["id"], OWNER)
@@ -87,6 +88,15 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(enabled.status_code, 200)
         self.assertEqual([p["profile_id"] for p in enabled.json()["profiles"]], ["sdxl-a", "wan-t2v"])
         self.assertNotIn("image_to_video", enabled.text)
+
+    def test_profiles_never_advertise_a_prompt_longer_than_submit_accepts(self):
+        from dataclasses import replace
+        large = replace(self.profiles["sdxl-a"], limits=replace(self.profiles["sdxl-a"].limits,
+                                                                 max_prompt_chars=6000))
+        configured = MediaJobService(self.store, {"sdxl-a": large}, SECRET)
+        response = client_for(configured).get("/internal/media/jobs/profiles", headers=HEADERS)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["profiles"][0]["max_prompt_chars"], 4000)
 
     def test_profiles_require_secret_and_loopback_before_exposing_catalog(self):
         for headers in ({}, {"X-Internal-Media-Secret": "invalid"}):
