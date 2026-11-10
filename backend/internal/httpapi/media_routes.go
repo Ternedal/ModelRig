@@ -92,7 +92,7 @@ func (s *server) handleMediaAsset(w http.ResponseWriter, r *http.Request) {
 // RegisterMediaRoutes is called from routes, always behind paired-device auth.
 // It is intentionally not a public, unpaired or worker-forwarded endpoint.
 func (s *server) registerMediaRoutes() {
-    s.mux.Handle("GET /api/v1/media", s.authMW(http.HandlerFunc(s.handleMediaList)))
+    s.mux.Handle("GET /api/v1/media", mediaPrivateNoStore(s.authMW(http.HandlerFunc(s.handleMediaList))))
     for _, method := range []string{http.MethodGet, http.MethodHead} {
         s.mux.Handle(method+" /api/v1/media/{id}", mediaPrivateNoStore(s.authMW(http.HandlerFunc(s.handleMediaAsset))))
     }
