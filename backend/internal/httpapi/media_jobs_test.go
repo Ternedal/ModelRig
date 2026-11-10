@@ -254,3 +254,31 @@ func TestMediaJobProfilesRouteRequiresBearerAndIsDefaultOff(t *testing.T) {
 		t.Fatalf("profile route cache=%q", rec.Header().Get("Cache-Control"))
 	}
 }
+
+func TestMediaJobWorkerAuthFailuresDoNotMasqueradeAsDevicePairingFailures(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(status)
+				_, _ = io.WriteString(w, `{"detail":"internal secret rejected"}`)
+			}))
+			defer worker.Close()
+			h := mediaJobsHandler(t, worker.URL, "1", mediaJobsTestSecret)
+			rec := doMediaJobs(h, http.MethodGet, "/api/v1/media/jobs/"+mediaJobsTestID, mediaJobsTestToken, "", nil)
+			if rec.Code != http.StatusServiceUnavailable {
+				t.Fatalf("worker status %d leaked as %d", status, rec.Code)
+			}
+			if strings.Contains(rec.Body.String(), "internal secret") || strings.Contains(rec.Body.String(), "rejected") {
+				t.Fatalf("internal worker error body leaked: %s", rec.Body.String())
+			}
+			if rec.Header().Get("Cache-Control") != "private, no-store" {
+				t.Fatalf("no-store missing: %q", rec.Header().Get("Cache-Control"))
+			}
+			unauthenticated := doMediaJobs(h, http.MethodGet, "/api/v1/media/jobs/"+mediaJobsTestID, "", "", nil)
+			if unauthenticated.Code != http.StatusUnauthorized {
+				t.Fatalf("device Bearer 401 was changed: %d", unauthenticated.Code)
+			}
+		})
+	}
+}
