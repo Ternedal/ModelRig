@@ -144,3 +144,19 @@ func TestMediaErrorResponsesNeverCache(t *testing.T) {
   }
  }
 }
+
+type mediaBrokenCatalog struct{}
+func (mediaBrokenCatalog) ListMedia(string,int,string)([]map[string]any,*string,error){return nil,nil,ErrMediaUnavailable}
+func (mediaBrokenCatalog) OpenMedia(string,string)(io.ReadSeekCloser,string,int64,error){
+ return nil,"video/mp4",10,nil
+}
+func TestMediaNilDescriptorFailsClosed(t *testing.T){
+ s:=&server{Deps:Deps{Media:mediaBrokenCatalog{}}}
+ r:=httptest.NewRequest("GET","/api/v1/media/asset_1",nil)
+ r.SetPathValue("id","asset_1")
+ w:=httptest.NewRecorder()
+ s.handleMediaAsset(w,r)
+ if w.Code!=503 || w.Header().Get("Cache-Control")!="private, no-store" {
+  t.Fatalf("nil descriptor: status=%d cache=%q",w.Code,w.Header().Get("Cache-Control"))
+ }
+}
