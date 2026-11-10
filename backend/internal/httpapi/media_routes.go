@@ -50,6 +50,7 @@ func (s *server) handleMediaAsset(w http.ResponseWriter, r *http.Request) {
     asset, mime, size, err := s.Media.OpenMedia(mediaInstallationOwner, id)
     if errors.Is(err, ErrMediaNotFound) { http.NotFound(w, r); return }
     if err != nil { http.Error(w, "media unavailable", http.StatusServiceUnavailable); return }
+    if asset == nil { http.Error(w, "invalid verified media", http.StatusServiceUnavailable); return }
     defer asset.Close()
     if size < 0 || (mime != "video/mp4" && mime != "image/png" && mime != "image/jpeg" && mime != "image/webp") {
         http.Error(w, "invalid verified media", http.StatusServiceUnavailable); return
@@ -75,14 +76,16 @@ func (s *server) handleMediaAsset(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Cache-Control", "private, no-store")
     w.Header().Set("Content-Type", mime)
     w.Header().Set("Accept-Ranges", "bytes")
-    w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
     w.Header().Set("X-Content-Type-Options", "nosniff")
-    if partial { w.Header().Set("Content-Range", contentRange) }
-    if r.Method == http.MethodHead { w.WriteHeader(status); return }
-    if _, err := asset.Seek(start, io.SeekStart); err != nil {
-        http.Error(w, "media unavailable", http.StatusServiceUnavailable); return
+    if r.Method != http.MethodHead {
+        if _, err := asset.Seek(start, io.SeekStart); err != nil {
+            http.Error(w, "media unavailable", http.StatusServiceUnavailable); return
+        }
     }
+    w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
+    if partial { w.Header().Set("Content-Range", contentRange) }
     w.WriteHeader(status)
+    if r.Method == http.MethodHead { return }
     _, _ = io.CopyN(w, asset, length) // response already started; never reopen by path
 }
 
