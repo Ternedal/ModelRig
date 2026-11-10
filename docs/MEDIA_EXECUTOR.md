@@ -247,4 +247,6 @@ Anders decided this on 6 Nov 2026 (#2275 6691069504). A job that no executor cla
 - **The store:** `claim_for()` expires stale jobs in the same transaction and never claims one, so a claim and an expiry cannot both win.
 - **Submission:** `submit()` expires stale jobs first, so stale jobs never fill the queue while media is off.
 - **Reading a job:** `get()` expires a stale job when it reads one, so the owner sees `expired` even while media is off.
+- **Cancelling:** `request_cancel()` on a stale queued job expires it and answers `expired`, not `cancelled`.
+- **The legacy `claim()`:** it expires first, like `claim_for()`. It has no production caller.
 

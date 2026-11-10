@@ -22,7 +22,7 @@ for extra in (ROOT / "worker", ROOT / "tests"):
 from app.gpu_lease import acquire_gpu_lease  # noqa: E402
 from app.media_executor import EXIT_CONFIG, EXIT_SINK_UNAVAILABLE  # noqa: E402
 from app.media_executor_main import _on_one_device as real_on_one_device, build_from_env, main  # noqa: E402
-from app.media_generation_contract import RenderedArtifact  # noqa: E402
+from app.media_generation_contract import ArtifactSinkUnavailable, RenderedArtifact  # noqa: E402
 from worker_media_generation_profiles import image_profile, video_profile  # noqa: E402
 
 GPU = "GPU-6a7f0c2e-1b2d-4c3e-8f9a-0123456789ab"
@@ -138,6 +138,19 @@ class EntryPointTests(unittest.TestCase):
         env = {**self.env, "KALIV_MEDIA_JOB_DB": str(self.state)}  # would be 78 if inspected
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=False):
             self.assertEqual(main(["--device", "cuda:0"], env), EXIT_SINK_UNAVAILABLE)
+
+    def test_a_75_says_whether_the_volume_or_the_work_area_is_missing(self):
+        # #2357 review P3-2: both are 75; the log line must not blame the volume for the work area.
+        import contextlib
+        import io
+        for reason, text in (("media_work_area_missing", "the private work area is not available"),
+                             ("media_volume_missing", "the external media volume is not available")):
+            with self.subTest(reason=reason), \
+                    patch("app.media_executor_main.build_from_env", side_effect=ArtifactSinkUnavailable(reason)):
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    self.assertEqual(main(["--device", "cuda:0"], self.env), EXIT_SINK_UNAVAILABLE)
+                self.assertIn(f"{text} ({reason})", err.getvalue())
 
     def test_a_locked_database_is_not_a_configuration_error(self):
         # Transient: exit 1, which the supervisor restarts with back-off; 78 would stop it for good.

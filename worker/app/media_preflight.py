@@ -9,7 +9,7 @@ It checks, on this machine and at this moment:
   different disk than the work area;
 - free space on both against a minimum;
 - that every named process (``pids``: the supervisor, worker, server, executor) runs as this
-  account: on Windows the token's user SID, on POSIX the real user id;
+  account: on Windows the token's user SID, on POSIX the effective user id (as the code reads it);
 - whether the executor switch is on (reported, not judged).
 
 It prints evidence, never a prompt or a secret: paths, SIDs or user ids, sizes and reason codes.

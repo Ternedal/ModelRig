@@ -471,6 +471,25 @@ class QueuedExpiryTests(unittest.TestCase):
         self.assertEqual(self.store.expire_queued(now=3_000_000.0 + 3 * self.DAY), 1)
         self.assertEqual(self.row(job)["state"], "expired")
 
+    def test_cancelling_a_stale_queued_job_expires_it_instead(self):
+        # #2357 review P3-3: expiry wins on every path, cancel included.
+        stale = self.job_at(5_000_000.0)
+        fresh = self.job_at(5_000_010.0)  # submitted before the first is stale, so submit() expired nothing
+        with patch("app.image_job_store.time.time", return_value=5_000_000.0 + self.DAY + 5):
+            self.assertIsNone(self.store.request_cancel(stale, "someone-else"), "never another owner's")
+            self.assertEqual(self.row(stale)["state"], "queued")
+            self.assertEqual(self.store.request_cancel(stale, "anders"), "expired")
+            self.assertEqual(self.store.request_cancel(fresh, "anders"), "cancelled")
+        self.assertEqual((self.row(stale)["state"], self.row(stale)["error"]), ("expired", "expired_unclaimed"))
+        self.assertEqual(self.row(fresh)["state"], "cancelled")
+
+    def test_the_legacy_claim_never_claims_a_stale_job_either(self):
+        stale = self.job_at(6_000_000.0)
+        fresh = self.job_at(6_000_010.0)
+        with patch("app.image_job_store.time.time", return_value=6_000_000.0 + self.DAY + 5):
+            self.assertEqual(self.store.claim()["id"], fresh)
+        self.assertEqual(self.row(stale)["state"], "expired")
+
     def test_an_expired_job_is_never_claimed_even_before_any_sweep(self):
         stale = self.job_at(4_000_000.0)
         fresh = self.job_at(4_000_000.0 + self.DAY)

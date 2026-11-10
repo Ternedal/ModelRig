@@ -353,10 +353,12 @@ class ImageJobStore:
     def claim(self) -> dict | None:
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
+            now = time.time()
+            # Like claim_for(): a stale queued job expires in this transaction and is never claimed.
+            db.execute(_EXPIRE_SQL, (EXPIRED_ERROR, now, now - QUEUED_MAX_AGE_S))
             row = db.execute("SELECT * FROM image_jobs WHERE state='queued' ORDER BY created,id LIMIT 1").fetchone()
             if row is None:
                 return None
-            now = time.time()
             db.execute("UPDATE image_jobs SET state='running',updated=? WHERE id=? AND state='queued'",
                        (now, row["id"]))
             return dict(row) | {"state": "running", "updated": now}
@@ -465,11 +467,16 @@ class ImageJobStore:
             return running + publishing
 
     def request_cancel(self, job_id: str, owner: str) -> str | None:
-        """'cancelled' (was queued), 'requested' (running: the executor stops it), 'too_late'
-        (publishing: it will complete), or None (not this owner's, or already finished)."""
+        """'cancelled' (was queued), 'expired' (was queued for more than 24 hours: it expires now
+        instead), 'requested' (running: the executor stops it), 'too_late' (publishing: it will
+        complete), or None (not this owner's, or already finished)."""
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             now = time.time()
+            # Expiry wins over cancel, as on every other path (#2357 review P3-3).
+            if db.execute(_EXPIRE_SQL + " AND id=? AND owner=?",
+                          (EXPIRED_ERROR, now, now - QUEUED_MAX_AGE_S, job_id, owner)).rowcount:
+                return "expired"
             if db.execute("UPDATE image_jobs SET state='cancelled',updated=? WHERE id=? AND owner=? AND state='queued'",
                           (now, job_id, owner)).rowcount:
                 return "cancelled"
