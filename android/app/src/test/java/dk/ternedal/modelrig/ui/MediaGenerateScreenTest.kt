@@ -1,0 +1,148 @@
+package dk.ternedal.modelrig.ui
+
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
+import dk.ternedal.modelrig.net.MediaJob
+import dk.ternedal.modelrig.net.MediaJobContractTest.Companion.JOB_ID
+import dk.ternedal.modelrig.net.MediaJobContractTest.Companion.SDXL
+import dk.ternedal.modelrig.net.MediaJobException
+import dk.ternedal.modelrig.net.MediaJobException.Reason
+import dk.ternedal.modelrig.net.MediaJobProfile
+import dk.ternedal.modelrig.net.MediaJobRequest
+import dk.ternedal.modelrig.net.MediaJobSource
+import dk.ternedal.modelrig.net.MediaJobState
+import dk.ternedal.modelrig.ui.theme.ModelRigTheme
+import kotlinx.coroutines.Dispatchers
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+
+/** The generate screen against a fake rig; no network. */
+@RunWith(RobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(sdk = [36])
+class MediaGenerateScreenTest {
+    @get:Rule
+    val compose = createComposeRule()
+
+    private class FakeRig(
+        private val profileList: () -> List<MediaJobProfile> = { listOf(SDXL) },
+        private val submitResult: () -> MediaJob = { job(MediaJobState.QUEUED) },
+        statuses: List<MediaJob> = emptyList(),
+        private val cancelResult: () -> MediaJob? = { job(MediaJobState.CANCELLED) },
+    ) : MediaJobSource {
+        val submitted = mutableListOf<MediaJobRequest>()
+        var polls = 0
+        var cancels = 0
+        private val queue = statuses.toMutableList()
+        override fun profiles() = profileList()
+        override fun submit(request: MediaJobRequest, profile: MediaJobProfile): MediaJob {
+            submitted += request
+            return submitResult()
+        }
+        override fun status(id: String): MediaJob {
+            polls++
+            return if (queue.size > 1) queue.removeAt(0) else queue.firstOrNull() ?: job(MediaJobState.QUEUED)
+        }
+        override fun cancel(id: String): MediaJob? {
+            cancels++
+            return cancelResult()
+        }
+    }
+
+    companion object {
+        fun job(state: MediaJobState, assetId: String? = null, error: String? = null) =
+            MediaJob(JOB_ID, state, "sdxl-a", assetId, error, false)
+    }
+
+    private var galleryOpened = 0
+
+    private fun show(rig: MediaJobSource) {
+        compose.setContent {
+            ModelRigTheme(dark = true) {
+                MediaGenerateContent(rig, onOpenGallery = { galleryOpened++ }, onClose = {}, io = Dispatchers.Unconfined,
+                    pollMillis = 10)
+            }
+        }
+        compose.waitForIdle()
+    }
+
+    @Test
+    fun `a rig without the route says so and offers nothing`() {
+        show(FakeRig(profileList = { throw MediaJobException(Reason.UNAVAILABLE, "Billedgenerering er ikke tilgængelig på denne rig") }))
+        compose.onNodeWithText("Billedgenerering er ikke tilgængelig på denne rig").assertExists()
+        compose.onNodeWithTag("generate-submit").assertDoesNotExist()
+        compose.onNodeWithTag("generate-prompt").assertDoesNotExist()
+    }
+
+    @Test
+    fun `generate follows the job to completion and only then offers the gallery`() {
+        val rig = FakeRig(statuses = listOf(job(MediaJobState.RUNNING), job(MediaJobState.COMPLETED, assetId = "asset_1")))
+        show(rig)
+        compose.onNodeWithTag("generate-submit").assertIsNotEnabled()
+        compose.onNodeWithTag("generate-prompt").performTextInput("a red bicycle")
+        compose.onNodeWithTag("generate-submit").assertIsEnabled().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTagExists("generate-open-gallery") }
+        compose.onNodeWithText("Færdig").assertExists()
+        compose.onNodeWithTag("generate-cancel").assertDoesNotExist()
+        compose.onNodeWithTag("generate-open-gallery").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertEquals(1, galleryOpened)
+        assertEquals("a red bicycle", rig.submitted.single().prompt)
+        val pollsAtEnd = rig.polls
+        Thread.sleep(100)
+        compose.waitForIdle()
+        assertEquals("polling stopped at the terminal state", pollsAtEnd, rig.polls)
+    }
+
+    @Test
+    fun `cancel is offered while queued and shows the cancelled job`() {
+        val rig = FakeRig()
+        show(rig)
+        compose.onNodeWithTag("generate-prompt").performTextInput("x")
+        compose.onNodeWithTag("generate-submit").performClick()
+        compose.onNodeWithTag("generate-cancel").assertIsEnabled().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTextExists("Annulleret") }
+        assertEquals(1, rig.cancels)
+        compose.onNodeWithTag("generate-open-gallery").assertDoesNotExist()
+    }
+
+    @Test
+    fun `an expired job is shown as expired`() {
+        show(FakeRig(statuses = listOf(job(MediaJobState.EXPIRED, error = "expired_unclaimed"))))
+        compose.onNodeWithTag("generate-prompt").performTextInput("x")
+        compose.onNodeWithTag("generate-submit").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithTextExists("Udløbet: riggen nåede ikke at starte jobbet inden for et døgn")
+        }
+        compose.onNodeWithTag("generate-open-gallery").assertDoesNotExist()
+    }
+
+    @Test
+    fun `a busy rig keeps the form and the prompt`() {
+        show(FakeRig(submitResult = { throw MediaJobException(Reason.BUSY, "x", "queue_full") }))
+        compose.onNodeWithTag("generate-prompt").performTextInput("keep me")
+        compose.onNodeWithTag("generate-submit").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Riggens kø er fuld; prøv igen om lidt").assertExists()
+        compose.onNodeWithText("keep me").assertExists()
+        compose.onNodeWithTag("generate-submit").assertIsEnabled()
+    }
+
+    private fun androidx.compose.ui.test.junit4.ComposeContentTestRule.onAllNodesWithTagExists(tag: String) =
+        onAllNodes(androidx.compose.ui.test.hasTestTag(tag)).fetchSemanticsNodes().isNotEmpty()
+
+    private fun androidx.compose.ui.test.junit4.ComposeContentTestRule.onAllNodesWithTextExists(text: String) =
+        onAllNodes(androidx.compose.ui.test.hasText(text)).fetchSemanticsNodes().isNotEmpty().also { assertTrue(true) }
+}
