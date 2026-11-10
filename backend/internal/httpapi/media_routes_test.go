@@ -2,7 +2,6 @@ package httpapi
 
 import (
  "bytes"
- "errors"
  "io"
  "net/http"
  "net/http/httptest"
@@ -88,5 +87,22 @@ func TestMediaAssetMissingAndInvalidID(t *testing.T) {
   if w.Code!=404 {t.Errorf("%s: %d",id,w.Code)}
  }
  if m.openCalls!=1 {t.Fatal("unsafe ID reached catalog")}
- if !errors.Is(ErrMediaNotFound,ErrMediaNotFound) {t.Fatal("missing sentinel")}
+}
+
+func TestMediaAssetIfRangeAndNoStore(t *testing.T) {
+ m:=&mediaTestCatalog{data:[]byte("0123456789")}
+ s:=&server{Deps:Deps{Media:m}}
+ r:=httptest.NewRequest("GET","/api/v1/media/asset_1",nil)
+ r.SetPathValue("id","asset_1")
+ r.Header.Set("Range","bytes=0-2")
+ r.Header.Set("If-Range",`"unmatched-etag"`)
+ w:=httptest.NewRecorder()
+ s.handleMediaAsset(w,r)
+ if w.Code!=200 || w.Body.String()!="0123456789" || w.Header().Get("Content-Range")!="" {
+  t.Fatalf("If-Range must ignore Range without matching validator: status=%d body=%q range=%q",w.Code,w.Body.String(),w.Header().Get("Content-Range"))
+ }
+ if w.Header().Get("Cache-Control")!="private, no-store" {t.Fatal("asset may be cached")}
+ list:=httptest.NewRecorder()
+ s.handleMediaList(list,httptest.NewRequest("GET","/api/v1/media",nil))
+ if list.Header().Get("Cache-Control")!="private, no-store" {t.Fatal("gallery may be cached")}
 }
