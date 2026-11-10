@@ -94,6 +94,6 @@ func (s *server) handleMediaAsset(w http.ResponseWriter, r *http.Request) {
 func (s *server) registerMediaRoutes() {
     s.mux.Handle("GET /api/v1/media", s.authMW(http.HandlerFunc(s.handleMediaList)))
     for _, method := range []string{http.MethodGet, http.MethodHead} {
-        s.mux.Handle(method+" /api/v1/media/{id}", s.authMW(http.HandlerFunc(s.handleMediaAsset)))
+        s.mux.Handle(method+" /api/v1/media/{id}", mediaPrivateNoStore(s.authMW(http.HandlerFunc(s.handleMediaAsset))))
     }
 }
