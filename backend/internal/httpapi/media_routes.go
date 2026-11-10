@@ -3,11 +3,9 @@ package httpapi
 import (
     "errors"
     "encoding/json"
-    "fmt"
     "io"
     "net/http"
     "strconv"
-    "strings"
 )
 
 // MediaCatalog is a trusted, installation-scoped adapter. Implementations MUST
@@ -75,10 +73,7 @@ func (s *server) handleMediaAsset(w http.ResponseWriter, r *http.Request) {
         http.Error(w, "media unavailable", http.StatusServiceUnavailable); return
     }
     w.WriteHeader(status)
-    if _, err := io.CopyN(w, asset, length); err != nil {
-        // Response already started. Do not reopen by path or append an error body.
-        _ = fmt.Sprintf("%v", err)
-    }
+    _, _ = io.CopyN(w, asset, length) // response already started; never reopen by path
 }
 
 // RegisterMediaRoutes is called from routes, always behind paired-device auth.
@@ -89,5 +84,3 @@ func (s *server) registerMediaRoutes() {
         s.mux.Handle(method+" /api/v1/media/{id}", s.authMW(http.HandlerFunc(s.handleMediaAsset)))
     }
 }
-
-var _ = strings.TrimSpace
