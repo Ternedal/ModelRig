@@ -20,6 +20,8 @@ var ErrMediaNotFound = errors.New("media asset not found")
 var ErrMediaUnavailable = errors.New("media catalog unavailable")
 
 func (s *server) handleMediaList(w http.ResponseWriter, r *http.Request) {
+    // Include errors and empty responses: authenticated media metadata must never be cached.
+    w.Header().Set("Cache-Control", "private, no-store")
     if s.Media == nil { http.Error(w, "media unavailable", http.StatusServiceUnavailable); return }
     query := r.URL.Query()
     if len(query["limit"]) > 1 || len(query["cursor"]) > 1 {
@@ -40,6 +42,8 @@ func (s *server) handleMediaList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleMediaAsset(w http.ResponseWriter, r *http.Request) {
+    // Cover 404, 416 and 503 as well as successful private asset responses.
+    w.Header().Set("Cache-Control", "private, no-store")
     if s.Media == nil { http.Error(w, "media unavailable", http.StatusServiceUnavailable); return }
     id := r.PathValue("id")
     if !validMediaID(id) { http.NotFound(w, r); return }
