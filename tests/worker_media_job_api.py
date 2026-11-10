@@ -67,6 +67,34 @@ class RouteTests(unittest.TestCase):
         self.assertEqual((row["owner"], row["prompt"]), ("installation", PROMPT), "the gallery's owner (#2365)")
         self.assertEqual(json.loads(row["params"]), {"width": 1024, "height": 1024, "steps": 20})
 
+    def test_profiles_are_filtered_versioned_and_do_not_expose_model_details(self):
+        response = self.client.get("/internal/media/jobs/profiles", headers=HEADERS)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {
+            "schema": "kaliv-media-job/v1",
+            "profiles": [{
+                "profile_id": "sdxl-a", "modality": "image",
+                "tasks": sorted(self.profiles["sdxl-a"].tasks),
+                "sizes": [list(size) for size in self.profiles["sdxl-a"].limits.sizes],
+                "max_steps": self.profiles["sdxl-a"].limits.max_steps,
+                "max_prompt_chars": self.profiles["sdxl-a"].limits.max_prompt_chars,
+            }],
+        })
+        for sensitive in ("model_id", "revision", "backend_options", "resources", "license", "secret"):
+            self.assertNotIn(sensitive, response.text)
+        video_service = MediaJobService(self.store, self.profiles, SECRET, video_enabled=True)
+        enabled = client_for(video_service).get("/internal/media/jobs/profiles", headers=HEADERS)
+        self.assertEqual(enabled.status_code, 200)
+        self.assertEqual([p["profile_id"] for p in enabled.json()["profiles"]], ["sdxl-a", "wan-t2v"])
+        self.assertNotIn("image_to_video", enabled.text)
+
+    def test_profiles_require_secret_and_loopback_before_exposing_catalog(self):
+        for headers in ({}, {"X-Internal-Media-Secret": "invalid"}):
+            response = self.client.get("/internal/media/jobs/profiles", headers=headers)
+            self.assertEqual(response.status_code, 401)
+        remote = client_for(self.service, loopback=lambda host: False)
+        self.assertEqual(remote.get("/internal/media/jobs/profiles", headers=HEADERS).status_code, 401)
+
     def test_an_owner_header_is_ignored(self):
         response = self.client.post("/internal/media/jobs", json={"profile_id": "sdxl-a", "prompt": PROMPT},
                                     headers={**HEADERS, "X-Verified-Owner": "someone-else"})
