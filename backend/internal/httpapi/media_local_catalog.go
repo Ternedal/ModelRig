@@ -6,6 +6,7 @@ import (
  "io"
  "os"
  "path/filepath"
+ "runtime"
  "strings"
 )
 
@@ -28,6 +29,11 @@ func (c LocalMediaCatalog) root() (string,error) {
  media,err:=filepath.Abs(c.MediaRoot);if err!=nil{return "",ErrMediaUnavailable}
  // The volume must be a filesystem root, never an ordinary fallback folder.
  if filepath.Clean(volume)!=filepath.Clean(filepath.VolumeName(volume)+string(os.PathSeparator)) {return "",ErrMediaUnavailable}
+ // The production media volume is Z: on Windows. Never read C: or another
+ // unapproved drive when an operator accidentally supplies the wrong root.
+ if runtime.GOOS=="windows" && !strings.EqualFold(filepath.VolumeName(volume),"Z:") {return "",ErrMediaUnavailable}
+ // POSIX '/' is the system disk, not an external media mount.
+ if runtime.GOOS!="windows" {return "",ErrMediaUnavailable}
  for _,path:=range []string{volume,media} {
   info,err:=os.Lstat(path);if err!=nil || !info.IsDir() || info.Mode()&os.ModeSymlink!=0{return "",ErrMediaUnavailable}
   resolved,err:=filepath.EvalSymlinks(path);if err!=nil || filepath.Clean(resolved)!=filepath.Clean(path){return "",ErrMediaUnavailable}
