@@ -112,7 +112,7 @@ Keep the paired token only in the environment:
 $env:MODELRIG_TOKEN = '<paired-device-token>'
 python scripts\scheduler_pilot_evidence.py `
   --manifest eval\scheduler_pilot_manifest.json `
-  --report validation\scheduler-pilot-latest.json
+  --report validation\scheduler-pilot-evidence-latest.json
 ```
 
 The collector accepts only loopback backend/worker URLs. It opens all three SQLite
@@ -144,7 +144,7 @@ Review the rolling report before copying it:
 ```powershell
 $stamp = Get-Date -Format 'yyyy-MM-dd_HHmm'
 Copy-Item `
-  validation\scheduler-pilot-latest.json `
+  validation\scheduler-pilot-evidence-latest.json `
   "validation\scheduler-pilot-$stamp.json"
 ```
 
