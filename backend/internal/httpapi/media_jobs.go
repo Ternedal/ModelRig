@@ -91,7 +91,7 @@ func (w *mediaJobsResponseWriter) WriteHeader(status int) {
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.ResponseWriter.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = io.WriteString(w.ResponseWriter, "media jobs unavailable\\n")
+		_, _ = io.WriteString(w.ResponseWriter, "media jobs unavailable\n")
 		return
 	}
 	w.ResponseWriter.WriteHeader(status)
