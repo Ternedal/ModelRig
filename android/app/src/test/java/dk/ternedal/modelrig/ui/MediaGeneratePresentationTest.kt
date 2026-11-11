@@ -194,6 +194,30 @@ class MediaGeneratePresentationTest {
     }
 
     @Test
+    fun `the too-late note survives a stall and a resume through to the finished picture`() {
+        var state = MediaGenerate.cancelled(MediaGenerate.cancelling(following(MediaJobState.RUNNING)),
+            MediaJobCancel("too_late", job(MediaJobState.PUBLISHING)))
+        repeat(MediaGenerate.MAX_POLL_FAILURES) {
+            state = MediaGenerate.pollFailed(state, MediaJobException(Reason.TRANSIENT, "x"))
+        }
+        val stalled = state.phase as MediaGeneratePhase.Stalled
+        assertTrue("the flag travels with the stalled job", stalled.tooLate)
+        val resumed = MediaGenerate.resume(state)
+        assertTrue((resumed.phase as MediaGeneratePhase.Following).tooLate)
+        assertEquals(MediaGenerate.TOO_LATE_TEXT, resumed.error)
+        assertFalse("still nothing to cancel", resumed.canCancel)
+        val done = MediaGenerate.polled(MediaGenerate.polled(resumed, job(MediaJobState.PUBLISHING)),
+            job(MediaJobState.COMPLETED, assetId = "asset_1"))
+        assertEquals("asset_1", done.completedAssetId)
+        assertEquals(MediaGenerate.TOO_LATE_TEXT, done.error)
+        // Without a too-late cancel, a stall and resume carry no note.
+        var plain = following(MediaJobState.RUNNING)
+        repeat(MediaGenerate.MAX_POLL_FAILURES) { plain = MediaGenerate.pollFailed(plain, MediaJobException(Reason.TRANSIENT, "x")) }
+        assertFalse((plain.phase as MediaGeneratePhase.Stalled).tooLate)
+        assertNull(MediaGenerate.polled(MediaGenerate.resume(plain), job(MediaJobState.RUNNING)).error)
+    }
+
+    @Test
     fun `an auth failure while polling stays distinct from a transient one`() {
         val auth = MediaGenerate.pollFailed(following(MediaJobState.RUNNING),
             MediaJobException(Reason.UNAUTHORIZED, "Parringen er ikke længere gyldig"))
