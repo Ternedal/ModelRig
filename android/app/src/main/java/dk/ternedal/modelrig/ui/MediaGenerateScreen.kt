@@ -38,7 +38,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Create one image on the paired rig (#2275 A1): profile, size, prompt,
+ * Create one image or video on the paired rig (#2275 A1, video C2): profile, size, prompt,
  * "Generér", live status, cancel, and "Åbn galleriet" once it is done.
  *
  * Reached only through MainActivity's EXTRA_MEDIA_GENERATE, like the gallery:
@@ -133,7 +133,7 @@ internal fun MediaGenerateContent(
 
     GenerateSurface {
         Button(onClick = onClose) { Text("Tilbage") }
-        Title()
+        Title(MediaGenerate.title(state))
         when (val phase = state.phase) {
             MediaGeneratePhase.Loading -> Text("Spørger riggen …", color = KalivTheme.colors.textMuted,
                 modifier = Modifier.testTag("generate-loading"))
@@ -162,7 +162,7 @@ private fun Form(
                 state.profiles.forEach { p ->
                     FilterChip(selected = p.profileId == state.profileId, enabled = editable,
                         onClick = { onState(MediaGenerate.selectProfile(state, p.profileId)) },
-                        label = { Text(p.profileId) })
+                        label = { Text("${MediaGenerate.modalityName(p.modality)} · ${p.profileId}") })
                 }
             }
         }
@@ -197,16 +197,16 @@ private fun Form(
         }
         when (val phase = state.phase) {
             is MediaGeneratePhase.Following -> Text(
-                if (phase.cancelling) "Annulleres …" else MediaGenerate.stateLabel(phase.job),
+                if (phase.cancelling) "Annulleres …" else MediaGenerate.stateLabel(phase.job, MediaGenerate.modalityOf(state, phase.job)),
                 color = KalivTheme.colors.textHigh, modifier = Modifier.testTag("generate-status"),
             )
             is MediaGeneratePhase.Stalled -> {
-                Text(MediaGenerate.stateLabel(phase.job), color = KalivTheme.colors.textMuted,
+                Text(MediaGenerate.stateLabel(phase.job, MediaGenerate.modalityOf(state, phase.job)), color = KalivTheme.colors.textMuted,
                     modifier = Modifier.testTag("generate-status"))
                 Button(onClick = onResume, modifier = Modifier.testTag("generate-resume")) { Text("Prøv igen") }
             }
             is MediaGeneratePhase.Finished -> {
-                Text(MediaGenerate.stateLabel(phase.job),
+                Text(MediaGenerate.stateLabel(phase.job, MediaGenerate.modalityOf(state, phase.job)),
                     color = if (state.completedAssetId != null) KalivTheme.colors.textHigh else KalivTheme.colors.danger,
                     modifier = Modifier.testTag("generate-status"))
                 if (state.completedAssetId != null) {
@@ -224,8 +224,8 @@ private fun Form(
 }
 
 @Composable
-private fun Title() {
-    Text("Generér billede", color = KalivTheme.colors.textHigh, modifier = Modifier.padding(vertical = 16.dp))
+private fun Title(title: String = "Generér billede") {
+    Text(title, color = KalivTheme.colors.textHigh, modifier = Modifier.padding(vertical = 16.dp))
 }
 
 @Composable

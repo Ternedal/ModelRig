@@ -55,7 +55,8 @@ class MediaJobContractTest {
         fun profiles(vararg items: JSONObject, schema: String = MediaJobContract.SCHEMA): String =
             JSONObject().put("schema", schema).put("profiles", JSONArray(items.toList())).toString()
 
-        val SDXL = MediaJobProfile("sdxl-a", listOf("text_to_image"), listOf(1024 to 1024, 832 to 1216), 40, 500)
+        val SDXL = MediaJobProfile("sdxl-a", MediaModality.IMAGE, listOf("text_to_image"), listOf(1024 to 1024, 832 to 1216), 40, 500)
+        val WAN = MediaJobProfile("wan-t2v", MediaModality.VIDEO, listOf("text_to_video"), listOf(832 to 480), 30, 1000)
     }
 
     private fun unavailable(block: () -> Unit) {
@@ -143,11 +144,13 @@ class MediaJobContractTest {
     }
 
     @Test
-    fun `only image profiles that do text to image are offered, malformed ones skipped`() {
+    fun `profiles that do their modality's text task are offered, malformed ones skipped`() {
         val list = MediaJobContract.parseProfiles(profiles(
             profile(),
-            profile(id = "wan-t2v", modality = "video", tasks = listOf("text_to_video")),
+            profile(id = "wan-t2v", modality = "video", tasks = listOf("text_to_video"), sizes = listOf(listOf(832, 480))),
             profile(id = "video-claims-image", modality = "video"),
+            profile(id = "i2v-only", modality = "video", tasks = listOf("image_to_video")),
+            profile(id = "audio", modality = "audio", tasks = listOf("text_to_image")),
             profile(id = "i2i-only", tasks = listOf("image_to_image")),
             profile(id = "Bad Id"),
             profile(id = "no-sizes", sizes = emptyList()),
@@ -156,8 +159,10 @@ class MediaJobContractTest {
             profile(id = "sdxl-b", maxSteps = 0),
             profile(),
         ))
-        assertEquals(listOf("sdxl-a"), list.map { it.profileId })
-        assertEquals(listOf(1024 to 1024, 832 to 1216), list.single().sizes)
+        assertEquals(listOf("sdxl-a", "wan-t2v"), list.map { it.profileId })
+        assertEquals(listOf(1024 to 1024, 832 to 1216), list[0].sizes)
+        assertEquals(MediaModality.IMAGE to "text_to_image", list[0].modality to list[0].task)
+        assertEquals(MediaModality.VIDEO to "text_to_video", list[1].modality to list[1].task)
     }
 
     @Test
@@ -206,6 +211,27 @@ class MediaJobContractTest {
         )
         for (request in bad) {
             assertThrows(IllegalArgumentException::class.java) { MediaJobContract.submitBody(request, SDXL) }
+        }
+    }
+
+    @Test
+    fun `a video submit sends text_to_video and never frames, and the tasks cannot be crossed`() {
+        val body = JSONObject(MediaJobContract.submitBody(
+            MediaJobRequest("wan-t2v", "a dog running", 832, 480, steps = null, seed = null, task = "text_to_video"), WAN))
+        assertEquals(setOf("profile_id", "prompt", "task", "width", "height"), body.keys().asSequence().toSet())
+        assertEquals("text_to_video", body.getString("task"))
+        assertFalse(body.has("frames"))
+        for ((request, profile) in listOf(
+            MediaJobRequest("wan-t2v", "x", 832, 480, null, null, task = "text_to_image") to WAN,
+            MediaJobRequest("wan-t2v", "x", 832, 480, null, null, task = "image_to_video") to WAN,
+            MediaJobRequest("sdxl-a", "x", 1024, 1024, null, null, task = "text_to_video") to SDXL,
+            // Profiles that also list an image-to-* task: that task is still never sent.
+            MediaJobRequest("both-i", "x", 1024, 1024, null, null, task = "image_to_image") to
+                SDXL.copy(profileId = "both-i", tasks = listOf("image_to_image", "text_to_image")),
+            MediaJobRequest("both-v", "x", 832, 480, null, null, task = "image_to_video") to
+                WAN.copy(profileId = "both-v", tasks = listOf("image_to_video", "text_to_video")),
+        )) {
+            assertThrows(IllegalArgumentException::class.java) { MediaJobContract.submitBody(request, profile) }
         }
     }
 

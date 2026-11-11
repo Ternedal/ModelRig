@@ -93,7 +93,7 @@ class MediaGenerateScreenTest {
     @Test
     fun `a rig with no image profile says so and offers nothing`() {
         show(FakeRig(profileList = { emptyList() }))
-        compose.onNodeWithText("Riggen har ingen billedprofil slået til").assertExists()
+        compose.onNodeWithText("Riggen har ingen billed- eller videoprofil slået til").assertExists()
         compose.onNodeWithTag("generate-submit").assertDoesNotExist()
     }
 
@@ -226,6 +226,24 @@ class MediaGenerateScreenTest {
         compose.waitUntil(5_000) { compose.onAllNodesWithTagExists("generate-open-gallery") }
         compose.onNodeWithText("Færdig").assertExists()
         assertEquals(1, rig.cancels)
+    }
+
+    @Test
+    fun `a video profile is chosen, submitted as text_to_video and completes to the gallery`() {
+        val rig = FakeRig(
+            profileList = { listOf(SDXL, dk.ternedal.modelrig.net.MediaJobContractTest.WAN) },
+            submitResult = { MediaJob(JOB_ID, MediaJobState.QUEUED, "wan-t2v", null, null, false) },
+            statuses = listOf(MediaJob(JOB_ID, MediaJobState.COMPLETED, "wan-t2v", "asset_v1", null, false)),
+        )
+        show(rig)
+        compose.onNodeWithText("Generér billede eller video").assertExists()
+        compose.onNodeWithText("Video · wan-t2v").performClick()
+        compose.onNodeWithText("832×480").assertExists()
+        compose.onNodeWithTag("generate-prompt").performScrollTo().performTextInput("a dog running")
+        compose.onNodeWithTag("generate-submit").performScrollTo().assertIsEnabled().performClick()
+        compose.waitUntil(5_000) { rig.submitted.isNotEmpty() && compose.onAllNodesWithTagExists("generate-open-gallery") }
+        val sent = rig.submitted.single()
+        assertEquals("text_to_video" to "wan-t2v", sent.task to sent.profileId)
     }
 
     @Test
