@@ -85,6 +85,12 @@ See **[docs/KALIV_SYSTEM_DEFINITION.md](docs/KALIV_SYSTEM_DEFINITION.md)** for
 the canonical whole-system definition, authority map, cognitive-continuity model,
 embodiment model and evidence-state vocabulary.
 
+The other Kaliv repositories (VoiceRig, BodyRig, VisionRig, LanguageRig,
+KalivNexus, KalivHub, SkyPlayer-Engine and the kaliv.dk site) and the contract
+each of them has with ModelRig are listed in
+**[docs/KALIV_ECOSYSTEM.md](docs/KALIV_ECOSYSTEM.md)**. The index of everything
+under `docs/` is **[docs/README.md](docs/README.md)**.
+
 Current version: see `VERSION`. For what actually exists right now — tools with their
 risk/sensitivity, the dormant switches and their defaults, design-doc status — see
 **CURRENT_STATE.md**, which is GENERATED from the code and CI-checked for drift.

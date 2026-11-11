@@ -14,6 +14,7 @@ GitHub Releases.
 ## System
 
 - [KALIV_SYSTEM_DEFINITION.md](KALIV_SYSTEM_DEFINITION.md) — systemdefinitionen: kanonisk produktdefinition og helsystem-arkitektur. *Levende reference.*
+- [KALIV_ECOSYSTEM.md](KALIV_ECOSYSTEM.md) — kort over Kaliv-repositories og kontrakterne mellem hvert af dem og ModelRig, med kildefil for hver kontrakt. *Levende reference.*
 - [consciousness-core/](consciousness-core/) — Consciousness Core: arkitektur og slice-dokumenter (eget indeks i mappen).
 - [devcontrol/](devcontrol/DEVCONTROL_ARCHITECTURE_DECISIONS.md) — DevControl: det komplette indeks over DevControl-beslutninger.
 
