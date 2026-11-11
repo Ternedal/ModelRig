@@ -62,6 +62,17 @@ func (c LocalMediaCatalog) entries() ([]localMediaEntry,error) {
   // than silently ignoring values that may become trusted in a later version.
   allowed:=map[string]bool{"id":true,"kind":true,"mime_type":true,"size_bytes":true,"created_at":true,"width":true,"height":true,"duration_seconds":true,"projection":true,"stereo":true,"thumbnail_id":true,"supports_range":true}
   for key:=range entry {if !allowed[key]{return nil,ErrMediaUnavailable}}
+  for _,key:=range []string{"id","kind","mime_type","created_at"} {if _,ok:=entry[key].(string);!ok{return nil,ErrMediaUnavailable}}
+  size,ok:=entry["size_bytes"].(float64);if !ok || size<1 || size>9007199254740991 || size!=float64(int64(size)){return nil,ErrMediaUnavailable}
+  for _,key:=range []string{"width","height"} {
+   if val,exists:=entry[key];exists {number,ok:=val.(float64);if !ok||number<1||number>2147483647||number!=float64(int64(number)){return nil,ErrMediaUnavailable}}
+  }
+  if val,exists:=entry["duration_seconds"];exists {number,ok:=val.(float64);if !ok||number<0||number>1e12{return nil,ErrMediaUnavailable}}
+  if val,exists:=entry["thumbnail_id"];exists {id,ok:=val.(string);if !ok||!validMediaID(id){return nil,ErrMediaUnavailable}}
+  if val,exists:=entry["supports_range"];exists {if _,ok:=val.(bool);!ok{return nil,ErrMediaUnavailable}}
+  if val,exists:=entry["projection"];exists {p,ok:=val.(string);if !ok||(p!="flat"&&p!="equirectangular_180"&&p!="equirectangular_360"){return nil,ErrMediaUnavailable}}
+  if val,exists:=entry["stereo"];exists {p,ok:=val.(string);if !ok||(p!="mono"&&p!="left_right"&&p!="top_bottom"){return nil,ErrMediaUnavailable}}
+  if _,exists:=entry["duration_seconds"];exists && entry["kind"]!="video"{return nil,ErrMediaUnavailable}
  }
  payload,err:=json.Marshal(raw);if err!=nil{return nil,ErrMediaUnavailable}
  if err:=json.Unmarshal(payload,&rows);err!=nil || len(rows)>10000{return nil,ErrMediaUnavailable}
