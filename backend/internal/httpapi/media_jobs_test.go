@@ -282,3 +282,23 @@ func TestMediaJobWorkerAuthFailuresDoNotMasqueradeAsDevicePairingFailures(t *tes
 		})
 	}
 }
+
+func TestMediaJobWorkerOutageDoesNotLeakLoopbackURL(t *testing.T) {
+	// A refused loopback connection makes the generic proxy include its target
+	// URL in the 502 body. The paired-device media boundary must redact it.
+	workerURL := "http://127.0.0.1:1"
+	h := mediaJobsHandler(t, workerURL, "1", mediaJobsTestSecret)
+	rec := doMediaJobs(h, http.MethodGet, "/api/v1/media/jobs/"+mediaJobsTestID, mediaJobsTestToken, "", nil)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("worker outage: status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), workerURL) || strings.Contains(rec.Body.String(), "/internal/media/jobs") {
+		t.Fatalf("worker internal URL leaked: %q", rec.Body.String())
+	}
+	if rec.Body.String() != "media jobs unavailable\\n" {
+		t.Fatalf("unexpected device error: %q", rec.Body.String())
+	}
+	if rec.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("outage response cache=%q", rec.Header().Get("Cache-Control"))
+	}
+}
