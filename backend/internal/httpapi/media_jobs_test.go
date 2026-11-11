@@ -302,3 +302,21 @@ func TestMediaJobWorkerOutageDoesNotLeakLoopbackURL(t *testing.T) {
 		t.Fatalf("outage response cache=%q", rec.Header().Get("Cache-Control"))
 	}
 }
+
+
+func TestMediaJobUpstreamBadGatewayBodyIsRedacted(t *testing.T) {
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = io.WriteString(w, "{\"detail\":\"http://127.0.0.1:8099/internal/media/jobs/secret\"}")
+	}))
+	defer worker.Close()
+	h := mediaJobsHandler(t, worker.URL, "1", mediaJobsTestSecret)
+	rec := doMediaJobs(h, http.MethodGet, "/api/v1/media/jobs/"+mediaJobsTestID, mediaJobsTestToken, "", nil)
+	if rec.Code != http.StatusBadGateway || rec.Body.String() != "media jobs unavailable\n" {
+		t.Fatalf("upstream 502 leaked or changed: status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "private, no-store" {
+		t.Fatalf("upstream 502 cache=%q", got)
+	}
+}
