@@ -75,14 +75,15 @@ func (s *server) forwardMediaJobs(w http.ResponseWriter, r *http.Request, upstre
 // mediaJobsResponseWriter keeps worker-internal authentication failures on the
 // internal trust boundary. A paired device's Bearer token was already checked
 // by authMW; an upstream 401/403 must not masquerade as a device pairing error.
-// Do not expose the upstream error body (which may contain internal details).
+// Do not expose upstream error bodies (which may contain internal details),
+// including proxy-generated 502 messages with the worker's loopback URL.
 type mediaJobsResponseWriter struct {
 	http.ResponseWriter
 	blocked bool
 }
 
 func (w *mediaJobsResponseWriter) WriteHeader(status int) {
-	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+	if status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusBadGateway {
 		w.blocked = true
 		for name := range w.Header() {
 			if strings.HasPrefix(http.CanonicalHeaderKey(name), "X-Bodyrig-") {
@@ -90,7 +91,11 @@ func (w *mediaJobsResponseWriter) WriteHeader(status int) {
 			}
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.ResponseWriter.WriteHeader(http.StatusServiceUnavailable)
+		if status == http.StatusBadGateway {
+			w.ResponseWriter.WriteHeader(http.StatusBadGateway)
+		} else {
+			w.ResponseWriter.WriteHeader(http.StatusServiceUnavailable)
+		}
 		_, _ = io.WriteString(w.ResponseWriter, "media jobs unavailable\n")
 		return
 	}
