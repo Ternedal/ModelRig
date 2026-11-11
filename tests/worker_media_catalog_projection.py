@@ -21,8 +21,8 @@ from app.media_catalog_projection import (
 class MediaCatalogProjectionTests(unittest.TestCase):
     def setUp(self):
         self.entries = [
-            {"asset_id": "mine", "mime": "image/png", "size": 4, "path": "NEVER_LEAK"},
-            {"asset_id": "other", "mime": "video/mp4", "size": 8},
+            {"id": "mine", "mime_type": "image/png", "size_bytes": 4, "created_at": "2026-11-11T00:00:00Z"},
+            {"id": "other", "mime_type": "video/mp4", "size_bytes": 8},
         ]
 
     def project(self, owned=frozenset({"mine"}), entries=None, **kwargs):
@@ -32,17 +32,17 @@ class MediaCatalogProjectionTests(unittest.TestCase):
         )
 
     def test_only_completed_owned_and_no_path(self):
-        self.assertEqual(self.project(), [{"asset_id": "mine", "mime": "image/png", "size": 4}])
+        self.assertEqual(self.project(), [{"id": "mine", "mime_type": "image/png", "size_bytes": 4, "created_at": "2026-11-11T00:00:00Z"}])
 
     def test_empty_ownership(self):
         self.assertEqual(self.project(owned=frozenset()), [])
 
     def test_rejects_invalid_metadata_even_for_other_owner(self):
         for entry in (
-            {"asset_id": "../escape", "mime": "image/png", "size": 1},
-            {"asset_id": "other", "mime": "text/html", "size": 1},
-            {"asset_id": "other", "mime": "video/mp4", "size": -1},
-            {"asset_id": "other", "mime": "video/mp4", "size": True},
+            {"id": "../escape", "mime_type": "image/png", "size_bytes": 1},
+            {"id": "other", "mime_type": "text/html", "size_bytes": 1},
+            {"id": "other", "mime_type": "video/mp4", "size_bytes": -1},
+            {"id": "other", "mime_type": "video/mp4", "size_bytes": True},
         ):
             with self.subTest(entry=entry), self.assertRaises(MediaCatalogProjectionError):
                 self.project(entries=[entry])
@@ -64,7 +64,7 @@ class MediaCatalogProjectionTests(unittest.TestCase):
 
     def test_limit_does_not_skip_later_invalid_entries(self):
         with self.assertRaises(MediaCatalogProjectionError):
-            self.project(entries=[self.entries[0], {"asset_id": "bad", "mime": "x", "size": 1}], limit=1)
+            self.project(entries=[self.entries[0], {"id": "bad", "mime_type": "x", "size_bytes": 1}], limit=1)
 
     def test_open_owned_descriptor_and_close(self):
         with tempfile.TemporaryDirectory() as directory:
