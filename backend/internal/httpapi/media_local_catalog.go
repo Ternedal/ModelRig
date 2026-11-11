@@ -8,6 +8,7 @@ import (
  "path/filepath"
  "runtime"
  "strings"
+ "time"
 )
 
 // LocalMediaCatalog reads the producer's published index on an explicitly
@@ -51,12 +52,15 @@ func (c LocalMediaCatalog) entries() ([]localMediaEntry,error) {
  info,err=f.Stat();if err!=nil || !info.Mode().IsRegular() || info.Size()>4*1024*1024{return nil,ErrMediaUnavailable}
  dec:=json.NewDecoder(io.LimitReader(f,4*1024*1024+1))
  var rows []localMediaEntry
- if err:=dec.Decode(&rows);err!=nil || len(rows)>10000{return nil,ErrMediaUnavailable}
- var extra any
- if !errors.Is(dec.Decode(&extra),io.EOF){return nil,ErrMediaUnavailable}
+ raw,err:=decodeUniqueJSON(dec)
+ if err!=nil{return nil,ErrMediaUnavailable}
+ if !errors.Is(dec.Decode(new(any)),io.EOF){return nil,ErrMediaUnavailable}
+ payload,err:=json.Marshal(raw);if err!=nil{return nil,ErrMediaUnavailable}
+ if err:=json.Unmarshal(payload,&rows);err!=nil || len(rows)>10000{return nil,ErrMediaUnavailable}
  seen:=map[string]bool{}
  for _,e:=range rows {
   if !validMediaID(e.ID)||seen[e.ID]||e.Size<=0||e.CreatedAt==""{return nil,ErrMediaUnavailable}
+  parsed,err:=time.Parse(time.RFC3339Nano,e.CreatedAt);if err!=nil || !strings.HasSuffix(e.CreatedAt,"Z") || parsed.Location()!=time.UTC{return nil,ErrMediaUnavailable}
   seen[e.ID]=true
   if (e.Kind=="video" && e.MIME!="video/mp4") || (e.Kind=="image" && e.MIME!="image/png" && e.MIME!="image/jpeg" && e.MIME!="image/webp") || (e.Kind!="image" && e.Kind!="video"){return nil,ErrMediaUnavailable}
  }
@@ -96,4 +100,32 @@ func (c LocalMediaCatalog) OpenMedia(owner,id string)(io.ReadSeekCloser,string,i
  opened,err:=f.Stat()
  if err!=nil||!opened.Mode().IsRegular()||opened.Size()!=entry.Size||!os.SameFile(info,opened){f.Close();return nil,"",0,ErrMediaUnavailable}
  return f,entry.MIME,entry.Size,nil
+}
+
+// decodeUniqueJSON rejects duplicate object keys at every depth. Encoding/json's
+// ordinary struct decoder silently accepts duplicates, unlike the Python writer.
+func decodeUniqueJSON(d *json.Decoder)(any,error){
+ token,err:=d.Token();if err!=nil{return nil,err}
+ delimiter,ok:=token.(json.Delim)
+ if !ok{return token,nil}
+ switch delimiter {
+ case '{':
+  obj:=make(map[string]any)
+  for d.More(){
+   keyToken,err:=d.Token();if err!=nil{return nil,err}
+   key,ok:=keyToken.(string);if !ok{return nil,ErrMediaUnavailable}
+   if _,exists:=obj[key];exists{return nil,ErrMediaUnavailable}
+   value,err:=decodeUniqueJSON(d);if err!=nil{return nil,err}
+   obj[key]=value
+  }
+  end,err:=d.Token();if err!=nil||end!=json.Delim('}'){return nil,ErrMediaUnavailable}
+  return obj,nil
+ case '[':
+  var items []any
+  for d.More(){item,err:=decodeUniqueJSON(d);if err!=nil{return nil,err};items=append(items,item);if len(items)>10000{return nil,ErrMediaUnavailable}}
+  end,err:=d.Token();if err!=nil||end!=json.Delim(']'){return nil,ErrMediaUnavailable}
+  return items,nil
+ default:
+  return nil,ErrMediaUnavailable
+ }
 }
