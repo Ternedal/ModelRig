@@ -49,7 +49,7 @@ func (c LocalMediaCatalog) entries() ([]localMediaEntry,error) {
  path:=filepath.Join(root,"gallery-index.json")
  info,err:=os.Lstat(path);if err!=nil || !info.Mode().IsRegular() || info.Size()>4*1024*1024{return nil,ErrMediaUnavailable}
  f,err:=os.Open(path);if err!=nil{return nil,ErrMediaUnavailable};defer f.Close()
- info,err=f.Stat();if err!=nil || !info.Mode().IsRegular() || info.Size()>4*1024*1024{return nil,ErrMediaUnavailable}
+ opened,err:=f.Stat();if err!=nil || !opened.Mode().IsRegular() || opened.Size()>4*1024*1024 || !os.SameFile(info,opened){return nil,ErrMediaUnavailable}
  dec:=json.NewDecoder(io.LimitReader(f,4*1024*1024+1))
  var rows []localMediaEntry
  raw,err:=decodeUniqueJSON(dec)
