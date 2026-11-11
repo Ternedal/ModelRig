@@ -4,13 +4,14 @@ Run: PYTHONPATH=worker python3 tests/worker_media_catalog_projection.py
 """
 import unittest
 import tempfile
-from pathlib import Path
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "worker"))
 
+from app.media_catalog_adapter import list_owned_gallery, open_owned_gallery_asset
 from app.media_catalog_projection import (
     MediaCatalogProjectionError,
     owned_completed_media,
@@ -146,6 +147,32 @@ class MediaCatalogProjectionTests(unittest.TestCase):
                     lambda: None, reject_descriptor,
                 )
             self.assertTrue(opened[0].closed)
+
+    def test_adapter_filters_actual_gallery_index(self):
+        class Store:
+            def completed_assets_for(self, owner):
+                self_owner = owner
+                assert self_owner == "installation"
+                return frozenset({"mine"})
+        with patch("app.media_catalog_adapter._root", return_value=Path("/verified/gallery")), \\
+             patch("app.media_catalog_adapter._index", return_value=self.entries):
+            result = list_owned_gallery("installation", Store(), "/verified/gallery", "/verified")
+        self.assertEqual([item["id"] for item in result], ["mine"])
+
+    def test_adapter_rejects_foreign_asset_without_opening(self):
+        class Store:
+            def owns_completed_asset(self, owner, asset):
+                return False
+        class Volume:
+            def verify(self):
+                return None
+        with patch("app.media_catalog_adapter.open_asset") as opener:
+            with self.assertRaises(MediaCatalogProjectionError):
+                open_owned_gallery_asset(
+                    "installation", "foreign", Store(), "/gallery", "/volume",
+                    Volume(), lambda handle, asset: None,
+                )
+            opener.assert_not_called()
 
 
 if __name__ == "__main__":
