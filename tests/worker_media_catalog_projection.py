@@ -1,7 +1,15 @@
-"""Contract tests for the owner-scoped media catalog projection."""
-import unittest
+"""Contract tests for the owner-scoped media catalog projection.
 
-from worker.app.media_catalog_projection import (
+Run: PYTHONPATH=worker python3 tests/worker_media_catalog_projection.py
+"""
+import unittest
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "worker"))
+
+from app.media_catalog_projection import (
     MediaCatalogProjectionError,
     owned_completed_media,
 )
