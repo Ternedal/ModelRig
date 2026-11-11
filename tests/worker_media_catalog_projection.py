@@ -156,7 +156,7 @@ class MediaCatalogProjectionTests(unittest.TestCase):
                 return frozenset({"mine"})
         with patch("app.media_catalog_adapter._root", return_value=Path("/verified/gallery")), \\
              patch("app.media_catalog_adapter._index", return_value=self.entries):
-            result = list_owned_gallery("installation", Store(), "/verified/gallery", "/verified")
+            result = list_owned_gallery("installation", Store(), "/verified/gallery", "/verified", Volume())
         self.assertEqual([item["id"] for item in result], ["mine"])
 
     def test_adapter_rejects_foreign_asset_without_opening(self):
