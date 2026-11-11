@@ -182,6 +182,20 @@ func TestMediaSeekFailureDoesNotPublishStaleRangeHeaders(t *testing.T){
  if !asset.closed {t.Fatal("failed asset was not closed")}
 }
 
+func TestMediaHeadSeekFailureFailsClosed(t *testing.T) {
+ asset:=&mediaSeekFailure{}
+ s:=&server{Deps:Deps{Media:&mediaSeekFailureCatalog{asset:asset}}}
+ r:=httptest.NewRequest(http.MethodHead,"/api/v1/media/asset_1",nil)
+ r.SetPathValue("id","asset_1")
+ r.Header.Set("Range","bytes=2-5")
+ w:=httptest.NewRecorder()
+ s.handleMediaAsset(w,r)
+ if w.Code!=http.StatusServiceUnavailable || w.Header().Get("Content-Length")!="" || w.Header().Get("Content-Range")!="" {
+  t.Fatalf("broken HEAD descriptor: status=%d length=%q range=%q",w.Code,w.Header().Get("Content-Length"),w.Header().Get("Content-Range"))
+ }
+ if !asset.closed { t.Fatal("failed HEAD asset was not closed") }
+}
+
 func TestMediaPrivateNoStoreWrapsEveryResponse(t *testing.T) {
     for _, status := range []int{http.StatusOK, http.StatusUnauthorized, http.StatusNotFound, http.StatusServiceUnavailable} {
         called := false
