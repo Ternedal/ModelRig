@@ -83,10 +83,10 @@ func (s *server) handleMediaAsset(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", mime)
     w.Header().Set("Accept-Ranges", "bytes")
     w.Header().Set("X-Content-Type-Options", "nosniff")
-    if r.Method != http.MethodHead {
-        if _, err := asset.Seek(start, io.SeekStart); err != nil {
-            http.Error(w, "media unavailable", http.StatusServiceUnavailable); return
-        }
+    // Verify seekability before committing response headers, including HEAD.
+    // A broken descriptor must never be advertised as a valid downloadable asset.
+    if _, err := asset.Seek(start, io.SeekStart); err != nil {
+        http.Error(w, "media unavailable", http.StatusServiceUnavailable); return
     }
     w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
     if partial { w.Header().Set("Content-Range", contentRange) }
