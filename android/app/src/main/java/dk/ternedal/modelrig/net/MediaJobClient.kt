@@ -18,7 +18,7 @@ interface MediaJobSource {
     fun profiles(): List<MediaJobProfile>
     fun submit(request: MediaJobRequest, profile: MediaJobProfile): MediaJob
     fun status(id: String): MediaJob
-    fun cancel(id: String): MediaJob?
+    fun cancel(id: String): MediaJobCancel
 }
 
 /**
@@ -79,7 +79,7 @@ class MediaJobClient(
 
     override fun status(id: String): MediaJob = MediaJobContract.parseJob(call(get(MediaJobContract.jobPath(id)), Route.JOB))
 
-    override fun cancel(id: String): MediaJob? {
+    override fun cancel(id: String): MediaJobCancel {
         val post = Request.Builder().url(url(MediaJobContract.cancelPath(id)))
             .post(ByteArray(0).toRequestBody(null))
             .build()
@@ -129,7 +129,9 @@ class MediaJobClient(
                 MediaJobException(Reason.UNAVAILABLE, "Billedgenerering er ikke tilgængelig på denne rig")
             }
             429 -> MediaJobException(Reason.BUSY, "Riggen har for mange job i kø", code)
-            503 -> MediaJobException(Reason.UNAVAILABLE, "Billedgenerering er ikke tilgængelig lige nu", code)
+            // Down or busy for a moment (the worker restarting, a work-area check blip):
+            // the caller decides whether that ends anything (6780346935 #2).
+            502, 503, 504 -> MediaJobException(Reason.TRANSIENT, "Riggen svarer ikke lige nu", code)
             else -> MediaJobException(Reason.HTTP, "Riggen svarede ${response.code}")
         }
     }

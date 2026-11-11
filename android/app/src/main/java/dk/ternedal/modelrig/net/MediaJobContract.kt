@@ -61,6 +61,19 @@ data class MediaJob(
     val cancelRequested: Boolean,
 )
 
+/**
+ * What cancel answered. [result] is the rig's code: `cancelled`, `expired`,
+ * `requested` (the executor stops at its next check) or `too_late` (the
+ * picture is already being saved; the job carries on to `completed`).
+ */
+data class MediaJobCancel(val result: String, val job: MediaJob?) {
+    val tooLate: Boolean get() = result == TOO_LATE
+
+    companion object {
+        const val TOO_LATE = "too_late"
+    }
+}
+
 data class MediaJobRequest(
     val profileId: String,
     val prompt: String,
@@ -78,6 +91,11 @@ class MediaJobException(val reason: Reason, message: String, val code: String? =
         UNAUTHORIZED,
         /** The route is absent (switch off), 503, or the answer was not understood. */
         UNAVAILABLE,
+        /**
+         * The rig answered 502, 503 or 504: down or busy for a moment. While a
+         * job is followed this is not the end of it (6780346935 #2).
+         */
+        TRANSIENT,
         INVALID_REQUEST,
         BUSY,
         NOT_FOUND,
@@ -152,17 +170,17 @@ object MediaJobContract {
 
     fun parseJob(json: String): MediaJob = jobFrom(parseObject(json))
 
-    /** `{"result": …, "job": Job|null}` from cancel; the job is what the screen shows. */
-    fun parseCancel(json: String): MediaJob? {
+    /** `{"result": …, "job": Job|null}` from cancel; the result decides what the screen says. */
+    fun parseCancel(json: String): MediaJobCancel {
         val root = parseObject(json)
         val result = root.opt("result") as? String ?: throw unavailable("result")
         if (!CODE.matches(result)) throw unavailable("result")
         val job = root.opt("job")
-        return when {
+        return MediaJobCancel(result, when {
             job == null || job == JSONObject.NULL -> null
             job is JSONObject -> jobFrom(job)
             else -> throw unavailable("job")
-        }
+        })
     }
 
     private fun jobFrom(obj: JSONObject): MediaJob {

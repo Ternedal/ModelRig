@@ -95,7 +95,7 @@ internal fun MediaGenerateContent(
     LaunchedEffect(followedId) {
         val id = followedId ?: return@LaunchedEffect
         while (true) {
-            delay(pollMillis)
+            delay(MediaGenerate.pollDelay(state, pollMillis))  // backs off while the rig is not answering
             val result = withContext(io) { runCatching { source.status(id) } }
             state = result.fold(
                 onSuccess = { MediaGenerate.polled(state, it) },
@@ -140,7 +140,7 @@ internal fun MediaGenerateContent(
             is MediaGeneratePhase.Unavailable -> Text(phase.message, color = KalivTheme.colors.danger,
                 modifier = Modifier.testTag("generate-unavailable"))
             else -> Form(state, onState = { state = it }, onSubmit = ::submit, onCancel = ::cancel,
-                onOpenGallery = onOpenGallery)
+                onOpenGallery = onOpenGallery, onResume = { state = MediaGenerate.resume(state) })
         }
     }
 }
@@ -152,6 +152,7 @@ private fun Form(
     onSubmit: () -> Unit,
     onCancel: () -> Unit,
     onOpenGallery: () -> Unit,
+    onResume: () -> Unit,
 ) {
     val editable = state.phase == MediaGeneratePhase.Ready || state.phase is MediaGeneratePhase.Finished
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -199,6 +200,11 @@ private fun Form(
                 if (phase.cancelling) "Annulleres …" else MediaGenerate.stateLabel(phase.job),
                 color = KalivTheme.colors.textHigh, modifier = Modifier.testTag("generate-status"),
             )
+            is MediaGeneratePhase.Stalled -> {
+                Text(MediaGenerate.stateLabel(phase.job), color = KalivTheme.colors.textMuted,
+                    modifier = Modifier.testTag("generate-status"))
+                Button(onClick = onResume, modifier = Modifier.testTag("generate-resume")) { Text("Prøv igen") }
+            }
             is MediaGeneratePhase.Finished -> {
                 Text(MediaGenerate.stateLabel(phase.job),
                     color = if (state.completedAssetId != null) KalivTheme.colors.textHigh else KalivTheme.colors.danger,

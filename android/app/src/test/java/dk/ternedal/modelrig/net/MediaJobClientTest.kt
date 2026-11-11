@@ -81,7 +81,7 @@ class MediaJobClientTest {
         server.enqueue(json(job(state = "running")))
         assertEquals(MediaJobState.RUNNING, client.status(JOB_ID).state)
         server.enqueue(json(JSONObject().put("result", "cancelled").put("job", JSONObject(job(state = "cancelled"))).toString()))
-        assertEquals(MediaJobState.CANCELLED, client.cancel(JOB_ID)!!.state)
+        assertEquals(MediaJobState.CANCELLED, client.cancel(JOB_ID).job!!.state)
         assertEquals("/api/v1/media/jobs/$JOB_ID", server.takeRequest(1, TimeUnit.SECONDS)!!.path)
         val cancel = server.takeRequest(1, TimeUnit.SECONDS)!!
         assertEquals("POST", cancel.method)
@@ -100,7 +100,9 @@ class MediaJobClientTest {
         val cases = listOf(
             Triple(404, "", Reason.UNAVAILABLE),
             Triple(404, """{"detail":"Not Found"}""", Reason.UNAVAILABLE),
-            Triple(503, """{"detail":"media_work_area_not_private"}""", Reason.UNAVAILABLE),
+            Triple(502, """{"error":"upstream unreachable"}""", Reason.TRANSIENT),
+            Triple(503, """{"detail":"media_work_area_not_private"}""", Reason.TRANSIENT),
+            Triple(504, "", Reason.TRANSIENT),
             Triple(401, "", Reason.UNAUTHORIZED),
             Triple(429, """{"detail":"active_limit"}""", Reason.BUSY),
             Triple(400, """{"detail":"profile_not_enabled"}""", Reason.INVALID_REQUEST),
