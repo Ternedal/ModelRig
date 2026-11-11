@@ -1,11 +1,19 @@
 # ModelRig tests
 
-Run the whole suite (Unix / WSL; needs Go + Python with worker deps):
+Run the smoke subset (Unix / WSL; needs Go + Python with worker deps):
 ```bash
 sh tests/run_tests.sh
 ```
 It builds the backend to a temp path, exports `MODELRIG_BIN`, frees ports, and
-runs everything below. **90 assertions** total.
+runs seven smoke files: the five below (counts are historical) plus
+`worker_voice_tts_empty_synthesis.py` and `worker_voice_tts_voicerig_provider.py`.
+
+CI runs every `tests/backend_*.py`, `tests/e2e.py`, `tests/worker_*.py` and
+`tests/workflow_*.py` (see `.github/workflows/_tests.yml`). Locally, run what CI
+runs with:
+```bash
+bash scripts/ci_local.sh
+```
 
 | File | What it covers | Count |
 |------|----------------|-------|

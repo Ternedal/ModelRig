@@ -359,8 +359,9 @@ never chained unapproved — even after an approved write, a subsequent write ge
 its own card. Off by default (`KALIV_TOOLS_ENABLED=1`).
 See `KRAVSPEC_V5_TOOLS.md`.
 
-**The Go server is a proxy and nothing more.** Gate, whitelist and audit live in
-the worker, so an old or tampered client cannot find a friendlier backend.
+**The Go server holds no tool gate.** It owns pairing, tokens, rate limiting, a few
+fail-soft system endpoints and closed route allowlists, and proxies the rest;
+gate, whitelist and audit live in the worker, so an old or tampered client cannot find a friendlier backend.
 
 Cloud fallback (desktop): if local is down/insufficient →
 Ollama Cloud (https://ollama.com, model `:cloud`) with `OLLAMA_API_KEY`.
@@ -390,7 +391,7 @@ Ollama Cloud (https://ollama.com, model `:cloud`) with `OLLAMA_API_KEY`.
   RAG, device mgmt, `doctor` health check, token `rotate`). Runnable today; used
   to drive the e2e test.
 - **tests/** — worker unit + RAG tests, backend smoke + V1 tests, and an
-  end-to-end integration test. `sh tests/run_tests.sh` runs the full suite (see CI for the current counts).
+  end-to-end integration test. `sh tests/run_tests.sh` runs a 7-file smoke subset; `bash scripts/ci_local.sh` runs what CI runs (and says what it skips).
 - **deploy/** — env reference, a Windows launcher (`run-windows.ps1`), and systemd
   units for running the worker + backend as services.
 - **scripts/** — the tooling CI depends on. Generators that own a document
@@ -446,7 +447,7 @@ pause, renewal or deletion after a claim cancels the in-flight occurrence
 (revision guard re-checked right before execution). Every consumed write
 approval persists a receipt (device, issue time, consumption time, grant
 revision) in the same transaction as the grant — `GET /schedules/{id}` shows
-the full history. `ACTIVATION_READINESS.md` runs seven live durability probes
+the full history. `ACTIVATION_READINESS.md` runs the live durability probes
 against the real components on every regeneration.
 
 ## ⚠️ The one gotcha that wastes an afternoon
@@ -487,8 +488,8 @@ cd ../backend && go build -o modelrig-server ./cmd/modelrig-server
 MODELRIG_HOST=0.0.0.0 ./modelrig-server
 
 # 3. Pair a device
-./modelrig-server -pair            # (server stopped) OR:
-curl -X POST http://localhost:8080/api/v1/pair/start   # (server running)
+./modelrig-server -pair            # on the rig, while the server is running — OR:
+curl -X POST http://localhost:8080/api/v1/pair/start   # loopback caller, or X-Admin-Key
 
 # 4a. Desktop
 cd ../desktop && ./gradlew run   # use the wrapper; a system gradle may be a different version
@@ -504,7 +505,8 @@ python tools/modelrig-cli.py chat "hello"
 
 Run the tests (Unix/WSL, needs Go + Python worker deps):
 ```bash
-sh tests/run_tests.sh
+sh tests/run_tests.sh       # smoke subset (7 files)
+bash scripts/ci_local.sh    # what CI runs, with its skips stated
 ```
 
 ## Build status at a glance
@@ -516,9 +518,9 @@ sh tests/run_tests.sh
 | android  | Kaliv APK (minSdk 26)                         | ✅ built in CI, `kaliv-latest.apk` on every release |
 | vr       | Kaliv VR Unity/OpenXR client                   | 🚧 landed on `main`; Quest build/device qualification pending |
 | desktop  | Kaliv Windows JAR (Compose JVM)               | ✅ built in CI, `Kaliv-windows-x64-X.Y.Z.jar` |
-| exes     | server + worker Windows executables           | ✅ built in CI, attached to every release |
+| exes     | server, supervisor, updater + worker Windows executables | ✅ built in CI, attached to every release |
 
-Every release ships its full asset set (both APKs, the desktop JAR, the three
+Every release ships its full asset set (both APKs, the desktop JAR, the four
 Windows exes, the zip and `SHA256SUMS.txt`) from a green CI run: the release is
 created as a DRAFT, assets are verified against the expected list, and only
 then is it published — so a half-uploaded release is never visible. Regression
@@ -527,12 +529,14 @@ anchoring, keep_alive-to-cloud, retry losing a turn's route, streams ending
 without a terminal event). The **honest rule** stands: compiled ≠ shipped, and
 CI-green ≠ works-on-device — the last mile is always on-device testing.
 
-See **STATUS.md** for the per-release history (a log, not a status page — for
-current state read CURRENT_STATE.md; the old "line 3 is always current"
-convention required a human to remember and spent 55 releases wrong
-one-liner) and **ROADMAP.md** for where this is going (closed-ended at V15).
+Per-release history is GitHub Releases (tags and assets; notes on some
+releases) and the merged PRs. **STATUS.md** is the early log up to 1.58.0 (a
+log, not a status page — for current state read CURRENT_STATE.md; the old
+"line 3 is always current" convention required a human to remember and spent 55
+releases wrong one-liner). **ROADMAP.md** holds direction and decisions (the
+original V1–V15 roadmap is archived in HISTORY.md).
 
-**Building and testing the clients locally?** See **CLIENT_BUILD_AND_TEST.md**.
+**Building and testing the clients locally?** Use the Run order above, `desktop/README.md`, `android/README.md` and `DEV_APPLIANCE.md` (`INSTALL_DEV_APK.cmd`); `CLIENT_BUILD_AND_TEST.md` is a historical document.
 
 ## License
 MIT — see LICENSE.
