@@ -1,0 +1,17 @@
+{
+  "schema": "kaliv-media-job-route-source-transition/v1",
+  "repository": "Ternedal/ModelRig",
+  "scope": "media-job-route-registration-only",
+  "implementation_choice": {
+    "feature_flag": "KALIV_MEDIA_JOBS",
+    "default_off": true,
+    "bearer_authenticated": true,
+    "loopback_worker_required": true,
+    "production_activation": false
+  },
+  "tracked_source_transition": {
+    "path": "backend/internal/httpapi/server.go",
+    "from_git_blob_sha": "f9b646350c70900ec256387b7a7e544d2de3eb0b",
+    "to_git_blob_sha": "150ae8bec0a45fc8f40a353e889a109e1482eb36"
+  }
+}
