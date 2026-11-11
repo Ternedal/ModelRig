@@ -48,7 +48,7 @@ sealed interface MediaGeneratePhase {
      * The rig stopped answering while a job was followed. The job ID is kept: the job
      * may still finish on the rig, and [MediaGenerate.resume] follows it again.
      */
-    data class Stalled(val job: MediaJob) : MediaGeneratePhase
+    data class Stalled(val job: MediaJob, val tooLate: Boolean = false) : MediaGeneratePhase
 
     data class Finished(val job: MediaJob) : MediaGeneratePhase
 }
@@ -184,7 +184,8 @@ object MediaGenerate {
             Reason.NETWORK, Reason.TRANSIENT -> {
                 val failures = following.failures + 1
                 if (failures >= MAX_POLL_FAILURES) {
-                    state.copy(phase = MediaGeneratePhase.Stalled(following.job),
+                    // tooLate travels with the job, so the reason survives a stall (6788066129).
+                    state.copy(phase = MediaGeneratePhase.Stalled(following.job, tooLate = following.tooLate),
                         error = "Riggen svarer ikke; jobbet kan stadig blive færdigt. Tryk Prøv igen")
                 } else {
                     state.copy(phase = following.copy(failures = failures), error = message(e))
@@ -199,7 +200,8 @@ object MediaGenerate {
     /** Follow a stalled job again, from a fresh backoff. */
     fun resume(state: MediaGenerateState): MediaGenerateState {
         val stalled = state.phase as? MediaGeneratePhase.Stalled ?: return state
-        return state.copy(phase = MediaGeneratePhase.Following(stalled.job), error = null)
+        return state.copy(phase = MediaGeneratePhase.Following(stalled.job, tooLate = stalled.tooLate),
+            error = if (stalled.tooLate) TOO_LATE_TEXT else null)
     }
 
     fun cancelling(state: MediaGenerateState): MediaGenerateState {
