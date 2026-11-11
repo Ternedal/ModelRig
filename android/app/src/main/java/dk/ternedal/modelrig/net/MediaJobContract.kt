@@ -23,9 +23,23 @@ import java.nio.charset.StandardCharsets
  * job's picture is opened from its `asset_id` through the gallery contract;
  * the server's `asset_url` is only compared, never followed.
  *
- * Image only. A video profile is not offered by this screen, even when the rig
- * lists one (video is default-off on the rig and not part of A1).
+ * Image and video (#2275 C2): a profile is offered for the one text task its
+ * modality serves, `text_to_image` or `text_to_video`. Image-to-anything is not
+ * offered; the rig does not serve image-to-video yet, and a profile left with no
+ * text task is skipped. The rig lists video profiles only when video is enabled
+ * there (`KALIV_MEDIA_VIDEO=1`). `frames` is never sent: the rig uses the
+ * profile's own maximum.
  */
+enum class MediaModality(val wire: String, val textTask: String) {
+    IMAGE("image", "text_to_image"),
+    VIDEO("video", "text_to_video"),
+    ;
+
+    companion object {
+        fun fromWire(value: Any?): MediaModality? = entries.firstOrNull { it.wire == value }
+    }
+}
+
 enum class MediaJobState(val wire: String, val terminal: Boolean) {
     QUEUED("queued", false),
     RUNNING("running", false),
@@ -43,12 +57,16 @@ enum class MediaJobState(val wire: String, val terminal: Boolean) {
 
 data class MediaJobProfile(
     val profileId: String,
+    val modality: MediaModality,
     val tasks: List<String>,
     /** The sizes the rig accepts, in the rig's order; the first is the default. */
     val sizes: List<Pair<Int, Int>>,
     val maxSteps: Int,
     val maxPromptChars: Int,
-)
+) {
+    /** The one task this screen asks this profile for. */
+    val task: String get() = modality.textTask
+}
 
 data class MediaJob(
     val id: String,
@@ -111,6 +129,7 @@ object MediaJobContract {
     const val PROFILES_PATH = "/api/v1/media/jobs/profiles"
     const val JOBS_PATH = "/api/v1/media/jobs"
     const val IMAGE_TASK = "text_to_image"
+    const val VIDEO_TASK = "text_to_video"
     const val MAX_SEED: Long = 4_294_967_295L
 
     private val JOB_ID = Regex("^[0-9a-f]{32}$")
@@ -150,9 +169,10 @@ object MediaJobContract {
 
     private fun profileOrNull(item: JSONObject): MediaJobProfile? {
         val id = item.opt("profile_id") as? String ?: return null
-        if (!PROFILE_ID.matches(id) || item.opt("modality") != "image") return null
+        if (!PROFILE_ID.matches(id)) return null
+        val modality = MediaModality.fromWire(item.opt("modality")) ?: return null
         val tasks = stringList(item.opt("tasks")) ?: return null
-        if (IMAGE_TASK !in tasks || tasks.any { !TASK.matches(it) }) return null
+        if (modality.textTask !in tasks || tasks.any { !TASK.matches(it) }) return null
         val rawSizes = item.opt("sizes") as? JSONArray ?: return null
         val sizes = ArrayList<Pair<Int, Int>>()
         for (i in 0 until rawSizes.length()) {
@@ -165,7 +185,7 @@ object MediaJobContract {
         if (sizes.isEmpty()) return null
         val maxSteps = strictInt(item.opt("max_steps"), 1, 200) ?: return null
         val maxPrompt = strictInt(item.opt("max_prompt_chars"), 1, 4000) ?: return null
-        return MediaJobProfile(id, tasks, sizes.distinct(), maxSteps, maxPrompt)
+        return MediaJobProfile(id, modality, tasks, sizes.distinct(), maxSteps, maxPrompt)
     }
 
     fun parseJob(json: String): MediaJob = jobFrom(parseObject(json))
@@ -208,7 +228,8 @@ object MediaJobContract {
     /** The submit body: exactly the keys the worker's strict schema accepts, nothing else. */
     fun submitBody(request: MediaJobRequest, profile: MediaJobProfile): String {
         require(request.profileId == profile.profileId) { "profile" }
-        require(request.task == IMAGE_TASK && request.task in profile.tasks) { "task" }
+        // Exactly the profile's text task: never image-to-*, never the other modality's task.
+        require(request.task == profile.task && request.task in profile.tasks) { "task" }
         val prompt = request.prompt.trim()
         require(prompt.isNotEmpty() && prompt.length <= profile.maxPromptChars) { "prompt" }
         require((request.width to request.height) in profile.sizes) { "size" }

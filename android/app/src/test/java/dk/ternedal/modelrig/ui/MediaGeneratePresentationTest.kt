@@ -8,6 +8,8 @@ import dk.ternedal.modelrig.net.MediaJobException
 import dk.ternedal.modelrig.net.MediaJobException.Reason
 import dk.ternedal.modelrig.net.MediaJobProfile
 import dk.ternedal.modelrig.net.MediaJobState
+import dk.ternedal.modelrig.net.MediaModality
+import dk.ternedal.modelrig.net.MediaJobContractTest.Companion.WAN
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -16,7 +18,7 @@ import org.junit.Test
 
 /** The generate screen's state machine, without Android. */
 class MediaGeneratePresentationTest {
-    private val other = MediaJobProfile("flux-b", listOf("text_to_image"), listOf(768 to 768), 30, 200)
+    private val other = MediaJobProfile("flux-b", MediaModality.IMAGE, listOf("text_to_image"), listOf(768 to 768), 30, 200)
 
     private fun job(state: MediaJobState, assetId: String? = null, cancelRequested: Boolean = false, error: String? = null,
                     id: String = JOB_ID) = MediaJob(id, state, "sdxl-a", assetId, error, cancelRequested)
@@ -215,6 +217,35 @@ class MediaGeneratePresentationTest {
         repeat(MediaGenerate.MAX_POLL_FAILURES) { plain = MediaGenerate.pollFailed(plain, MediaJobException(Reason.TRANSIENT, "x")) }
         assertFalse((plain.phase as MediaGeneratePhase.Stalled).tooLate)
         assertNull(MediaGenerate.polled(MediaGenerate.resume(plain), job(MediaJobState.RUNNING)).error)
+    }
+
+    @Test
+    fun `a video profile submits text_to_video through the same lifecycle`() {
+        var state = MediaGenerate.profilesLoaded(MediaGenerateState(), listOf(SDXL, WAN))
+        assertEquals("Generér billede eller video", MediaGenerate.title(state))
+        state = MediaGenerate.editPrompt(MediaGenerate.selectProfile(state, "wan-t2v"), "a dog running")
+        assertEquals(832 to 480, state.size)
+        val request = MediaGenerate.request(state)!!
+        assertEquals("text_to_video" to "wan-t2v", request.task to request.profileId)
+        val videoJob = MediaJob(JOB_ID, MediaJobState.PUBLISHING, "wan-t2v", null, null, false)
+        state = MediaGenerate.submitted(MediaGenerate.submitting(state), MediaJob(JOB_ID, MediaJobState.QUEUED, "wan-t2v", null, null, false))
+        state = MediaGenerate.polled(state, videoJob)
+        assertEquals("Gemmer videoen …", MediaGenerate.stateLabel(videoJob, MediaGenerate.modalityOf(state, videoJob)))
+        // Transient failures keep a video job the same way (job-ID continuity).
+        state = MediaGenerate.pollFailed(state, MediaJobException(Reason.TRANSIENT, "x"))
+        assertEquals(JOB_ID, (state.phase as MediaGeneratePhase.Following).job.id)
+        state = MediaGenerate.polled(state, MediaJob(JOB_ID, MediaJobState.COMPLETED, "wan-t2v", "asset_v1", null, false))
+        assertEquals("asset_v1", state.completedAssetId)
+    }
+
+    @Test
+    fun `with video off on the rig the screen is image only`() {
+        val state = MediaGenerate.profilesLoaded(MediaGenerateState(), listOf(SDXL))
+        assertEquals("Generér billede", MediaGenerate.title(state))
+        assertEquals("text_to_image", MediaGenerate.request(MediaGenerate.editPrompt(state, "x"))!!.task)
+        val onlyVideo = MediaGenerate.editPrompt(MediaGenerate.profilesLoaded(MediaGenerateState(), listOf(WAN)), "x")
+        assertEquals("text_to_video", MediaGenerate.request(onlyVideo)!!.task)
+        assertEquals("Gemmer billedet …", MediaGenerate.stateLabel(MediaJob(JOB_ID, MediaJobState.PUBLISHING, "unknown", null, null, false)))
     }
 
     @Test

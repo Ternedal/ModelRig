@@ -8,6 +8,7 @@ import dk.ternedal.modelrig.net.MediaJobException.Reason
 import dk.ternedal.modelrig.net.MediaJobProfile
 import dk.ternedal.modelrig.net.MediaJobRequest
 import dk.ternedal.modelrig.net.MediaJobState
+import dk.ternedal.modelrig.net.MediaModality
 
 /**
  * The generate screen as pure data (#2275 A1). No Android types, so every
@@ -94,7 +95,7 @@ object MediaGenerate {
     /** The longest wait between two polls while the rig is not answering. */
     const val MAX_POLL_BACKOFF_MILLIS = 30_000L
 
-    const val TOO_LATE_TEXT = "For sent at annullere: billedet er allerede ved at blive gemt"
+    const val TOO_LATE_TEXT = "For sent at annullere: resultatet er allerede ved at blive gemt"
 
     /**
      * The wait before the next poll: [base] while all is well, then doubled per failure
@@ -109,7 +110,7 @@ object MediaGenerate {
 
     fun profilesLoaded(state: MediaGenerateState, profiles: List<MediaJobProfile>): MediaGenerateState {
         if (profiles.isEmpty()) {
-            return state.copy(phase = MediaGeneratePhase.Unavailable("Riggen har ingen billedprofil slået til"),
+            return state.copy(phase = MediaGeneratePhase.Unavailable("Riggen har ingen billed- eller videoprofil slået til"),
                 profiles = emptyList(), profileId = null, size = null)
         }
         val keep = profiles.firstOrNull { it.profileId == state.profileId } ?: profiles.first()
@@ -140,7 +141,7 @@ object MediaGenerate {
         val p = state.profile ?: return null
         val (w, h) = state.size ?: return null
         return MediaJobRequest(profileId = p.profileId, prompt = state.prompt.trim(), width = w, height = h,
-            steps = null, seed = null, task = MediaJobContract.IMAGE_TASK)
+            steps = null, seed = null, task = p.task)
     }
 
     fun submitting(state: MediaGenerateState) = state.copy(phase = MediaGeneratePhase.Submitting, error = null)
@@ -241,10 +242,23 @@ object MediaGenerate {
     private fun phaseFor(job: MediaJob): MediaGeneratePhase =
         if (job.state.terminal) MediaGeneratePhase.Finished(job) else MediaGeneratePhase.Following(job)
 
-    fun stateLabel(job: MediaJob): String = when (job.state) {
+    /** The modality of the profile a job was made with, when the screen knows it. */
+    fun modalityOf(state: MediaGenerateState, job: MediaJob): MediaModality =
+        state.profiles.firstOrNull { it.profileId == job.profileId }?.modality ?: MediaModality.IMAGE
+
+    /** "Billede" or "Video", for the profile chips and the title. */
+    fun modalityName(modality: MediaModality): String = when (modality) {
+        MediaModality.IMAGE -> "Billede"
+        MediaModality.VIDEO -> "Video"
+    }
+
+    fun title(state: MediaGenerateState): String =
+        if (state.profiles.any { it.modality == MediaModality.VIDEO }) "Generér billede eller video" else "Generér billede"
+
+    fun stateLabel(job: MediaJob, modality: MediaModality = MediaModality.IMAGE): String = when (job.state) {
         MediaJobState.QUEUED -> if (job.cancelRequested) "Annulleres …" else "I kø på riggen"
         MediaJobState.RUNNING -> if (job.cancelRequested) "Annulleres …" else "Genererer …"
-        MediaJobState.PUBLISHING -> "Gemmer billedet …"
+        MediaJobState.PUBLISHING -> if (modality == MediaModality.VIDEO) "Gemmer videoen …" else "Gemmer billedet …"
         MediaJobState.COMPLETED -> "Færdig"
         MediaJobState.FAILED -> errorText(job.errorCode)
         MediaJobState.CANCELLED -> "Annulleret"
