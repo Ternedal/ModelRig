@@ -199,3 +199,28 @@ func TestMediaPrivateNoStoreWrapsEveryResponse(t *testing.T) {
         }
     }
 }
+
+type mediaOpenErrorCatalog struct{ asset *mediaSeekFailure; err error }
+func (m *mediaOpenErrorCatalog) ListMedia(string,int,string)([]map[string]any,*string,error){ return nil,nil,nil }
+func (m *mediaOpenErrorCatalog) OpenMedia(string,string)(io.ReadSeekCloser,string,int64,error){
+ return m.asset,"video/mp4",10,m.err
+}
+func TestMediaCatalogOpenErrorClosesPartialDescriptor(t *testing.T) {
+ for _,tc:=range []struct{err error; want int}{
+  {ErrMediaNotFound,http.StatusNotFound},
+  {ErrMediaUnavailable,http.StatusServiceUnavailable},
+ } {
+  asset:=&mediaSeekFailure{}
+  s:=&server{Deps:Deps{Media:&mediaOpenErrorCatalog{asset:asset,err:tc.err}}}
+  r:=httptest.NewRequest(http.MethodGet,"/api/v1/media/asset_1",nil)
+  r.SetPathValue("id","asset_1")
+  w:=httptest.NewRecorder()
+  s.handleMediaAsset(w,r)
+  if w.Code!=tc.want || !asset.closed {
+   t.Fatalf("error=%v: status=%d closed=%v",tc.err,w.Code,asset.closed)
+  }
+  if w.Header().Get("Cache-Control")!="private, no-store" {
+   t.Fatal("error response must not be cached")
+  }
+ }
+}
