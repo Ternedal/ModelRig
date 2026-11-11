@@ -22,6 +22,13 @@ type localMediaEntry struct {
  MIME string `json:"mime_type"`
  Size int64 `json:"size_bytes"`
  CreatedAt string `json:"created_at"`
+ Width *int64 `json:"width"`
+ Height *int64 `json:"height"`
+ Duration *float64 `json:"duration_seconds"`
+ Projection string `json:"projection"`
+ Stereo string `json:"stereo"`
+ ThumbnailID *string `json:"thumbnail_id"`
+ SupportsRange *bool `json:"supports_range"`
 }
 
 func (c LocalMediaCatalog) root() (string,error) {
@@ -98,7 +105,12 @@ func (c LocalMediaCatalog) ListMedia(owner string,limit int,cursor string)([]map
  end:=start+limit;if end>len(rows){end=len(rows)}
  out:=make([]map[string]any,0,end-start)
  for _,e:=range rows[start:end] {
-  out=append(out,map[string]any{"id":e.ID,"kind":e.Kind,"mime_type":e.MIME,"size_bytes":e.Size,"created_at":e.CreatedAt,"url":"/api/v1/media/"+e.ID,"playback":map[string]any{"supports_range":e.Kind=="video"}})
+  projection:=e.Projection;if projection==""{projection="flat"}
+  stereo:=e.Stereo;if stereo==""{stereo="mono"}
+  supportsRange:=e.Kind=="video";if e.SupportsRange!=nil{supportsRange=*e.SupportsRange}
+  var thumbnailURL any
+  if e.ThumbnailID!=nil{thumbnailURL="/api/v1/media/"+*e.ThumbnailID}
+  out=append(out,map[string]any{"id":e.ID,"kind":e.Kind,"mime_type":e.MIME,"size_bytes":e.Size,"created_at":e.CreatedAt,"url":"/api/v1/media/"+e.ID,"width":e.Width,"height":e.Height,"duration_seconds":e.Duration,"projection":projection,"stereo":stereo,"thumbnail_id":e.ThumbnailID,"thumbnail_url":thumbnailURL,"playback":map[string]any{"supports_range":supportsRange}})
  }
  var next *string
  if end<len(rows)&&end>start {id:=rows[end-1].ID;next=&id}
