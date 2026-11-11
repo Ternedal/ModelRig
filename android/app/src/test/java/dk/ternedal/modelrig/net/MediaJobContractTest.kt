@@ -126,8 +126,18 @@ class MediaJobContractTest {
     @Test
     fun `cancel returns its job or none`() {
         val body = JSONObject().put("result", "cancelled").put("job", JSONObject(job(state = "cancelled"))).toString()
-        assertEquals(MediaJobState.CANCELLED, MediaJobContract.parseCancel(body)!!.state)
-        assertNull(MediaJobContract.parseCancel(JSONObject().put("result", "cancel_requested").put("job", JSONObject.NULL).toString()))
+        val answer = MediaJobContract.parseCancel(body)
+        assertEquals("cancelled", answer.result)
+        assertEquals(MediaJobState.CANCELLED, answer.job!!.state)
+        assertNull(MediaJobContract.parseCancel(JSONObject().put("result", "requested").put("job", JSONObject.NULL).toString()).job)
+        // too_late: the backend keeps the job publishing (probe in 6780346935 #1); the result says so.
+        val late = MediaJobContract.parseCancel(JSONObject().put("result", "too_late")
+            .put("job", JSONObject(job(state = "publishing"))).toString())
+        assertTrue(late.tooLate)
+        assertEquals(MediaJobState.PUBLISHING, late.job!!.state)
+        for (result in listOf("cancelled", "expired", "requested", "too_late")) {
+            assertEquals(result, MediaJobContract.parseCancel(JSONObject().put("result", result).put("job", JSONObject.NULL).toString()).result)
+        }
         unavailable { MediaJobContract.parseCancel(JSONObject().put("job", JSONObject(job())).toString()) }
         unavailable { MediaJobContract.parseCancel(JSONObject().put("result", "ok").put("job", "x").toString()) }
     }

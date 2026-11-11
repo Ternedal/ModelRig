@@ -1,6 +1,7 @@
 package dk.ternedal.modelrig.ui
 
 import dk.ternedal.modelrig.net.MediaJob
+import dk.ternedal.modelrig.net.MediaJobCancel
 import dk.ternedal.modelrig.net.MediaJobContract
 import dk.ternedal.modelrig.net.MediaJobException
 import dk.ternedal.modelrig.net.MediaJobException.Reason
@@ -15,6 +16,7 @@ import dk.ternedal.modelrig.net.MediaJobState
  * ```
  * Loading → Ready → Submitting → Following(queued | running | publishing) → Finished
  *    ↘ Unavailable         ↘ Ready + error       ↘ cancelling …           (completed | failed | cancelled | expired)
+ *                                                ↘ Stalled (rig unreachable after bounded retries; same job, "Prøv igen")
  * ```
  *
  * The prompt lives only in this state, in memory. It is never written to
@@ -30,7 +32,23 @@ sealed interface MediaGeneratePhase {
 
     data object Submitting : MediaGeneratePhase
 
-    data class Following(val job: MediaJob, val cancelling: Boolean = false) : MediaGeneratePhase
+    /**
+     * A job the screen asks the rig about. [failures] counts transient poll failures in a
+     * row (network, 502/503/504) and drives the backoff; [tooLate] is set when cancel came
+     * after the picture was already being saved.
+     */
+    data class Following(
+        val job: MediaJob,
+        val cancelling: Boolean = false,
+        val failures: Int = 0,
+        val tooLate: Boolean = false,
+    ) : MediaGeneratePhase
+
+    /**
+     * The rig stopped answering while a job was followed. The job ID is kept: the job
+     * may still finish on the rig, and [MediaGenerate.resume] follows it again.
+     */
+    data class Stalled(val job: MediaJob) : MediaGeneratePhase
 
     data class Finished(val job: MediaJob) : MediaGeneratePhase
 }
@@ -55,7 +73,9 @@ data class MediaGenerateState(
         }
 
     val canCancel: Boolean
-        get() = (phase as? MediaGeneratePhase.Following)?.let { !it.cancelling && !it.job.cancelRequested } == true
+        get() = (phase as? MediaGeneratePhase.Following)?.let {
+            !it.cancelling && !it.job.cancelRequested && !it.tooLate && it.job.state != MediaJobState.PUBLISHING
+        } == true
 
     /** Only a verified completed job gives a gallery ID; nothing else opens a picture. */
     val completedAssetId: String?
@@ -68,6 +88,25 @@ data class MediaGenerateState(
 object MediaGenerate {
     const val POLL_MILLIS = 2_000L
 
+    /** Transient poll failures in a row before the screen stops asking and offers "Prøv igen". */
+    const val MAX_POLL_FAILURES = 6
+
+    /** The longest wait between two polls while the rig is not answering. */
+    const val MAX_POLL_BACKOFF_MILLIS = 30_000L
+
+    const val TOO_LATE_TEXT = "For sent at annullere: billedet er allerede ved at blive gemt"
+
+    /**
+     * The wait before the next poll: [base] while all is well, then doubled per failure
+     * in a row, capped at [MAX_POLL_BACKOFF_MILLIS] (2, 4, 8, 16, 30, 30 s).
+     */
+    fun pollDelay(state: MediaGenerateState, base: Long = POLL_MILLIS): Long {
+        val failures = (state.phase as? MediaGeneratePhase.Following)?.failures ?: 0
+        if (failures <= 0) return base
+        val factor = 1L shl failures.coerceAtMost(16)
+        return (base * factor).coerceAtMost(MAX_POLL_BACKOFF_MILLIS.coerceAtLeast(base))
+    }
+
     fun profilesLoaded(state: MediaGenerateState, profiles: List<MediaJobProfile>): MediaGenerateState {
         if (profiles.isEmpty()) {
             return state.copy(phase = MediaGeneratePhase.Unavailable("Riggen har ingen billedprofil slået til"),
@@ -79,7 +118,8 @@ object MediaGenerate {
     }
 
     fun profilesFailed(state: MediaGenerateState, e: MediaJobException): MediaGenerateState =
-        state.copy(phase = MediaGeneratePhase.Unavailable(message(e)))
+        state.copy(phase = MediaGeneratePhase.Unavailable(
+            if (e.reason == Reason.TRANSIENT) "Billedgenerering er ikke tilgængelig lige nu" else message(e)))
 
     fun selectProfile(state: MediaGenerateState, id: String): MediaGenerateState {
         val p = state.profiles.firstOrNull { it.profileId == id } ?: return state
@@ -120,24 +160,46 @@ object MediaGenerate {
         if (job.id != current.id) return state.copy(phase = MediaGeneratePhase.Unavailable("Uventet svar fra riggen"))
         val following = state.phase as MediaGeneratePhase.Following
         val next = phaseFor(job)
+        // A good answer ends a run of failures and its message. "Too late" stays on screen
+        // through to the finished job, so the user sees why the picture arrived anyway.
+        val note = if (following.tooLate) TOO_LATE_TEXT else null
         return if (next is MediaGeneratePhase.Following) {
-            state.copy(phase = next.copy(cancelling = following.cancelling && !job.cancelRequested))
+            state.copy(phase = next.copy(cancelling = following.cancelling && !job.cancelRequested,
+                tooLate = following.tooLate), error = note)
         } else {
-            state.copy(phase = next)
+            state.copy(phase = next, error = note)
         }
     }
 
     /**
-     * A failed poll. A network blip keeps following (the next poll retries);
-     * a job the rig no longer knows, or an answer not understood, ends it.
+     * A failed poll (6780346935 #2). The job keeps running on the rig whatever the phone
+     * sees, so a transient failure (network, 502/503/504) keeps following with backoff, and
+     * after [MAX_POLL_FAILURES] in a row the screen stops asking but keeps the job
+     * ([MediaGeneratePhase.Stalled]). Only a job the rig no longer knows, a pairing that is no
+     * longer valid, or an answer not understood ends it; the pairing case says so plainly.
      */
     fun pollFailed(state: MediaGenerateState, e: MediaJobException): MediaGenerateState {
-        if (state.phase !is MediaGeneratePhase.Following) return state
+        val following = state.phase as? MediaGeneratePhase.Following ?: return state
         return when (e.reason) {
-            Reason.NETWORK -> state.copy(error = message(e))
+            Reason.NETWORK, Reason.TRANSIENT -> {
+                val failures = following.failures + 1
+                if (failures >= MAX_POLL_FAILURES) {
+                    state.copy(phase = MediaGeneratePhase.Stalled(following.job),
+                        error = "Riggen svarer ikke; jobbet kan stadig blive færdigt. Tryk Prøv igen")
+                } else {
+                    state.copy(phase = following.copy(failures = failures), error = message(e))
+                }
+            }
             Reason.NOT_FOUND -> state.copy(phase = MediaGeneratePhase.Unavailable("Jobbet findes ikke længere på riggen"))
+            Reason.UNAUTHORIZED, Reason.NOT_PAIRED -> state.copy(phase = MediaGeneratePhase.Unavailable(message(e)), error = null)
             else -> state.copy(phase = MediaGeneratePhase.Unavailable(message(e)), error = null)
         }
+    }
+
+    /** Follow a stalled job again, from a fresh backoff. */
+    fun resume(state: MediaGenerateState): MediaGenerateState {
+        val stalled = state.phase as? MediaGeneratePhase.Stalled ?: return state
+        return state.copy(phase = MediaGeneratePhase.Following(stalled.job), error = null)
     }
 
     fun cancelling(state: MediaGenerateState): MediaGenerateState {
@@ -145,10 +207,20 @@ object MediaGenerate {
         return state.copy(phase = following.copy(cancelling = true), error = null)
     }
 
-    /** Cancel answered: show the job it returned, or keep following if it returned none. */
-    fun cancelled(state: MediaGenerateState, job: MediaJob?): MediaGenerateState =
-        if (job == null) state.copy(phase = (state.phase as? MediaGeneratePhase.Following)?.copy(cancelling = false) ?: state.phase)
-        else polled(state, job)
+    /**
+     * Cancel answered (6780346935 #1). `too_late` means the picture is already being saved:
+     * clear "Annulleres …", say it is too late, and keep following, since the job goes on
+     * to `completed`. Otherwise show the job it returned, or keep following if none.
+     */
+    fun cancelled(state: MediaGenerateState, answer: MediaJobCancel): MediaGenerateState {
+        val following = state.phase as? MediaGeneratePhase.Following ?: return state
+        if (answer.tooLate) {
+            val base = state.copy(phase = following.copy(cancelling = false, tooLate = true), error = TOO_LATE_TEXT)
+            return answer.job?.let { polled(base, it).copy(error = TOO_LATE_TEXT) } ?: base
+        }
+        val job = answer.job ?: return state.copy(phase = following.copy(cancelling = false))
+        return polled(state, job)
+    }
 
     fun cancelFailed(state: MediaGenerateState, e: MediaJobException): MediaGenerateState {
         val following = state.phase as? MediaGeneratePhase.Following ?: return state
@@ -178,7 +250,6 @@ object MediaGenerate {
     }
 
     fun errorText(code: String?): String = when (code) {
-        "too_late" -> "For sent at annullere: billedet var allerede ved at blive gemt"
         "gpu_unavailable" -> "Grafikkortet på riggen er ikke ledigt"
         "interrupted_by_restart" -> "Afbrudt: riggen genstartede"
         "interrupted_during_publication" -> "Afbrudt mens billedet blev gemt"
@@ -198,6 +269,7 @@ object MediaGenerate {
             else -> "Riggen afviste forespørgslen"
         }
         Reason.UNAVAILABLE -> e.message ?: "Billedgenerering er ikke tilgængelig på denne rig"
+        Reason.TRANSIENT, Reason.NETWORK -> e.message ?: "Riggen svarer ikke lige nu"
         else -> e.message ?: "Noget gik galt"
     }
 }

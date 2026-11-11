@@ -1,6 +1,7 @@
 package dk.ternedal.modelrig.ui
 
 import dk.ternedal.modelrig.net.MediaJob
+import dk.ternedal.modelrig.net.MediaJobCancel
 import dk.ternedal.modelrig.net.MediaJobContractTest.Companion.JOB_ID
 import dk.ternedal.modelrig.net.MediaJobContractTest.Companion.SDXL
 import dk.ternedal.modelrig.net.MediaJobException
@@ -91,7 +92,6 @@ class MediaGeneratePresentationTest {
         for ((terminal, label) in listOf(
             job(MediaJobState.FAILED, error = "interrupted_by_restart") to "Afbrudt: riggen genstartede",
             job(MediaJobState.FAILED, error = "something_new") to "Genereringen fejlede",
-            job(MediaJobState.FAILED, error = "too_late") to "For sent at annullere: billedet var allerede ved at blive gemt",
             job(MediaJobState.CANCELLED) to "Annulleret",
             job(MediaJobState.EXPIRED, error = "expired_unclaimed") to
                 "Udløbet: riggen nåede ikke at starte jobbet inden for et døgn",
@@ -126,17 +126,79 @@ class MediaGeneratePresentationTest {
 
     @Test
     fun `cancel answers are shown, and a cancel that came too late keeps following`() {
-        val cancelled = MediaGenerate.cancelled(MediaGenerate.cancelling(following()), job(MediaJobState.CANCELLED))
+        val cancelled = MediaGenerate.cancelled(MediaGenerate.cancelling(following()), MediaJobCancel("cancelled", job(MediaJobState.CANCELLED)))
         assertEquals(MediaJobState.CANCELLED, (cancelled.phase as MediaGeneratePhase.Finished).job.state)
         val requested = MediaGenerate.cancelled(MediaGenerate.cancelling(following(MediaJobState.RUNNING)),
-            job(MediaJobState.RUNNING, cancelRequested = true))
+            MediaJobCancel("requested", job(MediaJobState.RUNNING, cancelRequested = true)))
         assertTrue(requested.polling)
         assertFalse("already requested", requested.canCancel)
         val gone = MediaGenerate.cancelFailed(MediaGenerate.cancelling(following()), MediaJobException(Reason.NOT_FOUND, "x"))
         assertTrue(gone.polling)
         assertEquals("Jobbet var allerede færdigt", gone.error)
-        val none = MediaGenerate.cancelled(MediaGenerate.cancelling(following()), null)
+        val none = MediaGenerate.cancelled(MediaGenerate.cancelling(following()), MediaJobCancel("requested", null))
         assertTrue(none.canCancel)
+    }
+
+    @Test
+    fun `cancel too late during publishing clears cancelling, says so, and keeps following to completion`() {
+        val publishing = MediaGenerate.polled(following(MediaJobState.RUNNING), job(MediaJobState.PUBLISHING))
+        assertFalse("nothing to cancel while the picture is being saved", publishing.canCancel)
+        // The race: cancel was pressed while the phone still showed running.
+        val racing = MediaGenerate.cancelling(following(MediaJobState.RUNNING))
+        val late = MediaGenerate.cancelled(racing, MediaJobCancel("too_late", job(MediaJobState.PUBLISHING)))
+        val phase = late.phase as MediaGeneratePhase.Following
+        assertFalse("no more \"Annulleres …\"", phase.cancelling)
+        assertTrue(phase.tooLate)
+        assertEquals(MediaGenerate.TOO_LATE_TEXT, late.error)
+        assertTrue("still following", late.polling)
+        assertFalse(late.canCancel)
+        assertEquals("Gemmer billedet …", MediaGenerate.stateLabel(phase.job))
+        val stillLate = MediaGenerate.polled(late, job(MediaJobState.PUBLISHING))
+        assertTrue((stillLate.phase as MediaGeneratePhase.Following).tooLate)
+        assertEquals(MediaGenerate.TOO_LATE_TEXT, stillLate.error)
+        val done = MediaGenerate.polled(stillLate, job(MediaJobState.COMPLETED, assetId = "asset_1"))
+        assertEquals("asset_1", done.completedAssetId)
+        assertEquals("the reason stays with the finished picture", MediaGenerate.TOO_LATE_TEXT, done.error)
+        assertNull("a new picture starts clean", MediaGenerate.again(done).error)
+        // too_late without a job in the answer keeps following too.
+        val bare = MediaGenerate.cancelled(MediaGenerate.cancelling(following(MediaJobState.RUNNING)), MediaJobCancel("too_late", null))
+        assertTrue(bare.polling)
+        assertFalse((bare.phase as MediaGeneratePhase.Following).cancelling)
+        assertEquals(MediaGenerate.TOO_LATE_TEXT, bare.error)
+    }
+
+    @Test
+    fun `transient poll failures keep the job, back off, stall after a bound, and resume`() {
+        var state = following(MediaJobState.RUNNING)
+        assertEquals(MediaGenerate.POLL_MILLIS, MediaGenerate.pollDelay(state))
+        val delays = mutableListOf<Long>()
+        for (reason in listOf(Reason.TRANSIENT, Reason.NETWORK, Reason.TRANSIENT, Reason.TRANSIENT, Reason.NETWORK)) {
+            state = MediaGenerate.pollFailed(state, MediaJobException(reason, "Riggen svarer ikke lige nu"))
+            assertTrue("$reason keeps following", state.polling)
+            assertEquals(JOB_ID, (state.phase as MediaGeneratePhase.Following).job.id)
+            delays += MediaGenerate.pollDelay(state)
+        }
+        assertEquals(listOf(4_000L, 8_000L, 16_000L, 30_000L, 30_000L), delays)
+        state = MediaGenerate.pollFailed(state, MediaJobException(Reason.TRANSIENT, "x"))
+        val stalled = state.phase as MediaGeneratePhase.Stalled
+        assertFalse("bounded: no more polls", state.polling)
+        assertEquals("the job id is kept", JOB_ID, stalled.job.id)
+        val resumed = MediaGenerate.resume(state)
+        assertTrue(resumed.polling)
+        assertEquals(MediaGenerate.POLL_MILLIS, MediaGenerate.pollDelay(resumed))
+        // A good answer ends a run of failures.
+        val blip = MediaGenerate.pollFailed(following(MediaJobState.RUNNING), MediaJobException(Reason.TRANSIENT, "x"))
+        val ok = MediaGenerate.polled(blip, job(MediaJobState.RUNNING))
+        assertEquals(0, (ok.phase as MediaGeneratePhase.Following).failures)
+        assertNull(ok.error)
+    }
+
+    @Test
+    fun `an auth failure while polling stays distinct from a transient one`() {
+        val auth = MediaGenerate.pollFailed(following(MediaJobState.RUNNING),
+            MediaJobException(Reason.UNAUTHORIZED, "Parringen er ikke længere gyldig"))
+        assertEquals(MediaGeneratePhase.Unavailable("Parringen er ikke længere gyldig"), auth.phase)
+        assertFalse(auth.polling)
     }
 
     @Test

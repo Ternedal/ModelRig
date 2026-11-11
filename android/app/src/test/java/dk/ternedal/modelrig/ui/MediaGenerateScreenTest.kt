@@ -9,6 +9,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import dk.ternedal.modelrig.net.MediaJob
+import dk.ternedal.modelrig.net.MediaJobCancel
 import dk.ternedal.modelrig.net.MediaJobContractTest.Companion.JOB_ID
 import dk.ternedal.modelrig.net.MediaJobContractTest.Companion.SDXL
 import dk.ternedal.modelrig.net.MediaJobException
@@ -40,7 +41,9 @@ class MediaGenerateScreenTest {
         private val profileList: () -> List<MediaJobProfile> = { listOf(SDXL) },
         private val submitResult: () -> MediaJob = { job(MediaJobState.QUEUED) },
         statuses: List<MediaJob> = emptyList(),
-        private val cancelResult: () -> MediaJob? = { job(MediaJobState.CANCELLED) },
+        /** Thrown instead of answering for poll number n (1-based), when it returns one. */
+        private val statusError: (Int) -> MediaJobException? = { null },
+        private val cancelResult: () -> MediaJobCancel = { MediaJobCancel("cancelled", job(MediaJobState.CANCELLED)) },
     ) : MediaJobSource {
         val submitted = mutableListOf<MediaJobRequest>()
         var polls = 0
@@ -53,9 +56,10 @@ class MediaGenerateScreenTest {
         }
         override fun status(id: String): MediaJob {
             polls++
+            statusError(polls)?.let { throw it }
             return if (queue.size > 1) queue.removeAt(0) else queue.firstOrNull() ?: job(MediaJobState.QUEUED)
         }
-        override fun cancel(id: String): MediaJob? {
+        override fun cancel(id: String): MediaJobCancel {
             cancels++
             return cancelResult()
         }
@@ -158,6 +162,70 @@ class MediaGenerateScreenTest {
         compose.waitUntil(5_000) { compose.onAllNodesWithTextExists("Annulleret") }
         assertEquals(1, rig.cancels)
         compose.onNodeWithTag("generate-open-gallery").assertDoesNotExist()
+    }
+
+    @Test
+    fun `transient poll failures do not end the job, and it still completes`() {
+        val rig = FakeRig(
+            statuses = listOf(job(MediaJobState.RUNNING), job(MediaJobState.COMPLETED, assetId = "asset_1")),
+            statusError = { n -> if (n in 1..3) MediaJobException(Reason.TRANSIENT, "Riggen svarer ikke lige nu", "upstream") else null },
+        )
+        show(rig)
+        compose.onNodeWithTag("generate-prompt").performTextInput("x")
+        compose.onNodeWithTag("generate-submit").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithTagExists("generate-open-gallery") }
+        compose.onNodeWithText("Færdig").assertExists()
+        assertTrue("three failures, then two answers", rig.polls >= 5)
+    }
+
+    @Test
+    fun `a rig that stays down stalls with the job kept, and Proev igen follows it again`() {
+        var down = true
+        val rig = FakeRig(statuses = listOf(job(MediaJobState.COMPLETED, assetId = "asset_1")),
+            statusError = { if (down) MediaJobException(Reason.TRANSIENT, "Riggen svarer ikke lige nu") else null })
+        show(rig)
+        compose.onNodeWithTag("generate-prompt").performTextInput("x")
+        compose.onNodeWithTag("generate-submit").performClick()
+        compose.waitUntil(20_000) { compose.onAllNodesWithTagExists("generate-resume") }
+        val pollsWhenStalled = rig.polls
+        assertEquals("bounded: exactly MAX_POLL_FAILURES polls", MediaGenerate.MAX_POLL_FAILURES, pollsWhenStalled)
+        Thread.sleep(150)
+        compose.waitForIdle()
+        assertEquals("no polling while stalled", pollsWhenStalled, rig.polls)
+        down = false
+        compose.onNodeWithTag("generate-resume").performScrollTo().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTagExists("generate-open-gallery") }
+    }
+
+    @Test
+    fun `cancel answered too late shows it, drops Annulleres, and follows the job to Faerdig`() {
+        // Deterministic: running until cancel is pressed, then publishing twice, then completed.
+        var cancelled = false
+        var after = 0
+        val rig = object : MediaJobSource {
+            var cancels = 0
+            override fun profiles() = listOf(SDXL)
+            override fun submit(request: MediaJobRequest, profile: MediaJobProfile) = job(MediaJobState.RUNNING)
+            override fun status(id: String): MediaJob = when {
+                !cancelled -> job(MediaJobState.RUNNING)
+                ++after <= 2 -> job(MediaJobState.PUBLISHING)
+                else -> job(MediaJobState.COMPLETED, assetId = "asset_1")
+            }
+            override fun cancel(id: String): MediaJobCancel {
+                cancels++
+                cancelled = true
+                return MediaJobCancel("too_late", job(MediaJobState.PUBLISHING))
+            }
+        }
+        show(rig)
+        compose.onNodeWithTag("generate-prompt").performTextInput("x")
+        compose.onNodeWithTag("generate-submit").performClick()
+        compose.onNodeWithTag("generate-cancel").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTextExists(MediaGenerate.TOO_LATE_TEXT) }
+        compose.onNodeWithText("Annulleres …").assertDoesNotExist()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTagExists("generate-open-gallery") }
+        compose.onNodeWithText("Færdig").assertExists()
+        assertEquals(1, rig.cancels)
     }
 
     @Test
