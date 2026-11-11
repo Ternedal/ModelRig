@@ -412,8 +412,8 @@ halv release og lignede en hel. Flowet nu:
 7. Poll autentificeret med bounded sleeps (≤250s):
    `?head_sha=<full-sha>` for ci/codeql, `?branch=vX.Y.Z` for release-runnet.
    **Mellemlæsninger kan vise 5 assets — det er upload-racet, ikke en fejl.**
-   Afvent `completed`. Forventet: **9 assets** (2 APK'er, JAR, 3 exe'er, zip,
-   SHA256SUMS, +1). **Modstridende API-læsninger (404 på by-tag, "1 draft",
+   Afvent `completed`. Forventet: **9 assets** (2 APK'er, JAR, 4 exe'er —
+   server, supervisor, updater, worker — zip, SHA256SUMS). **Modstridende API-læsninger (404 på by-tag, "1 draft",
    forkert latest) er eventual consistency i publiceringsøjeblikket — mål igen
    før du konkluderer.** End-tjek altid: drafts == 0 (slet leftovers — CI
    publicerer sin egen; din API-draft kan hænge).
@@ -449,8 +449,12 @@ halv release og lignede en hel. Flowet nu:
     `STAGED_PHYSICAL_PROMOTION.md`, `STAGE_B_UPDATER_EVIDENCE.md`
     (kilde-versionen skal FORBLIVE eksplicit — kontrakterne kræver både
     kilde og mål nævnt).
-    Det strukturelle fix er en udledt gate over æra-pins (#753); indtil
-    den findes, er denne liste bump-proceduren.
+    Det strukturelle fix, en udledt gate over æra-pins (#753), findes:
+    `tests/workflow_era_pins.py` (#773, 27/8-2026) fejler PR'en ved drift,
+    men kun på de steder, den selv lister, så listen er stadig
+    bump-proceduren. Gaten kræver desuden, at `SOURCE_RELEASE_VERSION` i
+    selve gaten og `CANDIDATE_BRANCH_PREFIX`/`EXPECTED_VERSION` i
+    `scripts/stage_a_scheduler_pilot_easy.py` rykkes.
 
 ---
 
@@ -498,9 +502,10 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 - **RAG:** pdf/docx/pptx/html + foto (`/rag/ingest/image`, 501 uden
   `KALIV_VISION_MODEL`). Embeddings altid lokale (nomic-embed-text).
 - **Design:** `assets/design/kaliv-ui-guide/` er autoritativ
-  (kaliv-ui-tokens.json v1.0). Ændr tokens, ikke øjemål. Desktop følger den
-  fra v1.58.0; **Android kører ældre bronze (#8B6B3D) — alignment er en
-  ÅBEN Anders-beslutning.** Fonte (Inter/EB Garamond) mangler som filer.
+  (kaliv-ui-tokens.json v2.0). Ændr tokens, ikke øjemål. Desktop følger den
+  fra v1.58.0; Android-palettens divergens er et bevidst, pinnet
+  platformsvalg (§0 pkt. 9). Fontene (Inter/EB Garamond) ligger i
+  `android/app/src/main/res/font/`, licenserne i `docs/design/fonts/`.
 - Fuld env-liste og endpoints: `README.md` + `TROUBLESHOOTING.md`.
 
 ---
@@ -828,7 +833,34 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     tiende ikke dit arbejde. `git status --short` før `git add`, og vær
     særligt mistroisk efter en testkørsel — suiter skriver tilstand.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 7/11)
+## 9. Kø — hvem har bolden (16/7, opdateret 11/11)
+
+### 8.–11/11: D3 ændret, v2.0.19 publiceret, `physical-proof/2.0.19` oprettet
+
+**[11/11 — status. main = `3cbd00f1` (merge af #2364). Landet 7.–9/11: #2345,
+#2348, #2349, #2353, #2347, #2359, #2358, #2362, #2361, #2363, #2360, #2241,
+#2364.]**
+
+- **D3 ændret (Anders, 8/11 kl. 21:10 CET, #2275 kommentar 6726564262):**
+  "Ingen test, release på grøn CI". Tag og publicering sker, når CI er grøn på
+  RC-SHA'en og Anders siger go; den fysiske test flytter til efter
+  publicering. Gengivet i D3-blokken øverst i `RIGDAG_SIMPEL.md` og
+  `STAGED_PHYSICAL_PROMOTION.md`. Rækkefølgen i kommentaren: bump-PR med fuld
+  CI → go til bump-merge → RC-SHA = `main` med fuld CI → release-go → tag og
+  publicering via CI → release-verifikation → fysisk test og updater-vejen.
+- **Før bumpet (8/11):** #2363 (build-and-release kører kun på et
+  release-tag, jf. §4 pkt. 6), #2360 (voice-Stop lukker streamen; en stoppet
+  tur skriver intet) og #2241 (strandet v2.0.18-updater + Windows
+  self-replacement) landede.
+- **Release 9/11:** #2364 (bump, versionCode 299) merget 08:33 UTC som
+  `3cbd00f1`. Tagget `v2.0.19` peger på `3cbd00f1`, og releasen blev
+  publiceret 17:01 UTC med 9 assets: `kaliv-latest.apk`, `modelrig-v2.0.19.apk`,
+  `Kaliv-windows-x64-2.0.19.jar`, fire exe'er (server, supervisor, updater,
+  worker), `modelrig-v2.0.19.zip` og `SHA256SUMS.txt`.
+- **`physical-proof/2.0.19`** findes på origin og peger på tag-SHA'en
+  `3cbd00f1`. Stage A/B efter publicering følger `RIGDAG_SIMPEL.md`; fra
+  tagget, til Stage A er grøn, merges intet til `main` (Blok 0 dér), og
+  afvigelser rapporteres i #2275.
 
 ### 7/11: PR-scopede compile-jobs, voice-pins landet, #2244 synkroniseret
 
@@ -1350,6 +1382,12 @@ v2.0.10. Kandidat = `origin/physical-proof/2.0.11`, som SKAL være lig
 #720). Åbne issues: 33. 18/8-blokken længere nede er historik.]**
 
 ### FREEZE-VINDUE — læs før enhver landing på main
+
+> **Under D3 (8/11-2026):** tag og publicering kommer før Stage A, og vinduet
+> løber fra tagget, til Stage A er grøn: "fra tagget, til Stage A er grøn,
+> merges intet til `main`" (`RIGDAG_SIMPEL.md` Blok 0,
+> `STAGED_PHYSICAL_PROMOTION.md` A0). Koordinering sker i #2275. #731,
+> `v2.0.11` og rækkefølgen i punkt 3 nedenfor er 2.0.11-æraens.
 
 Fra det øjeblik riggen har produceret et grønt `candidate_freeze_check.py`-
 receipt på en exact SHA (meldt som kommentar på #731 / #58), og indtil den SHA
@@ -2099,7 +2137,7 @@ klienter, scripts og CI. Fem kontraktpunkter kræver paritetstest FØR ændring.
 
 ## 10. Dok-kort
 
-`STATUS.md` linje 3 = altid-aktuel one-liner (resten: release-historik) ·
+`STATUS.md` = release-log (aktuel tilstand: `CURRENT_STATE.md`) ·
 `ROADMAP.md` = retning, lukket-endet ved V15 · `DEVICE_TEST.md` = test-
 runbooks (S1–S4 streaming) · `TROUBLESHOOTING.md` = symptom→fix fra faktiske
 fejl · `MODELS.md` = modelvalg + voice-modeller · `CLOUD_TOOLS.md` =
@@ -2115,7 +2153,7 @@ PLAN_v1.13.0,
 ALVA_VOICE_ROADMAP_DELTA, CLIENT_BUILD_AND_TEST, KRAVSPEC_V5 (leveret).
 
 **Tilføjet i 2.0-æraen:** `docs/design/DDR-001*` = designbeslutning efter
-ADR-mønsteret, og `assets/design/kaliv-ui-tokens.json` er fortsat eneste
+ADR-mønsteret, og `assets/design/kaliv-ui-guide/kaliv-ui-tokens.json` er fortsat eneste
 tokenkilde · `docs/agent3/ADR-A3-001_CHAT_AGENT_SURFACE.md` = chattens
 adgang til Agent 3 · `AGENT_4_ARCHITECTURE_DECISIONS.md` = det KOMPLETTE
 ADR-indeks for Agent 4 · `ROUTE_INVENTORY.md` = genereret ruteliste (prober
