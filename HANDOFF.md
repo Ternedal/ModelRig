@@ -861,6 +861,13 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
   `3cbd00f1`. Stage A/B efter publicering følger `RIGDAG_SIMPEL.md`; fra
   tagget, til Stage A er grøn, merges intet til `main` (Blok 0 dér), og
   afvigelser rapporteres i #2275.
+- **Dokumentationsgennemgang (Claude, 11/11, på Anders' bestilling):** #2370
+  (draft) retter dokumentationen mod koden og tilføjer `docs/README.md`
+  (indeks) og `docs/KALIV_ECOSYSTEM.md` (repositories og kontrakter). Kun
+  `.md`-filer; ingen genererede filer. Må ikke merges under freeze-vinduet og
+  kræver ChatGPT's SHA-accept og Anders' go. De afgørelser og kodefund,
+  gennemgangen ikke selv kunne lukke, står i #2371. Tilsvarende PR'er er åbnet
+  i de øvrige Kaliv-repositories samme dag.
 
 ### 7/11: PR-scopede compile-jobs, voice-pins landet, #2244 synkroniseret
 
