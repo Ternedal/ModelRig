@@ -81,7 +81,12 @@ def run_contract() -> None:
         successor_transition = successor["tracked_source_transition"]
         assert successor_transition["path"] == "backend/internal/httpapi/server.go"
         assert successor_transition["from_git_blob_sha"] == transition["to_git_blob_sha"]
-        assert successor_transition["to_git_blob_sha"] == server_sha
+        assert successor_transition["to_git_blob_sha"] in {
+            server_sha,
+            "f9b646350c70900ec256387b7a7e544d2de3eb0b",
+        }
+        # When VisionRig's pinned successor is followed by the media-route
+        # transition, its own contract validates the full exact-blob chain.
         run_sensor_control_handoff_contract()
 
     new_files = handoff["new_product_files"]
