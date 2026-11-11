@@ -3,7 +3,7 @@
   "repository": "Ternedal/ModelRig",
   "scope": "media-job-route-registration-only",
   "implementation_choice": {
-    "feature_flag": "KALIV_MEDIA_JOBS",
+    "feature_flag": "KALIV_MEDIA_JOBS_API",
     "default_off": true,
     "bearer_authenticated": true,
     "loopback_worker_required": true,
