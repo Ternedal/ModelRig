@@ -77,7 +77,7 @@ class MediaCatalogProjectionTests(unittest.TestCase):
                 "installation", "mine",
                 lambda owner, asset: owner == "installation" and asset == "mine",
                 lambda asset: (path.open("rb"), "video/mp4", 4),
-                verify,
+                verify, lambda handle, asset: None,
             )
             try:
                 self.assertEqual((mime, size, handle.read()), ("video/mp4", 4, b"abcd"))
@@ -90,7 +90,7 @@ class MediaCatalogProjectionTests(unittest.TestCase):
         with self.assertRaises(MediaCatalogProjectionError):
             open_owned_completed_media(
                 "installation", "foreign", lambda *_: False,
-                lambda _: calls.append("opened"), lambda: None,
+                lambda _: calls.append("opened"), lambda: None, lambda handle, asset: None,
             )
         self.assertEqual(calls, [])
 
@@ -105,7 +105,7 @@ class MediaCatalogProjectionTests(unittest.TestCase):
                 return handle, "image/png", 4
             with self.assertRaises(MediaCatalogProjectionError):
                 open_owned_completed_media(
-                    "installation", "mine", lambda *_: True, open_asset, lambda: None
+                    "installation", "mine", lambda *_: True, open_asset, lambda: None, lambda handle, asset: None
                 )
             self.assertTrue(opened[0].closed)
 
@@ -125,7 +125,25 @@ class MediaCatalogProjectionTests(unittest.TestCase):
                 return handle, "image/png", 3
             with self.assertRaises(MediaCatalogProjectionError):
                 open_owned_completed_media(
-                    "installation", "mine", lambda *_: True, open_asset, verify
+                    "installation", "mine", lambda *_: True, open_asset, verify, lambda handle, asset: None
+                )
+            self.assertTrue(opened[0].closed)
+
+    def test_descriptor_refusal_closes_handle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "asset.png"
+            path.write_bytes(b"abc")
+            opened = []
+            def open_asset(_):
+                handle = path.open("rb")
+                opened.append(handle)
+                return handle, "image/png", 3
+            def reject_descriptor(handle, asset):
+                raise OSError("descriptor not on verified volume")
+            with self.assertRaises(MediaCatalogProjectionError):
+                open_owned_completed_media(
+                    "installation", "mine", lambda *_: True, open_asset,
+                    lambda: None, reject_descriptor,
                 )
             self.assertTrue(opened[0].closed)
 
