@@ -57,12 +57,9 @@ func main() {
 	// needs its own long-timeout client, not just the Android app.
 	workerSlowClient := proxy.New(cfg.WorkerBaseURL, 10*time.Minute).WithHealthPath("/healthz")
 
-	// Gallery is opt-in: absent explicit external volume configuration, media
-	// endpoints continue to fail closed with HTTP 503.
+	// Gallery remains disabled until the Z: volume identity and completed-job
+	// ownership checks are integrated and independently qualified.
 	var mediaCatalog httpapi.MediaCatalog
-	if volume, root := os.Getenv("KALIV_MEDIA_VOLUME_ROOT"), os.Getenv("KALIV_MEDIA_ROOT"); volume != "" && root != "" && os.Getenv("KALIV_MEDIA_GALLERY_VERIFIED") == "1" {
-		mediaCatalog = httpapi.LocalMediaCatalog{VolumeRoot: volume, MediaRoot: root}
-	}
 
 	handler := httpapi.New(httpapi.Deps{
 		Media:      mediaCatalog,
