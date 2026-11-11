@@ -48,9 +48,9 @@ def owned_completed_media(
                 raise MediaCatalogProjectionError("catalog too large")
             if not isinstance(entry, Mapping):
                 raise MediaCatalogProjectionError("invalid catalog entry")
-            asset_id = entry.get("asset_id")
-            mime = entry.get("mime")
-            size = entry.get("size")
+            asset_id = entry.get("id")
+            mime = entry.get("mime_type")
+            size = entry.get("size_bytes")
             if (type(asset_id) is not str or not _ASSET_ID.fullmatch(asset_id)
                     or type(mime) is not str
                     or mime not in ("image/png", "image/jpeg", "image/webp", "video/mp4")
@@ -59,7 +59,7 @@ def owned_completed_media(
                 raise MediaCatalogProjectionError("invalid catalog entry")
             seen.add(asset_id)
             if asset_id in owned and len(result) < limit:
-                result.append({"asset_id": asset_id, "mime": mime, "size": size})
+                result.append({key: value for key, value in entry.items() if key in ("id", "kind", "mime_type", "size_bytes", "created_at", "width", "height", "duration_seconds", "projection", "stereo", "thumbnail_id", "thumbnail_url", "url", "playback")})
         return result
     except MediaCatalogProjectionError:
         raise
