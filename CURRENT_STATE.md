@@ -68,9 +68,9 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_EGRESS_GATE` | `` |
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` |
 | `KALIV_HOME_RIG_PILOT` | `0` |
-| `KALIV_MEDIA_JOBS_API` | `0` |
 | `KALIV_MAX_UPLOAD_MB` | `25` |
 | `KALIV_MEDIA_EXECUTOR` | `(unset)` |
+| `KALIV_MEDIA_JOBS_API` | `0` |
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` |
 | `KALIV_READ_CONNECTOR_PILOT` | `0` |
 | `KALIV_SCHEDULER` | `` |
