@@ -60,7 +60,7 @@ func (c LocalMediaCatalog) entries() ([]localMediaEntry,error) {
   entry,ok:=value.(map[string]any);if !ok{return nil,ErrMediaUnavailable}
   // Reject producer-controlled locations and unrecognised metadata rather
   // than silently ignoring values that may become trusted in a later version.
-  allowed:=map[string]bool{"id":true,"kind":true,"mime_type":true,"size_bytes":true,"created_at":true}
+  allowed:=map[string]bool{"id":true,"kind":true,"mime_type":true,"size_bytes":true,"created_at":true,"width":true,"height":true,"duration_seconds":true,"projection":true,"stereo":true,"thumbnail_id":true,"supports_range":true}
   for key:=range entry {if !allowed[key]{return nil,ErrMediaUnavailable}}
  }
  payload,err:=json.Marshal(raw);if err!=nil{return nil,ErrMediaUnavailable}
