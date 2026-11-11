@@ -233,7 +233,7 @@ def run_contract() -> None:
         assert media_transition_record["repository"] == "Ternedal/ModelRig"
         assert media_transition_record["scope"] == "media-job-route-registration-only"
         assert media_transition_record["implementation_choice"] == {
-            "feature_flag": "KALIV_MEDIA_JOBS",
+            "feature_flag": "KALIV_MEDIA_JOBS_API",
             "default_off": True,
             "bearer_authenticated": True,
             "loopback_worker_required": True,
