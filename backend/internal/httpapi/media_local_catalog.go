@@ -55,6 +55,14 @@ func (c LocalMediaCatalog) entries() ([]localMediaEntry,error) {
  raw,err:=decodeUniqueJSON(dec)
  if err!=nil{return nil,ErrMediaUnavailable}
  if !errors.Is(dec.Decode(new(any)),io.EOF){return nil,ErrMediaUnavailable}
+ array,ok:=raw.([]any);if !ok{return nil,ErrMediaUnavailable}
+ for _,value:=range array {
+  entry,ok:=value.(map[string]any);if !ok{return nil,ErrMediaUnavailable}
+  // Reject producer-controlled locations and unrecognised metadata rather
+  // than silently ignoring values that may become trusted in a later version.
+  allowed:=map[string]bool{"id":true,"kind":true,"mime_type":true,"size_bytes":true,"created_at":true}
+  for key:=range entry {if !allowed[key]{return nil,ErrMediaUnavailable}}
+ }
  payload,err:=json.Marshal(raw);if err!=nil{return nil,ErrMediaUnavailable}
  if err:=json.Unmarshal(payload,&rows);err!=nil || len(rows)>10000{return nil,ErrMediaUnavailable}
  seen:=map[string]bool{}
