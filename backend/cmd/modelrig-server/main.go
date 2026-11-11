@@ -60,7 +60,7 @@ func main() {
 	// Gallery is opt-in: absent explicit external volume configuration, media
 	// endpoints continue to fail closed with HTTP 503.
 	var mediaCatalog httpapi.MediaCatalog
-	if volume, root := os.Getenv("KALIV_MEDIA_VOLUME_ROOT"), os.Getenv("KALIV_MEDIA_ROOT"); volume != "" && root != "" {
+	if volume, root := os.Getenv("KALIV_MEDIA_VOLUME_ROOT"), os.Getenv("KALIV_MEDIA_ROOT"); volume != "" && root != "" && os.Getenv("KALIV_MEDIA_GALLERY_VERIFIED") == "1" {
 		mediaCatalog = httpapi.LocalMediaCatalog{VolumeRoot: volume, MediaRoot: root}
 	}
 
