@@ -11,13 +11,16 @@ from .media_gallery_catalog import _index, _root
 from .media_gallery_asset import open_asset
 
 
-def list_owned_gallery(owner, job_store, media_root, verified_volume_root, *, limit=30):
+def list_owned_gallery(owner, job_store, media_root, verified_volume_root, volume, *, limit=30):
     """Filter validated gallery-index v1 entries against completed job ownership."""
-    return owned_completed_media(
+    volume.verify()
+    result = owned_completed_media(
         owner, job_store.completed_assets_for,
         lambda: _index(_root(media_root, verified_volume_root=verified_volume_root)),
         limit=limit,
     )
+    volume.verify()
+    return result
 
 
 def open_owned_gallery_asset(owner, asset_id, job_store, media_root,
