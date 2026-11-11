@@ -3,6 +3,8 @@
 Run: PYTHONPATH=worker python3 tests/worker_media_catalog_projection.py
 """
 import unittest
+import tempfile
+from pathlib import Path
 import sys
 from pathlib import Path
 
@@ -12,6 +14,7 @@ sys.path.insert(0, str(ROOT / "worker"))
 from app.media_catalog_projection import (
     MediaCatalogProjectionError,
     owned_completed_media,
+    open_owned_completed_media,
 )
 
 
@@ -62,6 +65,69 @@ class MediaCatalogProjectionTests(unittest.TestCase):
     def test_limit_does_not_skip_later_invalid_entries(self):
         with self.assertRaises(MediaCatalogProjectionError):
             self.project(entries=[self.entries[0], {"asset_id": "bad", "mime": "x", "size": 1}], limit=1)
+
+    def test_open_owned_descriptor_and_close(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "asset.mp4"
+            path.write_bytes(b"abcd")
+            calls = []
+            def verify():
+                calls.append("verified")
+            handle, mime, size = open_owned_completed_media(
+                "installation", "mine",
+                lambda owner, asset: owner == "installation" and asset == "mine",
+                lambda asset: (path.open("rb"), "video/mp4", 4),
+                verify,
+            )
+            try:
+                self.assertEqual((mime, size, handle.read()), ("video/mp4", 4, b"abcd"))
+                self.assertEqual(calls, ["verified", "verified"])
+            finally:
+                handle.close()
+
+    def test_open_rejects_foreign_owner_before_open(self):
+        calls = []
+        with self.assertRaises(MediaCatalogProjectionError):
+            open_owned_completed_media(
+                "installation", "foreign", lambda *_: False,
+                lambda _: calls.append("opened"), lambda: None,
+            )
+        self.assertEqual(calls, [])
+
+    def test_open_rejects_stale_size_and_closes_handle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "asset.png"
+            path.write_bytes(b"abc")
+            opened = []
+            def open_asset(_):
+                handle = path.open("rb")
+                opened.append(handle)
+                return handle, "image/png", 4
+            with self.assertRaises(MediaCatalogProjectionError):
+                open_owned_completed_media(
+                    "installation", "mine", lambda *_: True, open_asset, lambda: None
+                )
+            self.assertTrue(opened[0].closed)
+
+    def test_open_rejects_volume_loss_and_closes_handle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "asset.png"
+            path.write_bytes(b"abc")
+            opened = []
+            calls = []
+            def verify():
+                calls.append(1)
+                if len(calls) == 2:
+                    raise OSError("unplugged")
+            def open_asset(_):
+                handle = path.open("rb")
+                opened.append(handle)
+                return handle, "image/png", 3
+            with self.assertRaises(MediaCatalogProjectionError):
+                open_owned_completed_media(
+                    "installation", "mine", lambda *_: True, open_asset, verify
+                )
+            self.assertTrue(opened[0].closed)
 
 
 if __name__ == "__main__":
