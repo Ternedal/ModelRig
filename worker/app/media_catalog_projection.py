@@ -73,13 +73,15 @@ def open_owned_completed_media(
     owns_completed_asset: Callable[[str, str], bool],
     verified_open: Callable[[str], tuple[object, str, int]],
     verify_volume: Callable[[], object],
+    verify_descriptor: Callable[[object, str], object],
 ) -> tuple[object, str, int]:
     """Authorize an asset and return an already-open verified binary handle.
 
-    verified_open MUST enforce G1 require_descriptor on the opened handle,
-    prevent reparse/symlink traversal and return (seekable binary handle, MIME,
-    expected size). This boundary independently checks fstat/regular-file
-    identity and never returns a path. Callers own the returned handle.
+    verified_open returns (seekable binary handle, MIME, expected size).
+    verify_descriptor MUST enforce G1 require_descriptor on that exact opened
+    handle, including reparse/symlink traversal and volume identity. This
+    boundary independently checks fstat/regular-file identity, never returns
+    a path, and closes the handle on refusal. Callers own a successful handle.
     """
     import os
     import stat
@@ -98,6 +100,7 @@ def open_owned_completed_media(
                 or type(size) is not int or size < 0
                 or mime not in ("image/png", "image/jpeg", "image/webp", "video/mp4")):
             raise MediaCatalogProjectionError("invalid verified media")
+        verify_descriptor(handle, asset_id)
         info = os.fstat(handle.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_size != size:
             raise MediaCatalogProjectionError("media descriptor changed")
