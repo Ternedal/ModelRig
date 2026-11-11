@@ -65,3 +65,47 @@ def owned_completed_media(
         raise
     except Exception as exc:
         raise MediaCatalogProjectionError("media catalog unavailable") from exc
+
+
+def open_owned_completed_media(
+    owner: str,
+    asset_id: str,
+    owns_completed_asset: Callable[[str, str], bool],
+    verified_open: Callable[[str], tuple[object, str, int]],
+    verify_volume: Callable[[], object],
+) -> tuple[object, str, int]:
+    """Authorize an asset and return an already-open verified binary handle.
+
+    verified_open MUST enforce G1 require_descriptor on the opened handle,
+    prevent reparse/symlink traversal and return (seekable binary handle, MIME,
+    expected size). This boundary independently checks fstat/regular-file
+    identity and never returns a path. Callers own the returned handle.
+    """
+    import os
+    import stat
+
+    if (type(owner) is not str or not owner.strip() or len(owner) > 256
+            or type(asset_id) is not str or not _ASSET_ID.fullmatch(asset_id)):
+        raise MediaCatalogProjectionError("invalid media identity")
+    handle = None
+    try:
+        verify_volume()
+        if owns_completed_asset(owner, asset_id) is not True:
+            raise MediaCatalogProjectionError("media not found")
+        handle, mime, size = verified_open(asset_id)
+        if (handle is None or not callable(getattr(handle, "close", None))
+                or not callable(getattr(handle, "seek", None))
+                or type(size) is not int or size < 0
+                or mime not in ("image/png", "image/jpeg", "image/webp", "video/mp4")):
+            raise MediaCatalogProjectionError("invalid verified media")
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size != size:
+            raise MediaCatalogProjectionError("media descriptor changed")
+        verify_volume()
+        return handle, mime, size
+    except Exception as exc:
+        if handle is not None:
+            handle.close()
+        if isinstance(exc, MediaCatalogProjectionError):
+            raise
+        raise MediaCatalogProjectionError("media unavailable") from exc
