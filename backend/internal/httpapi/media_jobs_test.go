@@ -295,7 +295,7 @@ func TestMediaJobWorkerOutageDoesNotLeakLoopbackURL(t *testing.T) {
 	if strings.Contains(rec.Body.String(), workerURL) || strings.Contains(rec.Body.String(), "/internal/media/jobs") {
 		t.Fatalf("worker internal URL leaked: %q", rec.Body.String())
 	}
-	if rec.Body.String() != "media jobs unavailable\\n" {
+	if rec.Body.String() != "media jobs unavailable\n" {
 		t.Fatalf("unexpected device error: %q", rec.Body.String())
 	}
 	if rec.Header().Get("Cache-Control") != "private, no-store" {
