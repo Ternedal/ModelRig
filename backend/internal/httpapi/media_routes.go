@@ -48,8 +48,14 @@ func (s *server) handleMediaAsset(w http.ResponseWriter, r *http.Request) {
     id := r.PathValue("id")
     if !validMediaID(id) { http.NotFound(w, r); return }
     asset, mime, size, err := s.Media.OpenMedia(mediaInstallationOwner, id)
-    if errors.Is(err, ErrMediaNotFound) { http.NotFound(w, r); return }
-    if err != nil { http.Error(w, "media unavailable", http.StatusServiceUnavailable); return }
+    if err != nil {
+        // A catalog may return a partially opened descriptor alongside an error.
+        // Always release it before returning; never expose the failed asset.
+        if asset != nil { _ = asset.Close() }
+        if errors.Is(err, ErrMediaNotFound) { http.NotFound(w, r); return }
+        http.Error(w, "media unavailable", http.StatusServiceUnavailable)
+        return
+    }
     if asset == nil { http.Error(w, "invalid verified media", http.StatusServiceUnavailable); return }
     defer asset.Close()
     if size < 0 || (mime != "video/mp4" && mime != "image/png" && mime != "image/jpeg" && mime != "image/webp") {
