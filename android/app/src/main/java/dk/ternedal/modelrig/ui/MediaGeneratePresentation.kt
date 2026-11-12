@@ -270,6 +270,11 @@ object MediaGenerate {
         "interrupted_by_restart" -> "Afbrudt: riggen genstartede"
         "interrupted_during_publication" -> "Afbrudt mens billedet blev gemt"
         "generation_failed" -> "Genereringen fejlede på riggen"
+        "publication_failed" -> "Resultatet kunne ikke gemmes på riggen"
+        "generation_request_rejected" -> "Riggen afviste forespørgslen"
+        "gpu_busy" -> "Grafikkortet på riggen er optaget"
+        "gpu_memory_retained" -> "Grafikkortets hukommelse blev ikke frigjort på riggen"
+        "source_image_unavailable" -> "Kildebilledet findes ikke længere"
         "expired_unclaimed" -> "Udløbet: riggen nåede ikke at starte jobbet"
         else -> "Genereringen fejlede"
     }

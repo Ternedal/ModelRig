@@ -129,9 +129,13 @@ class MediaJobClient(
                 MediaJobException(Reason.UNAVAILABLE, "Billedgenerering er ikke tilgængelig på denne rig")
             }
             429 -> MediaJobException(Reason.BUSY, "Riggen har for mange job i kø", code)
-            // Down or busy for a moment (the worker restarting, a work-area check blip):
-            // the caller decides whether that ends anything (6780346935 #2).
-            502, 503, 504 -> MediaJobException(Reason.TRANSIENT, "Riggen svarer ikke lige nu", code)
+            // The route or method is not there (an older rig, or the switch off behind a
+            // proxy): the same as a missing route, never a guess (matrix 6780346935 P3 #5).
+            405, 501 -> MediaJobException(Reason.UNAVAILABLE, "Billedgenerering er ikke tilgængelig på denne rig")
+            // Down, busy or failing for a moment (the worker restarting, a work-area check
+            // blip, an unexpected error): the job may well be fine on the rig, so the caller
+            // decides whether that ends anything (6780346935 #2; #2275 backlog task 3).
+            500, 502, 503, 504 -> MediaJobException(Reason.TRANSIENT, "Riggen svarer ikke lige nu", code)
             else -> MediaJobException(Reason.HTTP, "Riggen svarede ${response.code}")
         }
     }

@@ -249,6 +249,25 @@ class MediaGeneratePresentationTest {
     }
 
     @Test
+    fun `every failure code the executor writes has its own Danish text`() {
+        // media_executor.py:76-88 and image_job_store.py:145-153 on #2368 c64a5bc0 (backlog task 3).
+        val codes = listOf("generation_failed", "publication_failed", "generation_request_rejected", "gpu_memory_retained",
+            "gpu_busy", "gpu_unavailable", "source_image_unavailable", "expired_unclaimed", "interrupted_by_restart",
+            "interrupted_during_publication")
+        val generic = MediaGenerate.errorText("not_a_known_code")
+        for (code in codes) assertTrue("$code falls back to the generic text", MediaGenerate.errorText(code) != generic)
+        assertEquals(codes.size, codes.map(MediaGenerate::errorText).toSet().size)
+    }
+
+    @Test
+    fun `a 500 while polling is transient and keeps the job, it is not the end of it`() {
+        val state = MediaGenerate.pollFailed(following(MediaJobState.RUNNING),
+            MediaJobException(Reason.TRANSIENT, "Riggen svarer ikke lige nu"))
+        assertTrue(state.polling)
+        assertEquals(JOB_ID, (state.phase as MediaGeneratePhase.Following).job.id)
+    }
+
+    @Test
     fun `an auth failure while polling stays distinct from a transient one`() {
         val auth = MediaGenerate.pollFailed(following(MediaJobState.RUNNING),
             MediaJobException(Reason.UNAUTHORIZED, "Parringen er ikke længere gyldig"))
