@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-RELEASE_SCHEMA = "kaliv-system-release-manifest/v1"
+RELEASE_SCHEMA = "kaliv-system-release-manifest/v2"
 VERDICT_SCHEMA = "kaliv-consciousness-core/live-lifecycle-verdict/v1"
 MODELRIG = "Ternedal/ModelRig"
 GATE = "consciousness_live_lifecycle"
