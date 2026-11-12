@@ -565,6 +565,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_kaliv_vr_renderer.py`
 - `tests/workflow_media_gallery_asset.py`
 - `tests/workflow_media_gallery_catalog.py`
+- `tests/workflow_media_gallery_contract_fixture.py`
 - `tests/workflow_media_gallery_index_writer.py`
 - `tests/workflow_media_gallery_range.py`
 - `tests/workflow_media_gallery_store.py`
