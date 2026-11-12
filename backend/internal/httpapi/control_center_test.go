@@ -211,6 +211,37 @@ func TestControlCenterVisionEnabledForwardsOnlyBooleanToLoopback(t *testing.T) {
 	}
 }
 
+func TestControlCenterVisionEnabledAcceptsTheCurrentVisionRigMetadataSchema(t *testing.T) {
+	// VisionRig main answers the metadata PATCH with v2 (state_revision added). Before this, every
+	// toggle from Control Center returned 502 although VisionRig had already applied it.
+	for _, tc := range []struct {
+		response string
+		want     int
+	}{
+		{`{"schema":"visionrig/sensor-metadata/v2","state_revision":2,"metadata":{"source_id":"kinect-living-room","display_name":null,"location":null,"role":null,"enabled":false,"retired_utc":null}}`, http.StatusOK},
+		{`{"schema":"visionrig/sensor-metadata/v1","metadata":{"source_id":"kinect-living-room","enabled":false}}`, http.StatusOK},
+		{`{"schema":"visionrig/sensor-metadata/v3","metadata":{"source_id":"kinect-living-room","enabled":false}}`, http.StatusBadGateway},
+		{`{"schema":2,"metadata":{"source_id":"kinect-living-room","enabled":false}}`, http.StatusBadGateway},
+		{`{"metadata":{"source_id":"kinect-living-room","enabled":false}}`, http.StatusBadGateway},
+		{`{"schema":"visionrig/sensor-metadata/v2","state_revision":2,"metadata":{"source_id":"other","enabled":false}}`, http.StatusBadGateway},
+		{`{"schema":"visionrig/sensor-metadata/v2","state_revision":2,"metadata":{"source_id":"kinect-living-room","enabled":true}}`, http.StatusBadGateway},
+	} {
+		vision := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(tc.response))
+		}))
+		t.Setenv("KALIV_VISIONRIG_URL", vision.URL)
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/control-center/vision/sensors/kinect-living-room/enabled",
+			strings.NewReader(`{"enabled":false}`))
+		req.SetPathValue("sourceID", "kinect-living-room")
+		rec := httptest.NewRecorder()
+		(&server{}).handleControlCenterVisionSensorEnabled(rec, req)
+		vision.Close()
+		if rec.Code != tc.want {
+			t.Errorf("%s: status = %d, want %d (%s)", tc.response, rec.Code, tc.want, rec.Body.String())
+		}
+	}
+}
+
 func TestVisionRigLoopbackBaseURLCanonicalizesLocalhost(t *testing.T) {
 	t.Setenv("KALIV_VISIONRIG_URL", "http://localhost:8110")
 	got, ok := visionRigLoopbackBaseURL()
