@@ -1,6 +1,6 @@
 # RIGDAG_SIMPEL — ModelRig 2.0.19
 
-> **Release-forberedelse, ikke fysisk godkendelse:** Denne branch er endnu ikke fysisk kvalificeret. Kør ikke promotion/tagging alene ud fra denne vejledning; kræv ny exact-head- og rig-evidens for v2.0.19.
+> **Publiceret 9/11-2026, ikke fysisk godkendelse:** `v2.0.19` er publiceret, og `physical-proof/2.0.19` peger på tag-SHA'en. Releasen er ikke fysisk kvalificeret, før Stage A/B nedenfor er kørt grønt på den SHA med ny exact-head- og rig-evidens for v2.0.19. Kør ikke tagging eller release ud fra denne vejledning.
 
 > **v2.0.19: Anders' release-beslutning (D3, 8/11-2026, #2275 6726564262).**
 > - **Det kræves før tag og publicering:** grøn exact-head CI på RC-SHA'en og Anders' særskilte release-go. RC-SHA'en er `main` efter merge af bump-PR'en #2364, ikke denne gren via fast-forward. Proceduren står i #2275.
@@ -53,9 +53,17 @@ if ($LASTEXITCODE -ne 0) { throw "Candidate er ikke frozen paa exact SHA $Candid
 
 Freeze-kontrollen og operatoren kræver, at den aktuelle `origin/main` er
 indeholdt i kandidaten. Efter publicering holder det kun, så længe `main` står
-på RC-SHA'en, så fra tagget, til Stage A er grøn, merges intet til `main`. Er
-`main` alligevel flyttet, stopper kontrollen. Den må ikke omgås; stop og
-rapportér i #2275.
+på RC-SHA'en.
+
+> **Freeze-vinduet er ophævet 12/11-2026 (Anders, #2275-kommentar 6816274261).**
+> Reglen om, at intet merges til `main` fra tagget, til Stage A er grøn, gælder
+> ikke længere. Anders tester ikke fysisk, før billede og video er i en release
+> (#2275-kommentar 6751908309), og de lå i de PR'er, reglen holdt ude. Når `main`
+> har flyttet sig fra RC-SHA'en, kan Stage A ikke køres på `v2.0.19`; næste
+> release tagges og valideres på sin egen SHA.
+
+Er `main` flyttet, stopper kontrollen. Den må ikke omgås; stop og rapportér i
+#2275.
 
 Fra første fysiske bevis til promotion eller abandonment må branchen ikke
 pushes, rebases, force-pushes, merges, amendes eller redigeres. Enhver head-
@@ -133,9 +141,11 @@ Kræv:
 
 ```text
 schema=kaliv-stage-b-physical-final/v1
+status=complete
 gate.passed=true
 release_freeze_complete=true
 updater_chain_complete=true
+strict_evidence_complete=true
 physical_campaign_complete=true
 browser_peer_physical_complete=true
 all_physical_evidence_complete=true
