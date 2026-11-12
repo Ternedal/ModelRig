@@ -1,6 +1,6 @@
 # Staged physical promotion — 2.0.19
 
-> **Release-forberedelse, ikke fysisk godkendelse:** Denne branch er endnu ikke fysisk kvalificeret. Kør ikke promotion/tagging alene ud fra denne vejledning; kræv ny exact-head- og rig-evidens for v2.0.19.
+> **Publiceret 9/11-2026, ikke fysisk godkendelse:** `v2.0.19` er publiceret, og `physical-proof/2.0.19` peger på tag-SHA'en. Releasen er ikke fysisk kvalificeret, før Stage A/B nedenfor er kørt grønt på den SHA med ny exact-head- og rig-evidens for v2.0.19. Kør ikke tagging eller release ud fra denne vejledning.
 
 > **v2.0.19: Anders' release-beslutning (D3, 8/11-2026, #2275 6726564262).**
 > - **Det kræves før tag og publicering:** grøn exact-head CI på RC-SHA'en og Anders' særskilte release-go. RC-SHA'en er `main` efter merge af bump-PR'en #2364, ikke denne gren via fast-forward. Proceduren står i #2275.
@@ -24,7 +24,8 @@ kopieres fra ældre evidens.
   enhver anden SHA-ændring forbudt.
 - Enhver bevægelse af kandidatbranch eller `origin/main` kræver ny freeze og ny
   evidens.
-- Fra tagget, til A3's kandidatgate er grøn, merges intet til `main` (se A0).
+- Freeze-vinduet (intet merges til `main` fra tagget, til A3's kandidatgate er
+  grøn) er ophævet 12/11-2026; se A0.
 - Alle receipts og rapporter skal bevare `production_activation=false`.
 - Ingen launcher i dette flow merger, pusher, tagger, releaser eller aktiverer.
 
@@ -63,9 +64,16 @@ merge af #2364 er prep-grenens SHA ikke den taggede.
 Både `candidate_freeze_check.py` og operatoren kræver, at den aktuelle
 `origin/main` er indeholdt i kandidaten, og hver receipt-consumer refetcher
 `main`. Efter publicering holder det kun, så længe `main` står på RC-SHA'en.
-Derfor merges intet til `main` fra tagget, til A3's kandidatgate er grøn. Er
-`main` alligevel flyttet, stopper kontrollen fail-closed. Den må ikke omgås;
-stop og rapportér i #2275.
+
+> **Freeze-vinduet er ophævet 12/11-2026 (Anders, #2275-kommentar 6816274261).**
+> Reglen om, at intet merges til `main` fra tagget, til A3's kandidatgate er grøn, gælder
+> ikke længere. Anders tester ikke fysisk, før billede og video er i en release
+> (#2275-kommentar 6751908309), og de lå i de PR'er, reglen holdt ude. Når `main`
+> har flyttet sig fra RC-SHA'en, kan Stage A ikke køres på `v2.0.19`; næste
+> release tagges og valideres på sin egen SHA.
+
+Er `main` flyttet, stopper kontrollen fail-closed. Den må ikke omgås; stop og
+rapportér i #2275.
 
 ### A1. Opret en frisk freeze-receipt
 
@@ -204,8 +212,9 @@ manglende updater-markører eller hashdrift blokerer.
 VERIFY_STAGE_B_EVIDENCE.cmd
 ```
 
-Launcheren kører i denne rækkefølge:
+Launcheren (`stage_b_physical_gate_v2.py`) kører i denne rækkefølge:
 
+0. `stage_b_strict_evidence.py` (kun ved grøn strict-gate fortsættes til trin 1-5);
 1. `freeze_check.py`;
 2. `appliance_lifecycle_updater_chain.py`;
 3. `physical_validation_campaign.py --mode verify`;
@@ -216,9 +225,11 @@ Kræv i `validation/stage-b-physical-final-latest.json`:
 
 ```text
 schema=kaliv-stage-b-physical-final/v1
+status=complete
 gate.passed=true
 release_freeze_complete=true
 updater_chain_complete=true
+strict_evidence_complete=true
 physical_campaign_complete=true
 browser_peer_physical_complete=true
 all_physical_evidence_complete=true

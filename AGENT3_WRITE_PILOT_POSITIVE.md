@@ -1,5 +1,12 @@
 # T-022 positiv write-pilot operator
 
+> **⚠️ Status 11/11-2026: launcheren kan ikke køre i sin nuværende form.**
+> `START_AGENT3_WRITE_PILOT_POSITIVE.cmd` er pinnet til
+> `agent/t022-write-pilot-positive-operator` (version 1.58.146), som ikke findes
+> på origin (GitHub API: 404). Launcherens fælles `ensure_candidate` (`scripts/stage_a_one_click.retained`) kører
+> `git fetch origin main <branch>` og `git switch <branch>` og stopper derfor
+> fail-closed, før der indsamles evidens.
+
 **Status:** dormant fysisk operator til del 1 af T-022. Den forbereder og binder de 20 positive `note_append`-runs, men sender ingen preview-, start-, approve-, retry-, replan- eller cancel-request.
 
 ## Hvad den automatiserer
