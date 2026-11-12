@@ -43,6 +43,28 @@ the exact pinned repositories. It does not prove physical validation, lifecycle,
 Photoreal likeness, M6, latency, soak, Android live body, or final production
 activation.
 
+## Assemble the input from the four verifiers
+
+Run each repository's verifier from a clean `main` checkout at the pinned revision
+and save its one-line verdict, then assemble:
+
+```powershell
+pwsh -File .\verify-repository-authority.ps1 -Json > ..\authority-modelrig.json   # likewise in BodyRig, VisionRig, VoiceRig
+python scripts/kaliv_repository_authority_assembler.py `
+  --modelrig .\authority-modelrig.json --bodyrig .\authority-bodyrig.json `
+  --visionrig .\authority-visionrig.json --voicerig .\authority-voicerig.json `
+  --expect Ternedal/ModelRig=<pin> --output .\repository-authority-evidence.json
+```
+
+`scripts/kaliv_repository_authority_assembler.py` accepts a verdict only when it is
+that repository's own format, version 1, `passed` with no errors, bound to one exact
+40-hex `head_revision` (and to GitHub's `main` on the same revision where the verifier
+reports it), and claims no production, physical or Agent 3 authority. Each entry's
+`evidence_ref` is `sha256:<hex of the exact bytes read>:<format>`. `--expect
+OWNER/REPO=<sha>` refuses any other head. It runs the qualifier on the result before
+writing, so exit 0 means the file below will be accepted; exit 2 writes nothing.
+UTF-16 files (Windows PowerShell 5.1's `>`) and a UTF-8 BOM are read.
+
 ## Run
 
 ```powershell
