@@ -51,9 +51,10 @@ def _refs() -> dict[str, str]:
     }
 
 
-def _assemble(refs: dict[str, str] | None = None):
+def _assemble(refs: dict[str, str] | None = None, scope: str = "embodied"):
     return module.assemble(
         release_id="kaliv-rc-test",
+        release_scope=scope,
         modelrig_sha=M,
         bodyrig_sha=B,
         visionrig_sha=V,
@@ -73,7 +74,10 @@ def _reject(refs: dict[str, str], fragment: str) -> None:
 
 def run_contract() -> None:
     manifest, verdict = _assemble()
-    assert manifest["schema"] == "kaliv-system-release-manifest/v1"
+    assert manifest["schema"] == "kaliv-system-release-manifest/v2"
+    assert manifest["release_scope"] == "embodied"
+    assert verdict["release_scope"] == "embodied"
+    assert verdict["deferred_gates"] == []
     assert manifest["production_activation"] is False
     assert verdict["state"] == "QUALIFIED"
     assert verdict["release_ready"] is True
@@ -108,9 +112,50 @@ def run_contract() -> None:
     )
     _reject(wrong_cross_repo, "repository SHAs do not match")
 
+    # ADR-SYS-001: a V1 manifest is assembled from the seven V1 refs only. The
+    # body gates are written PENDING and reported as deferred, never claimed.
+    body = set(module.release_gate.BODY_GATES)
+    v1_refs = {gate: ref for gate, ref in _refs().items() if gate not in body}
+    v1_manifest, v1_verdict = _assemble(v1_refs, scope="v1")
+    assert v1_manifest["release_scope"] == "v1"
+    assert v1_verdict["state"] == "QUALIFIED" and v1_verdict["release_ready"] is True
+    assert set(v1_verdict["deferred_gates"]) == body
+    for gate in body:
+        assert v1_manifest["gates"][gate] == {"status": "PENDING", "evidence_refs": []}
+
+    # V1 refs do not make an Embodied release, and Embodied refs are not
+    # accepted under the V1 scope: a body claim must go through its own scope.
+    try:
+        _assemble(v1_refs, scope="embodied")
+    except module.ReleaseManifestAssemblyError as exc:
+        assert "missing bodyrig_android_live_body" in str(exc), str(exc)
+    else:
+        raise AssertionError("embodied manifest assembled without body evidence")
+    try:
+        _assemble(_refs(), scope="v1")
+    except module.ReleaseManifestAssemblyError as exc:
+        assert "unknown bodyrig_android_live_body" in str(exc), str(exc)
+    else:
+        raise AssertionError("v1 manifest accepted body evidence")
+    v1_missing = dict(v1_refs)
+    del v1_missing["recovery_soak"]
+    try:
+        _assemble(v1_missing, scope="v1")
+    except module.ReleaseManifestAssemblyError as exc:
+        assert "missing recovery_soak" in str(exc), str(exc)
+    else:
+        raise AssertionError("v1 manifest assembled without recovery_soak")
+    try:
+        _assemble(scope="core")
+    except module.ReleaseManifestAssemblyError as exc:
+        assert "release scope must be one of" in str(exc), str(exc)
+    else:
+        raise AssertionError("unknown release scope accepted")
+
     try:
         module.assemble(
             release_id="kaliv-rc-test",
+            release_scope="embodied",
             modelrig_sha="main",
             bodyrig_sha=B,
             visionrig_sha=V,
