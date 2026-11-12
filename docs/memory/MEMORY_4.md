@@ -1,6 +1,6 @@
 # Memory 4.0 — shared retrieval and normal-chat integration
 
-Status: implementation track, default-off for normal chat and write activation.
+Status: implementation complete for #1167; every Memory 4 flag remains default-off. For the landed state, PRs and commits see [MEMORY_4_CLOSURE.md](./MEMORY_4_CLOSURE.md); this file is the design history for R01-R05 and W01-W02.
 
 Memory 4.0 is the path from the existing Agent 3 Memory 3.0 substrate to one
 model-independent memory service that can serve normal Kaliv chat, Agent 3

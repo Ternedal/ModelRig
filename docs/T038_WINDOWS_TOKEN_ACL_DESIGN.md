@@ -13,13 +13,13 @@ Step 3 changes behaviour **on Windows only**: a token file that other users
 can read is now refused, and so is a symlinked or junctioned token file.
 POSIX accepts and refuses exactly what it did before.
 
-## The gap (verified in code, 2026-10-26)
+## The gap before step 3 (verified in code, 2026-10-26; closed by `credential_file.py`)
 
 Three loaders accept a bearer token from a file. Each checks that the path is
 a regular file and that its size is bounded. Each rejects a file that other
 users can read **only on POSIX**:
 
-| Loader | Line on `main` |
+| Loader | Line on `main` before step 3 |
 | --- | --- |
 | `worker/app/home_assistant_provider_transport.py` `_load_bearer` | 184 `if os.name == "posix" and (info.st_mode & 0o077)` |
 | `worker/app/riggate_provider_transport.py` `_load_bearer` | 178, same |

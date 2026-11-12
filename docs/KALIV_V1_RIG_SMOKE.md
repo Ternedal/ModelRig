@@ -19,8 +19,8 @@ release candidate: even a stale/unauthorized clean checkout would self-match.
     python scripts\kaliv_v1_rig_smoke.py --expected-modelrig-sha $expectedModelRigSha
 
 To inspect an existing `C:\Rig\src\ModelRig` checkout **without copying a new
-script into that checkout**, launch this command from a separate local clone
-or worktree of draft PR #2101 (for example from its own checkout directory):
+script into that checkout**, launch this command from a separate clean local clone
+or worktree of ModelRig `main` (for example from its own checkout directory):
 
     python scripts\kaliv_v1_rig_smoke.py --checkout-root 'C:\Rig\src\ModelRig' --expected-modelrig-sha $expectedModelRigSha
 
@@ -28,7 +28,7 @@ or worktree of draft PR #2101 (for example from its own checkout directory):
 script compares HEAD and every tracked disk file with its committed blob SHA,
 not merely the index-visible status (which can hide changes via skip-worktree
 or assume-unchanged). The inspection targets the chosen checkout, **not** the
-inspector's draft worktree. Neither target tree nor Git index is written; status
+inspector's own worktree. Neither target tree nor Git index is written; status
 uses only `git --no-replace-objects` object and index listing commands, so
 replacement refs and configured clean-filter/fsmonitor hooks are never
 trusted or invoked. It also strips inherited Git overrides (including
@@ -59,4 +59,4 @@ human listening, VisionRig camera, BodyRig held-out likeness, Android/Quest,
 consciousness recovery, latency, soak and repository authority. Both
 release_gate_satisfied and production_activation remain false.
 
-**Post-freeze integration boundary (2026-10-20):** The temporary v2.0.18 merge freeze is lifted. This read-only diagnostic remains an isolated candidate until current-head CI and Stage-B qualification complete. Integrating a diagnostic into protected `main` does not prove hardware acceptance or authorize publishing a new release. Always supply an independently approved expected commit SHA for the specific checkout being inspected.
+**Post-freeze integration boundary (2026-10-20):** The temporary v2.0.18 merge freeze is lifted. Integrating a diagnostic into protected `main` does not prove hardware acceptance or authorize publishing a new release. Always supply an independently approved expected commit SHA for the specific checkout being inspected.

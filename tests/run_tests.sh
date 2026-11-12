@@ -1,5 +1,7 @@
 #!/bin/sh
-# Build the backend and run the full ModelRig test suite (Unix / WSL).
+# Build the backend and run a smoke subset of the tests (Unix / WSL).
+# CI runs every tests/backend_*.py, e2e.py, worker_*.py and workflow_*.py;
+# scripts/ci_local.sh is the local equivalent of that.
 # Requires: Go on PATH, Python 3 with the worker deps installed.
 set -u
 
