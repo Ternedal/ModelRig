@@ -155,6 +155,17 @@ class GalleryRouteTests(unittest.TestCase):
         self.assertEqual(owned.status_code, 503)
         self.assertTrue(owned.json()["detail"].startswith("media_volume_"), owned.text)
 
+    def test_t2_every_request_asks_the_job_database_again(self):
+        # ChatGPT 6821058128: Go sends a HEAD, then a ranged GET. A job that stops being completed
+        # between the two (here: failed afterwards) is refused on the GET, never served from the HEAD.
+        head = self.client.head("/internal/media/assets/img_png_1024", headers=HEADERS)
+        self.assertEqual(head.status_code, 200)
+        with sqlite3.connect(self.tmp / "jobs.sqlite3") as db:
+            db.execute("UPDATE image_jobs SET state='failed' WHERE asset_id='img_png_1024'")
+        ranged = self.get("/internal/media/assets/img_png_1024", Range="bytes=0-9")
+        self.assertEqual((ranged.status_code, ranged.json()["detail"]), (404, "asset_not_found"))
+        self.assertNotIn("img_png_1024", self.items(self.get("/internal/media/assets")))
+
     # -- bytes, Range and HEAD ----------------------------------------------------------------
     def test_full_ranged_suffix_unsatisfiable_and_head(self):
         data = (self.media / "img_png_1024.png").read_bytes()
