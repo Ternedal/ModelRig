@@ -269,8 +269,8 @@ et ☁ på rækken.
 den varme palet (charred black / ember bronze / muted ivory — ikke safir-blå),
 splash med ankh på sort, og velkomstskærmen med "Lokal intelligens. Privat."
 
-**Fejler (stadig blåt et sted) →** noter *hvilken* skærm. Desktop er stadig
-safir-blå med vilje — det er ModelRig, ikke Kaliv.
+**Fejler (stadig blåt et sted) →** noter *hvilken* skærm. Desktop bruger også
+Kaliv-tokens (`KalivTokens.kt`) — blåt dér er også en fejl.
 
 ---
 
