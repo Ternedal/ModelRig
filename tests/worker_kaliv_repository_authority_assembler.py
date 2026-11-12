@@ -32,6 +32,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -508,6 +509,351 @@ def report_comes_from_the_qualifier(c: Case) -> None:
 
 
 # --------------------------------------------------------------------------
+# Publication: what a failed run leaves behind
+# --------------------------------------------------------------------------
+
+def _names(c: Case) -> list[str]:
+    return sorted(path.name for path in c.dir.iterdir())
+
+
+def _no_staged_files(c: Case, label: str) -> None:
+    left = [path.name for path in c.dir.rglob("*") if ".staged" in path.name or path.name.endswith(".tmp")]
+    check(not left, f"{label}: staged files left behind: {left}")
+
+
+class _FailingLink:
+    """os.link that fails for the n-th published file, like a full disk."""
+
+    def __init__(self, fail_on: int, error: OSError) -> None:
+        self.calls = 0
+        self.fail_on = fail_on
+        self.error = error
+        self.real = os.link
+
+    def __call__(self, source: Any, target: Any) -> None:
+        self.calls += 1
+        if self.calls == self.fail_on:
+            raise self.error
+        self.real(source, target)
+
+
+def _failing_publication(c: Case, *, link: Any = None, create: Any = None, replace: Any = None, **arguments: Any) -> str:
+    saved = (assembler.os.link, assembler._create_exclusively, assembler.os.replace)
+    try:
+        if link is not None:
+            assembler.os.link = link
+        if create is not None:
+            assembler._create_exclusively = create
+        if replace is not None:
+            assembler.os.replace = replace
+        try:
+            c.assemble(**arguments)
+        except assembler.AssemblerError as exc:
+            return str(exc)
+        raise AssertionError("the failing publication was not reported")
+    finally:
+        assembler.os.link, assembler._create_exclusively, assembler.os.replace = saved
+
+
+def _disk_full(*_args: Any, **_kwargs: Any) -> None:
+    raise OSError(28, "No space left on device")
+
+
+def a_failure_before_the_first_file_publishes_nothing(c: Case) -> None:
+    before = _names(c)
+    message = _failing_publication(c, link=_FailingLink(1, OSError(1, "no links")), create=_disk_full)
+    check("nothing was published" in message, f"says nothing was published: {message}")
+    check("No space left" in message, "and names the cause")
+    check(_names(c) == before, "the directory is as it was")
+    _no_staged_files(c, "evidence could not be written")
+
+
+def a_failure_after_the_evidence_leaves_valid_evidence(c: Case) -> None:
+    message = _failing_publication(c, link=_FailingLink(2, OSError(1, "no links")), create=_disk_full)
+    check(c.output.name in message, f"names the published evidence file: {message}")
+    check("Run the same command again" in message, "and says how to complete the set")
+    check("nothing was published" not in message, "and does not claim nothing was written")
+    check(c.output.is_file() and not c.record.exists(), "evidence without record")
+    check(qualifier_cli(c.output)[0] == 0, "the published evidence is complete and qualifies")
+    _no_staged_files(c, "record could not be written")
+
+    kept = c.output.read_bytes()
+    assembly = c.assemble()
+    check(c.output.read_bytes() == kept, "the next run keeps the evidence file")
+    check(json.loads(c.record.read_bytes()) == assembly, "and completes the set with the record")
+    check(
+        assembly["evidence"]["sha256"] == hashlib.sha256(kept).hexdigest(),
+        "the record is for the evidence that was already there",
+    )
+
+
+def a_failure_on_the_report_leaves_evidence_and_record(c: Case) -> None:
+    report = c.dir / "kaliv-repository-authority-latest.json"
+    message = _failing_publication(c, replace=_disk_full, report=report)
+    check(c.output.name in message and c.record.name in message, f"names both: {message}")
+    check(c.output.is_file() and c.record.is_file() and not report.exists(), "no report")
+    _no_staged_files(c, "report could not be written")
+    c.assemble(report=report)
+    check(json.loads(report.read_bytes())["state"] == "QUALIFIED", "the next run writes the report")
+
+
+class _CommandLineRefuses(_Refusing):
+    def __init__(self, outcome: Any) -> None:
+        super().__init__()
+        self.outcome = outcome
+        self.read: list[bytes] = []
+
+    def qualify(self, value: dict) -> dict:
+        return qualifier.qualify(value)
+
+    def main(self, argv: list[str]) -> int:
+        self.read.append(Path(argv[0]).read_bytes())
+        if isinstance(self.outcome, BaseException):
+            raise self.outcome
+        return self.outcome
+
+
+def the_qualifiers_command_line_decides_before_anything_is_published(c: Case) -> None:
+    report = c.dir / "report.json"
+    for outcome, fragment, label in (
+        (2, "refused the staged evidence file", "the command line refuses"),
+        (RuntimeError("boom"), "failed on the staged evidence file: boom", "the command line crashes"),
+    ):
+        stub = _CommandLineRefuses(outcome)
+        c.refused(fragment, label, qualifier=stub, report=report)
+        _no_staged_files(c, label)
+        check(len(stub.read) == 1, f"{label}: it was run once")
+        evidence = json.loads(stub.read[0])
+        check(
+            [item["git_sha"] for item in evidence["repositories"]] == [PINS[slot] for slot in SLOTS],
+            f"{label}: on the complete evidence that would have been published",
+        )
+    stub = _CommandLineRefuses(OSError(13, "Permission denied"))
+    before = _names(c)
+    message = _failing_publication(c, qualifier=stub, report=report)
+    check("nothing was published" in message and "Permission denied" in message, message)
+    check(_names(c) == before, "an I/O error in the command line publishes nothing")
+
+
+def without_hard_links_publication_is_still_exclusive(c: Case) -> None:
+    def no_links(*_args: Any) -> None:
+        raise OSError(1, "Operation not permitted")
+
+    saved = assembler.os.link
+    assembler.os.link = no_links
+    try:
+        assembly = c.assemble()
+        check(json.loads(c.record.read_bytes()) == assembly, "published without hard links")
+        check(qualifier_cli(c.output)[0] == 0, "and the evidence qualifies")
+        _no_staged_files(c, "no hard links")
+        kept = c.output.read_bytes()
+        c.assemble()
+        check(c.output.read_bytes() == kept, "the same content again is not a change")
+        c.record.unlink()
+        c.output.write_bytes(kept + b" ")
+        changed = c.output.read_bytes()
+        c.refused("already exists with other content", "other evidence, no hard links")
+        check(c.output.read_bytes() == changed, "the other evidence file is not replaced")
+    finally:
+        assembler.os.link = saved
+
+
+def a_file_appearing_during_the_run_is_not_replaced(c: Case) -> None:
+    # The early check has passed; another run publishes first.
+    intruder = b"{}\n"
+    real = assembler.os.link
+
+    def racing_link(source: Any, target: Any) -> None:
+        if Path(target) == c.record:
+            c.record.write_bytes(intruder)
+        real(source, target)
+
+    message = _failing_publication(c, link=racing_link)
+    check("already exists with other content" in message, message)
+    check(c.record.read_bytes() == intruder, "the other run's record is left alone")
+    check(c.output.name in message, "and the message names what this run published")
+    check(qualifier_cli(c.output)[0] == 0, "which is complete evidence")
+    _no_staged_files(c, "lost the race for the record")
+
+
+def a_partial_exclusive_write_is_removed(c: Case) -> None:
+    target = c.dir / "partial.json"
+
+    real_fsync = assembler.os.fsync
+
+    def failing_fsync(descriptor: int) -> None:
+        raise OSError(5, "Input/output error")
+
+    assembler.os.fsync = failing_fsync
+    try:
+        try:
+            assembler._create_exclusively(target, b"half")
+        except OSError as exc:
+            check("Input/output" in str(exc), "the cause is passed on")
+        else:
+            raise AssertionError("the failing write was not reported")
+    finally:
+        assembler.os.fsync = real_fsync
+    check(not target.exists(), "the file this call created is removed again")
+
+    target.write_bytes(b"someone else's")
+    try:
+        assembler._create_exclusively(target, b"mine")
+    except FileExistsError:
+        pass
+    else:
+        raise AssertionError("an existing file was overwritten")
+    check(target.read_bytes() == b"someone else's", "an existing file is never touched")
+
+
+class _Truncating:
+    """A file that silently loses the last byte of what is written to it."""
+
+    def __init__(self, handle: Any) -> None:
+        self._handle = handle
+
+    def write(self, data: bytes) -> int:
+        self._handle.write(data[:-1])
+        return len(data)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._handle, name)
+
+    def __enter__(self) -> "_Truncating":
+        return self
+
+    def __exit__(self, *details: Any) -> None:
+        self._handle.close()
+
+
+def a_staged_file_that_reads_back_wrong_is_never_published(c: Case) -> None:
+    before = _names(c)
+    real = assembler.os.fdopen
+    assembler.os.fdopen = lambda descriptor, mode: _Truncating(real(descriptor, mode))
+    try:
+        try:
+            c.assemble()
+        except assembler.AssemblerError as exc:
+            check("does not read back as written" in str(exc), f"names the cause: {exc}")
+            check("nothing was published" in str(exc), "and that nothing was published")
+        else:
+            raise AssertionError("a damaged staged file was published")
+    finally:
+        assembler.os.fdopen = real
+    check(_names(c) == before, "the directory is as it was, the damaged staged file included")
+
+    # The same on the path without hard links.
+    target = c.dir / "exclusive.json"
+    assembler.open = lambda path, mode: _Truncating(open(path, mode))
+    try:
+        try:
+            assembler._create_exclusively(target, b"complete")
+        except OSError as exc:
+            check("does not read back as written" in str(exc), "exclusive write: names the cause")
+        else:
+            raise AssertionError("a damaged exclusive write was kept")
+    finally:
+        del assembler.open
+    check(not target.exists(), "exclusive write: the damaged file is removed")
+
+
+def no_fixed_temporary_name(c: Case) -> None:
+    # A file with the predictable name a shared temporary would have.
+    bystanders = {
+        c.output.with_name(c.output.name + ".tmp"): b"not ours 1",
+        c.record.with_name(c.record.name + ".tmp"): b"not ours 2",
+    }
+    for path, data in bystanders.items():
+        path.write_bytes(data)
+    c.assemble()
+    for path, data in bystanders.items():
+        check(path.read_bytes() == data, f"{path.name} is left alone")
+    check(
+        _names(c) == sorted([*(f"{slot}.json" for slot in SLOTS), c.output.name, c.record.name, *(p.name for p in bystanders)]),
+        "nothing else is left in the directory",
+    )
+
+
+def _race(c: Case, variants: list[dict[str, Path]]) -> list[subprocess.CompletedProcess]:
+    """Start one command line per variant at the same moment."""
+    gate = c.dir / "go"
+    launcher = (
+        "import pathlib, runpy, sys, time\n"
+        "gate = pathlib.Path(sys.argv[1])\n"
+        "while not gate.exists():\n"
+        "    time.sleep(0.001)\n"
+        "sys.argv = sys.argv[2:]\n"
+        "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+    )
+    processes = []
+    for files in variants:
+        command = [sys.executable, "-c", launcher, str(gate), str(SCRIPT)]
+        for slot in SLOTS:
+            command += [f"--{slot}", str(files[slot]), f"--pin-{slot}", c.pins[slot]]
+        command += ["--output", str(c.output)]
+        processes.append(subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True))
+    time.sleep(0.5)
+    gate.write_bytes(b"")
+    done = []
+    for process in processes:
+        out, err = process.communicate(timeout=120)
+        done.append(subprocess.CompletedProcess(process.args, process.returncode, out, err))
+    gate.unlink()
+    return done
+
+
+def concurrent_runs_never_mix_two_results(c: Case) -> None:
+    # Same verdicts, eight at once: every run succeeds and agrees.
+    done = _race(c, [c.files] * 8)
+    check([d.returncode for d in done] == [0] * 8, f"identical runs all succeed: {[d.stdout[-200:] for d in done if d.returncode]}")
+    record = json.loads(c.record.read_bytes())
+    check(all(json.loads(d.stdout) == record for d in done), "and all report the published record")
+    check(record["evidence"]["sha256"] == hashlib.sha256(c.output.read_bytes()).hexdigest(), "record matches evidence")
+    _no_staged_files(c, "eight identical runs")
+
+    # Two different results for the same target. A copy of a verdict with a
+    # byte-order mark is the same verdict in other bytes, so its hash, its
+    # reference and with them the evidence differ.
+    for rounds in range(6):
+        for stale in (c.output, c.record):
+            stale.unlink(missing_ok=True)
+        marked = c.dir / "voicerig-marked.json"
+        marked.write_bytes(b"\xef\xbb\xbf" + REAL["voicerig"].encode("utf-8"))
+        other = dict(c.files, voicerig=marked)
+        done = _race(c, [c.files, other, c.files, other, c.files, other])
+        winners = [d for d in done if d.returncode == 0]
+        losers = [d for d in done if d.returncode != 0]
+        check(len(winners) == 3, f"round {rounds}: one of the two results wins, with its three runs: {[d.returncode for d in done]}")
+        check(all(d.returncode == 2 for d in losers), f"round {rounds}: the others exit 2: {[d.stderr[-200:] for d in losers]}")
+        check(
+            all("already exists with other content" in json.loads(d.stdout)["error"] for d in losers),
+            f"round {rounds}: and say why",
+        )
+        evidence_bytes = c.output.read_bytes()
+        record = json.loads(c.record.read_bytes())
+        check(
+            record["evidence"]["sha256"] == hashlib.sha256(evidence_bytes).hexdigest(),
+            f"round {rounds}: the record on disk is for the evidence on disk",
+        )
+        check(all(json.loads(d.stdout) == record for d in winners), f"round {rounds}: the winners agree")
+        check(qualifier_cli(c.output)[0] == 0, f"round {rounds}: the evidence qualifies")
+        _no_staged_files(c, f"round {rounds}")
+
+
+def the_report_is_not_called_evidence(c: Case) -> None:
+    assembly = c.assemble()
+    check(
+        any("--report" in line and "not immutable release evidence" in line for line in assembly["limitations"]),
+        "the record says the report is not immutable evidence",
+    )
+    help_text = assembler.build_parser().format_help()
+    check("not immutable release" in " ".join(help_text.split()), "and so does --help")
+    doc = " ".join((assembler.__doc__ or "").split())
+    check("A refusal writes nothing" in doc, "the module states which failures write nothing")
+    check("can leave the set incomplete" in doc, "and which can leave the set incomplete")
+
+
+# --------------------------------------------------------------------------
 # Command line
 # --------------------------------------------------------------------------
 
@@ -580,6 +926,17 @@ def main() -> None:
         outputs_do_not_collide,
         nothing_is_written_unless_the_qualifier_accepts,
         report_comes_from_the_qualifier,
+        a_failure_before_the_first_file_publishes_nothing,
+        a_failure_after_the_evidence_leaves_valid_evidence,
+        a_failure_on_the_report_leaves_evidence_and_record,
+        the_qualifiers_command_line_decides_before_anything_is_published,
+        without_hard_links_publication_is_still_exclusive,
+        a_file_appearing_during_the_run_is_not_replaced,
+        a_partial_exclusive_write_is_removed,
+        a_staged_file_that_reads_back_wrong_is_never_published,
+        no_fixed_temporary_name,
+        concurrent_runs_never_mix_two_results,
+        the_report_is_not_called_evidence,
         command_line,
         command_line_leaves_no_bytecode,
         command_line_requires_all_four,

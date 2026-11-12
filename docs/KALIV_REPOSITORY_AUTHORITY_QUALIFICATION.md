@@ -116,13 +116,12 @@ Exit code 0 writes three files:
 |---|---|
 | `repository-authority-evidence.json` | The qualifier's input. |
 | `repository-authority-evidence-assembly.json` | The record: each verdict file's name, SHA-256, size and encoding, the pins, and the release reference. |
-| `kaliv-repository-authority-latest.json` | The qualifier's own verdict on the written file. |
+| `kaliv-repository-authority-latest.json` | The qualifier's latest verdict on that evidence. **The next run replaces it. It is not immutable release evidence;** refer to the evidence file and the record. |
 
 `release_evidence_ref` in the record and in the report is the value for
 `--repository-authority-ref` in the release manifest.
 
-Exit code 2 writes nothing and names the reason. The assembler refuses a
-verdict that:
+Exit code 2 names the reason. The assembler refuses a verdict that:
 
 - is not that repository's format, version 1, for `main`;
 - is not a PASS, lists errors, or reports `main` as unprotected;
@@ -132,6 +131,27 @@ verdict that:
 
 It also refuses to replace an evidence file or record that already exists with
 other content. Assembling the same verdicts again changes nothing.
+
+### What a failed run leaves behind
+
+- **A refusal writes nothing.** That covers everything above, the pins, and the
+  qualifier's answer. All of it is decided before the first output file is
+  created.
+- **An I/O failure while publishing can leave the set incomplete:** the
+  evidence file without its record, or both without the report.
+  - The files are published in that order.
+  - Each is complete or absent, and none replaces a file with other content.
+  - A published evidence file has already been accepted by the qualifier.
+  - The message names what was published. **Run the same command again to
+    complete the set.**
+- **Two runs at once cannot mix their results.** Each output is first written
+  to its own `.<name>.<random>.staged` file and then published without
+  replacing anything. If the two runs differ, one is refused.
+- A run that is killed can leave a `.staged` file. Nothing reads it; delete it.
+
+On a file system without hard links, publication is still exclusive, but a
+second run started in the same instant can see a half-written file and be
+refused. Run it again.
 
 **Keep the four verdict files.** Each evidence reference is the SHA-256 of one
 of them:
@@ -152,6 +172,11 @@ UTF-8. The hash is of the file as it was written.
   the settings before or after.
 - The qualifier sees the evidence file only. A reviewer checks the verdict
   files against the hashes in the record.
+- The rule that any field ending in `_authority` or `_activation` must be
+  `false` is a naming convention. A verifier that named an authority field
+  differently would not be caught by it. What bounds the schema is the format
+  and version check: a new verdict format has to be added to the assembler on
+  purpose.
 
 ## Run
 

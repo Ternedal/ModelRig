@@ -34,7 +34,26 @@ Run
         --output <dir>/repository-authority-evidence.json
 
 Exit code 0: the evidence file and its assembly record are written.
-Exit code 2: something was refused; nothing is written.
+Exit code 2: see below.
+
+What a failed run leaves behind
+-------------------------------
+- **A refusal writes nothing.** That is everything about the verdicts, the
+  pins, an output that already exists with other content, and the qualifier's
+  answer. All of it is decided before the first output file is created.
+- **An I/O failure while publishing can leave the set incomplete**: the
+  evidence file without its record, or both without the report. The files are
+  published in that order, each complete or not at all, and never over a file
+  with other content. A published evidence file has already been accepted by
+  the qualifier. The message names what was published; running the same
+  command again completes the set.
+- Each output is first written to a uniquely named ``.<name>.<random>.staged``
+  file beside its target. A run that is killed can leave such a file. It is
+  never read and can be deleted.
+
+The report (``--report``) is the qualifier's latest verdict. The next run
+replaces it. It is not immutable release evidence; refer to the evidence file
+and the record.
 """
 from __future__ import annotations
 
@@ -47,6 +66,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -168,6 +188,9 @@ def check_verdict(slot: str, verdict: Mapping[str, Any], pin: str) -> str:
         raise refuse("authority_mode is missing")
     if verdict.get("production_activation") is not False:
         raise refuse("production_activation is not false")
+    # Defence in depth, by naming convention only. An authority field with
+    # another kind of name would pass this loop. What bounds the schema is the
+    # format and version check above: a new format has to be added on purpose.
     for key, value in verdict.items():
         if key.endswith(("_authority", "_activation")) and value is not False:
             raise refuse(f"{key} is not false")
@@ -196,27 +219,78 @@ def load_qualifier() -> Any:
     return module
 
 
-def _needs_write(path: Path, data: bytes, label: str) -> bool:
-    """False if ``path`` already holds ``data``; refuse any other existing file."""
-    if not path.exists():
-        return True
+def _holds(path: Path, data: bytes) -> bool:
     try:
-        same = path.is_file() and path.read_bytes() == data
+        return path.is_file() and path.read_bytes() == data
     except OSError:
-        same = False
-    if not same:
-        raise AssemblerError(
-            f"{label} {path.name} already exists with other content; "
-            "move it away before assembling again"
-        )
-    return False
+        return False
 
 
-def _atomic_write(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_bytes(data)
-    os.replace(temporary, path)
+def _other_content(path: Path, label: str) -> AssemblerError:
+    return AssemblerError(
+        f"{label} {path.name} already exists with other content; "
+        "move it away before assembling again"
+    )
+
+
+def _stage(target: Path, data: bytes) -> Path:
+    """Write ``data`` to a new, uniquely named file beside ``target``.
+
+    The file is read back before it is returned, so what gets published is
+    known to be the bytes the qualifier accepted.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(
+        dir=target.parent, prefix=f".{target.name}.", suffix=".staged"
+    )
+    path = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if not _holds(path, data):
+            raise OSError(f"the staged copy of {target.name} does not read back as written")
+    except BaseException:
+        with contextlib.suppress(OSError):
+            path.unlink()
+        raise
+    return path
+
+
+def _create_exclusively(target: Path, data: bytes) -> None:
+    handle = open(target, "xb")  # FileExistsError if the target exists
+    try:
+        with handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if not _holds(target, data):
+            raise OSError(f"{target.name} does not read back as written")
+    except BaseException:
+        # This call created the file, so it may remove its own partial write.
+        with contextlib.suppress(OSError):
+            target.unlink()
+        raise
+
+
+def _publish_new(staged: Path, target: Path, data: bytes, label: str) -> None:
+    """Give ``target`` the staged bytes; never replace a file with other content.
+
+    A hard link is atomic and refuses an existing target, so two runs cannot
+    overwrite each other and no reader sees a half-written file.
+    """
+    try:
+        try:
+            os.link(staged, target)
+        except FileExistsError:
+            raise
+        except OSError:
+            # No hard links on this file system. Still exclusive, not atomic.
+            _create_exclusively(target, data)
+    except FileExistsError:
+        if not _holds(target, data):
+            raise _other_content(target, label) from None
 
 
 def assemble(
@@ -308,29 +382,69 @@ def assemble(
             "It says nothing about the settings before or after.",
             "The qualifier sees the evidence file only. The verdict files are a "
             "separate trust boundary that a reviewer checks by the hashes here.",
+            "A report written with --report is the qualifier's latest verdict and "
+            "is replaced by the next run. It is not immutable release evidence.",
         ],
         "production_activation": False,
     }
     record_bytes = (json.dumps(assembly, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
-    # Both checks come before the first write, so a refusal leaves nothing
-    # half-written. Assembling the same verdicts again is not a change.
-    pending = [
-        (targets[name], data)
-        for name, data in (("output", rendered), ("record", record_bytes))
-        if _needs_write(targets[name], data, name)
-    ]
-    for path, data in pending:
-        _atomic_write(path, data)
-    if report is not None:
-        # The qualifier's own command line reads the written file back and
-        # writes its report, so the report is the qualifier's and not a copy.
-        with contextlib.redirect_stdout(io.StringIO()):
-            code = qual.main([str(targets["output"]), "--report", str(report)])
-        if code != 0:
-            raise AssemblerError(
-                "the qualifier's command line refused the written evidence file"
-            )
+    # Refusals end here: nothing has been created yet.
+    for name, data in (("output", rendered), ("record", record_bytes)):
+        if targets[name].exists() and not _holds(targets[name], data):
+            raise _other_content(targets[name], name)
+
+    staged: list[Path] = []
+    published: list[str] = []
+    try:
+        staged_output = _stage(targets["output"], rendered)
+        staged.append(staged_output)
+        staged_record = _stage(targets["record"], record_bytes)
+        staged.append(staged_record)
+        staged_report = None
+        if report is not None:
+            staged_report = _stage(targets["report"], b"")
+            staged.append(staged_report)
+            # The qualifier's own command line reads the staged evidence file,
+            # which is the file about to be published, and writes its report.
+            # The report is the qualifier's and not a copy; a refusal here
+            # still publishes nothing.
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    code = qual.main([str(staged_output), "--report", str(staged_report)])
+            except OSError:
+                raise
+            except Exception as exc:
+                raise AssemblerError(
+                    f"the qualifier's command line failed on the staged evidence file: {exc}"
+                ) from exc
+            if code != 0:
+                raise AssemblerError(
+                    "the qualifier's command line refused the staged evidence file"
+                )
+
+        # Publication, in a fixed order. Each step adds one complete file.
+        _publish_new(staged_output, targets["output"], rendered, "output")
+        published.append(targets["output"].name)
+        _publish_new(staged_record, targets["record"], record_bytes, "record")
+        published.append(targets["record"].name)
+        if staged_report is not None:
+            os.replace(staged_report, targets["report"])
+            published.append(targets["report"].name)
+    except (OSError, AssemblerError) as exc:
+        reason = str(exc) if isinstance(exc, AssemblerError) else f"a file could not be written: {exc}"
+        if not published:
+            if isinstance(exc, AssemblerError):
+                raise
+            raise AssemblerError(f"{reason}; nothing was published") from exc
+        raise AssemblerError(
+            f"{reason}; already published, complete and accepted by the qualifier: "
+            f"{', '.join(published)}. Run the same command again to complete the set"
+        ) from exc
+    finally:
+        for path in staged:
+            with contextlib.suppress(OSError):
+                path.unlink()
     return assembly
 
 
@@ -364,7 +478,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--report",
         type=Path,
-        help="also let the qualifier write its verdict report here",
+        help=(
+            "also let the qualifier write its latest verdict here; the next run "
+            "replaces it, so it is not immutable release evidence"
+        ),
     )
     return parser
 
@@ -384,9 +501,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     except AssemblerError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}))
-        return 2
-    except OSError as exc:
-        print(json.dumps({"ok": False, "error": f"a file could not be written: {exc}"}))
         return 2
     print(json.dumps(assembly, indent=2, sort_keys=True))
     return 0
