@@ -18,6 +18,9 @@ catalog (#2365). Go never reads the media volume itself:
   and then checked with ``require_descriptor`` before any byte is sent. A volume lost once stays
   lost for this process (the same sticky rule as the executor): 503 until the worker restarts.
 
+**Order:** newest first, so a new result is on the first page. The cursor is the last id of the
+previous page.
+
 **Three states, never more.** Owned and verified → 200/206 (or 416 for a range past the end).
 Not owned, or unknown → 404, decided from the job database *before* the volume is touched, so the
 answer says nothing about what is on the disk. Cannot decide (database error, more than 10,000
@@ -112,6 +115,9 @@ class MediaGalleryService:
             if item["thumbnail_id"] is not None and item["thumbnail_id"] not in owned:
                 item = {**item, "thumbnail_id": None, "thumbnail_url": None}  # never a link to a 404
             items.append(item)
+        # Newest first (#2367 C6 G3): the sink appends to the index, so a new result is on the
+        # first page instead of the last. The cursor is still the last id of the previous page.
+        items.reverse()
         start = 0
         if cursor is not None:
             positions = [i for i, item in enumerate(items) if item["id"] == cursor]

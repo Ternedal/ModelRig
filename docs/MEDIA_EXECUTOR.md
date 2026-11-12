@@ -105,6 +105,8 @@ Each executor runs in the supervisor's process tree (a Windows Job Object), so s
 | `KALIV_MEDIA_PROFILE_DIR` | executor | Operator profile directory |
 | `KALIV_MEDIA_IDLE_UNLOAD_S` | executor | Optional; default 300 |
 | `KALIV_MEDIA_VIDEO=1` | executor | The video switch. It is separate from the master switch. With any other value, an enabled video profile is exit 78 |
+| `KALIV_MEDIA_JOBS_API=1` | server, worker | The device routes for jobs and the gallery (`docs/MEDIA_GALLERY.md`). Without it they are not registered (jobs) or answer 503 (gallery) |
+| `KALIV_MEDIA_INTERNAL_SECRET` | server, worker | At least 32 characters, no line break, the same value on both sides. It authenticates the server to the worker's `/internal/media/*` routes and never reaches a device or a log |
 | `KALIV_COMFY_PYTHON`, `KALIV_COMFY_MAIN` | executor (video) | Absolute paths of the pinned ComfyUI environment's python and of its `main.py`. `main.py` must not be a link |
 | `KALIV_COMFY_DIR` | executor (video) | The ComfyUI folder, in the work area. Every executor gets the same environment from the supervisor, so each uses its own `cuda<N>/` in it, chosen by `--device`: `<dir>/cuda0/`, `<dir>/cuda1/`. That folder must contain existing `input/`, `output/`, `temp/` and `user/` directories (not files, not links). Nothing is created |
 | `KALIV_COMFY_TEMPLATE_DIR` | executor (video) | The operator's workflow template directory. Each profile pins its template's SHA-256 |
