@@ -14,8 +14,7 @@ En sømløs tænke-/loading-animation baseret på den godkendte Kaliv-ankh.
 - Transparent GIF
 - Dark-mode GIF
 - Light-mode GIF
-- Transparent lossless animated WebP
-- Transparent APNG
+- Transparent lossless animated WebP (`WEBP/`, kun 256×256)
 
 ## Animation
 - Ankh'en står stille og bevarer brandets identitet

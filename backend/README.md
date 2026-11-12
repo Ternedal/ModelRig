@@ -27,7 +27,8 @@ Status: **built, vetted and smoke-tested** (11/11) in the generator environment.
 | DELETE | `/api/v1/rag/source`    | bearer | → worker `/rag/source` (query forwarded) |
 
 \* `pair/start` requires header `X-Admin-Key` **iff** `MODELRIG_ADMIN_KEY` is set;
-otherwise it is open (dev mode) and the server logs a warning.
+otherwise only a loopback caller may mint a code (the on-rig `-pair` CLI); remote
+callers get 403, and the server logs a note at startup.
 \*\* `pair/claim` consumes a valid, unexpired, single-use code, and is
 rate-limited per client IP (`MODELRIG_CLAIM_MAX` attempts / 5 min, default 10) to
 stop brute-forcing the code space.
@@ -47,19 +48,22 @@ MODELRIG_HOST=0.0.0.0 ./modelrig-server
 
 ## Pairing
 ```bash
-# server stopped: mint a code offline
+# on the rig, server running: asks the live server (see note below)
 ./modelrig-server -pair
 
-# server running: use the HTTP endpoint (updates the live in-memory store)
+# or call the HTTP endpoint directly (loopback, or with X-Admin-Key)
 curl -X POST http://localhost:8080/api/v1/pair/start
 ```
 Then in a client: `POST /api/v1/pair/claim {"device_name":"...","code":"XXXX-XXXX"}`
 → returns a `token` (shown once).
 
-> `-pair` now detects a running server on `127.0.0.1:PORT` and, if found, asks it
-> to mint the code over HTTP — so the code lands in the live store (no more
-> dual-writer footgun). Only if no server answers does it write the store file
-> directly. If `MODELRIG_ADMIN_KEY` is set, `-pair` sends it automatically.
+> `-pair` asks the running server at its configured address (`127.0.0.1:PORT`
+> for a `0.0.0.0` bind) to mint the code over HTTP, so the code lands in the
+> live store (no dual-writer footgun). If no server answers, it fails
+> ("running ModelRig server … is required for pairing"); it never writes the
+> store file itself. If `MODELRIG_ADMIN_KEY` is set, `-pair` sends it
+> automatically — and with a concrete LAN/Tailscale bind it must be set, because
+> that call does not arrive from loopback.
 
 ## Config
 Defaults → optional JSON file (`MODELRIG_CONFIG=path`) → env overrides.
@@ -73,7 +77,7 @@ Defaults → optional JSON file (`MODELRIG_CONFIG=path`) → env overrides.
 | `MODELRIG_WORKER_URL`  | `http://127.0.0.1:8099`     |                                    |
 | `MODELRIG_DATA`        | `./modelrig-data.json`      | device + pairing store             |
 | `MODELRIG_PAIRING_TTL` | `300` (seconds)             |                                    |
-| `MODELRIG_ADMIN_KEY`   | *(unset → pair/start open)* | gate for `pair/start`              |
+| `MODELRIG_ADMIN_KEY`   | *(unset → pair/start loopback-only)* | gate for `pair/start`     |
 | `MODELRIG_CLAIM_MAX`   | `10`                        | max claim attempts / IP / 5 min    |
 | `MODELRIG_CONFIG`      | *(unset)*                   | path to a JSON config file         |
 

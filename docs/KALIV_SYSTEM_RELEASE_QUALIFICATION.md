@@ -285,9 +285,9 @@ Do not mark the `consciousness_live_lifecycle` gate PASS by hand. Once
 verdict for the exact pinned ModelRig SHA, bind it into the release manifest with:
 
 ```powershell
-python scripts/kaliv_system_release_bind_consciousness.py \
-  .\kaliv-release-manifest.json \
-  .\consciousness-live-lifecycle-verdict.json \
+python scripts/kaliv_system_release_bind_consciousness.py `
+  .\kaliv-release-manifest.json `
+  .\consciousness-live-lifecycle-verdict.json `
   --output .\kaliv-release-manifest.bound.json
 ```
 

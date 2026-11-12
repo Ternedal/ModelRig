@@ -26,7 +26,7 @@ A generator runs only if **all** of these hold:
 6. The GPU lease for that UUID is free.
 7. With the lease held, torch's `cuda:N` reports that UUID, and the device has `min_usable_gib` free above `reserve_gib`.
 
-The lease is held for as long as the model is loaded: budget, load, inference and the resident lifetime, until `close()`. Another generator **that takes this lease**, such as a second image executor or (next slice) the Wan/ComfyUI adapter, gets `GpuBusy` for that GPU instead of loading on top of it.
+The lease is held for as long as the model is loaded: budget, load, inference and the resident lifetime, until `close()`. Another generator **that takes this lease**, such as a second image executor or the Wan/ComfyUI adapter (`worker/app/comfy_video_adapter.py`), gets `GpuBusy` for that GPU instead of loading on top of it.
 
 **Scope (decision 6491161681).** The lease coordinates only processes that take it. Ollama, a WSL2 instance and any worker that does not use `gpu_lease` are **not** covered. Whole-rig GPU exclusivity is **unproven** and not claimed until a common arbiter, or explicit coordination, and physical tests exist.
 
@@ -71,7 +71,7 @@ The placeholders above are rejected on purpose: a revision must be 40 lower-case
 
 - **Backends:**
   - `diffusers` serves image profiles;
-  - `comfyui` serves video profiles (Wan), and its adapter is the next slice.
+  - `comfyui` serves video profiles (Wan) through `ComfyVideoAdapter` (`worker/app/comfy_video_adapter.py`); see `docs/MEDIA_VIDEO_GENERATION.md`.
 - **Diffusers pipelines (allowlist):** `QwenImagePipeline`, `StableDiffusionXLPipeline`, `FluxPipeline`. The adapter never loads any other class.
 - **Licence:** recorded per profile. Some candidate models carry non-commercial licences; that is the operator's responsibility to respect.
 
@@ -80,7 +80,5 @@ The placeholders above are rejected on purpose: a revision must be 40 lower-case
 The executor process that drives these adapters is described in `docs/MEDIA_EXECUTOR.md` (G2, default-off).
 
 
-- the executor process and its wiring to the media store (once `ArtifactSink` has an implementation on the gallery side);
 - image-to-image (it needs input bytes from the media store);
-- the Wan/ComfyUI video adapter (submit/poll), which uses the same lease;
 - any route.

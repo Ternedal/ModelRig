@@ -125,8 +125,14 @@ for _name, _doc in (("RIGDAG_SIMPEL.md", rigdag), ("STAGED_PHYSICAL_PROMOTION.md
             f"{_name}: block 0 binds the candidate to the published v2.0.19 tag before the freeze",
         ),
         (
-            "merges intet til `main`" in _doc,
-            f"{_name}: main stays still from the tag until Stage A is green",
+            # Anders lifted the freeze window on 12 Nov 2026 (#2275 comment
+            # 6816274261). The runbook must say so, and must still tell the
+            # operator that a moved main stops the control and is not bypassed.
+            "Freeze-vinduet er ophævet 12/11-2026" in _doc
+            and "6816274261" in _doc
+            and "Den må ikke omgås" in _doc
+            and "merges intet til `main`" not in _doc,
+            f"{_name}: records that the freeze window was lifted and that a moved main still stops the control",
         ),
         (
             "fast-forwardes til `main`" not in _doc and "må `main` fast-forwardes" not in _doc,
