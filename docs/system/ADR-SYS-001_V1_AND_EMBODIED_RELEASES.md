@@ -1,8 +1,9 @@
 # ADR-SYS-001: V1 og Kaliv Embodied som to releases
 
-**Status:** UDKAST. Ikke vedtaget. Skrevet af Claude 12-11-2026 som afgørelse B i #2373. Vedtagelsen er Anders' merge af denne PR.
+**Status:** VEDTAGET af Anders 12-11-2026 ("vedtag ADR'en").
+**Udkast:** skrevet af Claude 12-11-2026 som afgørelse B i #2373.
 **Serie:** første dokument i en SYS-serie for beslutninger, der går på tværs af de fire repositories.
-**Stopreglen (A4-005):** dokumentet skal være vedtaget og landet, før gate-scriptet ændres.
+**Stopreglen (A4-005) er overholdt:** dette dokument landes FØR den kode, det beskriver.
 
 ---
 
@@ -72,9 +73,9 @@ Så længe alle ti hænger sammen, kan intet i Kaliv kaldes færdigt, før BodyR
 4. `KALIV_SYSTEM_RELEASE_QUALIFICATION.md`, `KALIV_SYSTEM_DEFINITION.md` og manifest-skabelonen.
 5. Release-kvalifikationens latency-afsnit for D5. Validatoren røres ikke.
 
-## 7. Valg, der er truffet i udkastet
+## 7. Valg truffet ved vedtagelsen
 
-Anders fik tre spørgsmål 12/11 og svarede "Kør" uden at vælge. Udkastet bruger derfor disse standardvalg. Hvert kan ændres før merge.
+Anders fik tre spørgsmål 12/11 og vedtog udkastet med dets standardvalg.
 
 - **Navn.** Den smalle release hedder "Kaliv V1". Den fulde hedder "Kaliv Embodied".
 - **Latency.** V1 måler til første talte svar (`outward_kind` = `voice`). Det er D5.
@@ -85,4 +86,4 @@ Anders fik tre spørgsmål 12/11 og svarede "Kør" uden at vælge. Udkastet brug
 - Det vælger ikke pins.
 - Det ændrer ikke BodyRigs egne acceptkrav (BodyRig #2, #3, #4, #5, #817).
 - Det tager ikke stilling til feature-stoppet (afgørelse C i #2373).
-- Det vedtager ikke sig selv. Statuslinjen ændres til VEDTAGET i samme PR, når Anders har sagt ja, og først derefter merges den.
+- Det ændrer ingen kode. Gate-scriptet og kravdokumenterne følger i egne PR'er efter afsnit 6.
