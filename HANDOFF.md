@@ -856,6 +856,47 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
   `scheduler_pilot_evidence.py`, og `START_STAGE_B_TEST.cmd` nævner ikke
   længere en forældet kildeversion).
 
+### 12/11: ADR-SYS-001, to releases, og feature-stop
+
+- **Anders vedtog ADR-SYS-001 12/11 kl. 07:28 CET** ("vedtag ADR'en").
+  Dokumentet ligger i `docs/system/ADR-SYS-001_V1_AND_EMBODIED_RELEASES.md`
+  (#2383, `ebe6090c`). De ti system-gates er nu to navngivne releases:
+  - **Kaliv V1** kræver syv: `software_exact_green`,
+    `consciousness_live_lifecycle`, `visionrig_physical_perception`,
+    `voicerig_physical_acceptance`, `end_to_end_latency`, `recovery_soak`,
+    `repository_authority`.
+  - **Kaliv Embodied** kræver alle ti. De tre krops-gates har uændrede krav.
+- **Gaten håndhæver det** (#2384, `2f960814`): release-manifestet er skema
+  `v2` og SKAL bære `release_scope` (`v1` eller `embodied`); verdiktet har
+  `release_scope` og `deferred_gates`; assembleren kræver `--release-scope`
+  og afviser krops-evidens under `v1`. BodyRig bliver i pin-sættet for begge.
+  Der fandtes ingen manifester, så intet skulle migreres.
+- **V1 måler latency til første talte svar** (`outward_kind` = `voice`).
+  Gaten ser kun evidens-ref'en og kan ikke kontrollere det; det er et krav
+  til kvalifikationskørslen.
+- **Ikke afgjort:** hvilken VoiceRig-SHA V1 pinner. V1-accepten ligger på
+  RC25 (`587e6cc`); det afgøres, når pins vælges.
+- **Feature-stop (afgørelse C i #2373), meldt i #2275 kommentar 6816510308.**
+  Grundlaget er Anders' "Kør" på en besked, der listede C som ventende; han
+  skrev ikke selv beslutningen ud og kan rulle den tilbage med én linje. Til
+  V1 har bestået sine syv gates, startes intet nyt på Continuum (#2261),
+  KalivNexus-integration, KalivHub ud over det importerede, LanguageRig og
+  voice-routing til Nest Hub (#2298/#2299). Undtaget: billede/video-stakken
+  og hastighedsarbejdet på BodyRigs klon-pipeline.
+- **Launchere:** efter #2372 og #2388 (`1a8b7b52`) sætter ALLE rod-launchere
+  `PYTHONDONTWRITEBYTECODE=1`, og `tests/workflow_launcher_bytecode.py` har
+  ingen undtagelsesliste. En ny launcher uden flaget fælder gaten.
+- **Issue-oprydning:** 68 af 72 Consciousness Core-slice-issues lukket 12/11
+  (57 på filtjek mod `main`, 5 på navnematch, 6 som forkastede varianter).
+  Åbne: #1613 (paraplyen), #1616, #1658, #1703. Metoden og dens grænser står
+  i #2373.
+- **Planen** for resten står i #2373: medie-stakken → 2.0.20 → rigdage for
+  V1 (fase 4) → Kaliv Embodied (fase 5).
+- **LEKTIE (gentagelse af 22/08):** mit landingsscript meldte #2388 som landet
+  i #2275 og #2373, selv om merge-kaldet havde svaret 405. Rettet inden for to
+  minutter. En melding skal ligge INDE i den gren, hvor merge-svaret,
+  `ls-remote`, REST-ref og PR-status er bekræftet ens.
+
 ### 8.–11/11: D3 ændret, v2.0.19 publiceret, `physical-proof/2.0.19` oprettet
 
 **[11/11 — status. main = `3cbd00f1` (merge af #2364). Landet 7.–9/11: #2345,
