@@ -148,6 +148,37 @@ object MediaGenerate {
 
     fun submitted(state: MediaGenerateState, job: MediaJob) = state.copy(phase = phaseFor(job), error = null)
 
+    /**
+     * The job a recreated screen picks up again (#2275 backlog task 4): rotation, a
+     * configuration change or the process being killed in the background. Only this
+     * ID is ever saved, never the prompt; it is a job the rig already holds.
+     */
+    fun jobId(state: MediaGenerateState): String? = when (val p = state.phase) {
+        is MediaGeneratePhase.Following -> p.job.id
+        is MediaGeneratePhase.Stalled -> p.job.id
+        is MediaGeneratePhase.Finished -> p.job.id
+        else -> null
+    }
+
+    /** The saved job, read back once the profiles are in; only onto the empty form, never over another job. */
+    fun restored(state: MediaGenerateState, id: String, job: MediaJob): MediaGenerateState = when {
+        state.phase != MediaGeneratePhase.Ready -> state
+        job.id != id -> state.copy(phase = MediaGeneratePhase.Unavailable("Uventet svar fra riggen"))
+        else -> state.copy(phase = phaseFor(job), error = null)
+    }
+
+    fun restoreFailed(state: MediaGenerateState, e: MediaJobException): MediaGenerateState {
+        if (state.phase != MediaGeneratePhase.Ready) return state
+        return when (e.reason) {
+            Reason.NOT_FOUND -> state.copy(error = "Det tidligere job findes ikke længere på riggen")
+            Reason.UNAUTHORIZED, Reason.NOT_PAIRED -> state.copy(phase = MediaGeneratePhase.Unavailable(message(e)))
+            // Never a guess: the job may well still be running, and the form says so.
+            else -> state.copy(error = RESTORE_FAILED_TEXT)
+        }
+    }
+
+    const val RESTORE_FAILED_TEXT = "Det tidligere job kunne ikke hentes; det kører måske stadig på riggen"
+
     fun submitFailed(state: MediaGenerateState, e: MediaJobException): MediaGenerateState =
         if (e.reason == Reason.UNAVAILABLE || e.reason == Reason.UNAUTHORIZED || e.reason == Reason.NOT_PAIRED) {
             state.copy(phase = MediaGeneratePhase.Unavailable(message(e)))

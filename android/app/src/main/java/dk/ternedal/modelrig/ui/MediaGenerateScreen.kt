@@ -20,6 +20,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -27,6 +28,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import dk.ternedal.modelrig.data.TokenStore
 import dk.ternedal.modelrig.net.MediaJobClient
+import dk.ternedal.modelrig.net.MediaJobContract
 import dk.ternedal.modelrig.net.MediaJobException
 import dk.ternedal.modelrig.net.MediaJobSource
 import dk.ternedal.modelrig.ui.components.kalivScreenInsets
@@ -47,7 +49,9 @@ import kotlinx.coroutines.withContext
  *
  * The prompt is held in Compose memory only (`remember`, not
  * `rememberSaveable`): it is not written to the saved instance state, a log or
- * storage, and it is gone when the screen closes.
+ * storage, and it is gone when the screen closes. Only the followed job's ID is
+ * saved (`rememberSaveable`), so a rotation or a process restart picks the same
+ * job up again instead of leaving it running unseen (#2275 backlog task 4).
  */
 @Composable
 fun MediaGenerateScreen(store: TokenStore, onOpenGallery: () -> Unit, onClose: () -> Unit) {
@@ -76,6 +80,9 @@ internal fun MediaGenerateContent(
     pollMillis: Long = MediaGenerate.POLL_MILLIS,
 ) {
     var state by remember { mutableStateOf(MediaGenerateState()) }
+    var savedJobId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Until the saved job has been asked for, the empty form must not clear it.
+    var restoring by remember { mutableStateOf(savedJobId != null) }
     val scope = rememberCoroutineScope()
 
     fun failure(error: Throwable): MediaJobException = error as? MediaJobException
@@ -87,6 +94,22 @@ internal fun MediaGenerateContent(
             onSuccess = { MediaGenerate.profilesLoaded(state, it) },
             onFailure = { MediaGenerate.profilesFailed(state, failure(it)) },
         )
+        val id = savedJobId?.takeIf(MediaJobContract::isJobId)
+        if (id != null && state.phase == MediaGeneratePhase.Ready) {
+            val job = withContext(io) { runCatching { source.status(id) } }
+            state = job.fold(
+                onSuccess = { MediaGenerate.restored(state, id, it) },
+                onFailure = { MediaGenerate.restoreFailed(state, failure(it)) },
+            )
+        }
+        restoring = false
+    }
+
+    val currentJobId = MediaGenerate.jobId(state)
+    LaunchedEffect(currentJobId, restoring) {
+        // A job that could not be read back is kept: it may still be running on the rig.
+        val keep = currentJobId == null && state.error == MediaGenerate.RESTORE_FAILED_TEXT
+        if (!restoring && state.phase != MediaGeneratePhase.Loading && !keep) savedJobId = currentJobId
     }
 
     // Poll while a job is followed; the effect is cancelled when the job finishes or the

@@ -268,6 +268,24 @@ class MediaGeneratePresentationTest {
     }
 
     @Test
+    fun `only a job phase has an id to save, and a restore never lands on another job`() {
+        // #2275 backlog task 4.
+        val ready = MediaGenerate.profilesLoaded(MediaGenerateState(), listOf(SDXL)).copy(prompt = "a red bicycle")
+        assertEquals(null, MediaGenerate.jobId(ready))
+        assertEquals(JOB_ID, MediaGenerate.jobId(following(MediaJobState.RUNNING)))
+        val back = MediaGenerate.restored(ready, JOB_ID, job(state = MediaJobState.RUNNING))
+        assertEquals(JOB_ID, (back.phase as MediaGeneratePhase.Following).job.id)
+        val other = MediaGenerate.restored(ready, JOB_ID, job(state = MediaJobState.RUNNING).copy(id = "b".repeat(32)))
+        assertTrue(other.phase is MediaGeneratePhase.Unavailable)
+        val busy = following(MediaJobState.RUNNING)
+        assertEquals("a restore is only applied to the empty form", busy, MediaGenerate.restored(busy, JOB_ID, job(state = MediaJobState.QUEUED)))
+        assertEquals(MediaGenerate.RESTORE_FAILED_TEXT,
+            MediaGenerate.restoreFailed(ready, MediaJobException(Reason.TRANSIENT, "x")).error)
+        assertTrue(MediaGenerate.restoreFailed(ready, MediaJobException(Reason.UNAUTHORIZED, "x")).phase is MediaGeneratePhase.Unavailable)
+        assertEquals(MediaGeneratePhase.Ready, MediaGenerate.restoreFailed(ready, MediaJobException(Reason.NOT_FOUND, "x")).phase)
+    }
+
+    @Test
     fun `an auth failure while polling stays distinct from a transient one`() {
         val auth = MediaGenerate.pollFailed(following(MediaJobState.RUNNING),
             MediaJobException(Reason.UNAUTHORIZED, "Parringen er ikke længere gyldig"))
