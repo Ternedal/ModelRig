@@ -90,7 +90,7 @@ turn names the measurement it wants with `outward_kind`:
 
 | `outward_kind` | Release | Ends when | Body |
 |---|---|---|---|
-| `voice` | Kaliv V1 (ADR-SYS-001 D5 and D6) | playback of the reply is reported on `POST /experimental/e2e-latency/voice/{utterance_id}/started` | None. No body session is created, read or required, and the receipt's `body_runtime_id` is null. |
+| `voice` | Kaliv V1 (ADR-SYS-001 D5 and D6) | a client reports on `POST /experimental/e2e-latency/voice/{utterance_id}/started` that it has dispatched playback of the reply | None. No body session is created, read or required, and the receipt's `body_runtime_id` is null. |
 | `voice+body` (default) | Kaliv Embodied | the client reports `POST /body/speech/{utterance_id}/started` | An active body is required, and the receipt names its runtime. |
 
 A playback start is reported once. A second report is refused and does not move
@@ -104,8 +104,8 @@ observer identity are the worker's own.
 > Windows-only code that no test executes.
 
 `scripts/kaliv_e2e_latency_voice_driver.py` is the client: it takes one spoken
-utterance, posts it, starts playing the reply on the rig, and only then reports
-the start.
+utterance, posts it, hands the reply to the player on the rig, and only then
+reports the start.
 
 Start the worker from the clean candidate checkout with the Consciousness
 flags and profile of
@@ -144,21 +144,74 @@ python scripts\kaliv_e2e_latency_voice_driver.py --record-seconds 5 --player-com
 
 ### What this number is
 
-The clock starts when the worker has accepted the audio and stops when the
-start of playback is reported on the worker's loopback. It therefore does
-**not** include:
+**The metric is: from the worker accepting the audio to playback of the reply
+being dispatched on the rig.** Use that wording in a release claim. It is not a
+verified first audible reply, and it is not the latency a phone user
+experiences.
+
+The clock starts when the worker has accepted the audio. It stops when the
+client reports on the worker's loopback that it has handed the reply to the
+player. It therefore does **not** include:
 
 - capturing the utterance and getting it to the worker;
 - the network between a phone and the rig;
 - playback on a phone;
-- the output latency of the playback device.
+- the output latency of the playback device;
+- the time from dispatch until the reply became audible. Neither the worker
+  nor the driver listens.
 
-The receipt's schema has no field for this, so the worker writes it to
-`voice_outward_scope.json` beside the receipts, and the driver repeats it in
-`rig_driver_run.json` together with the hashes of the input, the reply and the
-three receipts. Keep both files with the receipts. A reviewer of the
-`kaliv-end-to-end-latency:` reference should read them: the gate itself sees
-only the reference.
+### What the receipts assert, and what stands behind it
+
+All three receipts carry `real_event: true`, `simulated: false` and
+`replay: false`. **The worker sets those three values on every turn of this
+route.** They are the route's assertion. They are not findings about the audio.
+
+The route receives audio bytes and cannot tell an utterance spoken now from a
+recording. **Nothing in this evidence proves that the utterance was spoken
+live.** What stands behind `replay: false` is:
+
+- **The operator's attestation.** Whoever runs the driver attests that the
+  utterance was spoken for this turn.
+- **Two mechanical checks in the driver.** A supplied WAV must be at most ten
+  minutes old, and a recording is accepted once. They narrow the room for a
+  mistake. They prove nothing about how the audio was made.
+
+The run record names where the audio came from:
+
+| `input.source` | Meaning |
+|---|---|
+| `recorded_by_driver` | The driver recorded it from the default input device, directly before posting. |
+| `operator_supplied_wav` | The operator passed a file with `--wav`. |
+
+Both carry `live_utterance_verified: false`. The source follows from which
+input was given; no option sets it.
+
+### The two sidecar files
+
+The receipt's schema is exact and has no field for any of this, so it is
+written beside the receipts:
+
+| File | Written by | Holds |
+|---|---|---|
+| `voice_outward_scope.json` | the worker | what the stamp is (`outward_event`), `audible_onset_measured: false`, `live_utterance_verified: false`, the asserted receipt fields, and `not_measured` |
+| `rig_driver_run.json` | the driver | the source of the utterance, the player, `start_event: dispatch`, the same `not_measured` list, and the SHA-256 of the input, the reply, the three receipts and `voice_outward_scope.json` |
+
+The driver refuses to write its record if the worker's sidecar is missing or
+says less than this.
+
+**The gate sees only the `kaliv-end-to-end-latency:` reference. It cannot
+certify any of the above.** Whoever reviews that reference for a release must
+open both files. Checklist:
+
+1. The three receipt hashes in `rig_driver_run.json` match the receipt files.
+2. `scope_sidecar.sha256` matches `voice_outward_scope.json`.
+3. `input.source` is read and accepted for this release.
+4. `playback.start_event` is `dispatch`, and the release claim uses the wording
+   at the top of this section.
+5. Both `not_measured` lists hold the same six lines: the five above, and that
+   the route cannot tell whether the utterance was spoken live.
+
+Keep both files with the receipts.
 
 ## Run
 

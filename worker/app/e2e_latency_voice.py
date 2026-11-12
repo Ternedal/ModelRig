@@ -49,6 +49,19 @@ _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _UTTERANCE = re.compile(r"^e2e-[0-9a-f]{32}-0$")
 _MAX_PENDING_VOICE_OUTWARD = 8
 VOICE_SCOPE_SCHEMA = "kaliv-system/end-to-end-latency-voice-scope/v1"
+# What the voice measurement leaves out. The driver repeats this list.
+VOICE_NOT_MEASURED = (
+    "microphone capture and upload of the utterance",
+    "the network between a phone and the rig",
+    "playback on a phone",
+    "output latency of the playback device",
+    "when the reply became audible: the stamp is the client's report that "
+    "playback was dispatched",
+    "whether the utterance was spoken live: the route receives audio bytes "
+    "and cannot tell",
+)
+# Set by the observer on every receipt of every turn on this route.
+ASSERTED_RECEIPT_FIELDS = ("real_event", "simulated", "replay")
 
 
 class QualificationBody(BaseModel):
@@ -114,18 +127,23 @@ class VoiceOutwardRegistry:
                 "utterance_id": utterance_id,
                 "outward_kind": "voice",
                 "playback_start_reported_on": "worker-loopback",
+                # The route stamps the moment a client says playback started.
+                # It hears nothing itself, so the stamp is a dispatch report
+                # and not the moment the reply became audible.
+                "outward_event": "client-reported-playback-dispatch",
+                "audible_onset_measured": False,
                 "measured": (
-                    "from the worker accepting the audio to the reported start of "
-                    "playback of the reply"
+                    "from the worker accepting the audio to the client's report "
+                    "that it had dispatched playback of the reply"
                 ),
+                # The route receives audio bytes. It cannot tell an utterance
+                # spoken now from a recording, so these receipt fields are what
+                # the route asserts for every turn, not findings about the audio.
+                "live_utterance_verified": False,
+                "receipt_fields_asserted_not_measured": list(ASSERTED_RECEIPT_FIELDS),
                 # The receipt's schema has no field for this, so it is stated
                 # beside it: the number is not what a phone user experiences.
-                "not_measured": [
-                    "microphone capture and upload of the utterance",
-                    "the network between a phone and the rig",
-                    "playback on a phone",
-                    "output latency of the playback device",
-                ],
+                "not_measured": list(VOICE_NOT_MEASURED),
                 "production_activation": False,
             },
         )

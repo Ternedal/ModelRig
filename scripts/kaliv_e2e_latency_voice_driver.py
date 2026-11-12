@@ -17,6 +17,14 @@ It measures ADR-SYS-001's V1 scope: to the first spoken answer, with no body.
 The reply is played on the rig, so the number does not include a phone or the
 network to it. The run record says so.
 
+Two limits of the evidence, both stated in the run record:
+
+- The clock stops when playback has been dispatched to the player. The tool
+  does not listen, so it is not the moment the reply became audible.
+- The receipts say ``replay: false`` for every turn. Nothing here proves the
+  utterance was spoken live. The record names where the audio came from; that
+  it was spoken for this turn is the operator's attestation.
+
 The tool talks to the worker on loopback only. It starts, stops and activates
 nothing. The worker must already run with the qualification flag set.
 """
@@ -50,12 +58,23 @@ TURN_PATH = "/experimental/e2e-latency/voice"
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 _MAX_WAV_BYTES = 16 * 1024 * 1024
 _MAX_REPLY_BYTES = 64 * 1024 * 1024
+SCOPE_SIDECAR = "voice_outward_scope.json"
+# The worker writes the same list to its scope sidecar. A run is refused if the
+# two differ, so the record cannot say less than the worker does.
 NOT_MEASURED = (
     "microphone capture and upload of the utterance",
     "the network between a phone and the rig",
     "playback on a phone",
     "output latency of the playback device",
+    "when the reply became audible: the stamp is the client's report that "
+    "playback was dispatched",
+    "whether the utterance was spoken live: the route receives audio bytes "
+    "and cannot tell",
 )
+# Where the utterance came from. Neither value proves live speech.
+SOURCE_RECORDED = "recorded_by_driver"
+SOURCE_SUPPLIED = "operator_supplied_wav"
+LIVE_UTTERANCE = "attested by the operator who ran the driver; not verified"
 
 
 class DriverError(RuntimeError):
@@ -259,7 +278,7 @@ def run_turn(
             out(f"Tal nu. Optager i {record_seconds:g} sekunder ...")
             record(source, record_seconds)
             out("Optagelsen er slut.")
-            input_record: dict[str, Any] = {"mode": "recorded-live", "seconds": record_seconds}
+            input_record: dict[str, Any] = {"source": SOURCE_RECORDED, "seconds": record_seconds}
         else:
             source = wav
             try:
@@ -267,19 +286,24 @@ def run_turn(
             except OSError as exc:
                 raise DriverError("the WAV file cannot be read") from exc
             # A file from last week is a replay of an old event, and the
-            # receipts say this is not one.
+            # receipts say this is not one. The age limit narrows that; it
+            # does not prove the file was spoken into a microphone just now.
             if age > max_input_age_seconds:
                 raise DriverError(
                     f"the WAV file is {age:.0f} seconds old; record the utterance again "
                     f"(limit {max_input_age_seconds:.0f} seconds)"
                 )
-            input_record = {"mode": "supplied-file", "age_seconds": round(max(age, 0.0), 1)}
+            input_record = {"source": SOURCE_SUPPLIED, "age_seconds": round(max(age, 0.0), 1)}
         try:
             audio = source.read_bytes()
         except OSError as exc:
             raise DriverError("the utterance cannot be read") from exc
         if not audio or len(audio) > _MAX_WAV_BYTES:
             raise DriverError("the utterance must be a nonempty WAV of at most 16 MB")
+        # The same two lines for both sources: recording through the default
+        # input device does not prove a person spoke either.
+        input_record["live_utterance"] = LIVE_UTTERANCE
+        input_record["live_utterance_verified"] = False
         input_record["wav_seconds"] = round(wav_seconds(source), 2)
         input_record["sha256"] = _sha256(audio)
         input_record["bytes"] = len(audio)
@@ -376,6 +400,27 @@ def run_turn(
     if verdict.get("outward_kind") != "voice":
         raise DriverError("the receipts do not describe a voice-only measurement")
 
+    # The worker states the limits of the measurement beside the receipts. The
+    # record binds that file by hash and must not say less than it does.
+    scope_path = evidence_dir / SCOPE_SIDECAR
+    try:
+        scope_bytes = scope_path.read_bytes()
+        scope = json.loads(scope_bytes.decode("utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DriverError("the worker's scope sidecar cannot be read") from exc
+    if (
+        not isinstance(scope, dict)
+        or scope.get("utterance_id") != utterance
+        or scope.get("outward_kind") != "voice"
+        or scope.get("audible_onset_measured") is not False
+        or scope.get("live_utterance_verified") is not False
+        or scope.get("not_measured") != list(NOT_MEASURED)
+    ):
+        raise DriverError(
+            "the worker's scope sidecar does not state this turn's limits; "
+            "driver and worker must be from the same checkout"
+        )
+
     record_value = {
         "schema": RUN_SCHEMA,
         "qualification_id": turn.get("qualification_id"),
@@ -388,8 +433,13 @@ def run_turn(
         "playback": {
             "where": "on the machine that ran this driver",
             "player": player_label,
-            "reported_after_playback_began": True,
+            # The driver hands the reply to the player and then reports. It
+            # does not listen, so it cannot say when the reply was heard.
+            "start_event": "dispatch",
+            "reported_after_dispatch": True,
+            "audible_onset_measured": False,
         },
+        "scope_sidecar": {"path": str(scope_path), "sha256": _sha256(scope_bytes)},
         "source_receipts": {
             name: {"path": str(path), "sha256": _sha256(path.read_bytes())}
             for name, path in paths.items()
