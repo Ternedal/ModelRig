@@ -12,6 +12,9 @@ the call site, as workflow_client_capability_gates does for its gates:
   next to "Opgaver" and "Personer";
 - MainActivity still routes EXTRA_MEDIA_GENERATE to MediaGenerateScreen.
 
+Source is read through tests/support/source_code.code_of, so a commented-out
+item does not count (workflow_gates_read_code).
+
 Run: python3 tests/workflow_android_media_entry.py
 """
 from __future__ import annotations
@@ -21,6 +24,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tests" / "support"))
+from source_code import code_of  # noqa: E402  comments removed: a commented-out item must fail
 APP = ROOT / "android/app/src/main/java/dk/ternedal/modelrig"
 APP_UI = APP / "ui/AppUi.kt"
 MAIN = APP / "MainActivity.kt"
@@ -35,7 +40,7 @@ def check(ok: bool, message: str) -> None:
         failures.append(message)
 
 
-ui = APP_UI.read_text(encoding="utf-8")
+ui = code_of(APP_UI)
 items = [m.start() for m in re.finditer(r"DropdownMenuItem\(text = \{ Text\(MediaEntry\.LABEL\) \}", ui)]
 check(len(items) == 1, f"exactly one 'Medier' overflow item in AppUi.kt (found {len(items)})")
 if items:
@@ -52,11 +57,11 @@ if items:
         check('"Opgaver"' in between and '"Personer"' in between,
               "it sits with the other rig-only entries (Opgaver, Personer)")
 
-entry = ENTRY.read_text(encoding="utf-8")
+entry = code_of(ENTRY)
 check('const val LABEL = "Medier"' in entry, 'the label is "Medier"')
 check("putExtra(MainActivity.EXTRA_MEDIA_GENERATE, true)" in entry, "MediaEntry opens the generate screen")
 
-main = MAIN.read_text(encoding="utf-8")
+main = code_of(MAIN)
 check(re.search(r"openMediaGenerate\s*=\s*intent\?\.getBooleanExtra\(EXTRA_MEDIA_GENERATE, false\)", main) is not None,
       "MainActivity reads EXTRA_MEDIA_GENERATE")
 route = main.find("openMediaGenerate -> {")
