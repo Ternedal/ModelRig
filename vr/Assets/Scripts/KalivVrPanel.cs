@@ -33,6 +33,9 @@ namespace Kaliv.VR
         private Text _bodyStatus;
         private Button _pairButton;
         private Button _sendButton;
+        private Button _stopButton;
+        private int _streamAnchor = -1;     // index in _conversation where the live reply starts
+        private bool _transcriptDirty;
         private readonly List<string> _models = new();
         private int _modelIndex;
         private readonly StringBuilder _conversation = new();
@@ -118,6 +121,10 @@ namespace Kaliv.VR
                     _app.Send(value);
                 });
 
+            _stopButton = AddButton(_chatGroup.transform, "STOP",
+                new Vector2(170, 44), new Vector2(205, -318), Danger, _app.StopGeneration);
+            SetStopAvailable(false);
+
             AddButton(_chatGroup.transform, "KROP IGEN",
                 new Vector2(170, 44), new Vector2(-440, -318), Elevated, _app.RefreshBody);
             AddButton(_chatGroup.transform, "CENTRER KROP",
@@ -176,13 +183,64 @@ namespace Kaliv.VR
         public void AppendUser(string text) => Append("DIG", text);
         public void AppendAssistant(string text) => Append("KALIV", text);
 
+        public void SetStopAvailable(bool available)
+        {
+            if (_stopButton != null) _stopButton.gameObject.SetActive(available);
+        }
+
+        /// <summary>Open a live assistant block that deltas are appended into.</summary>
+        public void BeginAssistant()
+        {
+            if (_conversation.Length > 0) _conversation.Append("\n\n");
+            _conversation.Append("KALIV").Append("\n");
+            _streamAnchor = _conversation.Length;
+            _transcriptDirty = true;
+        }
+
+        /// <summary>
+        /// Append one chunk to the live block.
+        ///
+        /// The Text component is NOT refreshed here. A token arrives every few tens of
+        /// milliseconds and each assignment re-lays out the whole transcript, which is
+        /// real work on a Quest. LateUpdate coalesces it to at most one rebuild per frame.
+        /// </summary>
+        public void AppendAssistantDelta(string delta)
+        {
+            if (string.IsNullOrEmpty(delta)) return;
+            if (_streamAnchor < 0) BeginAssistant();
+            _conversation.Append(delta);
+            _transcriptDirty = true;
+        }
+
+        /// <summary>
+        /// Close the live block. <paramref name="placeholder"/> replaces it when the stream
+        /// produced nothing, so an empty bubble never stays on screen.
+        /// </summary>
+        public void EndAssistant(string placeholder)
+        {
+            if (_streamAnchor >= 0 && placeholder != null && _conversation.Length == _streamAnchor)
+                _conversation.Append(placeholder);
+
+            _streamAnchor = -1;
+            if (_conversation.Length > 5000)
+                _conversation.Remove(0, _conversation.Length - 5000);
+            _transcriptDirty = true;
+        }
+
+        private void LateUpdate()
+        {
+            if (!_transcriptDirty || _transcript == null) return;
+            _transcriptDirty = false;
+            _transcript.text = _conversation.ToString();
+        }
+
         private void Append(string who, string text)
         {
             if (_conversation.Length > 0) _conversation.Append("\n\n");
             _conversation.Append(who).Append("\n").Append(text?.Trim());
             if (_conversation.Length > 5000)
                 _conversation.Remove(0, _conversation.Length - 5000);
-            if (_transcript != null) _transcript.text = _conversation.ToString();
+            _transcriptDirty = true;
         }
 
         private void CycleModel()

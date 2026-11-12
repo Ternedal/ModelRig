@@ -18,6 +18,9 @@ namespace Kaliv.VR
         private KalivVrPanel _panel;
         private KalivVrRenderEngine _renderEngine;
         private readonly List<ModelRigVrClient.ChatMessage> _history = new();
+        private readonly System.Text.StringBuilder _reply = new();
+        private bool _streaming;
+        private System.Action _cancelChat;
 
         public string BaseUrl { get; private set; }
         public string Token { get; private set; }
@@ -137,32 +140,95 @@ namespace Kaliv.VR
                 return;
             }
             if (prompt.Length == 0) return;
+            if (_streaming) return;   // one generation at a time; Stop ends the current one
 
             _history.Add(new ModelRigVrClient.ChatMessage("user", prompt));
             _panel.AppendUser(prompt);
             _panel.SetComposerBusy(true);
             _panel.SetStatus("Kaliv tænker …", false);
 
-            StartCoroutine(_client.Chat(
+            // The reply is built here rather than read back out of the panel: the panel
+            // shows text, it does not own conversation state.
+            _reply.Length = 0;
+            _streaming = true;
+            _panel.BeginAssistant();
+            _panel.SetStopAvailable(true);
+
+            StartCoroutine(_client.ChatStream(
                 BaseUrl,
                 Token,
                 Model,
                 _history,
-                answer =>
+                delta =>
                 {
-                    string clean = string.IsNullOrWhiteSpace(answer)
-                        ? "(tomt svar fra modellen)"
-                        : answer.Trim();
-                    _history.Add(new ModelRigVrClient.ChatMessage("assistant", clean));
-                    _panel.AppendAssistant(clean);
-                    _panel.SetComposerBusy(false);
-                    _panel.SetStatus($"Rig · {Model}", false);
+                    _reply.Append(delta);
+                    _panel.AppendAssistantDelta(delta);
                 },
-                error =>
-                {
-                    _panel.SetComposerBusy(false);
-                    _panel.SetStatus(Friendly(error), true);
-                }));
+                phase => _panel.SetStatus(PhaseText(phase), false),
+                () => FinishStream(committed: true, stopped: false, error: null),
+                () => FinishStream(committed: true, stopped: true, error: null),
+                error => FinishStream(committed: false, stopped: false, error: error),
+                cancel => _cancelChat = cancel));
+        }
+
+        /// <summary>Stop an in-flight generation. What arrived so far is kept.</summary>
+        public void StopGeneration()
+        {
+            if (!_streaming) return;
+            _cancelChat?.Invoke();
+        }
+
+        /// <summary>
+        /// One exit for every way a stream can end, so the composer, the stop button and
+        /// the history can never be left in a half-finished state.
+        ///
+        /// A stopped generation still commits what arrived: the user read those words, and
+        /// a follow-up question that silently dropped them would make the model look like
+        /// it had amnesia about its own half-sentence.
+        /// </summary>
+        private void FinishStream(bool committed, bool stopped, string error)
+        {
+            if (!_streaming) return;
+            _streaming = false;
+            _cancelChat = null;
+            _panel.SetStopAvailable(false);
+            _panel.SetComposerBusy(false);
+
+            string text = _reply.ToString().Trim();
+
+            if (!committed)
+            {
+                // Nothing is added to history: a failed turn must not become context the
+                // model later treats as something it said.
+                _panel.EndAssistant(text.Length == 0 ? "(intet svar)" : null);
+                _panel.SetStatus(Friendly(error), true);
+                return;
+            }
+
+            if (text.Length == 0)
+            {
+                _panel.EndAssistant("(tomt svar fra modellen)");
+                _panel.SetStatus($"Rig · {Model}", false);
+                return;
+            }
+
+            _history.Add(new ModelRigVrClient.ChatMessage("assistant", text));
+            _panel.EndAssistant(null);
+            _panel.SetStatus(stopped ? $"Stoppet · {Model}" : $"Rig · {Model}", false);
+        }
+
+        /// <summary>
+        /// The rig's own phase vocabulary, shown as-is when unknown. The client reports
+        /// server state; it does not invent a local vocabulary that could drift.
+        /// </summary>
+        private static string PhaseText(string phase)
+        {
+            switch (phase)
+            {
+                case "searching": return "Kaliv søger i dine kilder …";
+                case "generating": return "Kaliv svarer …";
+                default: return string.IsNullOrWhiteSpace(phase) ? "Kaliv arbejder …" : "Kaliv: " + phase;
+            }
         }
 
         public void RefreshBody() => _renderEngine?.RefreshBody();
@@ -171,6 +237,7 @@ namespace Kaliv.VR
 
         public void ForgetRig()
         {
+            StopGeneration();
             BaseUrl = "";
             Token = "";
             Model = "";
