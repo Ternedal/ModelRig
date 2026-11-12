@@ -24,7 +24,8 @@ kopieres fra ældre evidens.
   enhver anden SHA-ændring forbudt.
 - Enhver bevægelse af kandidatbranch eller `origin/main` kræver ny freeze og ny
   evidens.
-- Fra tagget, til A3's kandidatgate er grøn, merges intet til `main` (se A0).
+- Freeze-vinduet (intet merges til `main` fra tagget, til A3's kandidatgate er
+  grøn) er ophævet 12/11-2026; se A0.
 - Alle receipts og rapporter skal bevare `production_activation=false`.
 - Ingen launcher i dette flow merger, pusher, tagger, releaser eller aktiverer.
 
@@ -63,9 +64,16 @@ merge af #2364 er prep-grenens SHA ikke den taggede.
 Både `candidate_freeze_check.py` og operatoren kræver, at den aktuelle
 `origin/main` er indeholdt i kandidaten, og hver receipt-consumer refetcher
 `main`. Efter publicering holder det kun, så længe `main` står på RC-SHA'en.
-Derfor merges intet til `main` fra tagget, til A3's kandidatgate er grøn. Er
-`main` alligevel flyttet, stopper kontrollen fail-closed. Den må ikke omgås;
-stop og rapportér i #2275.
+
+> **Freeze-vinduet er ophævet 12/11-2026 (Anders, #2275-kommentar 6816274261).**
+> Reglen om, at intet merges til `main` fra tagget, til A3's kandidatgate er grøn, gælder
+> ikke længere. Anders tester ikke fysisk, før billede og video er i en release
+> (#2275-kommentar 6751908309), og de lå i de PR'er, reglen holdt ude. Når `main`
+> har flyttet sig fra RC-SHA'en, kan Stage A ikke køres på `v2.0.19`; næste
+> release tagges og valideres på sin egen SHA.
+
+Er `main` flyttet, stopper kontrollen fail-closed. Den må ikke omgås; stop og
+rapportér i #2275.
 
 ### A1. Opret en frisk freeze-receipt
 
