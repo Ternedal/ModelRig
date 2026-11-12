@@ -10,8 +10,9 @@ collector sends GET requests to loopback only and reads one file, the
 supervisor heartbeat.
 
 > **Not yet run on the rig.** The collector is covered by its contract test
-> against a fake appliance on Linux. Its first run on Windows is a test of the
-> tool as much as of the appliance.
+> against a fake appliance, on Linux and on a Windows CI runner. The scheduled
+> task and the real heartbeat path have not been exercised. Do the smoke in
+> step 0 before any run that is meant as evidence.
 
 ## What the gate requires
 
@@ -61,28 +62,70 @@ Stage B takes the appliance down on purpose: the interrupted update, the good
 update, the reboot and the two supervisor restarts. A probe that lands in that
 downtime is red, and a red probe cannot be a sample.
 
-`assemble` leaves a red probe out of the observations only when it lies inside
-the period Stage B's own four recovery timestamps bound, widened by a declared
-tolerance. The tolerance may not exceed the policy's `max_sample_gap_seconds`
-and defaults to it. **A red probe anywhere else fails the assembly, and no file
-is written.**
+Stage B stamps each recovery *after* the service is back, so a trial's downtime
+precedes its stamp. The trial period therefore:
+
+- opens a declared lead before the first of the four stamps. The lead defaults
+  to the policy's `max_sample_gap_seconds` and may not exceed it;
+- closes at the last stamp. Nothing is added after it.
+
+`assemble` leaves a red probe out of the observations only when the probe
+**began** inside that period. A probe is placed by when it began
+(`probe_started_at`), because what it saw, it saw after that. A red probe that
+took more than two minutes is never excused.
+
+**Every other red probe in the window fails the assembly, and no file is
+written.** That includes a red probe before the first or after the last healthy
+probe. Nothing is trimmed silently: to leave later (or earlier) probes out of
+the claim, declare the window with `--window-end` (or `--window-start`). Probes
+outside a declared window are counted in the record.
 
 A journal line that cannot be read as a probe (a torn write) is treated as a
-red probe taken some time between its readable neighbours.
+red probe that began some time between its readable neighbours.
 
 From the reboot onwards every sample must report the Stage-B candidate's
-version, so a soak cannot continue unnoticed on another release.
+version, so a soak cannot continue unnoticed on another release. Samples before
+the reboot stamp may be on the source release, because the interruption trial
+runs there and has to lie inside the window. A healthy probe on the candidate
+before the reboot stamp is not release acceptance of anything.
 
-What was left out is listed in the assembly record
-(`validation/recovery-soak-assembly.json`) with the journal's SHA-256. The
-qualifier reads only the observations file and does not see the red probes, so
-the record and the journal are what a reviewer checks the exclusion against.
+### Limits of this evidence
+
+- **The qualifier does not see the exclusions.** It validates the observations
+  file only. The journal and the assembly record
+  (`validation/recovery-soak-assembly.json`, which carries the journal's
+  SHA-256 and lists every excluded probe) are a separate trust boundary. A
+  qualified verdict says the samples satisfy the policy; that the left-out
+  probes were legitimately left out is checked by a reviewer against the
+  journal.
+- **Downtime inside the trial period is not attributed.** A red probe there is
+  excused whether or not a trial caused it. The record shows that the appliance
+  was down during Stage B's trials; it does not show why. It is not proof of
+  uninterrupted health between the trials.
+- **The journal is unsigned.** It is written by the operator's own machine and
+  is only as trustworthy as the checkout it was collected in.
 
 ## Run
 
 All paths are relative to the candidate checkout. The journal, the observations
 file and the record must lie below `validation/`: untracked files there are the
 only local output the freeze gate accepts in a candidate checkout.
+
+### 0. Smoke, before anything that is meant as evidence
+
+Take two probes by hand and read them back. The appliance must be running.
+
+```powershell
+python scripts\kaliv_recovery_soak_collector.py sample --once --journal validation\recovery-soak-smoke.jsonl
+python scripts\kaliv_recovery_soak_collector.py sample --once --journal validation\recovery-soak-smoke.jsonl
+python scripts\kaliv_recovery_soak_collector.py status --journal validation\recovery-soak-smoke.jsonl
+```
+
+All four fields must print `ok` on both lines, and `status` must report two
+healthy probes. If `supervisor_looping` is `RED`, the heartbeat path is wrong:
+pass `--heartbeat`. If you use the scheduled task below, create it, wait for
+its first two probes and check them the same way before starting Stage B.
+Delete the smoke journal afterwards.
 
 ### 1. Start sampling, before Stage B
 
@@ -148,23 +191,32 @@ manifest:
 kaliv-recovery-soak:<modelrig-sha>:<sha256>
 ```
 
-If the appliance was used or stopped after the soak, bound the window so later
-probes are not part of the claim:
+If the appliance was used or stopped after the soak, declare where the window
+ends, so later probes are not part of the claim:
 
 ```powershell
   --window-end 2026-01-01T18:00:00+00:00
 ```
 
-`--window-start` does the same at the other end. Probes outside a declared
-window are counted in the record and are not part of the observations.
+`--window-start` does the same at the other end. Without a declared window
+every probe in the journal is part of the claim, and a red one outside Stage
+B's trial period fails the assembly.
+
+## Review checklist for the evidence
+
+Before the `kaliv-recovery-soak:` reference goes into a release manifest:
+
+1. The qualifier's report is `qualified: true` for the pinned ModelRig SHA.
+2. `validation/recovery-soak-assembly.json` names the same observations SHA-256
+   as the qualifier's report.
+3. The journal's SHA-256 equals `journal.sha256` in the record.
+4. Every entry in `red_probes_excluded` is one the reviewer accepts as Stage-B
+   downtime. The record cannot make that judgement.
+5. `probes_outside_declared_window` is 0, or the declared window is explained.
+6. `observed_in_samples` names only the source release and the candidate.
 
 ## Authority boundary
 
 A qualified verdict means the declared policy held over the sampled window on
-the Stage-B candidate. It does not prove any other release gate, and it keeps
-`production_activation` false.
-
-The collector's journal is written by the operator's own machine. Nothing in it
-is signed. It is evidence in the same sense as the other files under
-`validation/`: bound by hash into the record, and only as trustworthy as the
-checkout it was collected in.
+the Stage-B candidate, with the limits above. It does not prove any other
+release gate, and it keeps `production_activation` false.

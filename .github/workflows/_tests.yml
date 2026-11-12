@@ -852,6 +852,27 @@ jobs:
           '@ | python -
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+  # The recovery-soak collector and qualifier run on the rig, which is Windows.
+  # This is the only place their journal lock, path rules and Git checks are
+  # exercised there before a rig day.
+  test-windows-recovery-soak:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Recovery-soak collector and qualifier contracts on real Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python tests/worker_kaliv_recovery_soak_collector.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tests/worker_kaliv_recovery_soak_qualification.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   stage-b-slices:
     if: inputs.run_stage_b
     uses: ./.github/workflows/_stage_b_slices.yml

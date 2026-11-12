@@ -144,14 +144,21 @@ def test_probe(tmp: Path) -> None:
     backend, worker = appliance.start()
     heartbeat = _Heartbeat(tmp / "supervisor-heartbeat")
     stamp = datetime(2026, 9, 29, 10, 0, tzinfo=timezone.utc)
+    clock = {"calls": 0}
+
+    def now() -> datetime:
+        # Twelve seconds pass between the start of a probe and its end.
+        clock["calls"] += 1
+        return stamp + timedelta(seconds=12 * ((clock["calls"] - 1) % 2))
 
     def take() -> dict:
+        clock["calls"] = 0
         return collector.probe(
             backend_url=backend,
             worker_url=worker,
             heartbeat=heartbeat.path,
             heartbeat_settle_seconds=3,
-            now=lambda: stamp,
+            now=now,
             sleep=heartbeat.sleep,
         )
 
@@ -159,7 +166,8 @@ def test_probe(tmp: Path) -> None:
         record = take()
         check(set(record) == collector._PROBE_KEYS, "a probe carries exactly the journal keys")
         check(record["schema"] == collector.PROBE_SCHEMA, "probe schema")
-        check(record["observed_at"] == "2026-09-29T10:00:00+00:00", "probe is stamped in UTC")
+        check(record["probe_started_at"] == "2026-09-29T10:00:00+00:00", "the start is stamped in UTC")
+        check(record["observed_at"] == "2026-09-29T10:00:12+00:00", "and the end, when all is known")
         check(all(record[name] is True for name in collector.HEALTH_FIELDS), "healthy appliance")
         check(record["detail"]["backend_version"] == "2.0.14", "backend version is recorded")
         check(record["detail"]["worker_commit_sha"] == "a" * 40, "worker commit is recorded")
@@ -298,11 +306,19 @@ def at(hour: int, minute: int, second: int = 0) -> datetime:
     return DAY + timedelta(hours=hour, minutes=minute, seconds=second)
 
 
-def line(stamp: datetime, *, red: str | None = None, version: str | None = None) -> dict:
+def line(
+    stamp: datetime,
+    *,
+    red: str | None = None,
+    version: str | None = None,
+    took: float = 10,
+) -> dict:
+    """A journal line for a probe that ended at ``stamp`` after ``took`` seconds."""
     if version is None:
         version = CANDIDATE_VERSION if stamp >= REBOOT else SOURCE_VERSION
     record = {
         "schema": collector.PROBE_SCHEMA,
+        "probe_started_at": (stamp - timedelta(seconds=took)).isoformat(),
         "observed_at": stamp.isoformat(),
         **{name: True for name in collector.HEALTH_FIELDS},
         "detail": {
@@ -401,8 +417,9 @@ class Rig:
 
 def test_assemble() -> None:
     rig = Rig()
+    outside = "red probes outside the Stage-B trial period"
 
-    # The reboot at 10:05 was observed after it; the probe at 10:04 caught the
+    # The reboot at 10:05 was stamped after it; the probe at 10:04 caught the
     # appliance down, and one at 10:11:30 caught the worker restarting.
     during_reboot = line(at(10, 4), red="backend_healthy")
     during_restart = line(at(10, 11, 30), red="worker_healthy")
@@ -437,6 +454,20 @@ def test_assemble() -> None:
         "the record names the releases the window ran on",
     )
     check(assembly["journal"]["red_probes"] == 2, "the record counts the red probes")
+    check(assembly["probes_outside_declared_window"] == 0, "nothing is left out without a declared window")
+    check(
+        assembly["stage_b_trial_period"]
+        == {"lead_seconds": 900, "start": at(9, 50).isoformat(), "end": at(10, 14).isoformat()},
+        "the trial period opens a lead before the first stamp and closes at the last",
+    )
+    check(
+        any("separate trust boundary" in text for text in assembly["limitations"]),
+        "the record says the qualifier does not see the exclusions",
+    )
+    check(
+        any("does not show why" in text for text in assembly["limitations"]),
+        "and that downtime inside the period is not attributed",
+    )
     check(json.loads(rig.record.read_text(encoding="utf-8")) == assembly, "the record is written")
 
     # The file on disk goes through the qualifier's own command line.
@@ -451,7 +482,7 @@ def test_assemble() -> None:
     # Downtime is excused only while Stage B's own trials run.
     rig.refuses(
         with_extra(soak(), line(at(11, 35), red="backend_healthy")),
-        "red probes outside the Stage-B trial period",
+        outside,
         "a red probe an hour after Stage B",
     )
     for field in collector.HEALTH_FIELDS:
@@ -460,15 +491,79 @@ def test_assemble() -> None:
             f"{field} false",
             f"{field} red outside the trials",
         )
+
+    # The period closes at the last recovery stamp (10:14:00). Nothing is added
+    # after it: the stamp is taken once the service is back.
     rig.refuses(
-        entries,
-        "red probes outside the Stage-B trial period",
-        "no tolerance: the probe a minute before the first recovery stamp",
-        trial_tolerance_seconds=0,
+        with_extra(soak(), line(at(10, 15), red="worker_healthy")),
+        outside,
+        "a red probe a minute after the last recovery stamp",
     )
-    rig.refuses(entries, "must not exceed the max sample gap", "a tolerance above the policy's gap",
-                trial_tolerance_seconds=901)
-    rig.refuses(entries, "must not be negative", "a negative tolerance", trial_tolerance_seconds=-1)
+    rig.refuses(
+        with_extra(soak(), line(at(10, 14, 30), red="worker_healthy", took=25)),
+        outside,
+        "a red probe that began five seconds after the last stamp",
+    )
+    # A probe is placed by when it began: one that began before the last stamp
+    # and finished after it saw that trial's downtime.
+    assembly = rig.assemble(with_extra(soak(), line(at(10, 14, 20), red="worker_healthy", took=25)))
+    check(len(assembly["red_probes_excluded"]) == 1, "a probe that began before the last stamp is excused")
+
+    # The lead before the first stamp (10:05:00).
+    early_red = with_extra(soak(), line(at(9, 55), red="backend_healthy"))
+    assembly = rig.assemble(early_red)
+    check(len(assembly["red_probes_excluded"]) == 1, "a red probe inside the lead is excused")
+    rig.refuses(early_red, outside, "the same probe with a five-minute lead", trial_lead_seconds=300)
+    rig.refuses(entries, outside, "no lead: the probe a minute before the first stamp",
+                trial_lead_seconds=0)
+    rig.refuses(entries, "must not exceed the max sample gap", "a lead above the policy's gap",
+                trial_lead_seconds=901)
+    rig.refuses(entries, "must not be negative", "a negative lead", trial_lead_seconds=-1)
+
+    # A red probe that cannot be placed is never excused.
+    rig.refuses(
+        with_extra(soak(), line(at(10, 12, 30), red="worker_healthy", took=200)),
+        "too long to place",
+        "a red probe that took 200 seconds",
+    )
+    rig.refuses(
+        with_extra(soak(), line(at(11, 35), red="backend_healthy", took=91 * 60)),
+        "too long to place",
+        "a red probe that claims to have begun during the trials 91 minutes earlier",
+    )
+
+    # Red probes at the edges of the window are part of the claim. Nothing is
+    # trimmed unless the operator declares the window.
+    trailing = [*soak(), line(at(12, 30), red="backend_healthy")]
+    rig.refuses(trailing, outside, "a red probe after the last healthy probe")
+    rig.refuses(trailing, outside, "the same inside a declared window", window_end=at(12, 35))
+    assembly = rig.assemble(trailing, window_end=at(12, 25))
+    check(assembly["probes_outside_declared_window"] == 1, "a declared window end leaves it out")
+    check(assembly["declared_window"]["end"] == at(12, 25).isoformat(), "and the record says so")
+    check(assembly["observations"]["window_end"] == at(12, 20).isoformat(), "the window ends on a sample")
+    leading = [line(at(9, 40), red="backend_healthy"), *soak()]
+    rig.refuses(leading, outside, "a red probe before the first healthy probe")
+    rig.refuses(leading, outside, "the same inside a declared window", window_start=at(9, 35))
+    assembly = rig.assemble(leading, window_start=at(9, 45))
+    check(assembly["probes_outside_declared_window"] == 1, "a declared window start leaves it out")
+
+    # A crash after the soak, with the appliance back up later.
+    late = with_extra(soak(), line(at(12, 30), red="backend_healthy"), line(at(12, 40)))
+    rig.refuses(late, outside, "a later crash, no window end")
+    assembly = rig.assemble(late, window_end=at(12, 25))
+    check(assembly["probes_outside_declared_window"] == 2, "with a window end the later probes are outside")
+    early = with_extra(soak(), line(at(9, 30)), line(at(9, 40), red="backend_healthy"))
+    rig.refuses(early, outside, "an earlier crash, no window start")
+    assembly = rig.assemble(early, window_start=at(9, 45))
+    check(assembly["probes_outside_declared_window"] == 2, "with a window start the earlier probes are outside")
+    rig.refuses(late, "window start must be before window end", "an empty window",
+                window_start=at(12, 0), window_end=at(11, 0))
+    rig.refuses(late, "must carry a UTC offset", "a window end without an offset",
+                window_end=datetime(2026, 9, 29, 12, 25))
+    # A declared window cannot cut the recovery events out: the qualifier
+    # requires them inside the samples.
+    rig.refuses(entries, "outside the soak sample window", "a window that starts after the reboot",
+                window_start=at(10, 9))
 
     # A line that is not a probe is a red probe of unknown time.
     torn = b'{"schema": "kaliv-recovery-soak-probe/v1", "observed_at": "2026-09-29T11:3'
@@ -479,10 +574,21 @@ def test_assemble() -> None:
     )
     assembly = rig.assemble(with_extra(soak(), (at(10, 5), torn)))
     check(len(assembly["red_probes_excluded"]) == 1, "a torn line inside the trials is recorded")
+    rig.refuses([*soak(), (at(12, 25), torn)], "not valid UTF-8 JSON", "a torn last line")
+    assembly = rig.assemble([*soak(), (at(12, 25), torn)], window_end=at(12, 15))
+    check(assembly["probes_outside_declared_window"] == 2, "a torn last line after a declared end")
     extra_key = dict(line(at(11, 35)), note="edited")
     rig.refuses(with_extra(soak(), extra_key), "not a probe record", "a line with an unknown field")
+    no_start = line(at(11, 35))
+    del no_start["probe_started_at"]
+    rig.refuses(with_extra(soak(), no_start), "not a probe record", "a line without its start")
     stringly = dict(line(at(11, 35)), backend_healthy="true")
     rig.refuses(with_extra(soak(), stringly), "must be booleans", "a health field that is a string")
+    inverted = line(at(11, 35), took=-5)
+    rig.refuses(with_extra(soak(), inverted), "probe_started_at is after observed_at",
+                "a probe that ends before it begins")
+    naive = dict(line(at(11, 35)), probe_started_at="2026-09-29T11:34:50")
+    rig.refuses(with_extra(soak(), naive), "timezone-aware", "a start without an offset")
 
     # From the reboot onwards the appliance must be the candidate.
     rig.refuses(
@@ -505,29 +611,9 @@ def test_assemble() -> None:
     rig.refuses(
         [p for p in soak() if datetime.fromisoformat(p["observed_at"]) >= at(10, 10)],
         "outside the soak sample window",
-        "a window that starts after the reboot",
+        "a journal that starts after the reboot",
     )
     rig.refuses([line(at(10, 0))], "fewer than two healthy probes", "a single probe")
-
-    # A declared window. A crash after the soak is outside the claim; the same
-    # crash inside it is not.
-    late = with_extra(soak(), line(at(12, 30), red="backend_healthy"), line(at(12, 40)))
-    rig.refuses(late, "red probes outside the Stage-B trial period", "a later crash, no window end")
-    assembly = rig.assemble(late, window_end=at(12, 25))
-    check(assembly["probes_outside_window"] == 2, "with a window end the later probes are outside")
-    check(assembly["declared_window"]["end"] == at(12, 25).isoformat(), "and the record says so")
-    check(assembly["observations"]["window_end"] == at(12, 20).isoformat(), "the window ends on a sample")
-    early = with_extra(soak(), line(at(9, 30)), line(at(9, 40), red="backend_healthy"))
-    rig.refuses(early, "red probes outside the Stage-B trial period", "an earlier crash, no window start")
-    assembly = rig.assemble(early, window_start=at(9, 45))
-    check(assembly["probes_outside_window"] == 2, "with a window start the earlier probes are outside")
-    rig.refuses(late, "window start must be before window end", "an empty window",
-                window_start=at(12, 0), window_end=at(11, 0))
-    rig.refuses(late, "must carry a UTC offset", "a window end without an offset",
-                window_end=datetime(2026, 9, 29, 12, 25))
-    # A trailing red probe is outside the claimed window without any flag.
-    assembly = rig.assemble([*soak(), line(at(12, 30), red="backend_healthy")])
-    check(assembly["probes_outside_window"] == 1, "a trailing red probe is counted, not claimed")
 
     # The journal itself.
     backwards = [*soak(), line(at(12, 0, 30))]
@@ -567,6 +653,46 @@ def test_journal_and_cli(tmp: Path) -> None:
     summary = collector.summarize(probes)
     check(summary["window_seconds"] == 1200 and summary["red_probes"] == 1, "status summary")
     check(summary["max_healthy_gap_seconds"] == 1200, "the gap is measured between healthy probes")
+
+    # os.write may write less than it is given, and two collectors may run at
+    # once (a loop and a scheduled task). Neither may tear a line.
+    real_write = os.write
+
+    def short_write(descriptor: int, data) -> int:
+        return real_write(descriptor, bytes(data[:7]))
+
+    shared = root / "validation" / "shared-journal.jsonl"
+    writers, each = 6, 20
+    failures: list[BaseException] = []
+
+    def writer(number: int) -> None:
+        try:
+            for step in range(each):
+                collector.append_probe(shared, line(at(10, number, step)))
+        except BaseException as exc:  # noqa: BLE001 - reported below
+            failures.append(exc)
+
+    collector.os.write = short_write
+    try:
+        collector.append_probe(shared, line(at(9, 0)))
+        check(
+            shared.read_bytes() == (json.dumps(line(at(9, 0)), sort_keys=True, separators=(",", ":")) + "\n").encode(),
+            "a short write is completed, not left torn",
+        )
+        threads = [threading.Thread(target=writer, args=(number,)) for number in range(writers)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    finally:
+        collector.os.write = real_write
+    check(not failures, f"concurrent appends raise nothing: {failures[:1]}")
+    written = [raw for raw in shared.read_bytes().split(b"\n") if raw]
+    check(len(written) == 1 + writers * each, "every concurrent append is one line")
+    check(
+        all(collector._parse_line(0, raw).problem is None for raw in written),
+        "and no line is torn or interleaved",
+    )
 
     # The command line, against a live fake appliance and a heartbeat that a
     # background thread keeps advancing.
@@ -621,6 +747,8 @@ def test_journal_and_cli(tmp: Path) -> None:
         (["sample", "--repository-root", str(root), "--interval-seconds", "10"], "at least 30 seconds"),
         (["sample", "--repository-root", str(root), "--interval-seconds", "30",
           "--heartbeat-settle-seconds", "30"], "shorter than the interval"),
+        (["sample", "--repository-root", str(root), "--timeout", "40"], "must stay below"),
+        (["sample", "--repository-root", str(root), "--timeout", "0"], "must be positive"),
         (["assemble", "--repository-root", str(root), "--stage-b-report", "validation/missing.json",
           "--required-duration-seconds", "21600", "--max-sample-gap-seconds", "900",
           "--window-end", "2026-09-29T12:00:00"], "UTC offset"),

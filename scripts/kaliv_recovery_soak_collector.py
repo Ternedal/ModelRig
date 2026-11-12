@@ -45,11 +45,21 @@ downtime cannot be a sample.
 
 Stage B takes the appliance down on purpose: the interrupted update, the good
 update, the reboot and the two supervisor restarts. Its four hash-bound
-recovery timestamps bound that period. ``assemble`` leaves a red probe out only
-when it lies inside that period, widened by a declared tolerance that may not
-exceed the sample gap the policy allows. A red probe anywhere else fails the
-assembly. What was left out is written to the assembly record next to the
-observations file; the qualifier does not see it.
+recovery timestamps bound that period. Each is stamped after the service is
+back, so the downtime precedes its stamp: the period opens a declared lead
+before the first stamp (never more than the sample gap the policy allows) and
+closes at the last stamp, with nothing added after it.
+
+``assemble`` leaves a red probe out only when the probe began inside that
+period. Every other red probe in the window fails the assembly, including one
+before the first or after the last healthy probe. To leave later probes out of
+the claim, the operator declares the window (``--window-start``,
+``--window-end``); nothing is trimmed silently.
+
+Inside the period the tool cannot tell a trial's downtime from an unrelated
+one. That is a limit of the evidence, and the assembly record says so. The
+record lists what was left out; the qualifier reads only the observations file
+and does not see it.
 
 From the reboot onwards every healthy probe must report the Stage-B candidate's
 version, so a soak cannot quietly continue on another release.
@@ -84,10 +94,14 @@ HEALTH_FIELDS = (
     "supervisor_looping",
     "state_error_absent",
 )
-_PROBE_KEYS = {"schema", "observed_at", *HEALTH_FIELDS, "detail"}
+_PROBE_KEYS = {"schema", "probe_started_at", "observed_at", *HEALTH_FIELDS, "detail"}
+# A probe with the default timeouts takes about forty seconds at worst. A red
+# probe that took longer than this is never excused: it cannot be placed.
+MAX_PROBE_SECONDS = 120
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 _MAX_BODY = 1024 * 1024
 _MAX_JOURNAL_BYTES = 64 * 1024 * 1024
+_LOCK_OFFSET = 1 << 40
 _MAX_DETAIL = 200
 _DEFAULT_JOURNAL = "validation/recovery-soak-journal.jsonl"
 _DEFAULT_OBSERVATIONS = "validation/recovery-soak-observations.json"
@@ -112,10 +126,17 @@ def evidence_path(repository_root: Path, raw: str | Path, label: str) -> Path:
     root = repository_root.resolve()
     path = Path(raw)
     if path.is_absolute():
-        try:
-            relative = path.relative_to(root)
-        except ValueError as exc:
-            raise CollectorError(f"{label} must be below the repository root") from exc
+        # The root may have been given unresolved (a Windows 8.3 name, a link
+        # in a parent). Accept the path if it is below the root as given or as
+        # resolved; the walk below still refuses a symlink inside it.
+        for base in (root, repository_root, repository_root.absolute()):
+            try:
+                relative = path.relative_to(base)
+                break
+            except ValueError:
+                continue
+        else:
+            raise CollectorError(f"{label} must be below the repository root")
     else:
         relative = path
     if ".." in relative.parts:
@@ -257,6 +278,7 @@ def probe(
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
     """Take one probe. Never raises; what cannot be determined is false."""
+    started = now().astimezone(timezone.utc)
     detail: dict[str, Any] = {}
 
     status, body, text = http_get_json(backend_url + "/healthz", timeout)
@@ -290,11 +312,14 @@ def probe(
     )
     detail["heartbeat"] = text
 
-    # Stamped when all four answers are known: the sample says "at this
-    # instant these held", not "the probe began then".
+    # observed_at is stamped when all four answers are known: a sample says
+    # "at this instant these held". probe_started_at places a red probe: what
+    # it saw, it saw after it began.
+    finished = max(now().astimezone(timezone.utc), started)
     return {
         "schema": PROBE_SCHEMA,
-        "observed_at": now().astimezone(timezone.utc).isoformat(),
+        "probe_started_at": started.isoformat(),
+        "observed_at": finished.isoformat(),
         "backend_healthy": bool(backend_ok),
         "worker_healthy": bool(worker_up and overall_ok),
         "supervisor_looping": bool(looping),
@@ -303,14 +328,71 @@ def probe(
     }
 
 
+def _lock_journal(descriptor: int, *, wait_seconds: float = 30.0) -> None:
+    """Take an exclusive lock on the journal, or raise.
+
+    Two collectors can run at once (a loop and a scheduled task), and on
+    Windows an append is a seek followed by a write, so unlocked writers can
+    overwrite each other. The lock is the operating system's, so a collector
+    that dies (Stage B reboots the machine) cannot leave it behind.
+    """
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                # Windows locks are mandatory for the locked bytes, so lock one
+                # far beyond any journal: a reader is never refused.
+                os.lseek(descriptor, _LOCK_OFFSET, os.SEEK_SET)
+                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except OSError as exc:
+            if time.monotonic() >= deadline:
+                raise CollectorError("journal is locked by another collector") from exc
+            time.sleep(0.05)
+
+
+def _unlock_journal(descriptor: int) -> None:
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            os.lseek(descriptor, _LOCK_OFFSET, os.SEEK_SET)
+            msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    except OSError:
+        pass  # closing the descriptor releases the lock in any case
+
+
 def append_probe(journal: Path, record: Mapping[str, Any]) -> None:
-    """Append one line and force it to disk. The journal is never rewritten."""
+    """Append one whole line and force it to disk. The journal is never
+    rewritten."""
     line = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
     journal.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(str(journal), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0)
+    descriptor = os.open(str(journal), flags, 0o644)
     try:
-        os.write(descriptor, line)
-        os.fsync(descriptor)
+        _lock_journal(descriptor)
+        try:
+            # os.write may write less than it was given. Under the lock the
+            # rest follows before any other collector can append.
+            remaining = memoryview(line)
+            while remaining:
+                written = os.write(descriptor, remaining)
+                if written <= 0:
+                    raise CollectorError("journal write made no progress")
+                remaining = remaining[written:]
+            os.fsync(descriptor)
+        finally:
+            _unlock_journal(descriptor)
     finally:
         os.close(descriptor)
 
@@ -323,6 +405,7 @@ def append_probe(journal: Path, record: Mapping[str, Any]) -> None:
 class Probe:
     line: int
     observed_at: datetime | None  # None: the line could not be read as a probe
+    started_at: datetime | None
     healthy: bool
     fields: Mapping[str, bool]
     detail: Mapping[str, Any]
@@ -347,7 +430,7 @@ def _parse_timestamp(value: Any) -> datetime | None:
 
 def _parse_line(number: int, raw: bytes) -> Probe:
     def torn(problem: str) -> Probe:
-        return Probe(number, None, False, {}, {}, problem)
+        return Probe(number, None, None, False, {}, {}, problem)
 
     try:
         value = json.loads(raw.decode("utf-8"))
@@ -358,13 +441,16 @@ def _parse_line(number: int, raw: bytes) -> Probe:
     if value["schema"] != PROBE_SCHEMA:
         return torn("unknown probe schema")
     observed_at = _parse_timestamp(value["observed_at"])
-    if observed_at is None:
-        return torn("observed_at is not a timezone-aware ISO-8601 timestamp")
+    started_at = _parse_timestamp(value["probe_started_at"])
+    if observed_at is None or started_at is None:
+        return torn("timestamps must be timezone-aware ISO-8601")
+    if started_at > observed_at:
+        return torn("probe_started_at is after observed_at")
     fields = {name: value[name] for name in HEALTH_FIELDS}
     if any(not isinstance(flag, bool) for flag in fields.values()):
         return torn("health fields must be booleans")
     detail = value["detail"] if isinstance(value["detail"], dict) else {}
-    return Probe(number, observed_at, all(fields.values()), fields, detail)
+    return Probe(number, observed_at, started_at, all(fields.values()), fields, detail)
 
 
 def load_journal(journal: Path) -> tuple[list[Probe], str]:
@@ -414,21 +500,36 @@ def describe_red(item: Probe) -> str:
     if item.problem is not None:
         return f"line {item.line}: {item.problem}"
     failed = [name for name in HEALTH_FIELDS if not item.fields[name]]
-    when = item.observed_at.isoformat() if item.observed_at is not None else "unknown time"
-    return f"line {item.line} at {when}: " + ", ".join(failed) + " false"
+    took = (item.observed_at - item.started_at).total_seconds()
+    slow = f" (the probe took {took:.0f}s, too long to place)" if took > MAX_PROBE_SECONDS else ""
+    return (
+        f"line {item.line}, began {item.started_at.isoformat()}: "
+        + ", ".join(failed)
+        + " false"
+        + slow
+    )
 
 
-def time_bounds(probes: Sequence[Probe], index: int) -> tuple[datetime | None, datetime | None]:
-    """When probe ``index`` was taken: its own timestamp, or for an unreadable
-    line the timestamps of the nearest readable lines around it."""
-    own = probes[index].observed_at
-    if own is not None:
-        return own, own
+def _neighbours(probes: Sequence[Probe], index: int) -> tuple[datetime | None, datetime | None]:
     earlier = next(
         (p.observed_at for p in reversed(probes[:index]) if p.observed_at is not None), None
     )
     later = next((p.observed_at for p in probes[index + 1:] if p.observed_at is not None), None)
     return earlier, later
+
+
+def window_bounds(probes: Sequence[Probe], index: int) -> tuple[datetime | None, datetime | None]:
+    """When probe ``index`` was journalled: its own timestamp, or for an
+    unreadable line the timestamps of the nearest readable lines around it."""
+    own = probes[index].observed_at
+    return (own, own) if own is not None else _neighbours(probes, index)
+
+
+def began_bounds(probes: Sequence[Probe], index: int) -> tuple[datetime | None, datetime | None]:
+    """When probe ``index`` began. An unreadable line began somewhere between
+    its readable neighbours."""
+    own = probes[index].started_at
+    return (own, own) if own is not None else _neighbours(probes, index)
 
 
 # --------------------------------------------------------------------------
@@ -467,7 +568,7 @@ def assemble(
     max_sample_gap_seconds: int,
     output: Path,
     record: Path,
-    trial_tolerance_seconds: int | None = None,
+    trial_lead_seconds: int | None = None,
     window_start: datetime | None = None,
     window_end: datetime | None = None,
     qualifier: Any | None = None,
@@ -480,16 +581,16 @@ def assemble(
     root = repository_root.resolve()
     _positive_int(required_duration_seconds, "required duration")
     _positive_int(max_sample_gap_seconds, "max sample gap")
-    if trial_tolerance_seconds is None:
-        trial_tolerance_seconds = max_sample_gap_seconds
-    if isinstance(trial_tolerance_seconds, bool) or not isinstance(trial_tolerance_seconds, int):
-        raise CollectorError("trial tolerance must be an integer")
-    if trial_tolerance_seconds < 0:
-        raise CollectorError("trial tolerance must not be negative")
-    if trial_tolerance_seconds > max_sample_gap_seconds:
-        # A tolerance longer than the gap the policy accepts would excuse
-        # downtime the policy itself would not.
-        raise CollectorError("trial tolerance must not exceed the max sample gap")
+    if trial_lead_seconds is None:
+        trial_lead_seconds = max_sample_gap_seconds
+    if isinstance(trial_lead_seconds, bool) or not isinstance(trial_lead_seconds, int):
+        raise CollectorError("trial lead must be an integer")
+    if trial_lead_seconds < 0:
+        raise CollectorError("trial lead must not be negative")
+    if trial_lead_seconds > max_sample_gap_seconds:
+        # A lead longer than the gap the policy accepts would excuse downtime
+        # the policy itself would not.
+        raise CollectorError("trial lead must not exceed the max sample gap")
     _aware(window_start, "window start")
     _aware(window_end, "window end")
     if window_start is not None and window_end is not None and window_start >= window_end:
@@ -515,41 +616,42 @@ def assemble(
         kind: datetime.fromisoformat(authority[kind]["observed_at"])
         for kind in qual._REQUIRED_RECOVERY_KINDS
     }
-    tolerance = timedelta(seconds=trial_tolerance_seconds)
-    span_start = min(events.values()) - tolerance
-    span_end = max(events.values()) + tolerance
+    # Each stamp is taken after the service is back, so a trial's downtime
+    # precedes its stamp. The period opens a lead before the first stamp and
+    # closes at the last one: nothing after the last recovery is Stage B's.
+    span_start = min(events.values()) - timedelta(seconds=trial_lead_seconds)
+    span_end = max(events.values())
 
     probes, journal_sha256 = load_journal(journal)
 
     def in_window(index: int) -> bool:
-        earliest, latest = time_bounds(probes, index)
+        earliest, latest = window_bounds(probes, index)
         if window_start is not None and (latest is None or latest < window_start):
             return False
         if window_end is not None and (earliest is None or earliest > window_end):
             return False
         return True
 
+    # Only an explicitly declared window leaves probes out of the claim.
     chosen = [index for index in range(len(probes)) if in_window(index)]
     healthy_at = [index for index in chosen if probes[index].healthy]
     if len(healthy_at) < 2:
         raise CollectorError("fewer than two healthy probes in the window")
-    first, last = healthy_at[0], healthy_at[-1]
 
     excluded: list[str] = []
     unexplained: list[str] = []
-    outside = len(probes) - len(chosen)
     for index in chosen:
         item = probes[index]
         if item.healthy:
             continue
-        if index < first or index > last:
-            # Before the first or after the last healthy probe: not part of the
-            # window this soak claims. Counted, not claimed.
-            outside += 1
-            continue
-        earliest, latest = time_bounds(probes, index)
+        earliest, latest = began_bounds(probes, index)
+        placed = (
+            item.observed_at is None
+            or (item.observed_at - item.started_at).total_seconds() <= MAX_PROBE_SECONDS
+        )
         if (
-            earliest is not None
+            placed
+            and earliest is not None
             and latest is not None
             and span_start <= earliest
             and latest <= span_end
@@ -647,22 +749,28 @@ def assemble(
             "end": None if window_end is None else window_end.isoformat(),
         },
         "stage_b_trial_period": {
-            "tolerance_seconds": trial_tolerance_seconds,
+            "lead_seconds": trial_lead_seconds,
             "start": span_start.isoformat(),
             "end": span_end.isoformat(),
         },
         "red_probes_excluded": excluded,
-        "probes_outside_window": outside,
+        "probes_outside_declared_window": len(probes) - len(chosen),
         "observed_in_samples": {
             "backend_versions": seen("backend_version"),
             "worker_versions": seen("worker_version"),
             "worker_commit_shas": seen("worker_commit_sha"),
         },
         "expected_release_evidence_ref": verdict.release_evidence_ref,
-        "note": (
+        "limitations": [
             "This record is not a qualification verdict. Run "
-            "kaliv_recovery_soak_qualification.py on the observations file."
-        ),
+            "kaliv_recovery_soak_qualification.py on the observations file.",
+            "The qualifier validates the observations only. It does not see the "
+            "journal or this record, so the exclusions listed here are a separate "
+            "trust boundary that a reviewer checks against the journal by hash.",
+            "Inside the Stage-B trial period a red probe is excused whether or not "
+            "a trial caused it. The record shows that the appliance was down then; "
+            "it does not show why.",
+        ],
     }
     _atomic_write(output, rendered)
     _atomic_write(record, (json.dumps(assembly, indent=2, sort_keys=True) + "\n").encode("utf-8"))
@@ -708,6 +816,15 @@ def _cmd_sample(args: argparse.Namespace) -> int:
         raise CollectorError("interval must be at least 30 seconds")
     if args.heartbeat_settle_seconds >= args.interval_seconds:
         raise CollectorError("heartbeat settle time must be shorter than the interval")
+    if args.timeout <= 0 or args.heartbeat_settle_seconds <= 0:
+        raise CollectorError("timeouts must be positive")
+    if 3 * args.timeout + args.heartbeat_settle_seconds > MAX_PROBE_SECONDS - 10:
+        # A red probe that takes longer than MAX_PROBE_SECONDS can never be
+        # placed in Stage B's trial period, so do not allow one by design.
+        raise CollectorError(
+            f"three HTTP timeouts plus the heartbeat settle time must stay below "
+            f"{MAX_PROBE_SECONDS - 10} seconds"
+        )
 
     started = time.monotonic()
     while True:
@@ -754,7 +871,7 @@ def _cmd_assemble(args: argparse.Namespace) -> int:
         stage_b_report=args.stage_b_report,
         required_duration_seconds=args.required_duration_seconds,
         max_sample_gap_seconds=args.max_sample_gap_seconds,
-        trial_tolerance_seconds=args.trial_tolerance_seconds,
+        trial_lead_seconds=args.trial_lead_seconds,
         window_start=_cli_timestamp(args.window_start, "--window-start"),
         window_end=_cli_timestamp(args.window_end, "--window-end"),
         output=evidence_path(root, args.output, "output"),
@@ -801,9 +918,10 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--required-duration-seconds", type=int, required=True)
     build.add_argument("--max-sample-gap-seconds", type=int, required=True)
     build.add_argument(
-        "--trial-tolerance-seconds",
+        "--trial-lead-seconds",
         type=int,
-        help="widening of the Stage-B trial period (default: the max sample gap)",
+        help="how long before Stage B's first recovery stamp its trial period opens "
+        "(default and maximum: the max sample gap)",
     )
     build.add_argument("--window-start", help="ignore probes before this ISO-8601 instant")
     build.add_argument("--window-end", help="ignore probes after this ISO-8601 instant")
