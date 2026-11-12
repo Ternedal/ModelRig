@@ -53,9 +53,17 @@ if ($LASTEXITCODE -ne 0) { throw "Candidate er ikke frozen paa exact SHA $Candid
 
 Freeze-kontrollen og operatoren kræver, at den aktuelle `origin/main` er
 indeholdt i kandidaten. Efter publicering holder det kun, så længe `main` står
-på RC-SHA'en, så fra tagget, til Stage A er grøn, merges intet til `main`. Er
-`main` alligevel flyttet, stopper kontrollen. Den må ikke omgås; stop og
-rapportér i #2275.
+på RC-SHA'en.
+
+> **Freeze-vinduet er ophævet 12/11-2026 (Anders, #2275-kommentar 6816274261).**
+> Reglen om, at intet merges til `main` fra tagget, til Stage A er grøn, gælder
+> ikke længere. Anders tester ikke fysisk, før billede og video er i en release
+> (#2275-kommentar 6751908309), og de lå i de PR'er, reglen holdt ude. Når `main`
+> har flyttet sig fra RC-SHA'en, kan Stage A ikke køres på `v2.0.19`; næste
+> release tagges og valideres på sin egen SHA.
+
+Er `main` flyttet, stopper kontrollen. Den må ikke omgås; stop og rapportér i
+#2275.
 
 Fra første fysiske bevis til promotion eller abandonment må branchen ikke
 pushes, rebases, force-pushes, merges, amendes eller redigeres. Enhver head-
