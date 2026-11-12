@@ -708,6 +708,15 @@ jobs:
         working-directory: backend
         run: go test ./cmd/modelrig-updater/ ./cmd/modelrig-supervisor/ ./internal/heartbeat/
 
+      # The repository-authority wrapper is run by the operator in PowerShell on
+      # Windows. Run its contract there too, against a fake gh.
+      - name: Repository-authority wrapper contract on real Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python tests/workflow_repository_authority_wrapper.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   test-windows-tool-isolation:
     runs-on: windows-latest
     steps:
