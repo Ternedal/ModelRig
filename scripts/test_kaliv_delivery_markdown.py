@@ -56,7 +56,7 @@ class MarkdownReportTests(unittest.TestCase):
         for state in ("startup_failure", "action_required", "stale", "failure", "cancelled",
                       "timed_out", "unknown", "some_future_state"):
             self.assertIn("latest workflow: " + state, flagged(state), state)
-        for state in ("in_progress", "queued"):
+        for state in ("queued", "in_progress", "waiting", "pending", "requested"):
             self.assertIn("latest workflow not finished: " + state, flagged(state), state)
         for state in ("success", "neutral", "skipped", "none"):
             self.assertIn("No warning conditions detected", flagged(state), state)
