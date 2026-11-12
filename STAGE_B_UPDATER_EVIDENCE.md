@@ -1,9 +1,10 @@
 # Stage B updater-evidens — release 2.0.19
 
-Denne runbook bruges først efter, at den beståede Stage A-SHA er fast-forwardet
-til `main`, tagget som `v2.0.19` på præcis samme SHA og publiceret som et
-komplet signeret release-sæt. Ingen kommando her merger, tagger, releaser eller
-aktiverer produktion.
+Denne runbook bruges først efter, at `v2.0.19` er tagget på RC-SHA'en (`main`
+efter merge af #2364) og publiceret som et komplet signeret release-sæt (D3,
+#2275), og efter at Stage A er kørt på samme SHA jf.
+`STAGED_PHYSICAL_PROMOTION.md`. Ingen kommando her merger, tagger, releaser
+eller aktiverer produktion.
 
 ## Ærlig releasegrænse
 
@@ -223,17 +224,16 @@ physical_campaign_complete=true
 browser_peer_physical_complete=true
 all_physical_evidence_complete=true
 production_activation=false
-
-### Recovery-event timestamps
-
-Recovery/soak qualification treats the lifecycle event time as evidence, not operator input. The Stage B collector writes one UTC `observed_at` for reboot and supervisor restarts into both the lifecycle observation and its hash-bound log. The strict interruption path likewise writes and validates `recovery_observed_at`. A recovery-soak observation must use exactly those validated timestamps; changing only the soak JSON cannot move historical recovery evidence into a later soak window.
-
 summary.total=9
 ```
 
 Review hashes for strict-, updater-chain-, campaign- og component-final-
 rapporterne. Stop derefter. Aktivering kræver fortsat en separat eksplicit
 beslutning.
+
+### Recovery-event timestamps
+
+Recovery/soak qualification treats the lifecycle event time as evidence, not operator input. The Stage B collector writes one UTC `observed_at` for reboot and supervisor restarts into both the lifecycle observation and its hash-bound log. The strict interruption path likewise writes and validates `recovery_observed_at`. A recovery-soak observation must use exactly those validated timestamps; changing only the soak JSON cannot move historical recovery evidence into a later soak window.
 
 ## Rollback-reglen: binærer og journal følges ad
 

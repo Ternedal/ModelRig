@@ -1,5 +1,7 @@
 # ModelRig / Kaliv 2.0.14 – integrated test release
 
+> **Historical (2.0.14 test release).** The candidate was published as `V2.0.14` on 2026-10-14 and has been superseded by later releases; see GitHub Releases and the generated [`CURRENT_STATE.md`](../CURRENT_STATE.md) for the current state.
+
 This runbook is the operator-facing test path for the first integrated 2.0.14
 candidate. It does not grant production authority. All release and runtime
 authority gates remain fail-closed unless their own evidence says otherwise.
