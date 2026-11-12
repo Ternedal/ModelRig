@@ -31,6 +31,7 @@ Android --Bearer--> Go (authMW, Range, headers) --loopback + internal secret--> 
 **A lost volume stays lost** for the worker process, as for the executor: 503 until the worker restarts. A replugged disk is not trusted again on its own.
 
 ## The list
+- **Newest first.** The sink appends to the index, so the worker lists in reverse order, and a new result is on the first page.
 - The gallery index is filtered by the installation's completed assets **before** pagination, so a cursor always lies inside what the device may see.
 - An unknown cursor is 400.
 - A thumbnail whose asset is not owned is dropped (`thumbnail_id` and `thumbnail_url` are `null`) rather than linked to a 404.
