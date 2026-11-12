@@ -133,7 +133,7 @@ W02-B is accepted only when exact-head repository qualification proves:
 - exact storage keys remain distinct and no case-normalization gains merge authority;
 - unrelated durable rows do not consume the bounded relevant snapshot;
 - legacy mode remains writable with 128+ different canonical verbatim statements by using the exact-value selector;
-- protected mode never uses plaintext value lookup and retains its explicit bounded fail-closed behavior pending #1216;
+- protected mode never uses plaintext value lookup and retains its explicit bounded fail-closed behavior pending #1216 (since resolved by the #1218 keyed sidecar, [`MEMORY_4_PROTECTED_EXACT_LOOKUP.md`](./MEMORY_4_PROTECTED_EXACT_LOOKUP.md));
 - create preserves candidate authority/provenance fields exactly;
 - exact create replay is idempotent only on a full durable-field match and never through a later superseding version;
 - exact pending-to-confirmed verbatim promotion creates a new version, links `supersedes_id` and preserves history;

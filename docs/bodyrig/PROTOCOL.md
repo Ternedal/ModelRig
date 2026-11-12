@@ -1,5 +1,7 @@
 # BodyRig Runtime Protocol v0.1
 
+> **Historical (ModelRig-local bootstrap design).** See [`README.md`](README.md) in this directory; standalone `Ternedal/BodyRig` is authoritative. The live package format is `.mrbody` ([`../MRBODY_SPEC.md`](../MRBODY_SPEC.md)).
+
 This document defines the logical contracts between ModelRig, VoiceRig and BodyRig. Transport is deliberately unspecified in v0.1; JSON examples represent the canonical semantic payloads and can later map to WebSocket, gRPC, local IPC or another transport.
 
 ## 1. Identifiers and clock
