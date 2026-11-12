@@ -74,6 +74,26 @@ class EndToEndLatencyRuntimeTests(unittest.TestCase):
         self.assertEqual(binding["runtime_epoch"], observer.clock.runtime_epoch_id)
         self.assertEqual(binding["observer_id"], "observer-e2e-test")
 
+    def test_voice_outward_names_no_body(self):
+        # ADR-SYS-001 D5/D6: the V1 measurement ends at the first spoken answer.
+        observer = self.observer()
+        receipt = observer.voice_outward_started(utterance_id="e2e-utterance-0")
+        self.assertEqual(receipt["phase"], "outward_started")
+        self.assertEqual(
+            receipt["details"],
+            {
+                "outward_kind": "voice",
+                "started": True,
+                "utterance_id": "e2e-utterance-0",
+                "body_runtime_id": None,
+            },
+        )
+        self.assertEqual(receipt["event_id"], "cevt-" + "b" * 32)
+        self.assertEqual(receipt["runtime_epoch"], observer.clock.runtime_epoch_id)
+        self.assertIs(receipt["production_activation"], False)
+        with self.assertRaises(ValueError):
+            observer.voice_outward_started(utterance_id="not a token")
+
     def test_invalid_identity_and_fake_cycle_claims_fail_closed(self):
         with self.assertRaises(ValueError):
             EndToEndLatencyObserver(

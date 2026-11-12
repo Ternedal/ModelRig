@@ -82,6 +82,84 @@ A later physical baseline may establish an SLO. Until that happens, this
 qualifier must continue to report `threshold_applied=false`; CI must not invent
 or infer a threshold.
 
+## Producing the receipts
+
+The worker writes the receipts itself, from its own trusted clock, on two
+default-off routes mounted by `KALIV_E2E_LATENCY_QUALIFICATION_ENABLED=1`. A
+turn names the measurement it wants with `outward_kind`:
+
+| `outward_kind` | Release | Ends when | Body |
+|---|---|---|---|
+| `voice` | Kaliv V1 (ADR-SYS-001 D5 and D6) | playback of the reply is reported on `POST /experimental/e2e-latency/voice/{utterance_id}/started` | None. No body session is created, read or required, and the receipt's `body_runtime_id` is null. |
+| `voice+body` (default) | Kaliv Embodied | the client reports `POST /body/speech/{utterance_id}/started` | An active body is required, and the receipt names its runtime. |
+
+A playback start is reported once. A second report is refused and does not move
+the timestamp. The reporter supplies only the utterance; candidate, event and
+observer identity are the worker's own.
+
+### The Kaliv V1 voice measurement on the rig
+
+> **Not yet run on the rig.** The routes and the driver are covered by tests
+> against fakes on Linux. Microphone recording and `winsound` playback are
+> Windows-only code that no test executes.
+
+`scripts/kaliv_e2e_latency_voice_driver.py` is the client: it takes one spoken
+utterance, posts it, starts playing the reply on the rig, and only then reports
+the start.
+
+Start the worker from the clean candidate checkout with the Consciousness
+flags and profile of
+[`consciousness-core/LIVE_CYCLE_QUALIFICATION.md`](consciousness-core/LIVE_CYCLE_QUALIFICATION.md)
+(the route needs the live cognitive session, speech recognition and speech
+synthesis), plus:
+
+```powershell
+$env:KALIV_E2E_LATENCY_QUALIFICATION_ENABLED = "1"
+$env:KALIV_E2E_LATENCY_CANDIDATE_GIT_SHA = (git rev-parse HEAD)
+$env:KALIV_E2E_LATENCY_EVIDENCE_ROOT = (Join-Path (Get-Location) "validation\e2e-latency")
+```
+
+Then, in another window in the same checkout:
+
+```powershell
+python scripts\kaliv_e2e_latency_voice_driver.py --record-seconds 5
+```
+
+Speak when it says so. It prints the run record and the exact qualifier command
+for the three receipts.
+
+If recording from the microphone fails, record a WAV with any tool and pass it
+within ten minutes. A recording is accepted once:
+
+```powershell
+python scripts\kaliv_e2e_latency_voice_driver.py --wav C:\path\to\utterance.wav
+```
+
+If the reply cannot be played through `winsound`, name a player. The start is
+reported when the player has been launched:
+
+```powershell
+python scripts\kaliv_e2e_latency_voice_driver.py --record-seconds 5 --player-command "ffplay -nodisp -autoexit {wav}"
+```
+
+### What this number is
+
+The clock starts when the worker has accepted the audio and stops when the
+start of playback is reported on the worker's loopback. It therefore does
+**not** include:
+
+- capturing the utterance and getting it to the worker;
+- the network between a phone and the rig;
+- playback on a phone;
+- the output latency of the playback device.
+
+The receipt's schema has no field for this, so the worker writes it to
+`voice_outward_scope.json` beside the receipts, and the driver repeats it in
+`rig_driver_run.json` together with the hashes of the input, the reply and the
+three receipts. Keep both files with the receipts. A reviewer of the
+`kaliv-end-to-end-latency:` reference should read them: the gate itself sees
+only the reference.
+
 ## Run
 
 Store all three receipts below one evidence directory and invoke the qualifier
