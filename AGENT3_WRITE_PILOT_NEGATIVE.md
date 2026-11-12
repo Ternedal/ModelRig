@@ -1,5 +1,12 @@
 # T-022 negativ write-pilot operator
 
+> **⚠️ Status 11/11-2026: launcheren kan ikke køre i sin nuværende form.**
+> `START_AGENT3_WRITE_PILOT_NEGATIVE.cmd` er pinnet til
+> `agent/t022-write-pilot-negative-operator` (version 1.58.146), som ikke findes
+> på origin (GitHub API: 404). Launcherens fælles `ensure_candidate` (`scripts/stage_a_one_click.retained`) kører
+> `git fetch origin main <branch>` og `git switch <branch>` og stopper derfor
+> fail-closed, før der indsamles evidens.
+
 **Status:** dormant fysisk operator til del 2 af T-022. Den styrer og registrerer de syv adversarial cases gennem den eksisterende hashkædede recorder. Den sender ikke selv et adversarial request, godkender ikke en confirmation og aktiverer ikke produktion.
 
 ## Start

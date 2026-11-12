@@ -1,6 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+set "PYTHONDONTWRITEBYTECODE=1"
 
 echo ================================================================
 echo   Kaliv T-023 - fysisk termination UI-validering

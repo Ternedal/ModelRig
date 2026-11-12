@@ -1,6 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+set "PYTHONDONTWRITEBYTECODE=1"
 
 echo ================================================================
 echo   Kaliv Stage A - scheduler revocation

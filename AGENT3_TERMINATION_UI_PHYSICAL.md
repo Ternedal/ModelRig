@@ -1,5 +1,16 @@
 # Kaliv Agent 3 — fysisk T-023 termination UI-validering
 
+> **⚠️ Status 11/11-2026: launcheren kan ikke køre i sin nuværende form.**
+> `START_AGENT3_TERMINATION_UI_PHYSICAL.cmd` er pinnet til
+> `agent/t023-termination-physical-operator` (version 1.58.146), som ikke findes
+> på origin (GitHub API: 404). Launcherens fælles `ensure_candidate` (`scripts/stage_a_one_click.retained`) kører
+> `git fetch origin main <branch>` og `git switch <branch>` og stopper derfor
+> fail-closed, før der indsamles evidens.
+> Under en kampagne er indgangen `scripts/proof_t023_current.py`, som
+> `START_PROOF_CAMPAIGN.cmd` kalder, og som binder operatoren til den aktuelle
+> checkout (se "T-023: kør ALTID gennem proof-wrapperen" i
+> `STAGED_PHYSICAL_PROMOTION.md`).
+
 Status: **softwareflowet er CI-grønt; den fysiske Android/Windows-observation mangler fortsat.**
 
 Denne runbook beskriver den eneste kørsel, der må producere
