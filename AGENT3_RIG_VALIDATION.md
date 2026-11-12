@@ -1,6 +1,6 @@
 # Kaliv Agent 3.0 — validering på den fysiske rig
 
-Status: **harness, promotions-gate og statusvisning er implementeret og CI-testet; fysisk rig-validering er endnu ikke udført.**
+Status: **harness, promotions-gate og statusvisning er implementeret og CI-testet. Fysisk rig-validering blev kørt 25-26/7-2026 (9/9) på en senere ugyldiggjort kandidat-SHA; evidensen er SHA-bundet og skal køres igen for hver kandidat (aktuel tilstand: `ACTIVATION_READINESS.md`).**
 
 Denne procedure validerer den eksperimentelle Agent 3.0-sti gennem den rigtige
 Bearer-beskyttede Go-gateway og den lokale Ollama-planner. Den normale Android-,

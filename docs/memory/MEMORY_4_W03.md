@@ -1,6 +1,6 @@
 # Memory 4.0 W03 — bounded completed-turn durable write orchestration
 
-Status: implementation candidate, default-off and not wired to normal chat.
+Status: landed via #1226 (`ec3ccc2d`), default-off. Normal-chat wiring was added later and separately by W04-A/W04-B (both opt-in); see [MEMORY_4_CLOSURE.md](./MEMORY_4_CLOSURE.md).
 
 `production_activation=false`
 
