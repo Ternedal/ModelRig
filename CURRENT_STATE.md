@@ -519,6 +519,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_agent4_storage_boundary.py`
 - `tests/workflow_android_apk_certificate.py`
 - `tests/workflow_android_credential_commit.py`
+- `tests/workflow_android_media_entry.py`
 - `tests/workflow_android_palette_divergence.py`
 - `tests/workflow_android_scheduler_picker.py`
 - `tests/workflow_android_signing_audit.py`
