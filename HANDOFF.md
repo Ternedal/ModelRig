@@ -833,7 +833,23 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     tiende ikke dit arbejde. `git status --short` før `git add`, og vær
     særligt mistroisk efter en testkørsel — suiter skriver tilstand.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 11/11)
+## 9. Kø — hvem har bolden (16/7, opdateret 12/11)
+
+### 12/11: freeze-vinduet på `main` ophævet
+
+- **Anders ophævede freeze-vinduet 12/11 kl. 07:15 CET** (#2275 kommentar
+  6816274261). Reglen om, at intet merges til `main` fra `v2.0.19`-tagget,
+  til Stage A er grøn, gælder ikke længere. Baggrund: Anders tester ikke
+  fysisk, før billede og video er i en release (#2275 kommentar 6751908309),
+  og de lå i de PR'er, reglen holdt ude.
+- **Konsekvens:** når `main` har flyttet sig fra `3cbd00f1`, stopper
+  `candidate_freeze_check.py` for `v2.0.19`, så `v2.0.19` bliver ikke Stage
+  A-valideret, som den er. Næste release tagges og valideres på sin egen SHA.
+- **Uændret:** SHA-accept, fuld CI, Anders' go pr. merge til `main` og hans go
+  til release. Ophævelsen godkender ingen bestemt PR.
+- #2382 skriver afgørelsen ind i `RIGDAG_SIMPEL.md` og
+  `STAGED_PHYSICAL_PROMOTION.md` og retter D3-kontrakten i
+  `tests/workflow_staged_promotion_runbook.py`.
 
 ### 8.–11/11: D3 ændret, v2.0.19 publiceret, `physical-proof/2.0.19` oprettet
 
@@ -864,8 +880,8 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 - **Dokumentationsgennemgang (Claude, 11/11, på Anders' bestilling):** #2370
   (draft) retter dokumentationen mod koden og tilføjer `docs/README.md`
   (indeks) og `docs/KALIV_ECOSYSTEM.md` (repositories og kontrakter). Kun
-  `.md`-filer; ingen genererede filer. Må ikke merges under freeze-vinduet og
-  kræver ChatGPT's SHA-accept og Anders' go. De afgørelser og kodefund,
+  `.md`-filer; ingen genererede filer. Kræver ChatGPT's SHA-accept og Anders'
+  go (freeze-vinduet blev ophævet 12/11, se ovenfor). De afgørelser og kodefund,
   gennemgangen ikke selv kunne lukke, står i #2371. Tilsvarende PR'er er åbnet
   i de øvrige Kaliv-repositories samme dag.
 
@@ -1391,9 +1407,10 @@ v2.0.10. Kandidat = `origin/physical-proof/2.0.11`, som SKAL være lig
 ### FREEZE-VINDUE — læs før enhver landing på main
 
 > **Under D3 (8/11-2026):** tag og publicering kommer før Stage A, og vinduet
-> løber fra tagget, til Stage A er grøn: "fra tagget, til Stage A er grøn,
-> merges intet til `main`" (`RIGDAG_SIMPEL.md` Blok 0,
-> `STAGED_PHYSICAL_PROMOTION.md` A0). Koordinering sker i #2275. #731,
+> løb fra tagget, til Stage A var grøn (`RIGDAG_SIMPEL.md` Blok 0,
+> `STAGED_PHYSICAL_PROMOTION.md` A0). **Anders ophævede det vindue
+> 12/11-2026** (#2275 kommentar 6816274261): `main` er åben igen, og `v2.0.19`
+> bliver ikke Stage A-valideret, som den er. Koordinering sker i #2275. #731,
 > `v2.0.11` og rækkefølgen i punkt 3 nedenfor er 2.0.11-æraens.
 
 Fra det øjeblik riggen har produceret et grønt `candidate_freeze_check.py`-
