@@ -24,6 +24,7 @@ GitHub Releases.
 - [KALIV_SOFTWARE_EXACT_GREEN_QUALIFICATION.md](KALIV_SOFTWARE_EXACT_GREEN_QUALIFICATION.md) — evidens for `software_exact_green`-gaten via `scripts/kaliv_software_exact_green_qualifier.py`.
 - [KALIV_REPOSITORY_AUTHORITY_QUALIFICATION.md](KALIV_REPOSITORY_AUTHORITY_QUALIFICATION.md) — evidens for `repository_authority`-gaten via `scripts/kaliv_repository_authority_qualifier.py`.
 - [KALIV_END_TO_END_LATENCY_QUALIFICATION.md](KALIV_END_TO_END_LATENCY_QUALIFICATION.md) — evidens for `end_to_end_latency`-gaten via `scripts/kaliv_end_to_end_latency_qualifier.py`.
+- [KALIV_RECOVERY_SOAK_QUALIFICATION.md](KALIV_RECOVERY_SOAK_QUALIFICATION.md) — evidens for `recovery_soak`-gaten: `scripts/kaliv_recovery_soak_collector.py` tager helbredsprøverne, `scripts/kaliv_recovery_soak_qualification.py` kvalificerer dem. *Runbook.*
 - [KALIV_V1_RIG_SMOKE.md](KALIV_V1_RIG_SMOKE.md) — read-only readiness-diagnostik for riggen (checkout, backend/worker, ASR/TTS); ikke fysisk accept. *Runbook.*
 - [RELEASE_TEST_2.0.14.md](RELEASE_TEST_2.0.14.md) — operatørens testvej for den første integrerede 2.0.14-kandidat. *Historisk.*
 - [release/V1_EVIDENCE_TRUST_BOUNDARY.md](release/V1_EVIDENCE_TRUST_BOUNDARY.md) — operatørnote om hvad den eksisterende release-gate validerer, og hvad den ikke beviser.
