@@ -107,10 +107,10 @@ class MediaJobException(val reason: Reason, message: String, val code: String? =
         NOT_PAIRED,
         ORIGIN_REFUSED,
         UNAUTHORIZED,
-        /** The route is absent (switch off), 503, or the answer was not understood. */
+        /** The route or method is absent (404/405/501: switch off), or the answer was not understood. */
         UNAVAILABLE,
         /**
-         * The rig answered 502, 503 or 504: down or busy for a moment. While a
+         * The rig answered 500, 502, 503 or 504: down or failing for a moment. While a
          * job is followed this is not the end of it (6780346935 #2).
          */
         TRANSIENT,

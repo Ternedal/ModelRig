@@ -106,7 +106,11 @@ class MediaJobClientTest {
             Triple(401, "", Reason.UNAUTHORIZED),
             Triple(429, """{"detail":"active_limit"}""", Reason.BUSY),
             Triple(400, """{"detail":"profile_not_enabled"}""", Reason.INVALID_REQUEST),
-            Triple(500, "", Reason.HTTP),
+            Triple(500, "", Reason.TRANSIENT),
+            Triple(405, "", Reason.UNAVAILABLE),
+            Triple(501, "", Reason.UNAVAILABLE),
+            Triple(409, "", Reason.HTTP),
+            Triple(418, "", Reason.HTTP),
         )
         for ((code, body, expected) in cases) {
             server.enqueue(json(body, code))
