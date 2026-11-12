@@ -21,6 +21,8 @@ At construction:
 - The root is canonical. It has no symlink, junction, 8.3 alias, ``..`` or Windows namespace prefix.
 - The root is a directory and a mount point.
 - The root is not the system volume.
+- The root is a local disk: not a network drive (``GetDriveTypeW``) and not a ``subst`` drive letter
+  (``QueryDosDeviceW``), on Windows. POSIX network filesystems are already outside the allowed list.
 - Its filesystem has stable file ids: NTFS, ReFS, ext4, xfs or btrfs. FAT32 and exFAT are refused,
   because they reuse ids after a rename (docs/MEDIA_VIDEO_GENERATION.md, rig item 9).
 - The marker exists and matches the configured id.
@@ -65,6 +67,7 @@ VOLUME_ID_ENV = "KALIV_MEDIA_VOLUME_ID"
 MARKER_NAME = ".kaliv-media-volume"
 STABLE_ID_FILESYSTEMS = frozenset({"ntfs", "refs", "ext4", "xfs", "btrfs"})
 FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+DRIVE_REMOTE = 4  # GetDriveTypeW
 
 _VOLUME_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{7,63}\Z")
 _MAX_MARKER_BYTES = 128
@@ -155,6 +158,29 @@ class SystemProbe:
         mount = self._mountinfo(root)
         return mount[1] if mount else None
 
+    def drive_kind(self, root: str) -> str | None:
+        """Windows only: "remote" for a network drive, "subst" for a drive letter that ``subst`` maps to
+        a folder, "local" otherwise, None if it cannot be read (for example no such letter). POSIX: always "local" (a network
+        filesystem is already refused by ``STABLE_ID_FILESYSTEMS``).
+
+        Without this the two cases relied only on ``realpath`` turning the letter into its UNC path or
+        its target folder (#2275 backlog item 16). ``GetVolumeInformationW`` reports NTFS for many SMB
+        shares, so the filesystem check alone does not catch them."""
+        if not self.windows:
+            return "local"
+        import ctypes
+        drive = root[:2]
+        if len(drive) != 2 or drive[1] != ":":
+            return None
+        kind = ctypes.windll.kernel32.GetDriveTypeW(ctypes.c_wchar_p(drive + "\\"))  # type: ignore[attr-defined]
+        if kind == DRIVE_REMOTE:
+            return "remote"
+        target = ctypes.create_unicode_buffer(1024)
+        if not ctypes.windll.kernel32.QueryDosDeviceW(ctypes.c_wchar_p(drive), target, len(target)):  # type: ignore[attr-defined]
+            return None
+        # A real volume is a \Device\... name; subst gives \??\<target folder>.
+        return "subst" if target.value.startswith("\\??\\") else "local"
+
     def mount_instance(self, root: str) -> str | None:
         """This mounting of ``root``, where the platform names one: Linux's mount id, which a new
         mount of the same disk does not reuse. None on Windows, which has no such id (a volume's
@@ -212,6 +238,12 @@ class MountedMediaVolume:
             raise MediaVolumeConfigError("media_volume_root_invalid") from None
         self._root = self._normal(root)
         self._volume_id = volume_id
+        # Before anything else, so a network or subst letter is a configuration error (78) that stops
+        # the executor, not "the disk is not here right now" (75) that it would wait on forever. A
+        # letter that cannot be read (unplugged) is left to _observe_root: that is 75, as before.
+        kind = self._probe.drive_kind(self._root)
+        if kind in ("remote", "subst"):
+            raise MediaVolumeConfigError(f"media_volume_{kind}_refused")
         info = self._observe_root()
         filesystem = self._probe.filesystem(self._root)
         if filesystem is None:

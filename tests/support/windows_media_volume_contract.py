@@ -20,6 +20,9 @@ It uses the real SystemProbe throughout:
     These three are mandatory: if any of them cannot run (the workspace on the system drive, no
     junction), the contract FAILS.
 
+- A ``subst`` letter and a mapped network share, each with a valid marker, are refused as
+  configuration (backlog item 16); NOT RUN if the runner cannot create them.
+
 **What it changes:** it writes the marker ``<volume>\\.kaliv-media-volume`` for the run and removes it
 afterwards. If the workspace shares the system drive, or the volume root cannot be written, those
 cases are reported as NOT RUN with the reason. They are never counted as passes.
@@ -203,7 +206,70 @@ def main() -> int:
             marker.unlink()
         except OSError as exc:
             print(f"  WARN: could not remove {marker}: {exc}")
+    drive_letter_cases(workspace)
     return summary()
+
+
+def free_letter() -> str | None:
+    for letter in "YXWVUTS":
+        if not os.path.exists(letter + ":\\"):
+            return letter + ":"
+    return None
+
+
+def drive_letter_cases(workspace: str) -> None:
+    """#2275 backlog item 16: a subst letter and a mapped network share, each holding a valid marker
+    on a non-system NTFS volume, must be refused as configuration (78), never accepted."""
+    probe = SystemProbe()
+    system_root = os.environ.get("SystemDrive", "C:") + "\\"
+    check(probe.drive_kind(system_root) == "local", "the system drive is a local drive (GetDriveTypeW/QueryDosDeviceW)")
+    folder = os.path.realpath(tempfile.mkdtemp(prefix="kaliv-alias-", dir=workspace))
+    Path(folder, MARKER_NAME).write_text(VOLUME_ID, encoding="ascii")
+
+    def expect_refused(letter: str, kind: str, label: str) -> None:
+        check(probe.drive_kind(letter + "\\") == kind, f"{label}: drive_kind is {kind!r} ({probe.drive_kind(letter + '\\')!r})")
+        try:
+            MountedMediaVolume(letter + "\\", VOLUME_ID)
+            check(False, f"{label} with a valid marker is refused")
+        except MediaVolumeConfigError as exc:
+            check(str(exc) == f"media_volume_{kind}_refused", f"{label} with a valid marker is refused as configuration ({exc})")
+        except ArtifactSinkUnavailable as exc:
+            check(False, f"{label} is refused only as unavailable (75), not as configuration ({exc})")
+
+    letter = free_letter()
+    if letter is None:
+        skip("subst and network letters refused", "no free drive letter")
+        return
+    made = subprocess.run(["subst", letter, folder], capture_output=True, text=True)
+    if made.returncode == 0:
+        try:
+            expect_refused(letter, "subst", f"a subst letter {letter} for a folder on the workspace volume")
+        finally:
+            subprocess.run(["subst", letter, "/D"], capture_output=True, text=True)
+    else:
+        skip("subst letter refused", f"subst failed: {made.stdout} {made.stderr}")
+
+    share = "kalivcontract"
+    made = subprocess.run(["powershell", "-NoProfile", "-Command",
+                           f"New-SmbShare -Name {share} -Path '{folder}' -FullAccess $env:USERNAME | Out-Null"],
+                          capture_output=True, text=True)
+    if made.returncode != 0:
+        skip("network letter refused", f"New-SmbShare failed: {made.stdout.strip()} {made.stderr.strip()[:200]}")
+        return
+    try:
+        mapped = subprocess.run(["net", "use", letter, f"\\\\localhost\\{share}"], capture_output=True, text=True)
+        if mapped.returncode != 0:
+            skip("network letter refused", f"net use failed: {mapped.stdout.strip()} {mapped.stderr.strip()[:200]}")
+            return
+        try:
+            print(f"  network letter {letter}: GetVolumeInformationW={probe.filesystem(letter + '\\')} "
+                  f"realpath={os.path.realpath(letter + '\\')}")
+            expect_refused(letter, "remote", f"a network share mapped as {letter}")
+        finally:
+            subprocess.run(["net", "use", letter, "/delete", "/y"], capture_output=True, text=True)
+    finally:
+        subprocess.run(["powershell", "-NoProfile", "-Command", f"Remove-SmbShare -Name {share} -Force"],
+                       capture_output=True, text=True)
 
 
 def descriptor_ran_one() -> None:

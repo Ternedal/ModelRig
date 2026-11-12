@@ -45,6 +45,7 @@ The id ties the configuration to that one disk. Another disk mounted at the same
 - the root is canonical and is a directory;
 - it is a mount point;
 - it is not the system volume;
+- on Windows, it is a local drive: not a network drive (`GetDriveTypeW`) and not a `subst` letter (`QueryDosDeviceW`). Many SMB shares report NTFS, so the filesystem check alone would not catch them. This is checked first, so either case is 78 (`media_volume_remote_refused`, `media_volume_subst_refused`);
 - its filesystem is on the list above;
 - the marker matches the configured id.
 
@@ -86,7 +87,7 @@ It also runs `verify()`, so a lost or remounted volume refuses first. Any `requi
 
 | Error | Meaning | Executor exit |
 |---|---|---|
-| `MediaVolumeConfigError` | The configuration can never work: a bad id or root, a refused or unknown filesystem, or the system disk | 78 |
+| `MediaVolumeConfigError` | The configuration can never work: a bad id or root, a refused or unknown filesystem, the system disk, or a network or `subst` drive | 78 |
 | `ArtifactSinkUnavailable` | The volume is not usable right now: missing, not mounted, wrong or missing marker, identity changed, mounted again (`media_volume_remounted`), lost earlier (`media_volume_lost`), or a refused path | 75 |
 
 A missing marker counts as 75, because a wrong disk looks exactly the same. The reason string says which check failed. It never contains a prompt.

@@ -67,6 +67,11 @@ class FakeProbe(SystemProbe):
     def mount_instance(self, root):
         return self.mount_ids.get(root)
 
+    kind = "local"
+
+    def drive_kind(self, root):
+        return self.kind
+
 
 @unittest.skipIf(os.name == "nt", "POSIX paths; Windows runs tests/support/windows_media_volume_contract.py")
 class MediaVolumeTests(unittest.TestCase):
@@ -157,6 +162,20 @@ class MediaVolumeTests(unittest.TestCase):
         for fs in ("ntfs", "refs", "ext4", "xfs", "btrfs"):
             self.probe.fs = fs
             self.assertEqual(self.volume().filesystem, fs)
+
+    def test_a_network_or_subst_drive_is_a_configuration_error_even_with_a_valid_marker(self):
+        # #2275 backlog item 16: NTFS is reported for many SMB shares, so only the drive kind catches
+        # them when realpath does not; checked first, so it is 78 (stop), never 75 (wait).
+        self.probe.fs = "ntfs"
+        for kind in ("remote", "subst"):
+            with self.subTest(kind=kind):
+                self.probe.kind = kind
+                self.assertConfig(f"media_volume_{kind}_refused", self.volume)
+        self.probe.kind = None  # unreadable (no such letter): decided by the root checks as before
+        self.assertEqual(self.volume().filesystem, "ntfs")
+        self.probe.kind = None
+        self.probe.mounts = set()
+        self.assertRefused("media_volume_not_mounted", self.volume)
 
     def test_system_volume_is_refused(self):
         self.probe.system_dev = os.lstat(self.root).st_dev
