@@ -1,5 +1,13 @@
 # T-032 — fysisk browser-peer-validering på ModelRig
 
+> **⚠️ Status 11/11-2026: afsnit 1 kan ikke følges i sin nuværende form.**
+> Grenen `agent/t032-physical-operator-gate` findes ikke på origin (GitHub API:
+> 404), så `git switch`/`git pull` i afsnit 1 fejler. I det gældende flow kører
+> det fysiske browser-peer-bevis som en del af Stage A: `-Action Complete` i
+> `scripts/run-stage-a-physical-validation.ps1` kalder
+> `run-browser-peer-public-validation.ps1` på den checkout, A0 i
+> `STAGED_PHYSICAL_PROMOTION.md` låser.
+
 Denne gate er det fysiske Windows-bevis for den claim-bound browsertransport.
 Den hosted GitHub-receipt viser, at den offentlige transportvej virker, men den
 kan **ikke** bruges som ModelRig-bevis. Den fysiske gate kræver samme rene

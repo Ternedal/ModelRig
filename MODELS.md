@@ -44,8 +44,8 @@ Pull modellen på riggen, og den dukker op i listen. Ingen kode-ændring nødven
 — worker'en sender bare det modelnavn appen vælger videre til Ollama.
 
 Vil du sætte den som standard, så den bruges uden at vælge hver gang: sæt
-modelnavnet i appens indstillinger (rig-model-feltet), eller sæt `GEN_MODEL` på
-worker'en.
+modelnavnet i appens indstillinger (rig-model-feltet), eller sæt `MODELRIG_GEN_MODEL` på
+worker'en (default `qwen2.5-coder:7b`).
 
 ## Vigtig faldgrube: "thinking mode"
 

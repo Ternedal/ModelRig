@@ -47,8 +47,9 @@
    scheduler-godkendelser er device-bundne, så en fremmed enhed kan ikke minte dem).
 5. **Supply chain på kode-siden:** Python-deps pinnet `==`, GitHub Actions
    SHA-pinnet, Dependabot + CodeQL på main, release-assets SHA-256-verificeret
-   af updateren (1.58.15; ærlig grænse: manifestet er selv usigneret — se
-   accepteret risiko #4).
+   af updateren (1.58.15) og afvist uden GitHub build-provenance-attestation pr.
+   asset (releases fra og med 1.58.72; manifestet `SHA256SUMS.txt` er selv
+   usigneret — se accepteret risiko #4).
 
 *Uden for model:* nation-state, fysisk adgang til riggen (single-user-appliance;
 lokal adgang = game over by design, med DPAPI-at-rest som åbent punkt, T-033),
@@ -150,7 +151,7 @@ uden dig — ikke mod at nogen har dit enhedstoken.*
 
 Enhedstokenet **ér** autorisationen for dine egne admin-handlinger. Det er den
 samme grænse som resten af API'et: har man tokenet, er man dig. Rotation
-(`modelrig rotate`) er svaret på et lækket token, ikke en ekstra dialog.
+(`python tools/modelrig-cli.py rotate` eller `POST /api/v1/token/rotate`) er svaret på et lækket token, ikke en ekstra dialog.
 
 **Hvorfor ikke også gate brugerstien:** det ville tilføje friktion mod den
 forkerte trussel. Har nogen dit enhedstoken, er slettede modeller ikke det
@@ -173,6 +174,13 @@ Tailscale/WireGuard leverer den krypterede transport. Egen TLS er et **NEXT/appa
 Releasen publicerer nu `SHA256SUMS.txt` over alle assets, og updateren verificerer hver exe's
 SHA-256 mod den **før** supervisoren stoppes — mismatch eller manglende entry afviser installationen
 (fail closed; `-insecure-skip-verify` kun for en release der ligger før checksums).
+
+Derefter slår updateren hvert exe-digest op i GitHubs attestation-API for repoet
+(`verifyProvenance`/`attestedBy` i `backend/cmd/modelrig-updater/main.go`); release-workflowet
+attesterer assets med `actions/attest-build-provenance`. Et digest uden attestation, eller et
+opslag der ikke kan gennemføres, afviser installationen (fail closed; `-skip-attestation` kun for en
+release fra før v1.58.72). Opslaget stoler på GitHubs svar over TLS; Sigstore-bundlet verificeres
+ikke offline.
 
 **Ærlig grænse:** `SHA256SUMS.txt` er selv usigneret, så dette stopper et *tamperet/trunkeret asset*,
 ikke en angriber med release-write (som kunne erstatte begge). Næste niveau: signeret manifest /
