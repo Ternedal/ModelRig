@@ -53,7 +53,7 @@ func TestDecodeUniqueJSONRejectsOversizedArray(t *testing.T) {
 
 func TestDecodeUniqueJSONRejectsDuplicateEscapedKey(t *testing.T) {
  // JSON object keys must be compared after unescaping.
- dec := json.NewDecoder(strings.NewReader(`{"id":1,"\\u0069d":2}`))
+ dec := json.NewDecoder(strings.NewReader(`{"id":1,"\u0069d":2}`))
  if _, err := decodeUniqueJSON(dec); err == nil {
   t.Fatal("accepted semantically duplicate JSON keys")
  }
