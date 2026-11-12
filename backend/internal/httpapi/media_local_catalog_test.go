@@ -41,3 +41,20 @@ func TestLocalMediaCatalogRefusesOtherOwner(t *testing.T) {
  if _,_,err:=c.ListMedia("other",50,"");err==nil {t.Fatal("cross-owner listing accepted")}
  if file,_,_,err:=c.OpenMedia("other","asset_1");err==nil || file!=nil {t.Fatal("cross-owner asset accepted")}
 }
+
+func TestDecodeUniqueJSONRejectsOversizedArray(t *testing.T) {
+ // The decoder must stop before materialising an unbounded index.
+ input := "[" + strings.Repeat("0,", 10000) + "0]"
+ dec := json.NewDecoder(strings.NewReader(input))
+ if _, err := decodeUniqueJSON(dec); err == nil {
+  t.Fatal("accepted index with more than 10000 entries")
+ }
+}
+
+func TestDecodeUniqueJSONRejectsDuplicateEscapedKey(t *testing.T) {
+ // JSON object keys must be compared after unescaping.
+ dec := json.NewDecoder(strings.NewReader(`{"id":1,"\\u0069d":2}`))
+ if _, err := decodeUniqueJSON(dec); err == nil {
+  t.Fatal("accepted semantically duplicate JSON keys")
+ }
+}
