@@ -2,6 +2,7 @@ package dk.ternedal.modelrig.ui
 
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -80,6 +81,57 @@ class MediaGenerateScreenTest {
             }
         }
         compose.waitForIdle()
+    }
+
+    private fun showRestorable(rig: MediaJobSource, pollMillis: Long = 10): StateRestorationTester {
+        val tester = StateRestorationTester(compose)
+        tester.setContent {
+            ModelRigTheme(dark = true) {
+                MediaGenerateContent(rig, onOpenGallery = { galleryOpened++ }, onClose = {}, io = Dispatchers.Unconfined,
+                    pollMillis = pollMillis)
+            }
+        }
+        compose.waitForIdle()
+        return tester
+    }
+
+    @Test
+    fun `a recreated screen picks the followed job up again, but never the prompt`() {
+        // #2275 backlog task 4: rotation or a process restart must not leave the job running unseen.
+        val polledIds = mutableListOf<String>()
+        val rig = object : MediaJobSource by FakeRig(statuses = listOf(job(MediaJobState.RUNNING))) {
+            override fun status(id: String): MediaJob { polledIds += id; return job(MediaJobState.RUNNING) }
+        }
+        val tester = showRestorable(rig)
+        compose.onNodeWithTag("generate-prompt").performTextInput("secret-prompt-91 a red bicycle")
+        compose.onNodeWithTag("generate-submit").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTagExists("generate-cancel") }
+        val before = polledIds.size
+        tester.emulateSavedInstanceStateRestore()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTagExists("generate-cancel") }
+        assertTrue("the recreated screen asked the rig for the saved job", polledIds.size > before)
+        assertTrue(polledIds.all { it == JOB_ID })
+        compose.onNodeWithText("secret-prompt-91 a red bicycle", substring = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun `a saved job the rig no longer knows leaves the form usable and says so`() {
+        var gone = false
+        val rig = object : MediaJobSource by FakeRig() {
+            override fun status(id: String): MediaJob {
+                if (gone) throw MediaJobException(Reason.NOT_FOUND, "Jobbet findes ikke længere", "job_not_found")
+                return job(MediaJobState.RUNNING)
+            }
+        }
+        val tester = showRestorable(rig, pollMillis = 3_600_000)
+        compose.onNodeWithTag("generate-prompt").performTextInput("a red bicycle")
+        compose.onNodeWithTag("generate-submit").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTagExists("generate-cancel") }
+        gone = true  // polls are an hour apart here, so only the restore can see this
+        tester.emulateSavedInstanceStateRestore()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTagExists("generate-submit") }
+        compose.onNodeWithText("Det tidligere job findes ikke længere på riggen").assertExists()
+        compose.onNodeWithTag("generate-cancel").assertDoesNotExist()
     }
 
     @Test
