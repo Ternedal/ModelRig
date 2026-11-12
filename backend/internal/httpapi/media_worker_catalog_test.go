@@ -507,3 +507,95 @@ func TestMediaCatalogFromEnvIsOffUnlessSwitchedOnWithASecretAndALoopbackWorker(t
 		t.Fatalf("off: %d", rec.Code)
 	}
 }
+
+// ChatGPT 6820464362 P2: one document only, and every field checked by the same rules as the
+// worker's index check and Android's parser.
+func TestWorkerCatalogRefusesEveryInvalidItemOfTheSharedFixtureAndATrailingDocument(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "contracts", "kaliv-media-gallery-v1-fixtures.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		InvalidItems []struct {
+			Name string         `json:"name"`
+			Item map[string]any `json:"item"`
+		} `json:"invalid_items"`
+	}
+	if err := json.Unmarshal(raw, &fixture); err != nil || len(fixture.InvalidItems) == 0 {
+		t.Fatalf("invalid_items: %v", err)
+	}
+	f, worker := newFakeWorker(t)
+	s := galleryServer(t, worker.URL)
+	serve := func(body string) {
+		f.setOverride(func(w http.ResponseWriter, r *http.Request) bool {
+			if r.URL.Path != "/internal/media/assets" {
+				return false
+			}
+			_, _ = io.WriteString(w, body)
+			return true
+		})
+	}
+	pageOf := func(item map[string]any) string {
+		return string(mustJSON(t, map[string]any{"schema": "kaliv-media-gallery/v1", "items": []any{item}, "next_cursor": nil}))
+	}
+	for _, c := range fixture.InvalidItems {
+		serve(pageOf(c.Item))
+		if rec := listThrough(s, ""); rec.Code != http.StatusServiceUnavailable {
+			t.Errorf("fixture invalid_items %s: device %d", c.Name, rec.Code)
+		}
+	}
+	valid := func() map[string]any {
+		b, _ := json.Marshal(f.items[3]) // the VR180 video: every optional field is set
+		var item map[string]any
+		_ = json.Unmarshal(b, &item)
+		return item
+	}
+	serve(pageOf(valid()))
+	if rec := listThrough(s, ""); rec.Code != http.StatusOK {
+		t.Fatalf("the unchanged item must pass: %d %s", rec.Code, rec.Body.String())
+	}
+	changes := map[string]func(map[string]any){
+		"unknown kind":          func(i map[string]any) { i["kind"] = "audio" },
+		"image kind for an mp4": func(i map[string]any) { i["kind"] = "image" },
+		"unknown kind on a png": func(i map[string]any) {
+			i["kind"], i["mime_type"], i["duration_seconds"] = "audio", "image/png", nil
+		},
+		"ten fractional digits":   func(i map[string]any) { i["created_at"] = "2026-11-01T10:03:00.1234567891Z" },
+		"fractional size":         func(i map[string]any) { i["size_bytes"] = 1.5 },
+		"size as text":            func(i map[string]any) { i["size_bytes"] = "1" },
+		"size past 2^53":          func(i map[string]any) { i["size_bytes"] = float64(1 << 54) },
+		"not a timestamp":         func(i map[string]any) { i["created_at"] = "yesterday" },
+		"an impossible date":      func(i map[string]any) { i["created_at"] = "2026-02-30T10:00:00Z" },
+		"negative width":          func(i map[string]any) { i["width"] = -1.0 },
+		"fractional height":       func(i map[string]any) { i["height"] = 10.5 },
+		"width past int32":        func(i map[string]any) { i["width"] = 2147483648.0 },
+		"duration as text":        func(i map[string]any) { i["duration_seconds"] = "12" },
+		"negative duration":       func(i map[string]any) { i["duration_seconds"] = -1.0 },
+		"unknown projection":      func(i map[string]any) { i["projection"] = "cubemap" },
+		"projection missing":      func(i map[string]any) { i["projection"] = nil },
+		"supports_range as text":  func(i map[string]any) { i["playback"] = map[string]any{"supports_range": "yes"} },
+		"an extra playback field": func(i map[string]any) { i["playback"] = map[string]any{"supports_range": true, "x": 1} },
+	}
+	for label, change := range changes {
+		item := valid()
+		change(item)
+		serve(pageOf(item))
+		if rec := listThrough(s, ""); rec.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s: device %d", label, rec.Code)
+		}
+	}
+	for label, body := range map[string]string{
+		"a second document": pageOf(valid()) + pageOf(valid()),
+		"trailing garbage":  pageOf(valid()) + "x",
+		"an unknown field":  `{"schema":"kaliv-media-gallery/v1","items":[],"next_cursor":null,"extra":1}`,
+	} {
+		serve(body)
+		if rec := listThrough(s, ""); rec.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s: device %d", label, rec.Code)
+		}
+	}
+	serve(pageOf(valid()) + "\n") // a trailing newline is only whitespace
+	if rec := listThrough(s, ""); rec.Code != http.StatusOK {
+		t.Errorf("trailing newline: device %d", rec.Code)
+	}
+}

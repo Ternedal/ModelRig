@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -48,6 +50,18 @@ var mediaGalleryItemKeys = map[string]bool{
 }
 
 var mediaServedTypes = map[string]bool{"video/mp4": true, "image/png": true, "image/jpeg": true, "image/webp": true}
+
+var (
+	mediaProjections = map[any]bool{"flat": true, "equirectangular_180": true, "equirectangular_360": true}
+	mediaStereo      = map[any]bool{"mono": true, "left_right": true, "top_bottom": true}
+	mediaCreatedAt   = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z$`)
+)
+
+// mediaWholeNumber: a JSON number that is a whole number within [min, max] (decoded as float64).
+func mediaWholeNumber(value any, min, max float64) bool {
+	number, ok := value.(float64)
+	return ok && number >= min && number <= max && number == math.Trunc(number)
+}
 
 // NewWorkerMediaCatalog refuses a non-loopback worker or an unusable secret (nil, false).
 func NewWorkerMediaCatalog(workerBaseURL, secret string) (*WorkerMediaCatalog, bool) {
@@ -143,6 +157,10 @@ func (c *WorkerMediaCatalog) ListMedia(owner string, limit int, cursor string) (
 	if decoder.Decode(&page) != nil || page.Schema != "kaliv-media-gallery/v1" || page.Items == nil || len(page.Items) > limit {
 		return nil, nil, ErrMediaUnavailable
 	}
+	// Exactly one document: anything after it (a second page, trailing garbage) is refused.
+	if err := decoder.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
+		return nil, nil, ErrMediaUnavailable
+	}
 	for _, item := range page.Items {
 		if !validWorkerGalleryItem(item) {
 			return nil, nil, ErrMediaUnavailable
@@ -170,7 +188,41 @@ func validWorkerGalleryItem(item map[string]any) bool {
 	if !ok || !validMediaID(id) || item["url"] != "/api/v1/media/"+id {
 		return false
 	}
-	if mime, ok := item["mime_type"].(string); !ok || !mediaServedTypes[mime] {
+	mime, ok := item["mime_type"].(string)
+	if !ok || !mediaServedTypes[mime] {
+		return false
+	}
+	// The same rules as the worker's index check (worker/app/media_gallery_catalog.py _index) and
+	// Android's parser: a worker regression is refused here, never passed on to the device.
+	kind, ok := item["kind"].(string)
+	if !ok || (kind != "image" && kind != "video") || (kind == "video") != (mime == "video/mp4") {
+		return false
+	}
+	if !mediaWholeNumber(item["size_bytes"], 0, 1<<53-1) {
+		return false
+	}
+	created, ok := item["created_at"].(string)
+	if !ok || !mediaCreatedAt.MatchString(created) {
+		return false
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, created); err != nil || parsed.Location() != time.UTC {
+		return false
+	}
+	for _, key := range []string{"width", "height"} {
+		if item[key] != nil && !mediaWholeNumber(item[key], 0, 2147483647) {
+			return false
+		}
+	}
+	switch duration := item["duration_seconds"].(type) {
+	case nil:
+	case float64:
+		if kind == "image" || duration < 0 || math.IsInf(duration, 0) || math.IsNaN(duration) {
+			return false
+		}
+	default:
+		return false
+	}
+	if !mediaProjections[item["projection"]] || !mediaStereo[item["stereo"]] {
 		return false
 	}
 	switch thumb := item["thumbnail_id"].(type) {
