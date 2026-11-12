@@ -388,6 +388,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_kaliv_bodyrig_photoreal_qualifier.py`
 - `tests/worker_kaliv_e2e_latency_voice_driver.py`
 - `tests/worker_kaliv_end_to_end_latency_qualifier.py`
+- `tests/worker_kaliv_recovery_soak_collector.py`
+- `tests/worker_kaliv_recovery_soak_qualification.py`
 - `tests/worker_kaliv_release_manifest_assembler.py`
 - `tests/worker_kaliv_repository_authority_qualifier.py`
 - `tests/worker_kaliv_software_exact_green_qualifier.py`
