@@ -3,7 +3,8 @@
 **Status:** default-off.
 - The API worker never imports `worker/app/media_executor.py` (boundary test).
 - With G2b the appliance's Go `modelrig-supervisor` can start one executor per GPU, but only when `KALIV_MEDIA_EXECUTOR=1` and the configuration below is complete. Off by default; a refused configuration starts nothing.
-- Images only, published job-keyed through `ExternalMediaSink`. Video is refused (exit 78) until a staged video sink exists.
+- Images are published job-keyed through `ExternalMediaSink`.
+- Text-to-video is wired but **default-off** behind its own switch, `KALIV_MEDIA_VIDEO=1` (see "Video" below). Without that switch, an enabled video profile is still exit 78. Image-to-video is still exit 78 in every case.
 - Activation on the rig needs the rig pack (#2296 6509723614) and Anders' go.
 
 Sources:
@@ -103,6 +104,11 @@ Each executor runs in the supervisor's process tree (a Windows Job Object), so s
 | `KALIV_MEDIA_VOLUME_ID` | executor | The id in `<volume root>/.kaliv-media-volume` (G1, `docs/MEDIA_VOLUME.md`). Missing or malformed: exit 78. Wrong disk: exit 75 |
 | `KALIV_MEDIA_PROFILE_DIR` | executor | Operator profile directory |
 | `KALIV_MEDIA_IDLE_UNLOAD_S` | executor | Optional; default 300 |
+| `KALIV_MEDIA_VIDEO=1` | executor | The video switch. It is separate from the master switch. With any other value, an enabled video profile is exit 78 |
+| `KALIV_COMFY_PYTHON`, `KALIV_COMFY_MAIN` | executor (video) | Absolute paths of the pinned ComfyUI environment's python and of its `main.py`. `main.py` must not be a link |
+| `KALIV_COMFY_DIR` | executor (video) | The ComfyUI folder, in the work area. Every executor gets the same environment from the supervisor, so each uses its own `cuda<N>/` in it, chosen by `--device`: `<dir>/cuda0/`, `<dir>/cuda1/`. That folder must contain existing `input/`, `output/`, `temp/` and `user/` directories (not files, not links). Nothing is created |
+| `KALIV_COMFY_TEMPLATE_DIR` | executor (video) | The operator's workflow template directory. Each profile pins its template's SHA-256 |
+| `KALIV_COMFY_WEIGHTS_CACHE` | executor (video) | Optional. The weight-hash cache file, in a folder in the work area. If it is not set, the weights are re-hashed at every start |
 | `KALIV_MEDIA_PROFILES_ENABLED`, `KALIV_MEDIA_ALLOW_CANDIDATE_PROFILES`, `KALIV_GPU_LEASE_DIR`, `KALIV_GPU_DEVICE_UUIDS`, `CUDA_DEVICE_ORDER`, `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE` | executor | Existing |
 
 The supervisor reads them the way the children see them: the env file (`modelrig.env`) wins over its own environment.
@@ -123,7 +129,43 @@ The entry point checks the configuration before it touches anything, including t
   | `ArtifactSinkUnavailable` (the volume) | stays `running`, then recovery fails it as `interrupted_by_restart` | exit 75 |
 
 - **The bytes** go to `ComfyVideoAdapter.render_to(source_png=...)`. See `docs/MEDIA_VIDEO_GENERATION.md` for the bounded decode, the exclusive staging and the cleanup.
-- **Not wired in the entry point yet.** `media_executor_main` still refuses every video profile with exit 78. That stays so until the staged video sink (#2347), the verified volume (#2349) and the wiring are in, and Anders enables video after the rig proof.
+- **Not served by the entry point.** `media_executor_main` refuses a profile that lists `image_to_video` with exit 78, because the owner-gated source reader is not wired there. Text-to-video is wired; see "Video" below.
+
+## Video (text-to-video, default-off)
+
+`media_executor_main` serves a `comfyui` video profile only if **all** of the following hold. Otherwise it exits 78 before the job database is opened:
+
+- `KALIV_MEDIA_VIDEO=1`.
+- The profile lists `text_to_video` only.
+- The profile pins `comfyui_version` and `weights`. This holds even for a candidate profile, which the profile schema alone does not require.
+- No two served video profiles share a ComfyUI port.
+- `KALIV_COMFY_PYTHON`, `KALIV_COMFY_MAIN`, `KALIV_COMFY_DIR` and `KALIV_COMFY_TEMPLATE_DIR` are set and valid.
+- The four ComfyUI folders of this GPU, `KALIV_COMFY_DIR/cuda<N>/{input,output,temp,user}`, exist inside the work area (`PrivateWorkArea.require`) and are directories. A regular file there is 78 at start, not a failed job later.
+- Across **all** enabled ComfyUI video profiles, not only this GPU's:
+  - each profile lists exactly one GPU;
+  - no two profiles share a port.
+
+  This is checked across every GPU because each executor serves only its own profiles. Without it, a port shared between GPUs would pass both starts, and then fail every job on the second GPU.
+
+When video is served:
+
+- **Sink.** The executor gets `ExternalStagedVideoSink` on the publication volume, wrapped in `PinnedStagedVideoSink`. That wrapper verifies the pinned G1 volume before every `staged()` and every `adopt*()`, so a disk that is swapped during a render gets nothing.
+- **Adapter.** Each video profile gets a `ComfyVideoAdapter` with its own `ComfySupervisor`, which uses the executor's GPU UUID, lease directory and work area.
+- **Single queue.** It is the same queue and the same executor as images: one job at a time per GPU, and the same lease.
+- **Bounds.** The profile's `max_render_seconds` bounds a render, and the adapter interrupts ComfyUI when the deadline passes.
+- **Lifecycle.** A cancel before `begin_publish` wins. A volume lost mid-render is exit 75, and the next start fails the job (recovery).
+
+Tests: `tests/worker_media_executor_main_video.py` (fake ComfyUI child, real supervisor, adapter, sink and executor). They cover:
+- fail-closed configuration;
+- end-to-end job-keyed publication to the gallery, with `kind: video` and `video/mp4`;
+- image and video jobs on one executor;
+- the deadline;
+- cancel;
+- a lost volume followed by restart recovery.
+
+**Not proven on the rig.** Everything in `docs/MEDIA_VIDEO_GENERATION.md` "Must be proven on the rig before any activation" still applies. `KALIV_MEDIA_VIDEO` stays unset until Anders enables it after that proof.
+
+The model manifest, the memory profile for 2× RTX 3060 12 GB, the minimum viable settings and the qualification steps are in `docs/MEDIA_VIDEO_RIG_QUALIFICATION.md`.
 
 ## Exit codes and the supervisor's policy
 
@@ -143,13 +185,17 @@ Every restartable code doubles its delay for each exit in a row, capped at 5 min
 
 ## Not in this slice
 
-- Video through the executor: it needs ChatGPT's staged video sink (`JobKeyedStagedSink`).
+- Image-to-video through the entry point. It needs the owner-gated source reader wired.
 - A public "verify the volume" method on `ExternalMediaSink`: the entry point calls its `_root()` at start so a missing volume is exit 75 before anything is opened (ChatGPT owns the sink).
 - Routes for submit/get/cancel (ChatGPT).
 - Reconciliation itself: ChatGPT's read-only `inspect_generation_consistency` (#2313) classifies the recovered job. There is no automatic completion from file presence, and no inference retry.
 - G3 pinning: ComfyUI version and weight manifest.
 - Retiring `GenerationJobRunner`.
-- **Assumed, to be verified on the pinned diffusers in rig R5:** every allowlisted pipeline honours `callback_on_step_end` and `_interrupt`.
+- **Checked offline against the pinned diffusers 0.35.2** (`scripts/media_image_env_check.py`, `docs/MEDIA_IMAGE_RIG_QUALIFICATION.md` §1):
+  - every allowlisted pipeline's `__call__` takes `callback_on_step_end`;
+  - it resets `self._interrupt` and checks it between steps.
+
+  **Still to be shown on the rig:** that a cancel stops a render on the GPU.
 
 ## Diagnostics (Track 3)
 

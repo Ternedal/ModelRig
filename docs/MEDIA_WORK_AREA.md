@@ -31,7 +31,7 @@ The copy between the two disks is **not** atomic, which is why the gallery never
 
 `scripts/media_volume_repair.py` reports all of these (C6); nothing is deleted or republished automatically. An operator removes each leftover by name, and the owner resubmits. A removal that fails is logged and reported in the adapter's `last_cleanup`, never ignored.
 
-**Status:** the executor's entry point builds the work area at start and keeps the job database in it. Video stays default-off: `media_executor_main` keeps exit 78 for video. When video is wired, the supervisor takes the work area (`ComfySupervisor(work_area=...)`), and ComfyUI's four folders must be inside it.
+**Status:** the executor's entry point builds the work area at start and keeps the job database in it. Video is default-off behind `KALIV_MEDIA_VIDEO=1`. When it is on, the supervisor gets the work area (`ComfySupervisor(work_area=...)`), and ComfyUI's four folders for that GPU (`KALIV_COMFY_DIR`/`cuda<N>`/`input`, `output`, `temp`, `user`) must already exist inside it as directories. Otherwise the result is exit 78.
 
 ## What is checked
 
@@ -57,7 +57,9 @@ Windows, as the account that runs the executor. Groups are named by SID, so this
 
 ```powershell
 $Work = 'C:\Kaliv\media-work'
-New-Item -ItemType Directory -Force "$Work\state", "$Work\comfy\input", "$Work\comfy\output", "$Work\comfy\temp", "$Work\comfy\user" | Out-Null
+New-Item -ItemType Directory -Force "$Work\state" | Out-Null
+# One ComfyUI folder set per GPU (KALIV_COMFY_DIR = "$Work\comfy"; each executor uses cuda<N>).
+foreach ($Gpu in "cuda0", "cuda1") { foreach ($Dir in "input", "output", "temp", "user") { New-Item -ItemType Directory -Force "$Work\comfy\$Gpu\$Dir" | Out-Null } }
 $Me = ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
 icacls $Work /inheritance:r /grant:r "*${Me}:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F"
 icacls "$Work\*" /T /C /reset   # everything below inherits exactly that (never /reset the root itself)
