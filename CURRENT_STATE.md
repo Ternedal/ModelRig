@@ -370,6 +370,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_diffusers_image_adapter.py`
 - `tests/worker_e2e_latency_runtime.py`
 - `tests/worker_e2e_latency_voice_mount.py`
+- `tests/worker_e2e_latency_voice_route.py`
 - `tests/worker_eval.py`
 - `tests/worker_file_capabilities.py`
 - `tests/worker_file_capabilities_audit.py`
@@ -385,6 +386,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_jobs.py`
 - `tests/worker_kaliv_bodyrig_digital_twin_m6_qualifier.py`
 - `tests/worker_kaliv_bodyrig_photoreal_qualifier.py`
+- `tests/worker_kaliv_e2e_latency_voice_driver.py`
 - `tests/worker_kaliv_end_to_end_latency_qualifier.py`
 - `tests/worker_kaliv_release_manifest_assembler.py`
 - `tests/worker_kaliv_repository_authority_qualifier.py`
