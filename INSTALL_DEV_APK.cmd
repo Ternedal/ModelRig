@@ -1,6 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+set "PYTHONDONTWRITEBYTECODE=1"
 title Kaliv DEV-APK
 if "%GITHUB_TOKEN%"=="" set /p GITHUB_TOKEN=GitHub-PAT fra Notion Secrets: 
 set "GH_TOKEN=%GITHUB_TOKEN%"

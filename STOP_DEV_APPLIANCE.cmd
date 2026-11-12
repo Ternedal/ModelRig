@@ -1,6 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+set "PYTHONDONTWRITEBYTECODE=1"
 title Kaliv DEV-appliance -- stop
 rem Stop-/Start-ScheduledTask paa appliancens tasks kraever administrator.
 rem Uden elevation faldt foerste koersel paa praecis det -- saa bed om den.
