@@ -1,5 +1,11 @@
 # Milestone 3 — offline current-main handoff
 
+> **⚠️ HISTORISK DOKUMENT (1.58.147-æraen).** Kandidat- og builder-grenene
+> `agent/milestone3-current-main-v2` og `agent/milestone3-current-main-handoff-v2`
+> findes ikke længere på origin (GitHub API: 404), og PR #250 blev lukket uden
+> merge 30/7-2026. Builderen kan derfor ikke køres. Den gældende fysiske
+> procedure står i `STAGED_PHYSICAL_PROMOTION.md`.
+
 Denne builder pakker den grønne, dormante Milestone 3-kandidat fra PR #250 til kontrolleret overførsel til Windows-riggen uden en moving checkout og uden en publiceret release.
 
 ## Binding

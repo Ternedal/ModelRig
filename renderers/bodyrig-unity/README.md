@@ -2,7 +2,7 @@
 
 This is the first concrete renderer adapter for BodyRig. It consumes the landed renderer-neutral `bodyrig.render_frame` v0.1 wire contract and owns Unity/VRM-specific bones, expressions and retargeting.
 
-M2.8 renderer-neutral wire + digest-bound current-profile handoff is already on `main`. This draft contains only the Unity/VRM proof layer and must remain draft until a physical Windows build, a machine-confirmed real selected VRM load/bind, and explicit visual acceptance have all been recorded against the same exact draft SHA.
+M2.8 renderer-neutral wire + digest-bound current-profile handoff is already on `main`. This Unity/VRM proof layer landed on `main` with PR #720 (merged 2026-09-02, head `361b7544`); issue #717 is closed. Whether a physical Windows build, a machine-confirmed real selected VRM load/bind and explicit visual acceptance were recorded is not documented here. The proof procedure below was written for the #720 draft and still refers to the "exact draft SHA"; `production_activation=false` remains authoritative.
 
 ## Pinned baseline
 

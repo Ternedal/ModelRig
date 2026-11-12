@@ -35,8 +35,8 @@ as proof that an arbitrary copied receipt originated from the candidate SHA.
 
 Create an evidence JSON bundle and run:
 
-    python scripts/consciousness_live_lifecycle_qualifier.py ^
-      validation/consciousness-live-lifecycle-input.json ^
+    python scripts/consciousness_live_lifecycle_qualifier.py `
+      validation/consciousness-live-lifecycle-input.json `
       --report validation/consciousness-live-lifecycle-latest.json
 
 A successful verdict contains:
@@ -86,19 +86,19 @@ release gates remain independently required.
 The live lifecycle gate is assembled from raw, independently validated evidence
 with:
 
-    python scripts/consciousness_live_lifecycle_evidence_assembler.py ^
-      --candidate-sha <40-hex-modelrig-sha> ^
-      --live-cycle validation/consciousness-live-cycle-latest.json ^
-      --before-status validation/consciousness-status-before-restart.json ^
-      --after-status validation/consciousness-status-after-restart.json ^
-      --wake-receipt validation/wake-receipt.json ^
-      --wake-orientation validation/wake-orientation-receipt.json ^
-      --before-profile validation/profile-before.json ^
-      --after-profile validation/profile-after.json ^
-      --before-self-state validation/self-state-before.json ^
-      --after-self-state validation/self-state-after.json ^
-      --before-continuity validation/continuity-before.json ^
-      --after-continuity validation/continuity-after.json ^
+    python scripts/consciousness_live_lifecycle_evidence_assembler.py `
+      --candidate-sha <40-hex-modelrig-sha> `
+      --live-cycle validation/consciousness-live-cycle-latest.json `
+      --before-status validation/consciousness-status-before-restart.json `
+      --after-status validation/consciousness-status-after-restart.json `
+      --wake-receipt validation/wake-receipt.json `
+      --wake-orientation validation/wake-orientation-receipt.json `
+      --before-profile validation/profile-before.json `
+      --after-profile validation/profile-after.json `
+      --before-self-state validation/self-state-before.json `
+      --after-self-state validation/self-state-after.json `
+      --before-continuity validation/continuity-before.json `
+      --after-continuity validation/continuity-after.json `
       --output validation/consciousness-live-lifecycle-input.json
 
 The loopback runtime status now includes an opaque "runtime_instance_ref".
@@ -124,14 +124,14 @@ local operator session:
 The endpoint is loopback-only and remains disabled unless the exact flag above
 is set. Capture the ordinary privacy-safe status before restarting the worker:
 
-    Invoke-RestMethod http://127.0.0.1:8000/experimental/consciousness/status |
+    Invoke-RestMethod http://127.0.0.1:8099/experimental/consciousness/status |
       ConvertTo-Json -Depth 20 |
       Set-Content validation/consciousness-status-pre-restart.json -Encoding utf8
 
 After the worker has restarted and produced one lived-continuity receipt, capture
 the first qualification snapshot:
 
-    Invoke-RestMethod http://127.0.0.1:8000/experimental/consciousness/qualification-snapshot |
+    Invoke-RestMethod http://127.0.0.1:8099/experimental/consciousness/qualification-snapshot |
       ConvertTo-Json -Depth 30 |
       Set-Content validation/consciousness-pre-swap.json -Encoding utf8
 
@@ -139,18 +139,18 @@ Replace only the configured CognitiveProfile/model calibration. Do not run
 another cognitive cycle and do not restart the worker. Then capture the second
 snapshot:
 
-    Invoke-RestMethod http://127.0.0.1:8000/experimental/consciousness/qualification-snapshot |
+    Invoke-RestMethod http://127.0.0.1:8099/experimental/consciousness/qualification-snapshot |
       ConvertTo-Json -Depth 30 |
       Set-Content validation/consciousness-post-swap.json -Encoding utf8
 
 Assemble the qualification input directly from those snapshots:
 
-    python scripts/consciousness_live_lifecycle_from_snapshots.py ^
-      --candidate-sha <40-hex-modelrig-sha> ^
-      --live-cycle validation/consciousness-live-cycle-latest.json ^
-      --pre-restart-status validation/consciousness-status-pre-restart.json ^
-      --pre-swap-snapshot validation/consciousness-pre-swap.json ^
-      --post-swap-snapshot validation/consciousness-post-swap.json ^
+    python scripts/consciousness_live_lifecycle_from_snapshots.py `
+      --candidate-sha <40-hex-modelrig-sha> `
+      --live-cycle validation/consciousness-live-cycle-latest.json `
+      --pre-restart-status validation/consciousness-status-pre-restart.json `
+      --pre-swap-snapshot validation/consciousness-pre-swap.json `
+      --post-swap-snapshot validation/consciousness-post-swap.json `
       --output validation/consciousness-live-lifecycle-input.json
 
 The adapter requires a changed runtime instance across the restart and the same
