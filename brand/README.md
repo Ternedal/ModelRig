@@ -1,5 +1,8 @@
 # ModelRig – Brand Handoff v3
 
+> **OVERHALET — historisk ModelRig-handoff (v3).** Gældende brand er Kaliv:
+> [`KALIV_BRAND_HANDOFF.md`](KALIV_BRAND_HANDOFF.md). `05_handoff-docs/` er overhalet (se banneret i hver fil).
+
 Dette er en mere komplet handoff-pakke for **ModelRig**.
 
 Pakken er struktureret, så den kan bruges af:

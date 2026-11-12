@@ -1,22 +1,36 @@
 # T-022 samlet write-pilot og forensic collect
 
+> **⚠️ Status 11/11-2026: launcheren kan ikke køre i sin nuværende form.**
+> `START_AGENT3_WRITE_PILOT.cmd` binder collectoren til
+> `agent/t022-final-gate-current-main` (se `AGENT3_WRITE_PILOT_CURRENT_MAIN.md`),
+> og hverken den gren eller collectorens egen pin `agent/t022-write-pilot-collector`
+> findes på origin (GitHub API: 404). Launcherens fælles `ensure_candidate` (`scripts/stage_a_one_click.retained`) kører
+> `git fetch origin main <branch>` og `git switch <branch>` og stopper derfor
+> fail-closed, før der indsamles evidens.
+
 **Status:** dormant fysisk operator til del 3 af T-022. Den er den praktiske top-level launcher for hele kampagnen: 20 positive `note_append`-runs, syv adversarial cases og den eksisterende read-only forensic collector.
 
 ## Start
 
-Kør på Windows-riggen fra den eksakte collector-branch:
+Collectoren køres som en del af T-022 final-gaten. Kør på Windows-riggen:
 
 ```text
 START_AGENT3_WRITE_PILOT.cmd
 ```
 
-Launcherens kandidat er fastlåst til:
+Launcheren kører `scripts/agent3_write_pilot_current_main.py`, som binder hele
+kæden (positive, negative, collector og final-gate) til
+`agent/t022-final-gate-current-main` og delegerer via
+`scripts/agent3_write_pilot_final_gate_operator.py` til
+`scripts/agent3_write_pilot_final_gate.py`. Final-gaten kører collectoren og
+validerer derefter dens rapport (se `AGENT3_WRITE_PILOT_FINAL_GATE.md`).
+Collector-modulets egen pin er:
 
 ```text
 agent/t022-write-pilot-collector
 ```
 
-Wizard'en skifter selv til branchen, fast-forward-puller den og kræver en ren working tree samt exact `origin/<branch>`-head. Positive og negative fysiske records skal derfor være skabt på samme endelige Git-SHA som collector-koden.
+Wizard'en skifter selv til den bundne branch, fast-forward-puller den og kræver en ren working tree samt exact `origin/<branch>`-head. Positive og negative fysiske records skal derfor være skabt på samme endelige Git-SHA som collector-koden.
 
 ## Samlet rækkefølge
 

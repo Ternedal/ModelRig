@@ -1,5 +1,12 @@
 # T-022 current-main physical candidate
 
+> **⚠️ Status 11/11-2026: launcheren kan ikke køre i sin nuværende form.**
+> Kandidatgrenen `agent/t022-final-gate-current-main` findes ikke på origin
+> (GitHub API: 404). Launcherens fælles `ensure_candidate` (`scripts/stage_a_one_click.retained`) kører
+> `git fetch origin main <branch>` og `git switch <branch>` og stopper derfor
+> fail-closed, før der indsamles evidens.
+> T-022 indgår ikke i `START_PROOF_CAMPAIGN.cmd`.
+
 Denne branch samler den allerede CI-grønne, dormante T-022 final-gate-stack oven på
 nuværende `main` uden at ændre runtime-ruter, tools, approval-semantik eller
 produktionsaktivering.

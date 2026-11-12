@@ -2,6 +2,12 @@
 
 > **Start i `RIGDAG_SIMPEL.md`** — det styrer rækkefølgen og fjerner valgene.
 > Dette dokument er den detaljerede kørebog og fallback, når noget stopper.
+>
+> **⚠️ HISTORISK KØREBOG (1.58.147-æraen, 25.–27/7-2026).** Kandidat-, versions-
+> og promotionsangivelserne nedenfor (`60f9b00`, 1.58.147) er historiske. Den
+> gældende kandidat, freeze og release-regel (D3) står i `RIGDAG_SIMPEL.md` og
+> `STAGED_PHYSICAL_PROMOTION.md`. Tag, push eller release aldrig ud fra dette
+> dokument.
 
 **Skrevet ud fra hvad der faktisk står i koden**, ikke hvad jeg troede. Hvert
 krav herunder er slået op i den gate der håndhæver det.
@@ -278,14 +284,14 @@ hvert bevis er **present, fresh, candidate-bound og green** — og
 
 ### Promovering
 
-```powershell
-git tag -a v1.58.147 60f9b00 -m "v1.58.147"
-git push origin v1.58.147
-```
+Tag og release sker ikke ud fra denne kørebog. Den gældende procedure er
+D3-blokken og "Beslutningspunkt" i `STAGED_PHYSICAL_PROMOTION.md`: tag og
+publicering kun efter grøn exact-head CI på RC-SHA'en og Anders' særskilte
+release-go (#2275).
 
-**Tagget skal sidde direkte på `60f9b00`.** Aldrig på en merge-commit — dens træ
-ville afvige fra det validerede og fælde den byte-eksakte attestation
-(F-1802/F-1503).
+27/7-2026: `v1.58.147` blev tagget på release-bump-commit'en `f1edf947`
+(32 commits efter `60f9b00`) og publiceret samme aften. `60f9b00` selv blev
+aldrig tagget.
 
 ### Derefter
 

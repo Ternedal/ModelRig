@@ -1,5 +1,9 @@
 # Candidate 2.0.11 — physical proof authority
 
+> **⚠️ HISTORISK DOKUMENT (2.0.11-æraen).** "Aktiv authority" nedenfor gjaldt
+> 2.0.11-kandidaten. Den gældende kandidat-authority står i `RIGDAG_SIMPEL.md` og
+> `STAGED_PHYSICAL_PROMOTION.md`.
+
 Denne fil beskriver **authority-modellen** for den aktive 2.0.11-kandidat. Den
 pinner med vilje ikke et bestemt commit-SHA i dokumenttekst: den eksakte SHA
 skal altid læses fra den fetch'ede remote candidate-branch og derefter bevises

@@ -8,7 +8,7 @@
 
 ## 1. Arkitekturen som den ER (verificeret 14/7-2026)
 
-Seks ingest-veje (text, PDF, DOCX, PPTX, HTML/URL, deck) → fælles pipeline:
+Seks ingest-veje (text, PDF, DOCX, PPTX, HTML/URL, image) → fælles pipeline:
 `chunk_text` (sætnings-foretrukne brud, overlap) → `oc.embed_many` (batchet
 `/api/embed`, se §4c) →
 SQLite `documents` (text, source, chunk_index, embedding). Retrieval: cosine
@@ -116,8 +116,9 @@ brudt enkeltvis i kilden, hvorefter suiten blev rød.
 
 ## 4c. Batchet embedding (06/11-2026)
 
-Rig-målingen i `RAG_BENCHMARK.md` (10.000 chunks: recall@5 1,0, query p95
-3,7 ms, men ingest >35 min) pegede entydigt på ingest-siden: ét HTTP-kald og
+Rig-målingen i `RIGDAG-FRIKTION.md` (10.000 chunks: recall@5 1,0, query p95
+≈3,7 s, men ingest >35 min; tallene er endnu ikke indført i `RAG_BENCHMARK.md`)
+pegede entydigt på ingest-siden: ét HTTP-kald og
 én frisk forbindelse pr. chunk. `oc.embed_many` sender nu chunks i batches af
 `MODELRIG_EMBED_BATCH` (default 32) til `/api/embed`, som tager en liste og
 svarer med én vektor pr. input i samme rækkefølge. Kontrakten er uændret:
