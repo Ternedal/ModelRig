@@ -5,7 +5,7 @@
 
 **Version på main:** `2.0.19`
 **Kørende appliance:** ingen fundet på 127.0.0.1:8080 — dommen bygger på dette miljøs rapportstier (CI-fallback)
-**Genereret:** 2026-11-08 07:57 UTC
+**Genereret:** 2026-11-10 09:49 UTC
 
 ---
 
@@ -71,7 +71,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 39 feature-switches er tændt som default.** (35 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 40 feature-switches er tændt som default.** (36 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
@@ -112,6 +112,8 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` | slukket |
 | `KALIV_HOME_RIG_PILOT` | `0` | slukket |
 | `KALIV_MAX_UPLOAD_MB` | `25` | indstilling |
+| `KALIV_MEDIA_INTERNAL_SECRET` | `(unset)` | indstilling |
+| `KALIV_MEDIA_JOBS_API` | `0` | slukket |
 | `KALIV_MEMORY4_CHAT_ENABLED` | `0` | slukket |
 | `KALIV_MEMORY4_CHAT_WRITE_ENABLED` | `0` | slukket |
 | `KALIV_MEMORY4_CONTEXT_ENABLED` | `(tom)` | slukket |

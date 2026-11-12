@@ -68,7 +68,7 @@ class ImageToVideoExecutorTests(unittest.TestCase):
                                  temp_directory=self.dirs["temp"], user_directory=self.dirs["user"])
             sup = FakeSupervisor(fake_env={"FAKE_COMFY_STATE_DIR": self.dirs["state"],
                                            "FAKE_COMFY_RENDER_SECONDS": render_seconds},
-                                 media_volume=AnyExistingDirectory(), gpu_uuid=base.GPU_A, lease_dir=self.lease_dir,
+                                 work_area=AnyExistingDirectory(), gpu_uuid=base.GPU_A, lease_dir=self.lease_dir,
                                  launch=launch, reserve_gib=2, min_usable_gib=8, ready_timeout_s=15, stop_timeout_s=5,
                                  poll_s=0.05, base_env={"PATH": os.environ.get("PATH", "")})
             adapter = ComfyVideoAdapter(profile, supervisor=sup, template_dir=self.dirs["templates"],
@@ -94,6 +94,20 @@ class ImageToVideoExecutorTests(unittest.TestCase):
         self.assertEqual(row["state"], "completed")
         self.assertIn(row["asset_id"], self.sink.registry)
         self.assertEqual(os.listdir(self.dirs["input"]), [], "the staged source is removed")
+
+    def test_the_hand_off_receipt_names_the_source_and_its_digest(self):
+        """With the wiring, a hand-off receipt ties a leftover to its job; for image-to-video it also
+        names the source asset and its SHA-256, so the C6 inventory notices a changed source."""
+        source = png()
+        ex, _ = self.i2v_executor(lambda owner, asset: source)
+        job = self.submit(asset="b" * 32)
+        self.assertEqual(ex.step(), "completed")
+        with self.store._db() as db:
+            row = db.execute("SELECT record FROM image_jobs_handoff WHERE job_id=?", (job,)).fetchone()
+        self.assertIsNotNone(row, "the executor recorded the hand-off")
+        receipt = json.loads(row[0])
+        self.assertEqual(receipt["source_asset_id"], "b" * 32)
+        self.assertEqual(receipt["source_sha256"], hashlib.sha256(source).hexdigest())
 
     def test_an_owner_in_the_parameters_is_never_used(self):
         calls = []

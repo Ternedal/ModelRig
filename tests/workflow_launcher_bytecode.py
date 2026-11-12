@@ -13,9 +13,6 @@ are not commands and satisfy nothing. A launcher that hands over to PowerShell
 must set the variable too, because the script it starts inherits the
 environment and `-B` cannot reach it.
 
-NOT_ASSESSED lists the PowerShell launchers nobody has checked yet. The list
-may shrink, never grow: a new launcher is held to the rule.
-
 Run: python3 tests/workflow_launcher_bytecode.py
 """
 
@@ -29,15 +26,6 @@ ROOT = Path(__file__).resolve().parents[1]
 SET_FLAG = re.compile(r'^set\s+"?PYTHONDONTWRITEBYTECODE=1"?$', re.IGNORECASE)
 PYTHON = re.compile(r"(?<![\w\\./-])(?:python|py)(?:\.exe)?\s+(?P<args>.*)$", re.IGNORECASE)
 POWERSHELL = re.compile(r"(?<![\w\\./-])(?:powershell|pwsh)(?:\.exe)?\s", re.IGNORECASE)
-NOT_ASSESSED = frozenset({
-    "INSTALL_DEV_APK.cmd",
-    "PREPARE_FIRST_BODY.cmd",
-    "START_DEV_APPLIANCE.cmd",
-    "START_STAGE_A_PHONE_TEST.cmd",
-    "START_STAGE_A_SCHEDULER_TEST.cmd",
-    "STOP_DEV_APPLIANCE.cmd",
-    "STOP_STAGE_A_PHONE_TEST.cmd",
-})
 NOT_A_COMMAND = re.compile(r"^(?:@?rem\b|::|@?echo\b|title\b|where\b)", re.IGNORECASE)
 
 
@@ -110,13 +98,7 @@ running_python = 0
 for launcher in launchers:
     count, problem = verdict(launcher.read_text(encoding="utf-8", errors="replace"))
     running_python += 1 if count else 0
-    if launcher.name in NOT_ASSESSED:
-        check(problem is not None,
-              f"{launcher.name} now follows the rule: remove it from NOT_ASSESSED")
-        continue
     check(problem is None, f"{launcher.name}: {problem}")
-check(NOT_ASSESSED <= {launcher.name for launcher in launchers},
-      "NOT_ASSESSED names only launchers that exist")
 check(running_python >= 15, "the scan sees the launchers that run Python")
 
 print(f"\n===== LAUNCHER BYTECODE: {passed} passed, {failed} failed =====")

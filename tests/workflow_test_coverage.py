@@ -697,6 +697,8 @@ native_windows_contracts = (
     "tests/support/windows_catalog_tier_a_contract.py",
     "tests/support/windows_tier_a_receipt_contract.py",
     "tests/support/windows_media_volume_contract.py",
+    "tests/support/windows_media_work_area_contract.py",
+    "tests/support/windows_media_preflight_contract.py",
     "tests/support/windows_lease_dir_acl_contract.py",
     "tests/worker_media_staged_video_sink.py",
     "tests/workflow_media_gallery_index_writer.py",
