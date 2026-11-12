@@ -5,7 +5,7 @@ Anders' decision (6 Nov 2026, #2275 6686905826) is to generate media in a privat
 **Status: pending.** Nothing here has been run on the rig. Media stays default-off throughout: R17 never switches video on. R17 needs a new `$QualSha` set in the rig runbook (#2296), at a commit that contains:
 
 - **for R17.1 to R17.6, R17.8:** the wiring branch (`feat/media-volume-wiring`);
-- **for R17.7 and R17.9:** also the C6 repair tool (`feat/media-volume-repair`), which provides `scripts/media_volume_repair.py`. Without it, skip both and record them as not run.
+- **for R17.7 and R17.9:** also the C6 repair tool, `scripts/media_volume_repair.py`. It comes with the follow-up branch `feat/media-volume-recovery-tool` on top of the wiring branch. Without it, skip both and record them as not run.
 - **for R17.10–R17.13:** the wiring branch already contains #2345 (the lease-directory check) and #2349 (`MountedMediaVolume`). Neither is merged yet: running them at a branch commit is a qualification run, not a merge.
 
 ## 1. What is proven where
