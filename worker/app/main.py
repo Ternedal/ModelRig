@@ -92,6 +92,22 @@ if _os.getenv("KALIV_HOME_RIG_PILOT", "0").strip().lower() in {"1", "true", "on"
 
     _register_home_rig_pilot(_impl.app)
 
+# Media generation job routes (#2275 6764090458): submit, status and cancel, default-off. The
+# literal switch keeps the new surface visible to activation_readiness. The routes are internal:
+# loopback plus KALIV_MEDIA_INTERNAL_SECRET, reached only through the Go backend's authMW. With
+# the switch on but the configuration unusable they answer 503 and never open the database.
+if _os.getenv("KALIV_MEDIA_JOBS_API", "0").strip() == "1":
+    from .media_job_api import build_media_job_router as _build_media_job_router
+    from .media_job_api import cached_service as _media_job_service
+
+    _impl.app.include_router(_build_media_job_router(_media_job_service()))
+    # The gallery read routes (#2275 6819704169): the installation's completed assets only, from
+    # the verified media volume. Same switch, same internal boundary; Go never reads the volume.
+    from .media_gallery_api import build_media_gallery_router as _build_media_gallery_router
+    from .media_gallery_api import gallery_service_from_env as _media_gallery_service_from_env
+
+    _impl.app.include_router(_build_media_gallery_router(_media_job_service(_media_gallery_service_from_env)))
+
 # Return the implementation module for every import of app.main. This preserves
 # module-global monkeypatching and private helper access instead of copying names
 # into a wrapper namespace whose functions would still close over main_impl.
