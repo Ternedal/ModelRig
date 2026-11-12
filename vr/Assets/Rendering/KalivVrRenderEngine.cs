@@ -40,8 +40,16 @@ namespace Kaliv.VR.Rendering
         public Transform MediaRoot => _composition?.MediaRoot;
         public Transform UiRoot => _composition?.UiRoot;
         public Transform DebugRoot => _composition?.DebugRoot;
+        public string MediaFormatLabel => _mediaRenderer?.FormatLabel ?? "";
+        public double MediaLength => _mediaRenderer?.Length ?? 0;
+        public double MediaTime => _mediaRenderer?.Time ?? 0;
 
         public event Action<string, bool> StatusChanged;
+        public event Action MediaEnded;
+
+        private Transform _panelScreen;
+        private GameObject _mediaDisplay;
+        private bool _mediaIsScreen;
 
         public void Initialize(Camera camera)
         {
@@ -72,6 +80,7 @@ namespace Kaliv.VR.Rendering
             _mediaRenderer = _composition.MediaRoot.gameObject.AddComponent<KalivVrMediaRenderer>();
             _mediaRenderer.Initialize(_camera, _composition.MediaRoot, _composition.MediaLayer);
             _mediaRenderer.DisplayChanged += OnMediaDisplayChanged;
+            _mediaRenderer.Ended += OnMediaEnded;
             _trackingOrigin.OriginShifted += OnOriginShifted;
 
             _loader.Initialize(_renderer, _camera.transform);
@@ -150,6 +159,30 @@ namespace Kaliv.VR.Rendering
 
         public bool UnregisterSpatialTarget(string semanticTarget) =>
             _spatialTargets != null && _spatialTargets.Unregister(semanticTarget);
+
+        /// <summary>
+        /// The panel: what "screen" means when no video is open. BodyRig's canonical attention
+        /// targets include `screen` (docs/bodyrig/PROTOCOL.md §7), and until now VR resolved it
+        /// to nothing — Kaliv could be told to look at the screen and simply would not.
+        /// </summary>
+        public void SetScreenTarget(Transform panel)
+        {
+            _panelScreen = panel;
+            ApplyScreenTarget();
+        }
+
+        /// <summary>While a video plays, the video IS the screen.</summary>
+        public void SetMediaScreenAsGazeTarget(bool media)
+        {
+            _mediaIsScreen = media;
+            ApplyScreenTarget();
+        }
+
+        private void ApplyScreenTarget()
+        {
+            Transform screen = _mediaIsScreen && _mediaDisplay != null ? _mediaDisplay.transform : _panelScreen;
+            _renderer?.SetScreenTarget(screen);
+        }
 
         public void RefreshBody()
         {
@@ -233,10 +266,17 @@ namespace Kaliv.VR.Rendering
 
         private void OnMediaDisplayChanged(GameObject display)
         {
+            _mediaDisplay = display;
+            // The open video is addressable as object:media, so the rig can direct attention to it.
+            if (display != null) _spatialTargets?.RegisterObject("media", display.transform);
+            else _spatialTargets?.Unregister("object:media");
+            ApplyScreenTarget();
             KalivQuestRenderBudget.LogScene(
                 gameObject,
                 display == null ? "media-cleared" : "media-display-changed");
         }
+
+        private void OnMediaEnded() => MediaEnded?.Invoke();
 
         private void OnFrameApplied(KalivBodyRenderFrame frame)
         {
@@ -276,7 +316,10 @@ namespace Kaliv.VR.Rendering
             if (_revisionWatcher != null)
                 _revisionWatcher.RevisionChanged -= OnBodyRevisionChanged;
             if (_mediaRenderer != null)
+            {
                 _mediaRenderer.DisplayChanged -= OnMediaDisplayChanged;
+                _mediaRenderer.Ended -= OnMediaEnded;
+            }
             if (_trackingOrigin != null)
                 _trackingOrigin.OriginShifted -= OnOriginShifted;
         }
