@@ -1,0 +1,23 @@
+{
+    "name": "KalivVr.Editor",
+    "rootNamespace": "Kaliv.VR.Editor",
+    "references": [
+        "KalivVr",
+        "UniGLTF",
+        "UniGLTF.Utils",
+        "Ternedal.SkyPlayer.Engine",
+        "Unity.XR.OpenXR",
+        "Unity.XR.Management"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
