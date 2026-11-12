@@ -32,6 +32,7 @@ func (s *server) handleMediaList(w http.ResponseWriter, r *http.Request) {
         http.Error(w, "invalid gallery query", http.StatusBadRequest); return
     }
     items, next, err := s.Media.ListMedia(mediaInstallationOwner, limit, query.Get("cursor"))
+    if errors.Is(err, ErrMediaBadRequest) { http.Error(w, "invalid gallery query", http.StatusBadRequest); return }
     if err != nil { http.Error(w, "media unavailable", http.StatusServiceUnavailable); return }
     if items == nil { items = []map[string]any{} }
     w.Header().Set("Cache-Control", "private, no-store")
