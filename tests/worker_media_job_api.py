@@ -305,8 +305,10 @@ class ConfigurationTests(unittest.TestCase):
         # worker's own loopback middleware; mounted, the route still refuses it as not loopback
         # (401, so the route keeps its own check even on a LAN-exposed worker); not mounted, 404.
         probe = ("import app.main as m; from fastapi.testclient import TestClient; "
-                 "print(TestClient(m.app).post('/internal/media/jobs', json={}).status_code)")
-        for value, expected in (("1", "401"), ("0", "404"), ("true", "404"), (None, "404")):
+                 "c = TestClient(m.app); "
+                 "print(c.post('/internal/media/jobs', json={}).status_code, c.get('/internal/media/assets').status_code)")
+        # The gallery read routes (media_gallery_api) are mounted by the same switch.
+        for value, expected in (("1", "401 401"), ("0", "404 404"), ("true", "404 404"), (None, "404 404")):
             env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(ROOT / "worker"), "PYTHONDONTWRITEBYTECODE": "1",
                    "KALIV_WORKER_ALLOW_LAN": "1", "HOME": str(self.tmp), "KALIV_DATA_ROOT": str(self.tmp / "data")}
             if value is not None:
