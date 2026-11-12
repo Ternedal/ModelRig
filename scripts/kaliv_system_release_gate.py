@@ -16,8 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-SCHEMA = "kaliv-system-release-manifest/v1"
-VERDICT_SCHEMA = "kaliv-system-release-verdict/v1"
+SCHEMA = "kaliv-system-release-manifest/v2"
+VERDICT_SCHEMA = "kaliv-system-release-verdict/v2"
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _RELEASE_ID = re.compile(r"^kaliv-rc-[A-Za-z0-9._-]{1,64}$")
 _ANDROID_LIVE_BODY_REF = re.compile(
@@ -74,6 +74,22 @@ REQUIRED_GATES = (
     "recovery_soak",
     "repository_authority",
 )
+
+# ADR-SYS-001: two named releases over the same ten gates. Kaliv Embodied
+# requires all ten. Kaliv V1 requires the seven that do not depend on a human
+# accepting a photoreal body. The three body gates keep their evidence rules in
+# both scopes; in a V1 manifest they are reported as deferred, never as passed
+# by omission. BodyRig stays in the pin set for both scopes.
+BODY_GATES = (
+    "bodyrig_photoreal_likeness",
+    "bodyrig_digital_twin_m6",
+    "bodyrig_android_live_body",
+)
+V1_GATES = tuple(gate for gate in REQUIRED_GATES if gate not in BODY_GATES)
+RELEASE_SCOPE_GATES: Mapping[str, tuple[str, ...]] = {
+    "v1": V1_GATES,
+    "embodied": REQUIRED_GATES,
+}
 
 _ALLOWED_STATUS = {"PASS", "PENDING", "FAIL"}
 _MAX_EVIDENCE_REFS = 32
@@ -134,22 +150,26 @@ class SystemReleaseVerdict:
     schema: str
     release_id: str
     state: str
+    release_scope: str
     release_ready: bool
     production_activation: bool
     pinned_repositories: dict[str, str]
     pending_gates: tuple[str, ...]
     failed_gates: tuple[str, ...]
+    deferred_gates: tuple[str, ...]
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "schema": self.schema,
             "release_id": self.release_id,
             "state": self.state,
+            "release_scope": self.release_scope,
             "release_ready": self.release_ready,
             "production_activation": self.production_activation,
             "pinned_repositories": dict(self.pinned_repositories),
             "pending_gates": list(self.pending_gates),
             "failed_gates": list(self.failed_gates),
+            "deferred_gates": list(self.deferred_gates),
         }
 
 
@@ -235,13 +255,15 @@ def _validate_gates(
     bodyrig_sha: str,
     visionrig_sha: str,
     voicerig_sha: str,
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    scope_gates: tuple[str, ...],
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     gates = _require_mapping(value, "gates")
     expected = set(REQUIRED_GATES)
     _exact_keys(gates, expected, "gates")
 
     pending: list[str] = []
     failed: list[str] = []
+    deferred: list[str] = []
     for gate in REQUIRED_GATES:
         entry = _require_mapping(gates[gate], gate)
         _exact_keys(entry, {"status", "evidence_refs"}, gate)
@@ -437,11 +459,17 @@ def _validate_gates(
                     "end_to_end_latency evidence is not exact-tree-equivalent "
                     "to the pinned ModelRig revision"
                 )
-        if status == "PENDING":
+        if gate not in scope_gates:
+            # Outside the release scope a gate cannot block and cannot be
+            # claimed: anything but PASS is deferred, and a PASS was held to
+            # the same evidence rules above.
+            if status != "PASS":
+                deferred.append(gate)
+        elif status == "PENDING":
             pending.append(gate)
         elif status == "FAIL":
             failed.append(gate)
-    return tuple(pending), tuple(failed)
+    return tuple(pending), tuple(failed), tuple(deferred)
 
 
 def evaluate_manifest(manifest: Mapping[str, Any]) -> SystemReleaseVerdict:
@@ -451,6 +479,7 @@ def evaluate_manifest(manifest: Mapping[str, Any]) -> SystemReleaseVerdict:
         {
             "schema",
             "release_id",
+            "release_scope",
             "repositories",
             "gates",
             "production_activation",
@@ -464,6 +493,12 @@ def evaluate_manifest(manifest: Mapping[str, Any]) -> SystemReleaseVerdict:
     if not isinstance(release_id, str) or _RELEASE_ID.fullmatch(release_id) is None:
         raise SystemReleaseManifestError("release_id must be kaliv-rc-<bounded-id>")
 
+    release_scope = root["release_scope"]
+    if not isinstance(release_scope, str) or release_scope not in RELEASE_SCOPE_GATES:
+        raise SystemReleaseManifestError(
+            "release_scope must be one of: " + ", ".join(sorted(RELEASE_SCOPE_GATES))
+        )
+
     # This qualification surface deliberately cannot activate production.
     if root["production_activation"] is not False:
         raise SystemReleaseManifestError(
@@ -471,23 +506,26 @@ def evaluate_manifest(manifest: Mapping[str, Any]) -> SystemReleaseVerdict:
         )
 
     pinned = _validate_repositories(root["repositories"])
-    pending, failed = _validate_gates(
+    pending, failed, deferred = _validate_gates(
         root["gates"],
         modelrig_sha=pinned["Ternedal/ModelRig"],
         bodyrig_sha=pinned["Ternedal/BodyRig"],
         visionrig_sha=pinned["Ternedal/VisionRig"],
         voicerig_sha=pinned["Ternedal/VoiceRig"],
+        scope_gates=RELEASE_SCOPE_GATES[release_scope],
     )
     ready = not pending and not failed
     return SystemReleaseVerdict(
         schema=VERDICT_SCHEMA,
         release_id=release_id,
         state="QUALIFIED" if ready else "BLOCKED",
+        release_scope=release_scope,
         release_ready=ready,
         production_activation=False,
         pinned_repositories=pinned,
         pending_gates=pending,
         failed_gates=failed,
+        deferred_gates=deferred,
     )
 
 
