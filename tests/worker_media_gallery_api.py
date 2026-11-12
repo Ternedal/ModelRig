@@ -106,13 +106,14 @@ class GalleryRouteTests(unittest.TestCase):
         return [item["id"] for item in response.json()["items"]]
 
     # -- T1: the list holds exactly the completed assets ---------------------------------------
-    def test_t1_only_completed_assets_in_index_order_and_pagination_stays_inside(self):
-        owned = ["img_png_1024", "vid_vr180_lr", "vid_flat_writer_shape"]
+    def test_t1_only_completed_assets_newest_first_and_pagination_stays_inside(self):
+        # Newest first (#2367 C6 G3): the reverse of the index's append order.
+        owned = ["vid_flat_writer_shape", "vid_vr180_lr", "img_png_1024"]
         page = self.get("/internal/media/assets?limit=100")
         self.assertEqual(self.items(page), owned)
         self.assertEqual(page.json()["schema"], "kaliv-media-gallery/v1")
         self.assertIsNone(page.json()["next_cursor"])
-        expected = [item for item in FIXTURE["page"]["items"] if item["id"] in owned]
+        expected = [item for item in reversed(FIXTURE["page"]["items"]) if item["id"] in owned]
         self.assertEqual(page.json()["items"], expected, "the fixture's item shape, unchanged")
         first = self.get("/internal/media/assets?limit=2")
         self.assertEqual(self.items(first), owned[:2])
@@ -124,6 +125,13 @@ class GalleryRouteTests(unittest.TestCase):
             with self.subTest(cursor=cursor):
                 response = self.get(f"/internal/media/assets?limit=2&cursor={cursor}")
                 self.assertEqual((response.status_code, response.json()["detail"]), (400, "unknown_cursor"))
+
+    def test_t1_a_new_result_is_on_the_first_page(self):
+        newest = {**FIXTURE["index"][0], "id": "img_new_result", "created_at": "2026-11-12T12:00:00Z"}
+        (self.media / "img_new_result.png").write_bytes(b"x" * newest["size_bytes"])
+        self.write_index([*FIXTURE["index"], newest])  # the sink appends
+        self.complete("img_new_result")
+        self.assertEqual(self.items(self.get("/internal/media/assets?limit=1")), ["img_new_result"])
 
     def test_t1_a_thumbnail_that_is_not_owned_is_never_linked(self):
         with sqlite3.connect(self.tmp / "jobs.sqlite3") as db:
