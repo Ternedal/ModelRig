@@ -281,20 +281,31 @@ type workerMediaAsset struct {
 	body    io.ReadCloser
 }
 
+var errSeekOutside = errors.New("seek outside the asset")
+
 func (a *workerMediaAsset) Seek(offset int64, whence int) (int64, error) {
+	// Bounds are checked before any addition (ChatGPT 6821058128): a.offset and a.size are in
+	// [0, MaxInt64], so these comparisons cannot overflow, and an offset near MaxInt64 or
+	// MinInt64 is refused instead of wrapping into an apparently valid position.
 	var target int64
 	switch whence {
 	case io.SeekStart:
+		if offset < 0 || offset > a.size {
+			return a.offset, errSeekOutside
+		}
 		target = offset
 	case io.SeekCurrent:
+		if offset < -a.offset || offset > a.size-a.offset {
+			return a.offset, errSeekOutside
+		}
 		target = a.offset + offset
 	case io.SeekEnd:
+		if offset > 0 || offset < -a.size {
+			return a.offset, errSeekOutside
+		}
 		target = a.size + offset
 	default:
 		return a.offset, errors.New("invalid whence")
-	}
-	if target < 0 || target > a.size {
-		return a.offset, errors.New("seek outside the asset")
 	}
 	if target != a.offset && a.body != nil {
 		_ = a.body.Close()

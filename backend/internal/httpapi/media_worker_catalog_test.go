@@ -599,3 +599,40 @@ func TestWorkerCatalogRefusesEveryInvalidItemOfTheSharedFixtureAndATrailingDocum
 		t.Errorf("trailing newline: device %d", rec.Code)
 	}
 }
+
+func TestWorkerAssetSeekRefusesOverflowAndOutOfBoundsWithoutMoving(t *testing.T) {
+	_, worker := newFakeWorker(t)
+	catalog, _ := NewWorkerMediaCatalog(worker.URL, testMediaSecret)
+	opened, _, size, err := catalog.OpenMedia(mediaInstallationOwner, "img_png_1024")
+	if err != nil {
+		t.Fatal(err)
+	}
+	asset := opened.(*workerMediaAsset)
+	defer asset.Close()
+	if pos, err := asset.Seek(5, io.SeekStart); err != nil || pos != 5 {
+		t.Fatalf("seek 5: %d %v", pos, err)
+	}
+	const maxInt64, minInt64 = int64(^uint64(0) >> 1), -int64(^uint64(0)>>1) - 1
+	for _, tc := range []struct {
+		offset int64
+		whence int
+	}{
+		{maxInt64, io.SeekCurrent}, {minInt64, io.SeekCurrent}, {maxInt64, io.SeekEnd}, {minInt64, io.SeekEnd},
+		{maxInt64, io.SeekStart}, {minInt64, io.SeekStart}, {-1, io.SeekStart}, {size + 1, io.SeekStart},
+		{size, io.SeekCurrent}, {-6, io.SeekCurrent}, {1, io.SeekEnd}, {-size - 1, io.SeekEnd}, {0, 99},
+	} {
+		pos, err := asset.Seek(tc.offset, tc.whence)
+		if err == nil || pos != 5 || asset.offset != 5 {
+			t.Errorf("Seek(%d, %d) = %d, %v; offset now %d (want an error and no move from 5)", tc.offset, tc.whence, pos, err, asset.offset)
+		}
+	}
+	for _, tc := range []struct {
+		offset int64
+		whence int
+		want   int64
+	}{{-5, io.SeekCurrent, 0}, {size, io.SeekStart, size}, {-size, io.SeekEnd, 0}, {0, io.SeekEnd, size}, {-3, io.SeekEnd, size - 3}} {
+		if pos, err := asset.Seek(tc.offset, tc.whence); err != nil || pos != tc.want {
+			t.Errorf("Seek(%d, %d) = %d, %v; want %d", tc.offset, tc.whence, pos, err, tc.want)
+		}
+	}
+}
