@@ -134,7 +134,8 @@ To launchere kører `scheduler_pilot_report.py` for dig. Begge er pinnet til
   bruges af `START_REMAINING_PHYSICAL_TESTS.cmd`.
 
 `scripts/scheduler_pilot_evidence.py` (`SCHEDULER_PILOT_EVIDENCE.md`) skriver et
-andet skema og må ikke skrive til den sti.
+andet skema til `validation\scheduler-pilot-evidence-latest.json` og afviser selv
+at skrive til kampagnens sti.
 
 ## Stage B — publiceret release og T-006
 

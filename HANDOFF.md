@@ -849,7 +849,12 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
   til release. Ophævelsen godkender ingen bestemt PR.
 - #2382 skriver afgørelsen ind i `RIGDAG_SIMPEL.md` og
   `STAGED_PHYSICAL_PROMOTION.md` og retter D3-kontrakten i
-  `tests/workflow_staged_promotion_runbook.py`.
+  `tests/workflow_staged_promotion_runbook.py`. Indtil den er landet, står
+  reglen stadig som gældende i de to kørebøger; den er det ikke.
+- **`main` flyttede sig første gang 12/11 kl. 09:33 CET:** #2372 landede som
+  `8bdcd743` (bytecode-flag i ti launchere, egen default-rapportsti for
+  `scheduler_pilot_evidence.py`, og `START_STAGE_B_TEST.cmd` nævner ikke
+  længere en forældet kildeversion).
 
 ### 8.–11/11: D3 ændret, v2.0.19 publiceret, `physical-proof/2.0.19` oprettet
 
@@ -874,9 +879,10 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
   `Kaliv-windows-x64-2.0.19.jar`, fire exe'er (server, supervisor, updater,
   worker), `modelrig-v2.0.19.zip` og `SHA256SUMS.txt`.
 - **`physical-proof/2.0.19`** findes på origin og peger på tag-SHA'en
-  `3cbd00f1`. Stage A/B efter publicering følger `RIGDAG_SIMPEL.md`; fra
-  tagget, til Stage A er grøn, merges intet til `main` (Blok 0 dér), og
-  afvigelser rapporteres i #2275.
+  `3cbd00f1`. Stage A/B efter publicering følger `RIGDAG_SIMPEL.md`.
+  **Historisk regel, ophævet 12/11 (se øverst i §9):** fra tagget, til Stage A
+  var grøn, måtte intet merges til `main` (Blok 0 dér). Afvigelser rapporteres
+  i #2275.
 - **Dokumentationsgennemgang (Claude, 11/11, på Anders' bestilling):** #2370
   (draft) retter dokumentationen mod koden og tilføjer `docs/README.md`
   (indeks) og `docs/KALIV_ECOSYSTEM.md` (repositories og kontrakter). Kun

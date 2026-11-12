@@ -2,18 +2,15 @@
 
 **Status: read-only collector and evidence schema. The physical pilot itself must run on ModelRig.**
 
-> **⚠️ Warning (2.0.19, 11/11-2026): this report is not the campaign's scheduler evidence.**
-> This collector writes schema `kaliv-scheduler-pilot-evidence/v1`. Both its
-> default `--report` and the command in step 4 below point to
-> `validation/scheduler-pilot-latest.json`. That is the exact path where the
-> physical validation campaign's `scheduler_pilot` slot requires
-> `kaliv-scheduler-pilot/v4` (`scripts/physical_validation_campaign_core.py`).
-> Running step 4 as written overwrites a valid campaign report, and
-> `scheduler_pilot` turns red.
->
-> The campaign's scheduler report is produced by `RUN_STAGE_A_SCHEDULER_PILOT.cmd`
-> or `START_SCHEDULER_PILOT.cmd` (see T-019 in `PHYSICAL_VALIDATION_CAMPAIGN.md`).
-> Do not run this collector on a campaign rig.
+> **This report is not the campaign's scheduler evidence.** The collector writes
+> schema `kaliv-scheduler-pilot-evidence/v1` to
+> `validation/scheduler-pilot-evidence-latest.json`. The physical validation
+> campaign's `scheduler_pilot` slot reads `validation/scheduler-pilot-latest.json`
+> and requires `kaliv-scheduler-pilot/v4`
+> (`scripts/physical_validation_campaign_core.py`); the collector refuses to
+> write to that path. The campaign's report is produced by
+> `RUN_STAGE_A_SCHEDULER_PILOT.cmd` or `START_SCHEDULER_PILOT.cmd` (see T-019 in
+> `PHYSICAL_VALIDATION_CAMPAIGN.md`).
 
 `scripts/scheduler_pilot_evidence.py` does not create, approve, enable, revoke or
 execute a schedule. It reads the existing runtime identities and SQLite truth
