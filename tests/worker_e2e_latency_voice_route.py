@@ -197,6 +197,29 @@ class VoiceQualificationRouteTests(unittest.TestCase):
         self.assertIn("the network between a phone and the rig", scope["not_measured"])
         self.assertIs(scope["production_activation"], False)
 
+        # The stamp is a client's report of dispatch. The route hears nothing.
+        self.assertEqual(scope["outward_event"], "client-reported-playback-dispatch")
+        self.assertIs(scope["audible_onset_measured"], False)
+        self.assertEqual(scope["not_measured"], list(voice.VOICE_NOT_MEASURED))
+        self.assertEqual(len(scope["not_measured"]), 6)
+        self.assertTrue(any("became audible" in line for line in scope["not_measured"]))
+        self.assertTrue(any("spoken live" in line for line in scope["not_measured"]))
+
+        # The route cannot tell live speech from a recording. The sidecar says
+        # which receipt fields are the route's own assertion, and all three
+        # receipts carry exactly those values whatever audio was posted.
+        self.assertIs(scope["live_utterance_verified"], False)
+        self.assertEqual(
+            scope["receipt_fields_asserted_not_measured"], ["real_event", "simulated", "replay"]
+        )
+        for name in ("perception", "cognition", "outward"):
+            receipt = json.loads(receipts[name].read_text(encoding="utf-8"))
+            self.assertEqual(
+                [receipt[field] for field in scope["receipt_fields_asserted_not_measured"]],
+                [True, False, False],
+                name,
+            )
+
     def test_playback_start_is_reported_once(self) -> None:
         with patch.object(voice.body_session, "current_session", _no_body):
             turn = self.turn(outward_kind="voice")

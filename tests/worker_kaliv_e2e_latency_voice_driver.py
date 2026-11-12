@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import inspect
 import json
 import os
 import shutil
@@ -151,12 +152,39 @@ class VoiceDriverTests(unittest.TestCase):
         self.assertEqual(record["schema"], driver.RUN_SCHEMA)
         self.assertEqual(record["outward_kind"], "voice")
         self.assertEqual(record["candidate_git_sha"], route_test.CANDIDATE)
-        self.assertEqual(record["input"]["mode"], "supplied-file")
         self.assertEqual(record["input"]["sha256"], driver._sha256(source.read_bytes()))
         self.assertEqual(record["measured_ms"]["end_to_end"], 2_300)
         self.assertEqual(record["not_measured"], list(driver.NOT_MEASURED))
         self.assertIn("playback on a phone", record["not_measured"])
         self.assertIs(record["production_activation"], False)
+
+        # Where the audio came from. The file is named like the driver's own
+        # recording; it is still a file the operator supplied.
+        self.assertEqual(source.name, "utterance.wav")
+        self.assertEqual(record["input"]["source"], "operator_supplied_wav")
+        self.assertIs(record["input"]["live_utterance_verified"], False)
+        self.assertEqual(
+            record["input"]["live_utterance"],
+            "attested by the operator who ran the driver; not verified",
+        )
+        self.assertNotIn("mode", record["input"])
+
+        # The clock stops at dispatch of playback, and the record says so.
+        self.assertEqual(record["playback"]["start_event"], "dispatch")
+        self.assertIs(record["playback"]["reported_after_dispatch"], True)
+        self.assertIs(record["playback"]["audible_onset_measured"], False)
+        self.assertNotIn("reported_after_playback_began", record["playback"])
+        self.assertTrue(any("became audible" in line for line in record["not_measured"]))
+        self.assertTrue(any("spoken live" in line for line in record["not_measured"]))
+
+        # The worker's own statement of the limits is bound by hash.
+        sidecar = Path(record["scope_sidecar"]["path"])
+        self.assertEqual(sidecar.name, "voice_outward_scope.json")
+        self.assertEqual(sidecar.parent, Path(record["record_path"]).parent)
+        self.assertEqual(record["scope_sidecar"]["sha256"], driver._sha256(sidecar.read_bytes()))
+        scope = json.loads(sidecar.read_text(encoding="utf-8"))
+        self.assertEqual(scope["not_measured"], record["not_measured"])
+        self.assertEqual(tuple(scope["not_measured"]), route_test.voice.VOICE_NOT_MEASURED)
 
         # The reply was played, and the start was reported only after that.
         self.assertEqual(len(self.played), 1)
@@ -221,13 +249,71 @@ class VoiceDriverTests(unittest.TestCase):
 
         record_value = self.turn(record_seconds=4.0, record=record)
         self.assertEqual(recorded, [4.0])
-        self.assertEqual(record_value["input"]["mode"], "recorded-live")
+        self.assertEqual(record_value["input"]["source"], "recorded_by_driver")
         self.assertEqual(record_value["input"]["seconds"], 4.0)
+        # Recording through the input device proves no live speech either.
+        self.assertIs(record_value["input"]["live_utterance_verified"], False)
+        self.assertEqual(record_value["input"]["live_utterance"], driver.LIVE_UTTERANCE)
         self.assertTrue(any("Tal nu" in line for line in self.printed))
         for seconds in (0.5, 31.0):
             self.refused("between 1 and 30", record_seconds=seconds, record=record)
         self.refused("exactly one of", wav=self.fresh_wav(), record_seconds=4.0, record=record)
         self.refused("exactly one of")
+
+    def test_the_source_of_the_utterance_follows_from_the_input_alone(self) -> None:
+        # Nothing lets a caller name the source or claim live speech: the
+        # record derives both from which input was given.
+        claims = ("source", "mode", "live", "provenance", "attest", "replay")
+        for name in inspect.signature(driver.run_turn).parameters:
+            self.assertFalse(any(word in name for word in claims), name)
+        options = [
+            option
+            for action in driver.build_parser()._actions
+            for option in action.option_strings
+        ]
+        self.assertIn("--wav", options)
+        self.assertIn("--record-seconds", options)
+        for option in options:
+            self.assertFalse(any(word in option for word in claims), option)
+
+    def sidecar_changed(self, change):
+        """Let the turn run, then alter the worker's scope sidecar."""
+        real = driver.post_json
+        earlier = set(self.root.glob("*/voice_outward_scope.json"))
+
+        def post(url: str, payload, timeout: float) -> dict:
+            answer = real(url, payload, timeout)
+            if url.endswith("/started"):
+                (path,) = set(self.root.glob("*/voice_outward_scope.json")) - earlier
+                change(path)
+            return answer
+
+        return patch.object(driver, "post_json", post)
+
+    def test_a_scope_sidecar_that_says_less_is_refused(self) -> None:
+        def edit(update):
+            def change(path: Path) -> None:
+                scope = json.loads(path.read_text(encoding="utf-8"))
+                update(scope)
+                path.write_text(json.dumps(scope), encoding="utf-8")
+            return change
+
+        cases = (
+            ("an older worker's shorter list", edit(lambda scope: scope["not_measured"].pop())),
+            ("audible onset claimed", edit(lambda scope: scope.update(audible_onset_measured=True))),
+            ("audible onset unstated", edit(lambda scope: scope.pop("audible_onset_measured"))),
+            ("live speech claimed", edit(lambda scope: scope.update(live_utterance_verified=True))),
+            ("live speech unstated", edit(lambda scope: scope.pop("live_utterance_verified"))),
+            ("another measurement", edit(lambda scope: scope.update(outward_kind="voice+body"))),
+            ("another utterance", edit(lambda scope: scope.update(utterance_id="e2e-" + "9" * 32 + "-0"))),
+            ("no sidecar", lambda path: path.unlink()),
+            ("not JSON", lambda path: path.write_text("limits: none", encoding="utf-8")),
+            ("a list", lambda path: path.write_text("[]", encoding="utf-8")),
+        )
+        for index, (label, change) in enumerate(cases):
+            with self.subTest(label), self.sidecar_changed(change):
+                self.refused("scope sidecar", wav=self.fresh_wav(f"s{index}.wav", fill=40 + index))
+        self.assertEqual(list(self.root.glob("*/rig_driver_run.json")), [], "no run record")
 
     def test_no_playback_no_report(self) -> None:
         def broken(_path: Path) -> None:
