@@ -70,6 +70,13 @@ check(r.status_code == 403 and "cloud" in detail and "disabled" not in detail,
 r = chat({"cloud_base_url": "http://127.0.0.1:9/v1", "cloud_key": "k", "allow_rag_cloud": True})
 check(r.status_code != 403, f"RAG + cloud + consent -> past guard (got {r.status_code})")
 
+# 2b. RAG + a cloud URL WITHOUT a key + no consent -> 403 as well (#2275 item 25):
+#     the worker posts to cloud_base_url with or without a key, so the URL alone is cloud.
+r = chat({"cloud_base_url": "http://127.0.0.1:9/v1"})
+detail = (r.json().get("detail") or "").lower()
+check(r.status_code == 403 and "cloud" in detail,
+      f"RAG matched + cloud URL without key + no consent -> 403 (got {r.status_code}: {detail[:60]!r})")
+
 # 3. RAG + LOCAL model (no cloud_key) -> guard does not apply (local never leaves
 #    the rig); fails only because the sandbox has no Ollama.
 r = chat({})
