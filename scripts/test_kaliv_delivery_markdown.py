@@ -44,6 +44,23 @@ class MarkdownReportTests(unittest.TestCase):
         self.assertIn("none", result)
         self.assertNotIn("stale ready PR(s)", result)
 
+    def test_every_workflow_state_but_fine_ones_is_flagged(self):
+        # #2275 item 24: startup_failure (a broken workflow file) and action_required read
+        # as fine when only failure/cancelled/timed_out/unknown were flagged.
+        def flagged(workflow):
+            out = render({"schema": "kaliv.delivery-report.v1",
+                          "repositories": [{"repository": "Ternedal/ModelRig", "status": "collected",
+                                            "open_issues": 0, "open_prs": 0, "stale_prs": 0,
+                                            "workflow": workflow, "warnings": []}]})
+            return out.split("## Attention required")[1].split("## Next actions")[0]
+        for state in ("startup_failure", "action_required", "stale", "failure", "cancelled",
+                      "timed_out", "unknown", "some_future_state"):
+            self.assertIn("latest workflow: " + state, flagged(state), state)
+        for state in ("in_progress", "queued"):
+            self.assertIn("latest workflow not finished: " + state, flagged(state), state)
+        for state in ("success", "neutral", "skipped", "none"):
+            self.assertIn("No warning conditions detected", flagged(state), state)
+
     def test_no_false_production_green(self):
         result = render({"schema": "kaliv.delivery-report.v1",
                          "repositories": [{"repository": "Ternedal/VoiceRig",
