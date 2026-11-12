@@ -590,6 +590,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_release_tag_guard.py`
 - `tests/workflow_remaining_physical_pilots.py`
 - `tests/workflow_repository_authority.py`
+- `tests/workflow_repository_authority_wrapper.py`
 - `tests/workflow_rig_preflight.py`
 - `tests/workflow_route_inventory.py`
 - `tests/workflow_runner_offline.py`
