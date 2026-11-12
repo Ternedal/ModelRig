@@ -69,6 +69,8 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` |
 | `KALIV_HOME_RIG_PILOT` | `0` |
 | `KALIV_MAX_UPLOAD_MB` | `25` |
+| `KALIV_MEDIA_EXECUTOR` | `(unset)` |
+| `KALIV_MEDIA_JOBS_API` | `0` |
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` |
 | `KALIV_READ_CONNECTOR_PILOT` | `0` |
 | `KALIV_SCHEDULER` | `` |
@@ -392,13 +394,19 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_media_executor.py`
 - `tests/worker_media_executor_image_to_video.py`
 - `tests/worker_media_executor_main.py`
+- `tests/worker_media_executor_main_video.py`
+- `tests/worker_media_gallery_api.py`
 - `tests/worker_media_generation_profiles.py`
 - `tests/worker_media_generation_reconciliation.py`
 - `tests/worker_media_generation_runner.py`
+- `tests/worker_media_image_env.py`
+- `tests/worker_media_job_api.py`
+- `tests/worker_media_preflight.py`
 - `tests/worker_media_security_properties.py`
 - `tests/worker_media_source_image.py`
 - `tests/worker_media_staged_video_sink.py`
 - `tests/worker_media_volume.py`
+- `tests/worker_media_work_area.py`
 - `tests/worker_migrate.py`
 - `tests/worker_netguard.py`
 - `tests/worker_occurrence_ledger.py`
@@ -560,6 +568,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_kaliv_vr_renderer.py`
 - `tests/workflow_media_gallery_asset.py`
 - `tests/workflow_media_gallery_catalog.py`
+- `tests/workflow_media_gallery_contract_fixture.py`
 - `tests/workflow_media_gallery_index_writer.py`
 - `tests/workflow_media_gallery_range.py`
 - `tests/workflow_media_gallery_store.py`

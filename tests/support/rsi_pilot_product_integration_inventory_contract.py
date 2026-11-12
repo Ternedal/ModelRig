@@ -36,6 +36,9 @@ UI_HANDOFF_PATH = (
 SENSOR_CONTROL_HANDOFF_PATH = (
     ROOT / "docs" / "devcontrol" / "dc-l16" / "visionrig-sensor-control-handoff.json"
 )
+MEDIA_JOB_ROUTE_TRANSITION_PATH = (
+    ROOT / "docs" / "devcontrol" / "dc-l16" / "media-job-route-source-transition.json"
+)
 SELECTION_REQUIREMENTS_PATH = (
     ROOT / "docs" / "devcontrol" / "dc-l16" / "product-integration-selection-requirements.json"
 )
@@ -224,6 +227,25 @@ def run_contract() -> None:
         )
         transitions.setdefault(sensor_transition["path"], []).append(sensor_transition)
 
+    if MEDIA_JOB_ROUTE_TRANSITION_PATH.is_file():
+        media_transition_record = _load(MEDIA_JOB_ROUTE_TRANSITION_PATH)
+        assert media_transition_record["schema"] == "kaliv-media-job-route-source-transition/v1"
+        assert media_transition_record["repository"] == "Ternedal/ModelRig"
+        assert media_transition_record["scope"] == "media-job-route-registration-only"
+        assert media_transition_record["implementation_choice"] == {
+            "feature_flag": "KALIV_MEDIA_JOBS_API",
+            "default_off": True,
+            "bearer_authenticated": True,
+            "loopback_worker_required": True,
+            "production_activation": False,
+        }
+        media_transition = media_transition_record["tracked_source_transition"]
+        assert media_transition == {
+            "path": "backend/internal/httpapi/server.go",
+            "from_git_blob_sha": "f9b646350c70900ec256387b7a7e544d2de3eb0b",
+            "to_git_blob_sha": "150ae8bec0a45fc8f40a353e889a109e1482eb36",
+        }
+        transitions.setdefault(media_transition["path"], []).append(media_transition)
     # Explicitly recorded media route integration extends the sealed server
     # transition chain. Never relax the final blob equality assertion.
     media_transition_path = ROOT / "docs" / "devcontrol" / "dc-l16" / "media-gallery-server-transition.json"
@@ -233,7 +255,7 @@ def run_contract() -> None:
         assert media_transition["repository"] == "Ternedal/ModelRig"
         transition = media_transition["tracked_source_transition"]
         assert transition["path"] == "backend/internal/httpapi/server.go"
-        assert transition["from_git_blob_sha"] == "f9b646350c70900ec256387b7a7e544d2de3eb0b"
+        assert transition["from_git_blob_sha"] == "150ae8bec0a45fc8f40a353e889a109e1482eb36"
         transitions.setdefault(transition["path"], []).append(transition)
 
     candidates = inventory["candidate_surfaces"]

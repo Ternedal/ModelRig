@@ -16,6 +16,7 @@ HANDOFF = ROOT / "docs/devcontrol/dc-l16/visionrig-sensor-control-handoff.json"
 SCHEMA = ROOT / "devcontrol/schemas/rsi-pilot-visionrig-sensor-control-handoff-v1.schema.json"
 SERVER = ROOT / "backend/internal/httpapi/server.go"
 CONTROL_CENTER = ROOT / "backend/internal/httpapi/control_center.go"
+MEDIA_ROUTE_HANDOFF = ROOT / "docs/devcontrol/dc-l16/media-job-route-source-transition.json"
 
 PREDECESSOR_SHA = "582b163d7a71a934b43671ddad62a5644df3087e"
 SUCCESSOR_SHA = "f9b646350c70900ec256387b7a7e544d2de3eb0b"
@@ -66,7 +67,9 @@ def run_contract() -> None:
         assert media["repository"] == "Ternedal/ModelRig"
         media_transition = media["tracked_source_transition"]
         assert media_transition["path"] == "backend/internal/httpapi/server.go"
-        assert media_transition["from_git_blob_sha"] == SUCCESSOR_SHA
+        route = _load(MEDIA_ROUTE_HANDOFF)["tracked_source_transition"]
+        assert route["from_git_blob_sha"] == SUCCESSOR_SHA
+        assert media_transition["from_git_blob_sha"] == route["to_git_blob_sha"]
         assert media_transition["to_git_blob_sha"] == server_sha
 
     server = code_of(SERVER)

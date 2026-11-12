@@ -3,7 +3,8 @@
 **Status:** default-off.
 - The API worker never imports `worker/app/media_executor.py` (boundary test).
 - With G2b the appliance's Go `modelrig-supervisor` can start one executor per GPU, but only when `KALIV_MEDIA_EXECUTOR=1` and the configuration below is complete. Off by default; a refused configuration starts nothing.
-- Images only, published job-keyed through `ExternalMediaSink`. Video is refused (exit 78) until a staged video sink exists.
+- Images are published job-keyed through `ExternalMediaSink`.
+- Text-to-video is wired but **default-off** behind its own switch, `KALIV_MEDIA_VIDEO=1` (see "Video" below). Without that switch, an enabled video profile is still exit 78. Image-to-video is still exit 78 in every case.
 - Activation on the rig needs the rig pack (#2296 6509723614) and Anders' go.
 
 Sources:
@@ -36,7 +37,7 @@ Sources:
 | Concurrent initialisers serialise the migration | `ImageJobStore.__init__` (`BEGIN IMMEDIATE` spans inspection and `ALTER`) | `test_concurrent_initialisers_serialise_the_migration` (barrier at the schema read) |
 | A failed load continues only if `close()` proves the release; otherwise the adapter is retained and the exit is 70. `GpuResourcesRetained` from `load()` is always fatal | `_adapter_for` | three partial-load tests |
 | Publication is job-keyed when the sink offers it (`JobKeyedArtifactSink`, `JobKeyedStagedSink`) | `step`, `GenerationJobRunner` | image, video and real `ExternalMediaSink` tests |
-| A durable artifact whose completion write fails stays `publishing`, exit 76, then `interrupted during publication` | `step` | `test_a_durable_artifact_whose_completion_fails…`, `test_restart_reconciliation_with_the_real_gallery_sink` |
+| A durable artifact whose completion write fails stays `publishing`, exit 76, then `interrupted_during_publication` | `step` | `test_a_durable_artifact_whose_completion_fails…`, `test_restart_reconciliation_with_the_real_gallery_sink` |
 | A failure after the commit point is `publication_failed`, not `generation_failed` | `step` | `test_a_publication_error_after_the_commit_point…` |
 | The executor lock is released on every terminal path of `run()`; a retained adapter's GPU lease is not | `run`, `ExecutorLock.release` | `test_run_releases_the_executor_lock_on_every_exit_path` |
 | A ComfyUI whose interrupt is not confirmed drained (deadline, interrupt or queue check failed) sets `needs_restart`; the executor unloads it with proof before claiming again | `ComfyVideoAdapter._interrupt_and_drain`, `step` | `test_an_unconfirmed_drain_marks_the_adapter_for_restart`, `test_a_comfyui_whose_cancel_did_not_drain_is_restarted_before_the_next_job` |
@@ -60,9 +61,13 @@ queued --claim_for--> running --begin_publish--> publishing --complete--> comple
                       running/publishing --fail--> failed
                       running --finish_cancelled--> cancelled      (after request_cancel)
                       running --defer (VRAM short)--> queued        (G4; failed "gpu_unavailable" after 10 min)
-recovery:  running    -> failed "interrupted by restart"
-           publishing -> failed "interrupted during publication"   (an asset may exist: the sink reconciles)
+recovery:  running    -> failed interrupted_by_restart
+           publishing -> failed interrupted_during_publication   (an asset may exist: the sink reconciles)
 ```
+
+Rows failed before 6 Nov 2026 hold the sentences `interrupted by restart` and `interrupted during publication`. Nothing rewrites them; `image_job_store.public_error()` maps both forms to the codes, so a route shows codes only.
+
+**Owned assets for a gallery list.** `ImageJobStore.completed_assets_for(owner)` returns every asset the authenticated owner has through a completed job, in one read (the same authority as `owns_completed_asset`). Failed, running, publishing, expired and other owners' jobs are never in it, so a `published_not_recorded` file is never listed. More than 10,000 (the gallery index limit) is a refusal (`owner_asset_limit`), never a partial set, and a database error propagates rather than reading as "owns nothing".
 
 The migration is additive: `claimed_by` and `cancel_requested`. The legacy API (`claim`/`finish`/`cancel`/`recover_interrupted`) still serves `GenerationJobRunner`.
 
@@ -93,15 +98,22 @@ Each executor runs in the supervisor's process tree (a Windows Job Object), so s
 | `KALIV_MEDIA_EXECUTOR_DEVICES` | supervisor | `cuda:0` or `cuda:0,cuda:1`; at most 8, no duplicates |
 | `KALIV_MEDIA_EXECUTOR_PYTHON` | supervisor | Absolute path of the media environment's `python.exe` (torch and diffusers are not in the frozen worker) |
 | `KALIV_MEDIA_EXECUTOR_APP_DIR` | supervisor | Absolute path of the directory that contains `app/media_executor_main.py` |
-| `KALIV_MEDIA_JOB_DB` | executor, routes | Absolute path of the job SQLite |
+| `KALIV_MEDIA_WORK_ROOT` | executor | The private work area on the internal disk, where media is generated and the job database lives (Anders, 6 Nov; `docs/MEDIA_WORK_AREA.md`). Missing, not private, a network drive or on the media volume: exit 78 |
+| `KALIV_MEDIA_JOB_DB` | executor, routes | Absolute path of the job SQLite, in an existing folder inside the work area (else exit 78). The routes must run as the same account as the executor: nobody else can read the work area |
 | `KALIV_MEDIA_ROOT`, `KALIV_MEDIA_VOLUME_ROOT` | executor, gallery | Media directory and the verified volume root (`ExternalMediaSink`) |
+| `KALIV_MEDIA_VOLUME_ID` | executor | The id in `<volume root>/.kaliv-media-volume` (G1, `docs/MEDIA_VOLUME.md`). Missing or malformed: exit 78. Wrong disk: exit 75 |
 | `KALIV_MEDIA_PROFILE_DIR` | executor | Operator profile directory |
 | `KALIV_MEDIA_IDLE_UNLOAD_S` | executor | Optional; default 300 |
+| `KALIV_MEDIA_VIDEO=1` | executor | The video switch. It is separate from the master switch. With any other value, an enabled video profile is exit 78 |
+| `KALIV_COMFY_PYTHON`, `KALIV_COMFY_MAIN` | executor (video) | Absolute paths of the pinned ComfyUI environment's python and of its `main.py`. `main.py` must not be a link |
+| `KALIV_COMFY_DIR` | executor (video) | The ComfyUI folder, in the work area. Every executor gets the same environment from the supervisor, so each uses its own `cuda<N>/` in it, chosen by `--device`: `<dir>/cuda0/`, `<dir>/cuda1/`. That folder must contain existing `input/`, `output/`, `temp/` and `user/` directories (not files, not links). Nothing is created |
+| `KALIV_COMFY_TEMPLATE_DIR` | executor (video) | The operator's workflow template directory. Each profile pins its template's SHA-256 |
+| `KALIV_COMFY_WEIGHTS_CACHE` | executor (video) | Optional. The weight-hash cache file, in a folder in the work area. If it is not set, the weights are re-hashed at every start |
 | `KALIV_MEDIA_PROFILES_ENABLED`, `KALIV_MEDIA_ALLOW_CANDIDATE_PROFILES`, `KALIV_GPU_LEASE_DIR`, `KALIV_GPU_DEVICE_UUIDS`, `CUDA_DEVICE_ORDER`, `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE` | executor | Existing |
 
 The supervisor reads them the way the children see them: the env file (`modelrig.env`) wins over its own environment.
 
-The entry point checks the configuration before it touches anything, including the GPU lease directory: one that is relative, missing, a symlink or writable by others is exit 78, not a crash. The volume is verified before the job database is first opened and again before every later database access, so a volume that goes away while the executor runs stops it (exit 75) before it claims another job (#2337 reviews 4477083816, 4477083808). A diffusers profile also requires `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` at configuration time: without them it is exit 78 and the queue is untouched, instead of every claimed job failing at load (#2337 review 4477167705). An existing job database must be a regular SQLite file: a directory, a link (which could lead off the volume), a FIFO or a file that is not SQLite is exit 78 (#2337 review 4477759300); a locked database stays a transient exit 1. A missing directory is never created.
+The entry point checks the configuration before it touches anything, including the GPU lease directory: one that is relative, missing, a symlink or writable by others is exit 78, not a crash. The work area and then the volume are verified before the job database is first opened and again before every later database access, so a volume that goes away, or a work area that changes, while the executor runs stops it (exit 75) before it claims another job (#2337 reviews 4477083816, 4477083808). A diffusers profile also requires `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` at configuration time: without them it is exit 78 and the queue is untouched, instead of every claimed job failing at load (#2337 review 4477167705). An existing job database must be a regular SQLite file: a directory, a link (which could lead out of the work area), a FIFO or a file that is not SQLite is exit 78 (#2337 review 4477759300); a locked database stays a transient exit 1. A missing directory is never created.
 
 ## Image-to-video (seam #2339)
 
@@ -114,10 +126,46 @@ The entry point checks the configuration before it touches anything, including t
   | `SourceImageUnavailable` | `failed: source_image_unavailable` | continues |
   | `ValueError` (a malformed id) | `failed: generation_request_rejected` | continues |
   | anything other than non-empty `bytes` | `failed: source_image_unavailable` | continues |
-  | `ArtifactSinkUnavailable` (the volume) | stays `running`, then recovery fails it as interrupted by restart (`interrupted_by_restart` once the wiring lands) | exit 75 |
+  | `ArtifactSinkUnavailable` (the volume) | stays `running`, then recovery fails it as `interrupted_by_restart` | exit 75 |
 
 - **The bytes** go to `ComfyVideoAdapter.render_to(source_png=...)`. See `docs/MEDIA_VIDEO_GENERATION.md` for the bounded decode, the exclusive staging and the cleanup.
-- **Not wired in the entry point yet.** `media_executor_main` still refuses every video profile with exit 78. That stays so until the staged video sink (#2347), the verified volume (#2349) and the wiring are in, and Anders enables video after the rig proof.
+- **Not served by the entry point.** `media_executor_main` refuses a profile that lists `image_to_video` with exit 78, because the owner-gated source reader is not wired there. Text-to-video is wired; see "Video" below.
+
+## Video (text-to-video, default-off)
+
+`media_executor_main` serves a `comfyui` video profile only if **all** of the following hold. Otherwise it exits 78 before the job database is opened:
+
+- `KALIV_MEDIA_VIDEO=1`.
+- The profile lists `text_to_video` only.
+- The profile pins `comfyui_version` and `weights`. This holds even for a candidate profile, which the profile schema alone does not require.
+- No two served video profiles share a ComfyUI port.
+- `KALIV_COMFY_PYTHON`, `KALIV_COMFY_MAIN`, `KALIV_COMFY_DIR` and `KALIV_COMFY_TEMPLATE_DIR` are set and valid.
+- The four ComfyUI folders of this GPU, `KALIV_COMFY_DIR/cuda<N>/{input,output,temp,user}`, exist inside the work area (`PrivateWorkArea.require`) and are directories. A regular file there is 78 at start, not a failed job later.
+- Across **all** enabled ComfyUI video profiles, not only this GPU's:
+  - each profile lists exactly one GPU;
+  - no two profiles share a port.
+
+  This is checked across every GPU because each executor serves only its own profiles. Without it, a port shared between GPUs would pass both starts, and then fail every job on the second GPU.
+
+When video is served:
+
+- **Sink.** The executor gets `ExternalStagedVideoSink` on the publication volume, wrapped in `PinnedStagedVideoSink`. That wrapper verifies the pinned G1 volume before every `staged()` and every `adopt*()`, so a disk that is swapped during a render gets nothing.
+- **Adapter.** Each video profile gets a `ComfyVideoAdapter` with its own `ComfySupervisor`, which uses the executor's GPU UUID, lease directory and work area.
+- **Single queue.** It is the same queue and the same executor as images: one job at a time per GPU, and the same lease.
+- **Bounds.** The profile's `max_render_seconds` bounds a render, and the adapter interrupts ComfyUI when the deadline passes.
+- **Lifecycle.** A cancel before `begin_publish` wins. A volume lost mid-render is exit 75, and the next start fails the job (recovery).
+
+Tests: `tests/worker_media_executor_main_video.py` (fake ComfyUI child, real supervisor, adapter, sink and executor). They cover:
+- fail-closed configuration;
+- end-to-end job-keyed publication to the gallery, with `kind: video` and `video/mp4`;
+- image and video jobs on one executor;
+- the deadline;
+- cancel;
+- a lost volume followed by restart recovery.
+
+**Not proven on the rig.** Everything in `docs/MEDIA_VIDEO_GENERATION.md` "Must be proven on the rig before any activation" still applies. `KALIV_MEDIA_VIDEO` stays unset until Anders enables it after that proof.
+
+The model manifest, the memory profile for 2× RTX 3060 12 GB, the minimum viable settings and the qualification steps are in `docs/MEDIA_VIDEO_RIG_QUALIFICATION.md`.
 
 ## Exit codes and the supervisor's policy
 
@@ -129,7 +177,7 @@ The entry point checks the configuration before it touches anything, including t
 | 70 | GPU memory not proven free | Restart after 5 s (the OS has freed it with the process) |
 | 73 | Another executor holds this GPU | **Never** restarted; logged once |
 | 75 | Media volume unavailable (also: not there at start) | Restart after 30 s; the executor re-verifies on every start |
-| 76 | Publication not recorded (the artifact is durable; the job stays `publishing`) | Restart after 5 s; recovery marks it `interrupted during publication` for the sink owner's reconciliation |
+| 76 | Publication not recorded (the artifact is durable; the job stays `publishing`) | Restart after 5 s; recovery marks it `interrupted_during_publication` for the sink owner's reconciliation |
 | 78 | Configuration refused (including the switch off) | **Never** restarted; logged once |
 | other, or killed | Crash | Restart after 5 s |
 
@@ -137,10 +185,72 @@ Every restartable code doubles its delay for each exit in a row, capped at 5 min
 
 ## Not in this slice
 
-- Video through the executor: it needs ChatGPT's staged video sink (`JobKeyedStagedSink`).
+- Image-to-video through the entry point. It needs the owner-gated source reader wired.
 - A public "verify the volume" method on `ExternalMediaSink`: the entry point calls its `_root()` at start so a missing volume is exit 75 before anything is opened (ChatGPT owns the sink).
 - Routes for submit/get/cancel (ChatGPT).
 - Reconciliation itself: ChatGPT's read-only `inspect_generation_consistency` (#2313) classifies the recovered job. There is no automatic completion from file presence, and no inference retry.
 - G3 pinning: ComfyUI version and weight manifest.
 - Retiring `GenerationJobRunner`.
-- **Assumed, to be verified on the pinned diffusers in rig R5:** every allowlisted pipeline honours `callback_on_step_end` and `_interrupt`.
+- **Checked offline against the pinned diffusers 0.35.2** (`scripts/media_image_env_check.py`, `docs/MEDIA_IMAGE_RIG_QUALIFICATION.md` §1):
+  - every allowlisted pipeline's `__call__` takes `callback_on_step_end`;
+  - it resets `self._interrupt` and checks it between steps.
+
+  **Still to be shown on the rig:** that a cancel stops a render on the GPU.
+
+## Diagnostics (Track 3)
+
+While it runs, the executor writes one JSON line per lifecycle event to stderr, which `modelrig-supervisor` writes to the executor's log:
+
+```
+kaliv-media-event {"detail": "<job id>:sdxl-a:completed:12.3", "event": "job", "gpu": "GPU-..."}
+```
+
+**Events:**
+
+| Event | Detail |
+|---|---|
+| `recovered` | the number of interrupted jobs failed at start |
+| `purged` | prompts blanked by retention |
+| `loaded` and `closed` | a model was loaded or unloaded (with whether the GPU was proven free) |
+| `vram_short` | a job deferred for VRAM |
+| `job` | job id, profile, outcome and seconds |
+| `sink_unavailable` | the reason code only, at exit 75: the part of the message before its first colon when that is a code, otherwise the exception type. The rest of a message (an OS error with a path, and so a user name; an ACL's SIDs) never reaches the log |
+| `exit` | the exit code |
+
+They hold ids, outcomes, counts and codes, never a prompt or an owner. Each event is cut to 256 characters, so every log line is bounded. A failing log never stops the work. The in-memory record keeps only the last 1000 events, so a process that runs for months does not grow.
+
+**Order after a crash.** The first event of a new executor is `recovered` (the dead one's jobs, failed), then `expired` if any, and `purged`. Only then does it load a model and run a job, and its last event is `exit`. `tests/worker_media_executor.py` checks this order.
+
+## When the supervisor restarts (Track 3)
+
+**What happens.** The chain below is verified in code (main `cc2b28a6`); the last column says where it is tested.
+
+| Step | Why | Tested |
+|---|---|---|
+| The supervisor dies (crash, `Stop-Process -Force`, reboot) | — | — |
+| Every executor dies with it, and so does the ComfyUI each one started | All children are adopted into one Job Object with `KILL_ON_JOB_CLOSE` right after `Start()` (`main.go`; `executor.go` uses the same tree). ComfyUI is started by the executor, so it is inside the job too. | `processtree_windows_test.go` (closing the job kills its children), on the Windows gate |
+| The GPU lease, the resident lock and the executor lock are free | They are OS locks (`fcntl.flock` on POSIX, `msvcrt.locking` byte-range locks on Windows) held by those processes. The OS drops them when the processes die; nothing is left to clean up. | `worker_gpu_lease.py`; `windows_resident_lock_contract.py` |
+| The new supervisor starts a new executor per GPU | Exit 73 is impossible here, because the old one is gone. | `executor_test.go` (restart policy) |
+| The new executor fails the interrupted jobs | `recover_gpu`, under the executor lock: `interrupted_by_restart` or `interrupted_during_publication`. Its `kaliv-media-event` log says `recovered:N`. | `worker_image_job_store.py`, `worker_media_executor.py`, C2 crash tests |
+| A finished render the old executor had not published stays on C:, and a staged copy stays on Z: | Publish first, then delete. | C2; C6 `inventory` lists them |
+
+**Not proven physically:** killing `modelrig-supervisor` on the rig while a video renders, then checking that `nvidia-smi` shows the VRAM freed and that the next executor logs `recovered:1`. This needs video to be enabled (Anders) and belongs in the rig pack after R17.
+
+**A known window:** a child is adopted right after `Start()`. A process it spawned in the microseconds before that would not be inside the job. The executor starts ComfyUI only on its first job, long after its own adoption.
+
+## Queued jobs expire after 24 hours
+
+Anders decided this on 6 Nov 2026 (#2275 6691069504). A job that no executor claims within 24 hours of being submitted ends in the terminal state **`expired`** (error `expired_unclaimed`). The owner sees it, its place in the queue (16) and in the owner's limit (3) is freed, and its prompt is blanked after 30 days like any finished job's. Running and publishing jobs never expire.
+
+**How the age is measured.** The age is `time.time() - created`: seconds since the epoch, persisted when the job is submitted. That is UTC by definition, so time zones and summer time never move it, and it survives restarts.
+- **The clock is set back** after a job was submitted: the job is not old by its own stamp, so it never expires early.
+- **The clock is set forward:** jobs become older at once. That is the wall clock's verdict, and it applies only to queued jobs.
+
+**Who enforces it.** None of these depends on the executor running.
+- **The executor:** at start (`expired:N` in its log), and at most once a minute while idle, including while it waits for VRAM.
+- **The store:** `claim_for()` expires stale jobs in the same transaction and never claims one, so a claim and an expiry cannot both win.
+- **Submission:** `submit()` expires stale jobs first, so stale jobs never fill the queue while media is off.
+- **Reading a job:** `get()` expires a stale job when it reads one, so the owner sees `expired` even while media is off.
+- **Cancelling:** `request_cancel()` on a stale queued job expires it and answers `expired`, not `cancelled`.
+- **The legacy `claim()`:** it expires first, like `claim_for()`. It has no production caller.
+

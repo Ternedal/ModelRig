@@ -112,6 +112,9 @@ func (s *server) routes() {
 	// worker + backend surfaces. Every backend route remains Bearer-authenticated,
 	// while github_connector.go additionally refuses a non-loopback worker before
 	// forwarding either an observability read or a standing-grant mutation.
+	// Media generation jobs: default off, behind authMW, forwarded only to a loopback worker.
+	s.registerMediaJobRoutes()
+
 	if githubConnectorPilotEnabled() {
 		s.mux.Handle("GET /api/v1/github-connector/grants", s.authMW(http.HandlerFunc(s.handleGitHubConnectorGrants)))
 		s.mux.Handle("POST /api/v1/github-connector/grants/preview", s.authMW(http.HandlerFunc(s.handleGitHubConnectorGrantPreview)))

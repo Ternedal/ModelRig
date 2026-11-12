@@ -2,9 +2,14 @@
 
 The verified media volume is where generated media is **published**: the gallery, its index and every staged file. `worker/app/media_volume.py` is the production check for it. `MountedMediaVolume` implements the `VerifiedMediaVolume` protocol in `media_generation_contract`.
 
-**Generation happens elsewhere (Anders, 6 Nov 2026, #2275).** ComfyUI's working folders and the job database live in a private work area on the internal disk. A finished file is checked, copied into a staged file on this volume, synced, and published to the gallery in one atomic step; only then is the copy on the internal disk removed. So nothing partial is ever visible in the gallery, and a finished file is never deleted before it is published. That work area is a separate check, added with the wiring; this module does not cover it.
+**Generation happens elsewhere (Anders, 6 Nov 2026, #2275).** ComfyUI's working folders and the job database live in a private work area on the internal disk. A finished file is checked, copied into a staged file on this volume, synced, and published to the gallery in one atomic step; only then is the copy on the internal disk removed. So nothing partial is ever visible in the gallery, and a finished file is never deleted before it is published. That work area is a separate check (`docs/MEDIA_WORK_AREA.md`); this module does not cover it.
 
-**Status: it exists but is not wired in yet.** Nothing calls it; wiring it into the executor is a separate PR. Video stays default-off, and `media_executor_main` keeps exit 78 for video until that PR and the rig evidence are in.
+**Status: wired into the media executor's entry point** (`media_executor_main.build_from_env`).
+- **The volume:** `KALIV_MEDIA_VOLUME_ROOT` plus `KALIV_MEDIA_VOLUME_ID` build one `MountedMediaVolume` at start.
+- **The job store's guard:** checks it before every access (the work area, then `volume.verify()`, then the gallery root), so the executor never claims a job it could not publish. The job database itself is in the work area, not here.
+- **The gallery sink:** uses its root.
+- **Exit codes:** a configuration that can never work is exit 78; a missing, foreign or swapped disk is exit 75.
+- **Video is default-off:** `media_executor_main` serves text-to-video only with `KALIV_MEDIA_VIDEO=1`, which stays unset until the rig evidence is in. The staged video sink verifies this pinned volume before every staging and every adoption.
 
 ## Operator setup (once per disk)
 
@@ -66,6 +71,17 @@ The root's identity (`st_dev`, `st_ino`) is pinned. On Windows, `st_dev` is the 
 - a FIFO or device;
 - on Windows: UNC and `\\?\` / `\\.\` paths, alternate data streams, trailing dots or spaces, and reserved names (`NUL`, `COM1` and so on).
 
+**`require_descriptor(fd, path)`** is for a reader that has already opened a file, such as the gallery (#2275 6702693683). Call it right after the open and before any byte is served. A path check proves where a name pointed when it was walked, but the descriptor is what is read. It refuses:
+
+| Situation between the check and the open | Reason |
+|---|---|
+| The descriptor is on another device: a parent swapped for a link to another disk, a Windows reparse point (Windows has no `O_NOFOLLOW`), or an unmount that let the mount point or drive letter fall back to the system disk | `media_descriptor_other_device` |
+| The descriptor is not a regular file or directory | `media_descriptor_not_file_or_directory` |
+| The descriptor is not the file a verified walk of `path` finds after the open, e.g. a parent was a link to elsewhere *on the same volume* at the open and was swapped back | `media_descriptor_not_path` |
+| The descriptor cannot be read (closed) | `media_descriptor_unavailable` |
+
+It also runs `verify()`, so a lost or remounted volume refuses first. Any `require()` reason, for example `media_path_not_canonical` while a parent is still a link, refuses too.
+
 ## Error classes and exit codes
 
 | Error | Meaning | Executor exit |
@@ -75,7 +91,7 @@ The root's identity (`st_dev`, `st_ino`) is pinned. On Windows, `st_dev` is the 
 
 A missing marker counts as 75, because a wrong disk looks exactly the same. The reason string says which check failed. It never contains a prompt.
 
-## Integration (the follow-up wiring PR)
+## Integration
 
 ```python
 volume = media_volume_from_env()                       # KALIV_MEDIA_VOLUME_ROOT / _ID
@@ -87,10 +103,10 @@ sink = ExternalStagedVideoSink(media_root, verified_volume_root=volume.root)   #
 
 ## Limits
 
-These are checks, not handles. A process running as the same OS user could swap a directory between the check and its use. The private work area on the internal disk, where ComfyUI writes (rig item 9 in `MEDIA_VIDEO_GENERATION.md`), is the guard against that.
+`verify()` and `require()` are checks, not handles. A process running as the same OS user could swap a directory between the check and its use. A reader that opens first and then calls `require_descriptor` is bound to what it actually opened. Writers still rely on the work area. The private work area on the internal disk, where ComfyUI writes (rig item 9 in `MEDIA_VIDEO_GENERATION.md`), is the guard against that.
 
 ## Tests
 
 - `tests/worker_media_volume.py` runs anywhere. It uses real directories, files and symlinks. A fake probe stands in only for mount points, filesystem types, the system device, a foreign `st_dev` and the reparse attribute. On Linux it also runs the real probe against the `/dev/shm` mount.
-- `tests/support/windows_media_volume_contract.py` runs on the Windows gate with the real probe. It covers NTFS, the refused system drive, junctions, alternate data streams, trailing-dot aliases, 8.3 names and a changed marker.
+- `tests/support/windows_media_volume_contract.py` runs on the Windows gate with the real probe. It covers NTFS, the refused system drive, junctions, alternate data streams, trailing-dot aliases, 8.3 names and a changed marker. For `require_descriptor` it checks three cases: an open file on the volume passes, a descriptor on the system drive is refused, and a file opened through a junction that is then swapped for a folder is refused. The three are mandatory: if any of them cannot run (for example, the workspace is on the system drive or `mklink /J` fails), the contract FAILS instead of passing with a "not run" (ChatGPT, #2275 6704220238). These cases run only once this branch is in a PR; they have not run yet.
 - **Rig (C3, R14):** unplug the disk while an executor runs, then plug it back in. Expect exit 75, then a clean restart.

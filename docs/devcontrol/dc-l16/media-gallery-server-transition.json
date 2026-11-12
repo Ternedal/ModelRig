@@ -4,8 +4,8 @@
   "purpose": "Mount paired-device-authenticated media gallery endpoints; catalog adapter remains fail-closed until verified",
   "tracked_source_transition": {
     "path": "backend/internal/httpapi/server.go",
-    "from_git_blob_sha": "f9b646350c70900ec256387b7a7e544d2de3eb0b",
-    "to_git_blob_sha": "695fee94c3dec9585fa2868ac64fd1c599e780d6"
+    "from_git_blob_sha": "150ae8bec0a45fc8f40a353e889a109e1482eb36",
+    "to_git_blob_sha": "0cd1fa1117aefdc8a63b1a0d84a5c4db987673fa"
   },
   "authority_state": {
     "production_activation_authorized": false,

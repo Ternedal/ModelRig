@@ -1,0 +1,21 @@
+{
+  "schema": "kaliv-media-profile/v1",
+  "profile_id": "sdxl-base-1-0",
+  "modality": "image",
+  "tasks": ["text_to_image"],
+  "backend": "diffusers",
+  "pipeline": "StableDiffusionXLPipeline",
+  "model_id": "stabilityai/stable-diffusion-xl-base-1.0",
+  "revision": "PIN-THE-40-HEX-COMMIT-FROM-THE-RIG-CACHE",
+  "limits": {
+    "max_prompt_chars": 500,
+    "sizes": [[1024, 1024], [896, 1152], [1152, 896], [832, 1216], [1216, 832]],
+    "max_steps": 40,
+    "max_frames": null
+  },
+  "outputs": ["image/png"],
+  "resources": {"min_usable_gib": 10, "reserve_gib": 1.5, "devices": ["cuda:1"], "cpu_offload": false},
+  "qualification": "candidate",
+  "license": "openrail++",
+  "backend_options": {}
+}

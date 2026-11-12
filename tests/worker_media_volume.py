@@ -348,6 +348,100 @@ class MediaVolumeTests(unittest.TestCase):
         os.mkfifo(fifo)
         self.assertRefused("media_path_not_file_or_directory", self.volume().require, fifo)
 
+    # -- descriptors (the gallery's reads; #2275 6702693683 findings 1 and 3) -------------------------
+
+    def opened(self, path, flags=os.O_RDONLY):
+        fd = os.open(path, flags)
+        self.addCleanup(os.close, fd)
+        return fd
+
+    def asset(self, name="a.png", data=b"MINE"):
+        path = os.path.join(self.out, name)
+        Path(path).write_bytes(data)
+        return path
+
+    def test_descriptor_of_the_named_file_passes(self):
+        path = self.asset()
+        info = self.volume().require_descriptor(self.opened(path), path)
+        self.assertEqual((info.st_dev, info.st_ino), (os.stat(path).st_dev, os.stat(path).st_ino))
+        self.volume().require_descriptor(self.opened(self.out), self.out)  # a directory too
+
+    def test_parent_swapped_around_the_open_is_refused(self):
+        # The probe's attack: a parent is a link to elsewhere ON THE SAME VOLUME at the open, and is
+        # swapped back afterwards. The path walks clean again, but the descriptor is another file.
+        path = self.asset(data=b"MINE")
+        elsewhere = os.path.join(self.root, "elsewhere")
+        os.makedirs(elsewhere)
+        Path(elsewhere, "a.png").write_bytes(b"EVIL")
+        output = self.out
+        os.rename(output, output + ".real")
+        os.symlink(elsewhere, output)  # the parent is a link at the open; O_NOFOLLOW covers the last part only
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        self.addCleanup(os.close, fd)
+        os.unlink(output)
+        os.rename(output + ".real", output)  # swapped back: the path walks clean again
+        self.assertEqual(os.read(fd, 4), b"EVIL")
+        os.lseek(fd, 0, os.SEEK_SET)
+        self.assertRefused("media_descriptor_not_path", self.volume().require_descriptor, fd, path)
+
+    def test_parent_still_a_link_after_the_open_is_refused(self):
+        path = self.asset()
+        comfy = os.path.join(self.root, "comfy")
+        os.rename(comfy, comfy + ".real")
+        os.symlink(comfy + ".real", comfy)
+        fd = self.opened(path)
+        self.assertRefused("media_path_not_canonical", self.volume().require_descriptor, fd, path)
+
+    def test_descriptor_on_another_device_is_refused(self):
+        path = self.asset()
+        fd = self.opened(path)
+        real = os.fstat(fd)
+        foreign = SimpleNamespace(st_dev=real.st_dev + 1, st_ino=real.st_ino, st_mode=real.st_mode)
+        volume = self.volume()
+        self.probe.fstat = lambda _fd: foreign
+        self.assertRefused("media_descriptor_other_device", volume.require_descriptor, fd, path)
+
+    def test_a_real_file_on_another_filesystem_is_refused(self):
+        shm = "/dev/shm"
+        if not os.path.isdir(shm) or os.stat(shm).st_dev == os.stat(self.root).st_dev:
+            self.skipTest("no second filesystem here")
+        other = tempfile.mkdtemp(prefix="kaliv-g1-other-", dir=shm)
+        self.addCleanup(shutil.rmtree, other, True)
+        Path(other, "a.png").write_bytes(b"EVIL")
+        path = self.asset()
+        fd = self.opened(os.path.join(other, "a.png"))
+        self.assertRefused("media_descriptor_other_device", self.volume().require_descriptor, fd, path)
+
+    def test_a_fifo_descriptor_is_refused(self):
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("no FIFOs here")
+        fifo = os.path.join(self.out, "pipe")
+        os.mkfifo(fifo)
+        fd = self.opened(fifo, os.O_RDONLY | os.O_NONBLOCK)
+        self.assertRefused("media_descriptor_not_file_or_directory",
+                           self.volume().require_descriptor, fd, fifo)
+
+    def test_a_closed_descriptor_is_refused(self):
+        path = self.asset()
+        fd = os.open(path, os.O_RDONLY)
+        os.close(fd)
+        self.assertRefused("media_descriptor_unavailable", self.volume().require_descriptor, fd, path)
+
+    def test_a_lost_volume_refuses_the_descriptor_first(self):
+        path = self.asset()
+        fd = self.opened(path)
+        volume = self.volume()
+        os.unlink(os.path.join(self.root, MARKER_NAME))
+        self.assertRefused("media_volume_marker_missing", volume.require_descriptor, fd, path)
+        self.write_marker(VOLUME_ID)
+        self.assertRefused("media_volume_lost", volume.require_descriptor, fd, path)
+
+    def test_a_path_outside_the_volume_is_refused(self):
+        outside = os.path.join(self.base, "outside.png")
+        Path(outside).write_bytes(b"MINE")
+        fd = self.opened(outside)
+        self.assertRefused("media_path_outside_volume", self.volume().require_descriptor, fd, outside)
+
     # -- configuration ---------------------------------------------------------------------------
 
     def test_from_env_requires_both_settings(self):

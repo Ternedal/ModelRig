@@ -128,6 +128,9 @@ class SystemProbe:
     def lstat(self, path: str):
         return os.lstat(path)
 
+    def fstat(self, fd: int):
+        return os.fstat(fd)
+
     def ismount(self, path: str) -> bool:
         return os.path.ismount(path)
 
@@ -227,11 +230,7 @@ class MountedMediaVolume:
     # -- helpers -------------------------------------------------------------------------------
 
     def _normal(self, path: str) -> str:
-        """Collapse doubled separators and drop a trailing one, but keep a drive root's (``E:\\``)."""
-        norm = self._paths.normpath(path)
-        if self._probe.windows and re.fullmatch(r"[A-Za-z]:", norm):
-            norm += "\\"
-        return norm
+        return normal_path(path, windows=self._probe.windows)
 
     def _same(self, a: str, b: str) -> bool:
         return self._paths.normcase(a) == self._paths.normcase(b)
@@ -311,39 +310,96 @@ class MountedMediaVolume:
         """Return only if ``path`` is an existing directory or regular file on this volume."""
         raw = check_path_syntax(os.fspath(path), windows=self._probe.windows)
         self.verify()
-        # Only this platform's separators, everywhere below: a backslash is an ordinary filename
-        # character on POSIX, so treating it as one would check a different path, or let a sibling
-        # of a root ending in a backslash pass containment (#2349 reviews 4491252681, 4491286902).
-        separators = "\\/" if self._probe.windows else "/"
-        target = self._normal(raw)
-        root_key = self._paths.normcase(self._root)
-        target_key = self._paths.normcase(target)
-        prefix = root_key if root_key.endswith(tuple(separators)) else root_key + self._paths.sep
-        if target_key != root_key and not target_key.startswith(prefix):
-            raise _refused("media_path_outside_volume")
+        walk_within(self._root, raw, probe=self._probe, device=self._identity[0],
+                    prefix="media_path", outside="media_path_outside_volume")
+
+    def require_descriptor(self, fd: int, path: str | os.PathLike) -> os.stat_result:
+        """Return only if the open descriptor ``fd`` is the file or directory ``path`` names here.
+
+        Call it right after the open and before any byte is read or served. ``require(path)``
+        proves where a name pointed when it was walked, but the descriptor is what is read.
+        Between the two, a parent swapped for a link (``O_NOFOLLOW`` covers only the last
+        component, and Windows has none), a reparse point, or an unmount that lets the mount
+        point or drive letter fall back to the system disk can hand back another file. So the
+        descriptor must be on the pinned device, be a regular file or directory, and be the very
+        file (``st_dev``, ``st_ino``) that a verified walk of ``path`` finds after the open.
+        Refuses with ``media_descriptor_unavailable|other_device|not_file_or_directory|not_path``
+        or any reason of ``verify()`` and ``require()``. Written for the gallery's reads
+        (#2275 6702693683, findings 1 and 3)."""
+        raw = check_path_syntax(os.fspath(path), windows=self._probe.windows)
+        self.verify()
         try:
-            real = self._probe.realpath(target)
+            opened = self._probe.fstat(fd)
         except OSError:
-            raise _refused("media_path_missing") from None
-        if not self._same(self._normal(real), target):
-            raise _refused("media_path_not_canonical")
-        # Walk every component below the root: no link or reparse point, no other device.
-        relative = target[len(self._root):].lstrip(separators)
-        current = self._root
-        parts = [p for p in re.split(f"[{re.escape(separators)}]", relative) if p] if relative else []
-        info = None
-        for part in parts:
-            current = self._paths.join(current, part)
-            try:
-                info = self._probe.lstat(current)
-            except OSError:
-                raise _refused("media_path_missing") from None
-            if _is_link(info):
-                raise _refused("media_path_link")
-            if info.st_dev != self._identity[0]:
-                raise _refused("media_path_other_device")
-        if info is not None and not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
-            raise _refused("media_path_not_file_or_directory")
+            raise _refused("media_descriptor_unavailable") from None
+        if opened.st_dev != self._identity[0]:
+            raise _refused("media_descriptor_other_device")
+        if not (stat.S_ISREG(opened.st_mode) or stat.S_ISDIR(opened.st_mode)):
+            raise _refused("media_descriptor_not_file_or_directory")
+        walked = walk_within(self._root, raw, probe=self._probe, device=self._identity[0],
+                             prefix="media_path", outside="media_path_outside_volume")
+        named = walked[-1][1] if walked else self._observe_root()
+        if (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino):
+            raise _refused("media_descriptor_not_path")
+        return opened
+
+
+def normal_path(path: str, *, windows: bool) -> str:
+    """Collapse doubled separators and drop a trailing one, but keep a drive root's (``E:\\``)."""
+    norm = (ntpath if windows else posixpath).normpath(path)
+    if windows and re.fullmatch(r"[A-Za-z]:", norm):
+        norm += "\\"
+    return norm
+
+
+def walk_within(root: str, raw: str, *, probe: SystemProbe, device: int, prefix: str,
+                outside: str) -> list[tuple[str, os.stat_result]]:
+    """The walk behind ``require``, shared by the media volume and the work area.
+
+    ``root`` is already normalised and verified; ``raw`` has passed ``check_path_syntax``. Returns
+    only if ``raw`` is a canonical, existing directory or regular file under ``root``, with no link
+    or reparse point and no other device in any component below the root. Returns every component
+    walked, with its ``lstat``. Raises ``ArtifactSinkUnavailable`` with ``outside`` or
+    ``<prefix>_missing|not_canonical|link|other_device|not_file_or_directory``.
+    """
+    windows = probe.windows
+    paths = ntpath if windows else posixpath
+    # Only this platform's separators, everywhere below: a backslash is an ordinary filename
+    # character on POSIX, so treating it as one would check a different path, or let a sibling
+    # of a root ending in a backslash pass containment (#2349 reviews 4491252681, 4491286902).
+    separators = "\\/" if windows else "/"
+    target = normal_path(raw, windows=windows)
+    root_key = paths.normcase(root)
+    target_key = paths.normcase(target)
+    contained = root_key if root_key.endswith(tuple(separators)) else root_key + paths.sep
+    if target_key != root_key and not target_key.startswith(contained):
+        raise _refused(outside)
+    try:
+        real = probe.realpath(target)
+    except OSError:
+        raise _refused(f"{prefix}_missing") from None
+    if paths.normcase(normal_path(real, windows=windows)) != target_key:
+        raise _refused(f"{prefix}_not_canonical")
+    # Walk every component below the root: no link or reparse point, no other device.
+    relative = target[len(root):].lstrip(separators)
+    current = root
+    parts = [p for p in re.split(f"[{re.escape(separators)}]", relative) if p] if relative else []
+    walked: list[tuple[str, os.stat_result]] = []
+    info = None
+    for part in parts:
+        current = paths.join(current, part)
+        try:
+            info = probe.lstat(current)
+        except OSError:
+            raise _refused(f"{prefix}_missing") from None
+        if _is_link(info):
+            raise _refused(f"{prefix}_link")
+        if info.st_dev != device:
+            raise _refused(f"{prefix}_other_device")
+        walked.append((current, info))
+    if info is not None and not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+        raise _refused(f"{prefix}_not_file_or_directory")
+    return walked
 
 
 def media_volume_from_env(env: Mapping[str, str] | None = None, *,
