@@ -791,7 +791,12 @@ namespace Kaliv.VR
 
         public void RefreshBody() => _renderEngine?.RefreshBody();
 
-        public void RecenterBody() => _renderEngine?.RecenterPresence();
+        /// <summary>CENTRER: Kaliv and the panel both come back in front of you.</summary>
+        public void RecenterBody()
+        {
+            _renderEngine?.RecenterPresence();
+            _panel?.PlaceInFront();
+        }
 
         public void ForgetRig()
         {

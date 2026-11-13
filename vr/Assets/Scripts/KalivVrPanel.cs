@@ -133,8 +133,12 @@ namespace Kaliv.VR
             var rt = (RectTransform)_canvas.transform;
             rt.sizeDelta = new Vector2(1200, 760);
             rt.localScale = Vector3.one * 0.00155f;
-            rt.position = camera.transform.position + camera.transform.forward * 2.15f;
-            rt.rotation = Quaternion.LookRotation(camera.transform.forward, camera.transform.up);
+            // NOT placed here. At this point the headset has usually not delivered a head pose
+            // yet, so the camera sits at the floor-level origin and a panel placed "in front"
+            // of it lands low and tilted up — exactly what the first headset test showed. The
+            // panel waits for tracking in LateUpdate (WaitForTrackingThenPlace).
+            _camera = camera;
+            _placeAfter = Time.realtimeSinceStartup + PlaceFallbackSeconds;
 
             var bg = AddImage(_canvas.transform, "Background", new Vector2(1200, 760), Vector2.zero, CanvasBg);
             bg.transform.SetAsFirstSibling();
@@ -769,8 +773,73 @@ namespace Kaliv.VR
         /// </summary>
         public void MarkTranscriptDirty() => _transcriptDirty = true;
 
+        // ---- placement -------------------------------------------------------------------
+
+        private Camera _camera;
+        private bool _placed;
+        private float _placeAfter;
+        private bool _prevRecenterButton;
+        private const float PlaceFallbackSeconds = 3f;
+        private const float PanelDistance = 2.0f;
+        /// <summary>A head higher than this above the floor-level origin means tracking has arrived.</summary>
+        private const float TrackedHeadHeight = 0.5f;
+
+        /// <summary>
+        /// Put the panel in front of the user at eye height, upright and facing them. Only the
+        /// head's YAW is used: looking down at the controller while it is placed must not leave
+        /// the panel tilted on the floor. Slightly below eye level reads most comfortably.
+        /// </summary>
+        public void PlaceInFront()
+        {
+            if (_camera == null || _canvas == null) return;
+            var head = _camera.transform;
+            Vector3 fwd = head.forward;
+            fwd.y = 0f;
+            // Looking straight down, the top of the head points the way the user faces;
+            // looking straight up, it points behind them.
+            if (fwd.sqrMagnitude < 0.001f) fwd = head.forward.y < 0 ? head.up : -head.up;
+            fwd.y = 0f;
+            if (fwd.sqrMagnitude < 0.001f) fwd = Vector3.forward;
+            fwd.Normalize();
+
+            var rt = (RectTransform)_canvas.transform;
+            rt.position = head.position + fwd * PanelDistance + Vector3.down * 0.12f;
+            rt.rotation = Quaternion.LookRotation(fwd, Vector3.up);
+            _placed = true;
+        }
+
+        /// <summary>
+        /// First placement waits for a real head pose (or gives up waiting after a few seconds,
+        /// so a seated user at a low origin still gets a panel). After that, B or Y brings the
+        /// panel back in front — the same buttons recenter in SkyPlayer.
+        /// </summary>
+        private void UpdatePlacement()
+        {
+            if (_camera == null) return;
+            if (!_placed)
+            {
+                bool tracked = _camera.transform.localPosition.y > TrackedHeadHeight ||
+                               _camera.transform.position.y > TrackedHeadHeight;
+                if (tracked || Time.realtimeSinceStartup > _placeAfter) PlaceInFront();
+                return;
+            }
+
+            bool pressed = SecondaryButton(UnityEngine.XR.XRNode.RightHand) ||
+                           SecondaryButton(UnityEngine.XR.XRNode.LeftHand);
+            if (pressed && !_prevRecenterButton) PlaceInFront();
+            _prevRecenterButton = pressed;
+        }
+
+        private static bool SecondaryButton(UnityEngine.XR.XRNode node)
+        {
+            var d = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(node);
+            return d.isValid && d.TryGetFeatureValue(UnityEngine.XR.CommonUsages.secondaryButton, out bool v) && v;
+        }
+
         private void LateUpdate()
         {
+            UpdatePlacement();
+
             if (_confirmGroup != null && _confirmGroup.activeSelf && _confirmDeadline > 0f)
             {
                 float left = _confirmDeadline - Time.realtimeSinceStartup;
