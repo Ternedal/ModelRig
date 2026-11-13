@@ -2,11 +2,9 @@
 
 Anders' decision (6 Nov 2026, #2275 6686905826) is to generate media in a private work area on the internal disk (C:) and publish it on the external disk (Z:). This page is the operator pack that proves that layout **on the rig**. It complements the CI evidence and does not replace it.
 
-**Status: pending.** Nothing here has been run on the rig. Media stays default-off throughout: R17 never switches video on. R17 needs a new `$QualSha` set in the rig runbook (#2296), at a commit that contains:
+**Status: pending.** Nothing here has been run on the rig. Media stays default-off throughout: R17 never switches video on.
 
-- **for R17.1 to R17.6, R17.8:** the wiring branch (`feat/media-volume-wiring`);
-- **for R17.7 and R17.9:** also the C6 repair tool, `scripts/media_volume_repair.py`. It comes with the follow-up branch `feat/media-volume-recovery-tool` on top of the wiring branch. Without it, skip both and record them as not run.
-- **for R17.10–R17.13:** the wiring branch already contains #2345 (the lease-directory check) and #2349 (`MountedMediaVolume`). Neither is merged yet: running them at a branch commit is a qualification run, not a merge.
+**What to run it on.** Everything R17 needs is on `main`: the wiring (#2357) with the lease-directory check (#2345) and `MountedMediaVolume` (#2349), the C6 repair tool with the network and `subst` refusal (#2386), and the tool's volume check (#2401). Anders tests physically on a release (#2275 6751908309), so set `$Qual` to a worktree at that release's tag SHA (`$RelSha` in the runbook, #2390 6848926366, step 0). R17.7 and R17.9 are no longer skipped.
 
 ## 1. What is proven where
 
@@ -35,8 +33,8 @@ Anders' decision (6 Nov 2026, #2275 6686905826) is to generate media in a privat
 ## 2. Variables (paste into every PowerShell window)
 
 ```powershell
-$Qual = "C:\Users\admin\Desktop\mr-media-qual"          # the worktree at the new $QualSha (rig runbook R0)
-$GenPy = Join-Path $env:LOCALAPPDATA "kaliv-qual\genvenv\Scripts\python.exe"
+$Qual = "C:\Users\admin\Desktop\mr-media-qual"          # the worktree at the release tag SHA ($RelSha, #2390 runbook step 0)
+$GenPy = "C:\Kaliv\media-venv\Scripts\python.exe"   # the media venv (docs/MEDIA_IMAGE_RIG_QUALIFICATION.md §4.1), the same as KALIV_MEDIA_EXECUTOR_PYTHON
 $WorkRoot = "C:\Kaliv\media-work"
 $JobDb = "$WorkRoot\state\jobs.sqlite3"
 $VolumeRoot = "Z:\"
