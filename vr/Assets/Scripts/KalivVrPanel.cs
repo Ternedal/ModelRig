@@ -85,6 +85,18 @@ namespace Kaliv.VR
         private Text _transportInfo;
         private Text _transportPlay;
 
+        // Keyboard
+        private GameObject _keyboardGroup;
+        private Text _kbTitle;
+        private Text _kbPreview;
+        private readonly List<Button[]> _kbRows = new();
+        private Text _kbShiftLabel;
+        private Text _kbLayerLabel;
+        private Text _kbOkLabel;
+        private KalivKeyboardModel _kb;
+        private InputField _kbTarget;
+        private bool _keyboardOpen;
+
         private sealed class MediaRow
         {
             public GameObject Root;
@@ -139,8 +151,285 @@ namespace Kaliv.VR
             BuildConfirmCard();
             BuildMediaBrowser();
             BuildTransport();
+            BuildRigOverlay();
+            BuildKeyboard();
+
+            // Every text field in the panel opens the in-headset keyboard instead of waiting for
+            // a system keyboard that Quest will not show for this app.
+            KalivVrPointer.InputFieldHandler = OpenKeyboard;
 
             SetPaired(false);
+        }
+
+        private void OnDestroy()
+        {
+            if (KalivVrPointer.InputFieldHandler == (Func<InputField, bool>)OpenKeyboard)
+                KalivVrPointer.InputFieldHandler = null;
+        }
+
+        private void BuildKeyboard()
+        {
+            _keyboardGroup = Group("Keyboard", _canvas.transform);
+            AddImage(_keyboardGroup.transform, "Backdrop", new Vector2(1200, 760), Vector2.zero, CanvasBg);
+            _kbTitle = AddText(_keyboardGroup.transform, "", 16, Accent, TextAnchor.MiddleLeft,
+                new Vector2(1080, 36), new Vector2(0, 322), FontStyle.Bold);
+            var previewBg = AddImage(_keyboardGroup.transform, "Preview", new Vector2(1092, 74), new Vector2(0, 262), Elevated);
+            var outline = previewBg.gameObject.AddComponent<Outline>();
+            outline.effectColor = Border;
+            outline.effectDistance = new Vector2(1.5f, -1.5f);
+            previewBg.gameObject.AddComponent<RectMask2D>();
+            _kbPreview = AddText(previewBg.transform, "", 22, TextMain, TextAnchor.MiddleRight,
+                new Vector2(1060, 64), Vector2.zero);
+            _kbPreview.horizontalOverflow = HorizontalWrapMode.Overflow;
+
+            const float keyW = 92f, keyH = 78f, gap = 8f;
+            int perRow = KalivKeyboardModel.MaxKeysPerRow;
+            for (int r = 0; r < KalivKeyboardModel.Rows; r++)
+            {
+                var row = new Button[perRow];
+                float y = 160f - r * (keyH + gap);
+                for (int c = 0; c < perRow; c++)
+                {
+                    int rr = r, cc = c;
+                    row[c] = AddButton(_keyboardGroup.transform, "", new Vector2(keyW, keyH), new Vector2(0, y),
+                        Surface, () => PressKey(rr, cc));
+                    row[c].GetComponentInChildren<Text>().fontSize = 24;
+                }
+                _kbRows.Add(row);
+            }
+
+            float by = 160f - KalivKeyboardModel.Rows * (keyH + gap);
+            var shift = AddButton(_keyboardGroup.transform, KalivKeyboardModel.Shift, new Vector2(130, keyH), new Vector2(-480, by),
+                Elevated, () => PressNamed(KalivKeyboardModel.Shift));
+            _kbShiftLabel = shift.GetComponentInChildren<Text>();
+            var layer = AddButton(_keyboardGroup.transform, KalivKeyboardModel.ToSymbols, new Vector2(140, keyH), new Vector2(-340, by),
+                Elevated, () => PressNamed(_kb != null && _kb.Current == KalivKeyboardModel.Layer.Symbols
+                    ? KalivKeyboardModel.ToLetters : KalivKeyboardModel.ToSymbols));
+            _kbLayerLabel = layer.GetComponentInChildren<Text>();
+            AddButton(_keyboardGroup.transform, KalivKeyboardModel.Space, new Vector2(400, keyH), new Vector2(-55, by),
+                Surface, () => PressNamed(KalivKeyboardModel.Space));
+            AddButton(_keyboardGroup.transform, KalivKeyboardModel.Delete, new Vector2(150, keyH), new Vector2(230, by),
+                Elevated, () => PressNamed(KalivKeyboardModel.Delete));
+            AddButton(_keyboardGroup.transform, KalivKeyboardModel.Clear, new Vector2(130, keyH), new Vector2(380, by),
+                Elevated, () => PressNamed(KalivKeyboardModel.Clear));
+            AddButton(_keyboardGroup.transform, "LUK", new Vector2(110, keyH), new Vector2(505, by),
+                Danger, () => CloseKeyboard(false));
+
+            var ok = AddButton(_keyboardGroup.transform, "OK", new Vector2(360, 64), new Vector2(0, by - 90),
+                Accent, () => CloseKeyboard(true));
+            _kbOkLabel = ok.GetComponentInChildren<Text>();
+
+            _keyboardGroup.SetActive(false);
+        }
+
+        /// <summary>Called by the pointer when a text field is clicked. Returns true when handled.</summary>
+        private bool OpenKeyboard(InputField field)
+        {
+            if (field == null || _keyboardGroup == null) return false;
+            if (!field.transform.IsChildOf(_canvas.transform)) return false;   // not ours
+
+            _kbTarget = field;
+            bool prompt = field == _prompt;
+            int max = field == _code ? 32 : field == _url ? 200 : 2000;
+            _kb = new KalivKeyboardModel(field.text, max, capitalizeFirst: prompt);
+            string name = field.gameObject.name;
+            _kbTitle.text = name.ToUpperInvariant();
+            _kbOkLabel.text = prompt ? "SEND" : "OK";
+            _keyboardOpen = true;
+            RefreshGroups();
+            _keyboardGroup.transform.SetAsLastSibling();
+            RefreshKeyboard();
+            return true;
+        }
+
+        private void PressKey(int row, int col)
+        {
+            if (_kb == null) return;
+            string keys = _kb.RowKeys(row);
+            if (col < 0 || col >= keys.Length) return;
+            _kb.Press(keys[col].ToString());
+            RefreshKeyboard();
+        }
+
+        private void PressNamed(string key)
+        {
+            if (_kb == null) return;
+            _kb.Press(key);
+            RefreshKeyboard();
+        }
+
+        private void RefreshKeyboard()
+        {
+            if (_kb == null) return;
+            for (int r = 0; r < _kbRows.Count; r++)
+            {
+                string keys = _kb.RowKeys(r);
+                var row = _kbRows[r];
+                float keyW = 92f, gap = 8f;
+                float width = keys.Length * (keyW + gap) - gap;
+                for (int c = 0; c < row.Length; c++)
+                {
+                    bool used = c < keys.Length;
+                    row[c].gameObject.SetActive(used);
+                    if (!used) continue;
+                    row[c].GetComponentInChildren<Text>().text = keys[c].ToString();
+                    var rt = (RectTransform)row[c].transform;
+                    rt.anchoredPosition = new Vector2(-width / 2f + keyW / 2f + c * (keyW + gap), rt.anchoredPosition.y);
+                }
+            }
+            _kbShiftLabel.text = _kb.Current == KalivKeyboardModel.Layer.Upper ? "SHIFT ●" : KalivKeyboardModel.Shift;
+            _kbLayerLabel.text = _kb.Current == KalivKeyboardModel.Layer.Symbols
+                ? KalivKeyboardModel.ToLetters : KalivKeyboardModel.ToSymbols;
+            // The caret makes "is there a trailing space?" answerable at a glance.
+            _kbPreview.text = _kb.Text + "|";
+        }
+
+        private void CloseKeyboard(bool commit)
+        {
+            var target = _kbTarget;
+            string text = _kb?.Text ?? "";
+            _kbTarget = null;
+            _kb = null;
+            _keyboardOpen = false;
+            RefreshGroups();
+
+            if (!commit || target == null) return;
+            if (target == _prompt)
+            {
+                target.text = "";
+                _app.Send(text);
+                return;
+            }
+            target.text = text;
+        }
+
+        public bool KeyboardOpen => _keyboardOpen;
+
+        // ---- RIG overlay: document sources & tool registry ------------------------------
+
+        /// <summary>One row in the RIG overlay: a main action and an optional on/off switch.</summary>
+        public sealed class RigRow
+        {
+            public string Label;
+            public string Toggle;          // null = no switch
+            public bool ToggleOn;
+            public bool Selected;
+            public Action OnMain;
+            public Action OnToggle;
+        }
+
+        private GameObject _rigGroup;
+        private bool _rigOpen;
+        private Text _rigStatus;
+        private Image _rigTabSources, _rigTabTools;
+        private readonly List<(Button main, Text mainText, Button toggle, Text toggleText)> _rigRowUi = new();
+        private Button _rigMore;
+        private List<RigRow> _rigRows = new();
+        private int _rigPage;
+        private const int RigRowsPerPage = 7;
+
+        private void BuildRigOverlay()
+        {
+            _rigGroup = Group("RigOverlay", _canvas.transform);
+            AddImage(_rigGroup.transform, "Backdrop", new Vector2(1200, 760), Vector2.zero, CanvasBg);
+            AddText(_rigGroup.transform, "RIG", 18, Accent, TextAnchor.MiddleLeft,
+                new Vector2(300, 40), new Vector2(-390, 330), FontStyle.Bold);
+            var tabS = AddButton(_rigGroup.transform, "KILDER", new Vector2(200, 48), new Vector2(120, 330),
+                Elevated, () => _app.RigShowSources());
+            _rigTabSources = tabS.GetComponent<Image>();
+            var tabT = AddButton(_rigGroup.transform, "VÆRKTØJER", new Vector2(220, 48), new Vector2(340, 330),
+                Elevated, () => _app.RigShowTools());
+            _rigTabTools = tabT.GetComponent<Image>();
+
+            _rigStatus = AddText(_rigGroup.transform, "", 15, Muted, TextAnchor.MiddleLeft,
+                new Vector2(1080, 44), new Vector2(0, 278));
+            _rigStatus.horizontalOverflow = HorizontalWrapMode.Wrap;
+
+            for (int i = 0; i < RigRowsPerPage; i++)
+            {
+                int index = i;
+                float y = 215 - i * 68;
+                var main = AddButton(_rigGroup.transform, "", new Vector2(860, 58), new Vector2(-110, y),
+                    Surface, () => OnRigMain(index));
+                var mt = main.GetComponentInChildren<Text>();
+                mt.alignment = TextAnchor.MiddleLeft;
+                mt.fontStyle = FontStyle.Normal;
+                mt.rectTransform.sizeDelta = new Vector2(820, 54);
+                var toggle = AddButton(_rigGroup.transform, "", new Vector2(200, 58), new Vector2(430, y),
+                    Elevated, () => OnRigToggle(index));
+                _rigRowUi.Add((main, mt, toggle, toggle.GetComponentInChildren<Text>()));
+                main.gameObject.SetActive(false);
+                toggle.gameObject.SetActive(false);
+            }
+
+            _rigMore = AddButton(_rigGroup.transform, "FLERE", new Vector2(200, 52), new Vector2(-150, -300),
+                Elevated, () => { _rigPage++; RenderRigRows(); });
+            AddButton(_rigGroup.transform, "LUK", new Vector2(200, 52), new Vector2(150, -300),
+                Elevated, () => ShowRig(false));
+            _rigGroup.SetActive(false);
+        }
+
+        public void ShowRig(bool show)
+        {
+            _rigOpen = show;
+            RefreshGroups();
+            if (show) _rigGroup.transform.SetAsLastSibling();
+        }
+
+        public void SetRigTab(bool sources)
+        {
+            if (_rigTabSources != null) _rigTabSources.color = sources ? Accent : Elevated;
+            if (_rigTabTools != null) _rigTabTools.color = sources ? Elevated : Accent;
+        }
+
+        public void SetRigStatus(string text, bool error)
+        {
+            if (_rigStatus == null) return;
+            _rigStatus.text = text ?? "";
+            _rigStatus.color = error ? Danger : Muted;
+        }
+
+        public void SetRigRows(List<RigRow> rows, bool keepPage = false)
+        {
+            _rigRows = rows ?? new List<RigRow>();
+            if (!keepPage) _rigPage = 0;
+            RenderRigRows();
+        }
+
+        private void RenderRigRows()
+        {
+            int pages = Math.Max(1, (_rigRows.Count + RigRowsPerPage - 1) / RigRowsPerPage);
+            if (_rigPage >= pages) _rigPage = 0;
+            int start = _rigPage * RigRowsPerPage;
+            for (int i = 0; i < _rigRowUi.Count; i++)
+            {
+                var ui = _rigRowUi[i];
+                int idx = start + i;
+                var row = idx < _rigRows.Count ? _rigRows[idx] : null;
+                ui.main.gameObject.SetActive(row != null);
+                ui.toggle.gameObject.SetActive(row != null && row.Toggle != null);
+                if (row == null) continue;
+                ui.mainText.text = (row.Selected ? "● " : "   ") + row.Label;
+                ((Image)ui.main.targetGraphic).color = row.Selected ? Elevated : Surface;
+                if (row.Toggle != null)
+                {
+                    ui.toggleText.text = row.Toggle;
+                    ((Image)ui.toggle.targetGraphic).color = row.ToggleOn ? Ok : Danger;
+                }
+            }
+            if (_rigMore != null) _rigMore.gameObject.SetActive(pages > 1);
+        }
+
+        private void OnRigMain(int index)
+        {
+            int idx = _rigPage * RigRowsPerPage + index;
+            if (idx < _rigRows.Count) _rigRows[idx].OnMain?.Invoke();
+        }
+
+        private void OnRigToggle(int index)
+        {
+            int idx = _rigPage * RigRowsPerPage + index;
+            if (idx < _rigRows.Count) _rigRows[idx].OnToggle?.Invoke();
         }
 
         private void BuildPairGroup()
@@ -169,12 +458,16 @@ namespace Kaliv.VR
 
             // Mode row: the two switches that decide the turn's route, then model + media.
             // Same two toggles as Android's composer, so the same turn routes the same way.
-            var rag = AddButton(_chatGroup.transform, "VIDEN · FRA", new Vector2(200, 44), new Vector2(-440, 205),
+            var rag = AddButton(_chatGroup.transform, "VIDEN · FRA", new Vector2(220, 44), new Vector2(-430, 205),
                 Elevated, () => _app.ToggleRag());
             _ragLabel = rag.GetComponentInChildren<Text>();
             _ragImage = rag.GetComponent<Image>();
-            var tools = AddButton(_chatGroup.transform, "VÆRKTØJER · FRA", new Vector2(240, 44), new Vector2(-210, 205),
+            var tools = AddButton(_chatGroup.transform, "VÆRKTØJER · FRA", new Vector2(220, 44), new Vector2(-200, 205),
                 Elevated, () => _app.ToggleTools());
+            // Which documents VIDEN searches, and which tools exist and are allowed — the
+            // rig's own switches, so the headset can pull the brake without a phone.
+            AddButton(_chatGroup.transform, "RIG", new Vector2(110, 44), new Vector2(-25, 205),
+                Elevated, () => _app.OpenRig());
             _toolsLabel = tools.GetComponentInChildren<Text>();
             _toolsImage = tools.GetComponent<Image>();
             AddButton(_chatGroup.transform, "SKIFT MODEL", new Vector2(190, 44), new Vector2(255, 205), Elevated, CycleModel);
@@ -334,7 +627,7 @@ namespace Kaliv.VR
         public void SetPaired(bool paired)
         {
             _paired = paired;
-            if (!paired) { _mediaOpen = false; _confirmOpen = false; }
+            if (!paired) { _mediaOpen = false; _confirmOpen = false; _rigOpen = false; }
             RefreshGroups();
         }
 
@@ -347,10 +640,16 @@ namespace Kaliv.VR
         /// </summary>
         private void RefreshGroups()
         {
-            _pairGroup?.SetActive(!_paired);
-            _confirmGroup?.SetActive(_paired && _confirmOpen);
-            _mediaGroup?.SetActive(_paired && _mediaOpen && !_confirmOpen);
-            _chatGroup?.SetActive(_paired && !_mediaOpen && !_confirmOpen);
+            // The keyboard sits above everything: it is always opened FROM a field on screen and
+            // closes back to it. A confirmation card that arrives meanwhile waits underneath.
+            bool kb = _keyboardOpen;
+            _keyboardGroup?.SetActive(kb);
+            _pairGroup?.SetActive(!_paired && !kb);
+            _confirmGroup?.SetActive(_paired && _confirmOpen && !kb);
+            bool overlay = _confirmOpen || kb;
+            _rigGroup?.SetActive(_paired && _rigOpen && !overlay);
+            _mediaGroup?.SetActive(_paired && _mediaOpen && !_rigOpen && !overlay);
+            _chatGroup?.SetActive(_paired && !_mediaOpen && !_rigOpen && !overlay);
         }
 
         public void SetStatus(string text, bool error)
@@ -386,9 +685,11 @@ namespace Kaliv.VR
             RefreshModelLabel();
         }
 
-        public void SetModes(bool rag, bool tools)
+        public void SetModes(bool rag, bool tools, string ragSource = null)
         {
-            if (_ragLabel != null) _ragLabel.text = rag ? "VIDEN · TIL" : "VIDEN · FRA";
+            string src = string.IsNullOrEmpty(ragSource) ? "TIL"
+                : (ragSource.Length > 10 ? ragSource.Substring(0, 9) + "…" : ragSource);
+            if (_ragLabel != null) _ragLabel.text = rag ? "VIDEN · " + src : "VIDEN · FRA";
             if (_ragImage != null) _ragImage.color = rag ? Ok : Elevated;
             if (_toolsLabel != null) _toolsLabel.text = tools ? "VÆRKTØJER · TIL" : "VÆRKTØJER · FRA";
             if (_toolsImage != null) _toolsImage.color = tools ? Ok : Elevated;
@@ -478,7 +779,8 @@ namespace Kaliv.VR
         {
             var sb = new StringBuilder();
             bool user = m.Role == "user";
-            string who = user ? "DIG" : "KALIV";
+            // When the rig has a Person Profile selected, say who answered — as Android does.
+            string who = user ? "DIG" : string.IsNullOrEmpty(m.Person) ? "KALIV" : "KALIV · " + m.Person.ToUpperInvariant();
             sb.Append("<b><color=").Append(AccentHex).Append('>').Append(who);
             if (m.Spoken) sb.Append(" · tale");
             sb.Append("</color></b>\n");

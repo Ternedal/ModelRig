@@ -179,6 +179,7 @@ namespace Kaliv.VR
         public IEnumerator ToolsChatStream(string baseUrl, string token, string message, string model,
                                            string conversationId,
                                            List<(string role, string content)> history, bool rag,
+                                           string ragSource,
                                            Action<string> onPhase, Action<KalivToolTurn> onResult,
                                            Action onStopped, Action<string> fail,
                                            Action<Action> registerCancel = null)
@@ -191,7 +192,12 @@ namespace Kaliv.VR
                     arr.Add(new Dictionary<string, object> { ["role"] = role, ["content"] = content });
                 payload["history"] = arr;
             }
-            if (rag) payload["rag"] = true;
+            if (rag)
+            {
+                // Tools used to silently discard document context on Android. Both can be on.
+                payload["rag"] = true;
+                if (!string.IsNullOrWhiteSpace(ragSource)) payload["rag_source"] = ragSource;
+            }
             if (!string.IsNullOrWhiteSpace(model)) payload["model"] = model;
             if (!string.IsNullOrWhiteSpace(conversationId)) payload["conversation_id"] = conversationId;
 
@@ -252,7 +258,65 @@ namespace Kaliv.VR
                 timeoutSeconds: 300);
         }
 
+        // ---- rig settings: document sources and the tool registry ------------------------
+
+        public IEnumerator RagSources(string baseUrl, string token, Action<List<KalivRagSource>> ok, Action<string> fail)
+        {
+            yield return JsonRequest("GET", Normalize(baseUrl) + "/api/v1/rag/sources", null, token,
+                text => ok?.Invoke(KalivRigInfo.ParseRagSources(text)),
+                (status, msg) => fail?.Invoke(msg));
+        }
+
+        /// <summary>
+        /// Switch retrieval from one source on or off. Deletes nothing. Returns the RIG's state
+        /// afterwards — the client never assumes its own write succeeded.
+        /// </summary>
+        public IEnumerator SetRagSourceEnabled(string baseUrl, string token, string source, bool enabled,
+                                               Action<bool> ok, Action<string> fail)
+        {
+            string body = KalivJson.Serialize(new Dictionary<string, object> { ["source"] = source, ["enabled"] = enabled });
+            yield return JsonRequest("POST", Normalize(baseUrl) + "/api/v1/rag/source/enabled", body, token,
+                text => ok?.Invoke(KalivJson.Bool(KalivJson.TryParseObject(text), "enabled", enabled)),
+                (status, msg) => fail?.Invoke(msg));
+        }
+
+        public IEnumerator ToolsList(string baseUrl, string token, Action<KalivToolRegistry> ok, Action<string> fail)
+        {
+            yield return JsonRequest("GET", Normalize(baseUrl) + "/api/v1/tools", null, token,
+                text => ok?.Invoke(KalivRigInfo.ParseToolRegistry(text)),
+                (status, msg) => fail?.Invoke(msg));
+        }
+
+        /// <summary>
+        /// The kill switch, reachable from the headset. Omit <paramref name="tool"/> to switch
+        /// the whole layer. Turning a tool off also un-advertises it, so the model cannot ask
+        /// for it back. Returns the registry as the rig now reports it.
+        /// </summary>
+        public IEnumerator SetToolsEnabled(string baseUrl, string token, bool enabled, string tool,
+                                           Action<KalivToolRegistry> ok, Action<string> fail)
+        {
+            var payload = new Dictionary<string, object> { ["enabled"] = enabled };
+            if (!string.IsNullOrEmpty(tool)) payload["tool"] = tool;
+            yield return JsonRequest("POST", Normalize(baseUrl) + "/api/v1/tools/enabled",
+                KalivJson.Serialize(payload), token,
+                text => ok?.Invoke(KalivRigInfo.ParseToolRegistry(text)),
+                (status, msg) => fail?.Invoke(msg));
+        }
+
         // ---- voice --------------------------------------------------------------------------
+
+        /// <summary>
+        /// The worker's capabilities via GET /api/v1/health/full — the backend has no
+        /// /capabilities route of its own (Android found that out through a 404). Fail-soft: a
+        /// failed probe yields Unknown, which means "everything available", never "nothing".
+        /// </summary>
+        public IEnumerator Capabilities(string baseUrl, string token, Action<KalivCapabilities> done)
+        {
+            yield return JsonRequest("GET", Normalize(baseUrl) + "/api/v1/health/full", null, token,
+                text => done?.Invoke(KalivCapabilities.FromHealthFull(text)),
+                (status, msg) => done?.Invoke(KalivCapabilities.Unknown),
+                timeoutSeconds: 10);
+        }
 
         /// <summary>Whether ASR/TTS are installed on the rig, so the UI can say so before recording.</summary>
         public IEnumerator VoiceStatus(string baseUrl, string token,
@@ -434,7 +498,14 @@ namespace Kaliv.VR
         {
             string dir = Path.Combine(Application.temporaryCachePath, "kaliv-media");
             Directory.CreateDirectory(dir);
-            string ext = item.MimeType == "video/mp4" ? ".mp4" : "";
+            string ext = item.MimeType switch
+            {
+                "video/mp4" => ".mp4",
+                "image/png" => ".png",
+                "image/jpeg" => ".jpg",
+                "image/webp" => ".webp",
+                _ => "",
+            };
             string path = Path.Combine(dir, item.Id + ext);
 
             if (File.Exists(path) && new FileInfo(path).Length == item.SizeBytes)

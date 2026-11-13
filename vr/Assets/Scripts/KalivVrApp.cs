@@ -21,6 +21,7 @@ namespace Kaliv.VR
         private const string ModelKey = "kaliv.vr.model";
         private const string RagKey = "kaliv.vr.mode.rag";
         private const string ToolsKey = "kaliv.vr.mode.tools";
+        private const string RagSourceKey = "kaliv.vr.mode.rag_source";
         private const string ConversationFile = "kaliv-vr-conversation.json";
 
         private ModelRigVrClient _client;
@@ -35,6 +36,7 @@ namespace Kaliv.VR
         private KalivMessage _live;              // the assistant message being written
         private KalivToolTurn _pendingConfirmation;
         private bool _bodySpeechReporting = true;
+        private KalivCapabilities _caps = KalivCapabilities.Unknown;
 
         // Media
         private string _mediaCursor;
@@ -48,6 +50,8 @@ namespace Kaliv.VR
         public string Model { get; private set; }
         public bool RagMode { get; private set; }
         public bool ToolsMode { get; private set; }
+        /// <summary>Narrow VIDEN to one source; null searches all. Android's ragSourceFilter.</summary>
+        public string RagSource { get; private set; }
 
         public bool Paired => !string.IsNullOrWhiteSpace(BaseUrl) && !string.IsNullOrWhiteSpace(Token);
 
@@ -57,14 +61,19 @@ namespace Kaliv.VR
         // Startup & pairing
         // =====================================================================================
 
+        private Camera _camera;
+
         public void Initialize(Camera camera)
         {
+            _camera = camera;
             _client = gameObject.AddComponent<ModelRigVrClient>();
             BaseUrl = PlayerPrefs.GetString(BaseUrlKey, "http://192.168.1.10:8080");
             Token = PlayerPrefs.GetString(TokenKey, "");
             Model = PlayerPrefs.GetString(ModelKey, "");
             RagMode = PlayerPrefs.GetInt(RagKey, 0) == 1;
             ToolsMode = PlayerPrefs.GetInt(ToolsKey, 0) == 1;
+            RagSource = PlayerPrefs.GetString(RagSourceKey, "");
+            if (string.IsNullOrWhiteSpace(RagSource)) RagSource = null;
 
             camera.clearFlags = CameraClearFlags.SolidColor;
             camera.backgroundColor = new Color(0f, 0f, 0f, 0f);
@@ -86,7 +95,7 @@ namespace Kaliv.VR
             _voice.SpeechEvent += ReportBodySpeech;
 
             _panel.SetConnectionDefaults(BaseUrl, "");
-            _panel.SetModes(RagMode, ToolsMode);
+            _panel.SetModes(RagMode, ToolsMode, RagSource);
             _panel.BindConversation(_conversation);
             _panel.SetPaired(Paired);
             _panel.SetBodyStatus("Renderer klar", false);
@@ -135,9 +144,17 @@ namespace Kaliv.VR
                 }));
         }
 
+        /// <summary>Ask the rig what it can do, so buttons do not promise what it cannot.</summary>
+        private void RefreshCapabilities()
+        {
+            if (!Paired) return;
+            StartCoroutine(_client.Capabilities(BaseUrl, Token, caps => _caps = caps));
+        }
+
         public void RefreshModels()
         {
             if (!Paired) return;
+            RefreshCapabilities();
             _panel.SetStatus("Henter modeller …", false);
             StartCoroutine(_client.ListModels(BaseUrl, Token,
                 models =>
@@ -174,7 +191,7 @@ namespace Kaliv.VR
             RagMode = !RagMode;
             PlayerPrefs.SetInt(RagKey, RagMode ? 1 : 0);
             PlayerPrefs.Save();
-            _panel.SetModes(RagMode, ToolsMode);
+            _panel.SetModes(RagMode, ToolsMode, RagSource);
         }
 
         public void ToggleTools()
@@ -182,7 +199,128 @@ namespace Kaliv.VR
             ToolsMode = !ToolsMode;
             PlayerPrefs.SetInt(ToolsKey, ToolsMode ? 1 : 0);
             PlayerPrefs.Save();
-            _panel.SetModes(RagMode, ToolsMode);
+            _panel.SetModes(RagMode, ToolsMode, RagSource);
+        }
+
+        // =====================================================================================
+        // RIG overlay: document sources and the tool registry
+        // =====================================================================================
+
+        private bool _rigOnTools;
+
+        public void OpenRig()
+        {
+            if (!Paired) return;
+            _panel.ShowRig(true);
+            if (_rigOnTools) RigShowTools(); else RigShowSources();
+        }
+
+        public void RigShowSources()
+        {
+            _rigOnTools = false;
+            _panel.SetRigTab(true);
+            _panel.SetRigStatus("Henter kilder …", false);
+            StartCoroutine(_client.RagSources(BaseUrl, Token, RenderSources,
+                error => _panel.SetRigStatus(Friendly(error), true)));
+        }
+
+        private void RenderSources(List<KalivRagSource> sources)
+        {
+            var rows = new List<KalivVrPanel.RigRow>
+            {
+                new KalivVrPanel.RigRow
+                {
+                    Label = "ALLE KILDER",
+                    Selected = RagSource == null,
+                    OnMain = () => { SetRagSource(null); RenderSources(sources); },
+                },
+            };
+            bool filterStillExists = RagSource == null;
+            foreach (var s in sources)
+            {
+                var src = s;
+                if (src.Name == RagSource) filterStillExists = true;
+                rows.Add(new KalivVrPanel.RigRow
+                {
+                    Label = $"{src.Name}  ·  {src.Chunks} udsnit",
+                    Selected = src.Name == RagSource,
+                    Toggle = src.Enabled ? "HENTES" : "SLUKKET",
+                    ToggleOn = src.Enabled,
+                    OnMain = () => { SetRagSource(src.Name); RenderSources(sources); },
+                    OnToggle = () => ToggleSource(src, sources),
+                });
+            }
+            // A filter on a source that has since been deleted would silently find nothing.
+            if (!filterStillExists) SetRagSource(null);
+
+            _panel.SetRigRows(rows, keepPage: true);
+            _panel.SetRigStatus(sources.Count == 0
+                ? "Riggen har ingen dokumenter endnu. De tilføjes fra telefonen eller desktop."
+                : "Vælg hvad VIDEN søger i. HENTES/SLUKKET styrer om riggen må bruge kilden — intet slettes.", false);
+        }
+
+        private void ToggleSource(KalivRagSource src, List<KalivRagSource> sources)
+        {
+            _panel.SetRigStatus($"{(src.Enabled ? "Slukker" : "Tænder")} {src.Name} …", false);
+            StartCoroutine(_client.SetRagSourceEnabled(BaseUrl, Token, src.Name, !src.Enabled,
+                enabled => { src.Enabled = enabled; RenderSources(sources); },   // the rig's word, not ours
+                error => _panel.SetRigStatus(Friendly(error), true)));
+        }
+
+        private void SetRagSource(string source)
+        {
+            RagSource = source;
+            PlayerPrefs.SetString(RagSourceKey, source ?? "");
+            PlayerPrefs.Save();
+            _panel.SetModes(RagMode, ToolsMode, RagSource);
+        }
+
+        public void RigShowTools()
+        {
+            _rigOnTools = true;
+            _panel.SetRigTab(false);
+            _panel.SetRigStatus("Henter værktøjer …", false);
+            StartCoroutine(_client.ToolsList(BaseUrl, Token, RenderTools,
+                error => _panel.SetRigStatus(Friendly(error), true)));
+        }
+
+        private void RenderTools(KalivToolRegistry reg)
+        {
+            var rows = new List<KalivVrPanel.RigRow>
+            {
+                new KalivVrPanel.RigRow
+                {
+                    Label = "VÆRKTØJSLAGET (alle værktøjer)",
+                    Toggle = reg.Enabled ? "TÆNDT" : "SLUKKET",
+                    ToggleOn = reg.Enabled,
+                    OnToggle = () => SetTools(!reg.Enabled, null),
+                },
+            };
+            foreach (var t in reg.Tools)
+            {
+                var tool = t;
+                string risk = string.IsNullOrEmpty(tool.Risk) ? "" : $"  ·  {tool.Risk}";
+                rows.Add(new KalivVrPanel.RigRow
+                {
+                    Label = tool.Name + risk,
+                    Toggle = tool.Enabled ? "TÆNDT" : "SLUKKET",
+                    ToggleOn = tool.Enabled,
+                    OnMain = () => _panel.SetRigStatus(
+                        string.IsNullOrWhiteSpace(tool.Description) ? tool.Name : tool.Description, false),
+                    OnToggle = () => SetTools(!tool.Enabled, tool.Name),
+                });
+            }
+            _panel.SetRigRows(rows, keepPage: true);
+            _panel.SetRigStatus(reg.Enabled
+                ? "Riggens egen nødbremse: sluk et værktøj, eller hele laget. Et slukket værktøj fortælles ikke engang til modellen."
+                : "Værktøjslaget er slukket på riggen — VÆRKTØJER-ture bliver afvist, indtil det tændes.", false);
+        }
+
+        private void SetTools(bool enabled, string tool)
+        {
+            _panel.SetRigStatus(enabled ? "Tænder …" : "Slukker …", false);
+            StartCoroutine(_client.SetToolsEnabled(BaseUrl, Token, enabled, tool, RenderTools,
+                error => _panel.SetRigStatus(Friendly(error), true)));
         }
 
         // =====================================================================================
@@ -249,11 +387,11 @@ namespace Kaliv.VR
                     // The current message goes separately; history is everything before it.
                     StartCoroutine(_client.ToolsChatStream(BaseUrl, Token, prompt, Model,
                         _conversation.ConversationId, _conversation.History(excludeLast: true), plan.ToolsWithRag,
-                        OnPhase, OnToolResult, OnStopped, OnFailed, RegisterCancel));
+                        RagSource, OnPhase, OnToolResult, OnStopped, OnFailed, RegisterCancel));
                     break;
 
                 case KalivTurnRoute.Rag:
-                    StartCoroutine(_client.RagChatStream(BaseUrl, Token, prompt, Model, null,
+                    StartCoroutine(_client.RagChatStream(BaseUrl, Token, prompt, Model, RagSource,
                         names => { _live.Sources.Clear(); _live.Sources.AddRange(names); _panel.MarkTranscriptDirty(); },
                         OnDelta, OnPhase, OnDone, OnStopped, OnFailed, RegisterCancel));
                     break;
@@ -269,7 +407,7 @@ namespace Kaliv.VR
         {
             _busy = true;
             _live = _conversation.Add(new KalivMessage("assistant", ""));
-            _panel.SetLiveSuffix(" ▌");
+            _panel.SetLiveSuffix(" …");   // Arial has …; it has no block glyph
             _panel.SetComposerBusy(true);
             _panel.SetStopAvailable(true);
             _panel.SetRetryAvailable(false);
@@ -375,6 +513,7 @@ namespace Kaliv.VR
         {
             if (_live == null) return;
             _live.Tool = turn.ExecutedWrite ?? turn.Tool;
+            if (turn.PersonName != null) _live.Person = turn.PersonName;
             _live.Sources.Clear();
             _live.Sources.AddRange(turn.Sources);
 
@@ -456,6 +595,11 @@ namespace Kaliv.VR
             }
 
             if (!CanStartTurn()) return;
+
+            // Say it BEFORE the user talks, not after: a fresh worker ships without ASR/TTS.
+            string blocked = _caps.VoiceBlockedReason();
+            if (blocked != null) { _panel.SetStatus(blocked, true); RefreshCapabilities(); return; }
+
             string err = _voice.StartRecording();
             if (err != null) { _panel.SetStatus(err, true); return; }
             _panel.SetStatus(KalivTurnStatus.Listening, false);
@@ -503,6 +647,8 @@ namespace Kaliv.VR
                 error =>
                 {
                     if (heard.Text == "…") { heard.Text = "(stemmebesked)"; }
+                    // The rig's voice stack may have changed since we last asked.
+                    RefreshCapabilities();
                     FinishTurn(TurnEnd.Failed, error);
                 },
                 RegisterCancel));
@@ -575,11 +721,7 @@ namespace Kaliv.VR
         public void PlayMedia(KalivMediaItem item)
         {
             if (item == null) return;
-            if (item.Kind != KalivMediaKind.Video)
-            {
-                _panel.SetMediaStatus("Billeder vises ikke i VR endnu — kun video.", true);
-                return;
-            }
+            if (item.Kind == KalivMediaKind.Image) { ShowImage(item); return; }
             string hint = item.FormatHint;
             if (hint == null)
             {
@@ -625,15 +767,67 @@ namespace Kaliv.VR
             _cancelDownload?.Invoke();
             _renderEngine.StopMedia();
             _renderEngine.SetMediaScreenAsGazeTarget(false);
+            _images?.Hide();
+            if (_showingImage) _renderEngine.SetScreenTarget(_panel.PanelTransform);   // "screen" is the panel again
+            _showingImage = false;
             _mediaOpen = false;
             _panel.ShowTransport(false);
+        }
+
+        private KalivImageViewer _images;
+        private bool _showingImage;
+
+        /// <summary>
+        /// A still image: fetched like a video (Bearer header, local cache), then shown on a
+        /// floating plane. Stereo photos show one eye's half so they read as one picture.
+        /// </summary>
+        private void ShowImage(KalivMediaItem item)
+        {
+            _cancelDownload?.Invoke();
+            StartCoroutine(_client.MediaDownload(BaseUrl, Token, item,
+                p => _panel.SetMediaStatus($"Henter billede … {Mathf.RoundToInt(p * 100)} %", false),
+                path =>
+                {
+                    _cancelDownload = null;
+                    byte[] bytes;
+                    try { bytes = File.ReadAllBytes(path); }
+                    catch (Exception e) { _panel.SetMediaStatus("Billedet kunne ikke læses: " + e.Message, true); return; }
+
+                    var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                    if (!tex.LoadImage(bytes, true))
+                    {
+                        Destroy(tex);
+                        // WebP is in the contract, but Unity's decoder only reads PNG and JPEG.
+                        _panel.SetMediaStatus(item.MimeType == "image/webp"
+                            ? "WebP-billeder kan Unity ikke afkode på headsettet — kun PNG og JPEG."
+                            : "Billedet kunne ikke afkodes.", true);
+                        return;
+                    }
+
+                    if (_images == null)
+                    {
+                        _images = KalivImageViewer.Create(_renderEngine.MediaRoot);
+                        // Into the media layer, so the composition's camera setup draws it.
+                        _renderEngine.AttachMedia(_images.gameObject);
+                    }
+                    _renderEngine.StopMedia();
+                    _images.Show(tex, item.Stereo, _camera);
+                    _renderEngine.SetScreenTarget(_images.transform);   // Kaliv can look at it
+                    _showingImage = true;
+                    _mediaOpen = true;
+                    _panel.ShowMediaBrowser(false);
+                    _panel.ShowTransport(true);
+                    _panel.SetTransportInfo($"BILLEDE\n{item.Width}×{item.Height}", false);
+                },
+                error => { _cancelDownload = null; _panel.SetMediaStatus(error, true); },
+                cancel => _cancelDownload = cancel));
         }
 
         private void OnMediaEnded() => UpdateTransport();
 
         private void UpdateTransport()
         {
-            if (!_mediaOpen) return;
+            if (!_mediaOpen || _showingImage) return;
             string fmt = _renderEngine.MediaFormatLabel;
             string time = _renderEngine.MediaLength > 0
                 ? $"{Clock(_renderEngine.MediaTime)} / {Clock(_renderEngine.MediaLength)}"
@@ -650,11 +844,53 @@ namespace Kaliv.VR
                 _panel?.SetVoiceState(_voice.IsRecording, _voice.Level, _voice.RecordedSeconds,
                     !_busy && _pendingConfirmation == null && Paired);
 
-            if (_mediaOpen && (_transportTick -= Time.unscaledDeltaTime) <= 0f)
+            if (_mediaOpen)
             {
-                _transportTick = 0.5f;
-                UpdateTransport();
+                if (!_showingImage) MediaSticks();
+                if ((_transportTick -= Time.unscaledDeltaTime) <= 0f)
+                {
+                    _transportTick = 0.5f;
+                    UpdateTransport();
+                }
             }
+        }
+
+        private bool _seekLatched;
+
+        /// <summary>
+        /// Joysticks while a video is open — the same mapping as SkyPlayer, so the two apps on
+        /// the same engine feel the same: right ↑/↓ zoom, right ←/→ skip 10 s, left stick pans.
+        /// The skip is a flick, latched until the stick returns to centre, so holding it does
+        /// not machine-gun through the video.
+        /// </summary>
+        private void MediaSticks()
+        {
+            Vector2 right = Stick(UnityEngine.XR.XRNode.RightHand);
+            Vector2 left = Stick(UnityEngine.XR.XRNode.LeftHand);
+            float dt = Time.unscaledDeltaTime;
+
+            if (Mathf.Abs(right.y) > 0.2f && Mathf.Abs(right.y) > Mathf.Abs(right.x))
+                _renderEngine.AdjustMediaZoom(right.y * dt);
+
+            if (!_seekLatched && Mathf.Abs(right.x) > 0.75f && Mathf.Abs(right.x) > Mathf.Abs(right.y))
+            {
+                _seekLatched = true;
+                MediaSeek(right.x > 0 ? 10 : -10);
+            }
+            else if (_seekLatched && Mathf.Abs(right.x) < 0.3f)
+            {
+                _seekLatched = false;
+            }
+
+            if (left.sqrMagnitude > 0.04f)
+                _renderEngine.PanMedia(left.x * 60f * dt, left.y * 45f * dt);
+        }
+
+        private static Vector2 Stick(UnityEngine.XR.XRNode node)
+        {
+            var d = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(node);
+            return d.isValid && d.TryGetFeatureValue(UnityEngine.XR.CommonUsages.primary2DAxis, out Vector2 v)
+                ? v : Vector2.zero;
         }
 
         private static string Clock(double seconds)
