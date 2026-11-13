@@ -32,7 +32,9 @@ from app.media_gallery_index_writer import register_asset  # noqa: E402
 from app.media_gallery_store import ExternalMediaSink  # noqa: E402
 from app.media_generation_contract import ArtifactSinkUnavailable  # noqa: E402
 from app.media_recovery_inventory import recovery_inventory  # noqa: E402
+from app.media_volume import MARKER_NAME  # noqa: E402
 from app.media_work_area import PrivateWorkArea  # noqa: E402
+from worker_media_volume import VOLUME_ID, FakeProbe  # noqa: E402
 
 GPU = "GPU-6a7f0c2e-1b2d-4c3e-8f9a-0123456789ab"
 DEAD = GPU + ":" + "a" * 16
@@ -492,14 +494,16 @@ class RecoveryInventoryTests(unittest.TestCase):
         self.receipt(job, output)
         self.temp(MP4)
         self.restart()
+        Path(self.volume, MARKER_NAME).write_text(VOLUME_ID, encoding="ascii")  # G1's marker
+        probe = FakeProbe({self.volume})
         spec = importlib.util.spec_from_file_location("media_volume_repair", ROOT / "scripts/media_volume_repair.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = module.main(["inventory", "--media-root", self.media, "--volume-root", self.volume,
-                                "--job-db", self.db, "--lease-dir", self.lease, "--work-root", self.work,
-                                "--work-dir", self.output])
+                                "--volume-id", VOLUME_ID, "--job-db", self.db, "--lease-dir", self.lease,
+                                "--work-root", self.work, "--work-dir", self.output], volume_probe=probe)
         self.assertEqual(code, 0, err.getvalue())
         report = json.loads(out.getvalue())
         self.assertEqual(report["schema"], "kaliv-media-recovery-inventory/v1")

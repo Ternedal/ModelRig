@@ -5,7 +5,7 @@ A crash, or a lost volume, can leave three kinds of residue on the media volume,
 ## The report (read-only)
 
 ```powershell
-& $GenPy scripts\media_volume_repair.py report --media-root $Gallery --volume-root $VolumeRoot --job-db $JobDb --lease-dir $LeaseDir `
+& $GenPy scripts\media_volume_repair.py report --media-root $Gallery --volume-root $VolumeRoot --volume-id $VolumeId --job-db $JobDb --lease-dir $LeaseDir `
     --work-root $WorkRoot --work-dir "$WorkRoot\comfy\output" --work-dir "$WorkRoot\comfy\temp" --work-dir "$WorkRoot\comfy\input"
 ```
 
@@ -35,10 +35,10 @@ Each repair does three things before it acts:
 
 ```powershell
 # Register one adoptable asset (and only an adoptable one).
-& $GenPy scripts\media_volume_repair.py adopt --asset <asset_id> --media-root $Gallery --volume-root $VolumeRoot --job-db $JobDb --lease-dir $LeaseDir
+& $GenPy scripts\media_volume_repair.py adopt --asset <asset_id> --media-root $Gallery --volume-root $VolumeRoot --volume-id $VolumeId --job-db $JobDb --lease-dir $LeaseDir
 
 # Remove one stale temp file, using the device and inode from the report.
-& $GenPy scripts\media_volume_repair.py remove-temp --name <.kaliv-...tmp> --device <device> --inode <inode> --media-root $Gallery --volume-root $VolumeRoot --lease-dir $LeaseDir
+& $GenPy scripts\media_volume_repair.py remove-temp --name <.kaliv-...tmp> --device <device> --inode <inode> --media-root $Gallery --volume-root $VolumeRoot --volume-id $VolumeId --lease-dir $LeaseDir
 
 # Remove one leftover file from a work-area scratch folder, using the folder, path, device and inode from the report.
 & $GenPy scripts\media_volume_repair.py remove-work-file --work-root $WorkRoot --work-dir "$WorkRoot\comfy\output" --path <path> --device <device> --inode <inode> --job-db $JobDb --lease-dir $LeaseDir
@@ -64,7 +64,7 @@ It captures the file by an atomic rename, then checks it again. If it is not the
 The video hand-off from the work area (C:) to the volume (Z:) is: copy into a staged file, sync, publish, then remove the copy on C:. Before the copy starts, the executor stores a **hand-off receipt** for the job (table `image_jobs_handoff`). The receipt holds the output's name, `st_dev`, `st_ino` and size, the volume root's identity, and the SHA-256 once copied. `inventory` uses it to tie each leftover to its job:
 
 ```powershell
-& $GenPy scripts\media_volume_repair.py inventory --media-root $Gallery --volume-root $VolumeRoot --job-db $JobDb `
+& $GenPy scripts\media_volume_repair.py inventory --media-root $Gallery --volume-root $VolumeRoot --volume-id $VolumeId --job-db $JobDb `
     --lease-dir $LeaseDir --work-root $WorkRoot --work-dir "$WorkRoot\comfy\output"
 ```
 
@@ -98,10 +98,18 @@ While an executor runs it classifies nothing (`status: executor_running`), becau
 | 0 | Done |
 | 1 | Refused, with the reason on stderr; nothing changed |
 | 2 | Usage |
-| 75 | The media volume is not there, or the work area failed its checks |
+| 75 | The media volume is not there, or it is not the one `--volume-id` names (another disk, a copied marker, a remount), or the work area failed its checks |
+| 78 | The volume configuration is refused: an invalid id, a network or `subst` letter, or the system disk |
 
 **Access lost while it reads.** If Z: goes away, or a folder on it is denied or locked, while a report or the inventory reads, the run stops with exit 75 (`repair_volume_unreadable`). If a scanned work folder, or an entry in it, cannot be read, it stops with exit 1 (`work_directory_unreadable`). It never answers with a partial result: for example, an index it may not read is never taken as an empty gallery. A file removed between the listing and the check is simply no longer reported.
 
 ## Relation to G1
 
-The volume check here is the gallery's own (`ExternalMediaSink._root`). The work area check is `PrivateWorkArea`, the same one the executor uses. Still open: the tool should also take `KALIV_MEDIA_VOLUME_ID` and verify G1's marker and pinned identity (`MountedMediaVolume`, `docs/MEDIA_VOLUME.md`) before a repair on the volume.
+Every command that reads or changes the volume (`report`, `inventory`, `adopt`, `remove-temp`) takes `--volume-id` and first verifies the volume as the executor does (`MountedMediaVolume`, `docs/MEDIA_VOLUME.md`):
+- the marker holds that id;
+- the root is mounted, on a local disk that is not the system disk, and not a network or `subst` letter;
+- `--media-root` is on it.
+
+Only then is the gallery folder opened, through the gallery's own check (`ExternalMediaSink._root`). After the command, the volume is verified once more: if the disk changed while the tool ran, it exits 75 and prints no result. The work area check is `PrivateWorkArea`, the same one the executor uses. `remove-work-file` touches only the work area and takes no volume.
+
+Before this, the tool checked only the mount point and the gallery folder, so a different disk mounted at the same letter with the same folder was accepted (H1, #2390 6848926366).
