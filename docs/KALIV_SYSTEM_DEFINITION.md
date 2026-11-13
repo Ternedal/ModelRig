@@ -213,6 +213,13 @@ CI-green must never be rewritten as physical or human acceptance.
 
 ## Whole-system completion criterion
 
+ADR-SYS-001 (`docs/system/ADR-SYS-001_V1_AND_EMBODIED_RELEASES.md`, adopted
+12 Nov 2026) releases the system in two named steps. **Kaliv V1** is the system
+below without an accepted photoreal body: it requires the seven release gates
+that are not body gates. **Kaliv Embodied** is the complete vision and requires
+all ten. The criterion in this section describes Kaliv Embodied. A Kaliv V1
+release makes no claim about a body.
+
 The complete Kaliv vision is reached only when one coherent system can:
 
 1. use a replaceable local/cloud LLM without making that model the persistence
