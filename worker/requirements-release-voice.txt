@@ -6,4 +6,4 @@ piper-tts==1.8.0
 # The frozen worker cannot use CUDA wheels from another Python installation.
 # Bundle the CUDA 12 / cuDNN 9 runtime used by GPU speech recognition.
 nvidia-cublas-cu12==12.8.4.1; sys_platform == "win32"
-nvidia-cudnn-cu12==9.10.2.21; sys_platform == "win32"
+nvidia-cudnn-cu12==9.28.1.4; sys_platform == "win32"
