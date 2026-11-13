@@ -30,7 +30,25 @@ from app.media_gallery_catalog import list_gallery  # noqa: E402
 from app.media_gallery_store import ExternalMediaSink  # noqa: E402
 from app.media_generation_contract import ArtifactSinkUnavailable  # noqa: E402
 from app.media_repair import RepairRefused, adopt, reconcile, remove_stale_temp, remove_work_file  # noqa: E402
+from app.media_volume import MARKER_NAME  # noqa: E402
 from app.media_work_area import PrivateWorkArea  # noqa: E402
+
+sys.path.insert(0, str(ROOT / "tests"))
+from worker_media_volume import FakeProbe  # noqa: E402  (G1's own test probe, reused)
+
+VOLUME_ID = "kaliv-media-0001"
+
+
+class FlakyMountProbe(FakeProbe):
+    """The volume is mounted for the first ``mounted_calls`` checks, then gone."""
+
+    def __init__(self, mounts, mounted_calls):
+        super().__init__(mounts)
+        self.left = mounted_calls
+
+    def ismount(self, path):
+        self.left -= 1
+        return self.left >= 0 and super().ismount(path)
 
 GPU = "GPU-6a7f0c2e-1b2d-4c3e-8f9a-0123456789ab"
 DEAD = "GPU-6a7f0c2e-1b2d-4c3e-8f9a-0123456789ab:00000000000000aa"
@@ -363,28 +381,136 @@ class MediaRepairTests(unittest.TestCase):
 
     # -- the CLI ---------------------------------------------------------------------------------
 
-    def cli(self, *args):
+    def cli(self, *args, probe=None):
         spec = importlib.util.spec_from_file_location("media_volume_repair", ROOT / "scripts/media_volume_repair.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = module.main(list(args))
+            code = module.main(list(args), volume_probe=probe if probe is not None else self.probe())
         return code, out.getvalue(), err.getvalue()
+
+    def probe(self):
+        return FakeProbe({self.volume})
+
+    def marker(self, text=VOLUME_ID):
+        Path(self.volume, MARKER_NAME).write_text(text + "\n", encoding="ascii")
+
+    def adoptable(self):
+        return self.report()["counts"]["adoptable"]
 
     def test_cli_report_adopt_and_exit_codes(self):
         _, asset = self.job()
+        self.marker()
         common = ["--media-root", self.media, "--volume-root", self.volume]
+        pinned = [*common, "--volume-id", VOLUME_ID]
         code, out, _ = self.cli("report", *common, "--job-db", self.db, "--lease-dir", self.lease)
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["counts"]["adoptable"], 1)
-        code, _, err = self.cli("adopt", *common, "--job-db", self.db, "--lease-dir", self.lease, "--asset", "0" * 32)
+        code, _, err = self.cli("adopt", *pinned, "--job-db", self.db, "--lease-dir", self.lease, "--asset", "0" * 32)
         self.assertEqual((code, err.strip()), (1, "refused: not_an_unindexed_asset"))
-        code, out, _ = self.cli("adopt", *common, "--job-db", self.db, "--lease-dir", self.lease, "--asset", asset)
+        code, out, _ = self.cli("adopt", *pinned, "--job-db", self.db, "--lease-dir", self.lease, "--asset", asset)
         self.assertEqual((code, json.loads(out)["adopted"]), (0, asset))
         self.mounted.clear()
         code, _, err = self.cli("report", *common, "--job-db", self.db)
         self.assertEqual(code, 75)
+
+    # -- G1 before a repair writes on the volume (#2386 P1, docs/MEDIA_REPAIR.md) ---------------
+
+    def cli_usage(self, *args):
+        """argparse's exit code and stderr for a usage error."""
+        err = io.StringIO()
+        with self.assertRaises(SystemExit) as ctx, contextlib.redirect_stderr(err):
+            spec = importlib.util.spec_from_file_location("media_volume_repair", ROOT / "scripts/media_volume_repair.py")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module.main(list(args), volume_probe=self.probe())
+        return ctx.exception.code, err.getvalue()
+
+    def adopt_cli(self, asset, *extra, probe=None, volume_id=VOLUME_ID):
+        ids = ["--volume-id", volume_id] if volume_id is not None else []
+        return self.cli("adopt", "--media-root", self.media, "--volume-root", self.volume, *ids,
+                        "--job-db", self.db, "--lease-dir", self.lease, "--asset", asset, *extra, probe=probe)
+
+    def test_writing_repairs_require_a_volume_id(self):
+        _, asset = self.job()
+        self.marker()
+        name, dev, ino = self.stale()
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("KALIV_MEDIA_VOLUME_ID", None)
+            for argv in (["adopt", "--asset", asset, "--job-db", self.db],
+                         ["remove-temp", "--name", name, "--device", str(dev), "--inode", str(ino)]):
+                with self.subTest(argv[0]):
+                    code, err = self.cli_usage(argv[0], "--media-root", self.media, "--volume-root", self.volume,
+                                               "--lease-dir", self.lease, *argv[1:])
+                    self.assertEqual(code, 2)
+                    self.assertIn("--volume-id", err)
+        self.assertEqual(self.adoptable(), 1)
+        self.assertTrue(Path(self.media, name).exists())
+
+    def test_the_volume_id_defaults_to_the_executors_setting(self):
+        _, asset = self.job()
+        self.marker()
+        with patch.dict(os.environ, {"KALIV_MEDIA_VOLUME_ID": VOLUME_ID}):
+            code, out, err = self.adopt_cli(asset, volume_id=None)
+        self.assertEqual((code, json.loads(out)["adopted"]), (0, asset), err)
+
+    def test_adopt_refuses_another_disk_and_changes_nothing(self):
+        _, asset = self.job()
+        for case, setup, probe, want in (
+            ("marker missing", lambda: None, None, (75, "media_volume_marker_missing")),
+            ("another id", lambda: self.marker("kaliv-media-other1"), None, (75, "media_volume_marker_mismatch")),
+            ("not mounted", self.marker, FakeProbe(set()), (75, "media_volume_not_mounted")),
+        ):
+            with self.subTest(case):
+                Path(self.volume, MARKER_NAME).unlink(missing_ok=True)
+                setup()
+                code, out, err = self.adopt_cli(asset, probe=probe)
+                self.assertEqual(code, want[0], err)
+                self.assertIn(want[1], err)
+                self.assertEqual(out, "")
+                self.assertEqual(self.adoptable(), 1)
+
+    def test_remove_temp_refuses_another_disk_and_keeps_the_file(self):
+        name, dev, ino = self.stale()
+        self.marker("kaliv-media-other1")
+        code, out, err = self.cli("remove-temp", "--media-root", self.media, "--volume-root", self.volume,
+                                  "--volume-id", VOLUME_ID, "--lease-dir", self.lease,
+                                  "--name", name, "--device", str(dev), "--inode", str(ino))
+        self.assertEqual((code, out), (75, ""), err)
+        self.assertIn("media_volume_marker_mismatch", err)
+        self.assertTrue(Path(self.media, name).exists())
+
+    def test_a_network_or_subst_letter_is_a_configuration_error(self):
+        _, asset = self.job()
+        self.marker()
+        for kind in ("remote", "subst"):
+            with self.subTest(kind):
+                probe = self.probe()
+                probe.kind = kind
+                code, _, err = self.adopt_cli(asset, probe=probe)
+                self.assertEqual(code, 78, err)
+                self.assertIn(f"media_volume_{kind}_refused", err)
+        code, _, err = self.adopt_cli(asset, volume_id="x")
+        self.assertEqual(code, 78, err)
+        self.assertIn("media_volume_id_invalid", err)
+        self.assertEqual(self.adoptable(), 1)
+
+    def test_the_volume_is_verified_again_immediately_before_the_write(self):
+        """Mounted when the tool starts, gone by the time it would adopt: nothing is adopted."""
+        _, asset = self.job()
+        self.marker()
+        code, out, err = self.adopt_cli(asset, probe=FlakyMountProbe({self.volume}, mounted_calls=1))
+        self.assertEqual((code, out), (75, ""), err)
+        self.assertIn("media_volume_not_mounted", err)
+        self.assertEqual(self.adoptable(), 1)
+        name, dev, ino = self.stale()
+        code, out, err = self.cli("remove-temp", "--media-root", self.media, "--volume-root", self.volume,
+                                  "--volume-id", VOLUME_ID, "--lease-dir", self.lease,
+                                  "--name", name, "--device", str(dev), "--inode", str(ino),
+                                  probe=FlakyMountProbe({self.volume}, mounted_calls=1))
+        self.assertEqual((code, out), (75, ""), err)
+        self.assertTrue(Path(self.media, name).exists())
 
     def test_cli_work_area_report_and_removal(self):
         rel, dev, ino = self.leftover(self.output, "kaliv_00001_.mp4")

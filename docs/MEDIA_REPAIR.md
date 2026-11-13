@@ -35,10 +35,10 @@ Each repair does three things before it acts:
 
 ```powershell
 # Register one adoptable asset (and only an adoptable one).
-& $GenPy scripts\media_volume_repair.py adopt --asset <asset_id> --media-root $Gallery --volume-root $VolumeRoot --job-db $JobDb --lease-dir $LeaseDir
+& $GenPy scripts\media_volume_repair.py adopt --asset <asset_id> --media-root $Gallery --volume-root $VolumeRoot --volume-id $VolumeId --job-db $JobDb --lease-dir $LeaseDir
 
 # Remove one stale temp file, using the device and inode from the report.
-& $GenPy scripts\media_volume_repair.py remove-temp --name <.kaliv-...tmp> --device <device> --inode <inode> --media-root $Gallery --volume-root $VolumeRoot --lease-dir $LeaseDir
+& $GenPy scripts\media_volume_repair.py remove-temp --name <.kaliv-...tmp> --device <device> --inode <inode> --media-root $Gallery --volume-root $VolumeRoot --volume-id $VolumeId --lease-dir $LeaseDir
 
 # Remove one leftover file from a work-area scratch folder, using the folder, path, device and inode from the report.
 & $GenPy scripts\media_volume_repair.py remove-work-file --work-root $WorkRoot --work-dir "$WorkRoot\comfy\output" --path <path> --device <device> --inode <inode> --job-db $JobDb --lease-dir $LeaseDir
@@ -98,10 +98,13 @@ While an executor runs it classifies nothing (`status: executor_running`), becau
 | 0 | Done |
 | 1 | Refused, with the reason on stderr; nothing changed |
 | 2 | Usage |
-| 75 | The media volume is not there, or the work area failed its checks |
+| 75 | The media volume is not there, or the work area failed its checks; for `adopt` and `remove-temp` also: not the pinned volume (marker missing or another id, identity changed, remounted) |
+| 78 | `adopt` and `remove-temp` only: the volume can never be right as configured (invalid id, network or `subst` drive, unsupported filesystem, the system disk) |
 
 **Access lost while it reads.** If Z: goes away, or a folder on it is denied or locked, while a report or the inventory reads, the run stops with exit 75 (`repair_volume_unreadable`). If a scanned work folder, or an entry in it, cannot be read, it stops with exit 1 (`work_directory_unreadable`). It never answers with a partial result: for example, an index it may not read is never taken as an empty gallery. A file removed between the listing and the check is simply no longer reported.
 
 ## Relation to G1
 
-The volume check here is the gallery's own (`ExternalMediaSink._root`). The work area check is `PrivateWorkArea`, the same one the executor uses. Still open: the tool should also take `KALIV_MEDIA_VOLUME_ID` and verify G1's marker and pinned identity (`MountedMediaVolume`, `docs/MEDIA_VOLUME.md`) before a repair on the volume.
+The two repairs that write on the volume, `adopt` and `remove-temp`, verify it as the executor does before they touch it: `MountedMediaVolume` (`docs/MEDIA_VOLUME.md`) with `--volume-id`, which defaults to `KALIV_MEDIA_VOLUME_ID`. The marker must hold that id, the root must be a mounted local disk (no network or `subst` letter, not the system disk), and the pinned identity is checked again immediately before the repair. Without an id they stop with usage (2); a replaced or remounted disk is 75, a configuration that can never work is 78, and nothing is changed. The window between that last check and the write is the same one the executor's sinks accept; the repairs also hold every executor lock while they run.
+
+`report`, `inventory` and `remove-work-file` do not write on the volume and keep the gallery's own path check (`ExternalMediaSink._root`); `remove-work-file` only touches the work area, checked by `PrivateWorkArea` as the executor does.
