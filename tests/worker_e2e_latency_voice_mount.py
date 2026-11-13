@@ -44,7 +44,7 @@ class E2ELatencyVoiceMountTests(unittest.TestCase):
                 self.assertFalse(mount(app), value)
             self.assertEqual(qualification_routes(app), [])
 
-    def test_exact_opt_in_mounts_one_post_route_and_is_idempotent(self) -> None:
+    def test_exact_opt_in_mounts_the_two_post_routes_and_is_idempotent(self) -> None:
         app = FastAPI()
         with patch.dict(os.environ, {FLAG: "1"}, clear=False):
             self.assertTrue(mount(app))
@@ -52,11 +52,17 @@ class E2ELatencyVoiceMountTests(unittest.TestCase):
             self.assertTrue(mount(app))
         self.assertEqual(len(app.routes), route_count)
         routes = qualification_routes(app)
-        self.assertEqual(len(routes), 1)
-        self.assertEqual(getattr(routes[0], "methods", set()), {"POST"})
+        # The turn, and the playback start of its reply for the voice-only
+        # measurement. Nothing else is mounted by the flag.
         self.assertEqual(
-            str(getattr(routes[0], "path", "")),
-            "/experimental/e2e-latency/voice",
+            sorted(
+                (str(getattr(route, "path", "")), tuple(sorted(getattr(route, "methods", set()))))
+                for route in routes
+            ),
+            [
+                ("/experimental/e2e-latency/voice", ("POST",)),
+                ("/experimental/e2e-latency/voice/{utterance_id}/started", ("POST",)),
+            ],
         )
 
     def test_mount_creates_no_evidence_root_or_runtime_state(self) -> None:
