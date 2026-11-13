@@ -98,7 +98,7 @@ While an executor runs it classifies nothing (`status: executor_running`), becau
 | 0 | Done |
 | 1 | Refused, with the reason on stderr; nothing changed |
 | 2 | Usage |
-| 75 | The media volume is not there, or it is not the one `--volume-id` names (another disk, a copied marker, a remount), or the work area failed its checks |
+| 75 | The media volume is not there, or it is not the one `--volume-id` names (another disk, a copied marker, a remount), or the work area failed its checks. After `adopt` or `remove-temp` the change may already have been made; see above |
 | 78 | The volume configuration is refused: an invalid id, a network or `subst` letter, or the system disk |
 
 **Access lost while it reads.** If Z: goes away, or a folder on it is denied or locked, while a report or the inventory reads, the run stops with exit 75 (`repair_volume_unreadable`). If a scanned work folder, or an entry in it, cannot be read, it stops with exit 1 (`work_directory_unreadable`). It never answers with a partial result: for example, an index it may not read is never taken as an empty gallery. A file removed between the listing and the check is simply no longer reported.
@@ -110,6 +110,6 @@ Every command that reads or changes the volume (`report`, `inventory`, `adopt`, 
 - the root is mounted, on a local disk that is not the system disk, and not a network or `subst` letter;
 - `--media-root` is on it.
 
-Only then is the gallery folder opened, through the gallery's own check (`ExternalMediaSink._root`). After the command, the volume is verified once more: if the disk changed while the tool ran, it exits 75 and prints no result. The work area check is `PrivateWorkArea`, the same one the executor uses. `remove-work-file` touches only the work area and takes no volume.
+Only then is the gallery folder opened, through the gallery's own check (`ExternalMediaSink._root`). After the command, the volume is verified once more: if the disk changed while the tool ran, it exits 75 and prints no result. **After `adopt` or `remove-temp` that does not mean nothing happened:** the change may already have been made. The message names the item and says so ("The operation may already have changed state; re-inventory on the verified volume before retry."). Reconnect the right disk, run `inventory` or `report` on it, and only then decide on a retry. A retried `adopt` of an asset that was adopted is refused (`not_an_unindexed_asset`, exit 1), so a retry does no harm. The work area check is `PrivateWorkArea`, the same one the executor uses. `remove-work-file` touches only the work area and takes no volume.
 
 Before this, the tool checked only the mount point and the gallery folder, so a different disk mounted at the same letter with the same folder was accepted (H1, #2390 6848926366).

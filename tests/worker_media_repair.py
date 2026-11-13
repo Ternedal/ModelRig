@@ -465,6 +465,42 @@ class MediaRepairTests(unittest.TestCase):
                                       "--volume-id", VOLUME_ID, "--job-db", self.db, module=module)
         self.assertEqual((code, out), (75, ""), err)
         self.assertIn("media_volume_marker_mismatch", err)
+        self.assertNotIn("may already have changed state", err, "a report changes nothing")
+
+    def test_a_disk_change_after_a_repair_says_the_repair_may_have_happened(self):
+        """P3 (6858965370, 6859352124): the real adopt or remove-temp runs, then the disk changes.
+
+        Exit 75, no unverified result on stdout, and stderr says the change may already have been made."""
+        _, asset = self.job()
+        name, dev, ino = self.stale()
+        common = ["--media-root", self.media, "--volume-root", self.volume, "--volume-id", VOLUME_ID,
+                  "--lease-dir", self.lease]
+        for command, real, extra, item in (
+                ("adopt", "adopt", ["--job-db", self.db, "--asset", asset], f"asset {asset}"),
+                ("remove-temp", "remove_stale_temp", ["--name", name, "--device", str(dev), "--inode", str(ino)],
+                 f"temp file {name}")):
+            module = self.tool()
+            original = getattr(module, real)
+
+            def then_swap(*args, _original=original, **kwargs):
+                result = _original(*args, **kwargs)
+                Path(self.volume, MARKER_NAME).write_text("kaliv-media-9999", encoding="ascii")
+                return result
+
+            with patch.object(module, real, side_effect=then_swap):
+                code, out, err = self.cli(command, *common, *extra, module=module)
+            self.assertEqual((code, out), (75, ""), err)
+            self.assertIn(f"after {command} of {item}", err)
+            self.assertIn("media_volume_marker_mismatch", err)
+            self.assertIn("The operation may already have changed state; re-inventory on the verified volume "
+                          "before retry.", err)
+            Path(self.volume, MARKER_NAME).write_text(VOLUME_ID, encoding="ascii")
+        # Both changes were in fact made, which is why the message must not read as "nothing happened".
+        code, out, err = self.cli("report", "--media-root", self.media, "--volume-root", self.volume,
+                                  "--volume-id", VOLUME_ID, "--job-db", self.db, "--lease-dir", self.lease)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["counts"]["adoptable"], 0)
+        self.assertFalse(Path(self.media, name).exists())
 
 
 if __name__ == "__main__":

@@ -109,8 +109,19 @@ def main(argv: list[str], *, volume_probe=None) -> int:
             result = remove_stale_temp(sink, args.name, device=args.device, inode=args.inode,
                                        lease_dir=args.lease_dir, minimum_age_seconds=age)
         # Still the same disk afterwards. If it changed while the tool ran, say so (75) rather than
-        # print a result that may describe another disk.
-        volume.verify()
+        # print a result that may describe another disk. After adopt or remove-temp the change may
+        # already have been made, so the message says that and names the item, but the result is
+        # not printed: it was not verified (ChatGPT 6859352124, review 6858965370).
+        try:
+            volume.verify()
+        except ArtifactSinkUnavailable as exc:
+            if args.command in ("adopt", "remove-temp"):
+                item = f"asset {args.asset}" if args.command == "adopt" else f"temp file {args.name}"
+                print(f"media volume unavailable after {args.command} of {item}: {exc}. The operation may "
+                      "already have changed state; re-inventory on the verified volume before retry.",
+                      file=sys.stderr)
+                return 75
+            raise
     except MediaVolumeConfigError as exc:
         print(f"media volume refused: {exc}", file=sys.stderr)
         return 78
