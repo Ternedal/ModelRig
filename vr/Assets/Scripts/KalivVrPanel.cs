@@ -469,8 +469,12 @@ namespace Kaliv.VR
         private void BuildPairGroup()
         {
             _pairGroup = Group("PairGroup", _canvas.transform);
-            _url = AddInput(_pairGroup.transform, "Rig-adresse", "http://192.168.1.10:8080",
-                new Vector2(780, 62), new Vector2(-90, 120));
+            _url = AddInput(_pairGroup.transform, "Rig-adresse", "http://riggens-adresse:8080",
+                new Vector2(600, 62), new Vector2(-180, 120));
+            // The rig's address changes with the router's whim; FIND RIG asks the local network.
+            _findButton = AddButton(_pairGroup.transform, "FIND RIG",
+                new Vector2(300, 62), new Vector2(315, 120), Elevated, () => _app.FindRig());
+            _findLabel = _findButton.GetComponentInChildren<Text>();
             _code = AddInput(_pairGroup.transform, "Parringskode", "XXXX-XXXX",
                 new Vector2(420, 62), new Vector2(-270, 35));
             _pairButton = AddButton(_pairGroup.transform, "FORBIND",
@@ -703,6 +707,24 @@ namespace Kaliv.VR
         public void SetBusy(bool busy)
         {
             if (_pairButton != null) _pairButton.interactable = !busy;
+        }
+
+        private Button _findButton;
+        private Text _findLabel;
+
+        public string RigAddressField => _url != null ? _url.text : "";
+
+        public void SetRigAddress(string url)
+        {
+            if (_url != null) _url.text = url ?? "";
+        }
+
+        /// <summary>The FIND RIG button shows the scan's progress while it runs.</summary>
+        public void SetFindRigState(bool scanning, float progress)
+        {
+            if (_findLabel != null)
+                _findLabel.text = scanning ? $"SØGER {Mathf.RoundToInt(progress * 100)} %" : "FIND RIG";
+            if (_findButton != null) _findButton.interactable = !scanning;
         }
 
         public void SetComposerBusy(bool busy)

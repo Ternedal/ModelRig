@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
@@ -70,7 +71,8 @@ namespace Kaliv.VR
         {
             _camera = camera;
             _client = gameObject.AddComponent<ModelRigVrClient>();
-            BaseUrl = PlayerPrefs.GetString(BaseUrlKey, "http://192.168.1.10:8080");
+            // No made-up default: an example address in the field reads as the real one.
+            BaseUrl = PlayerPrefs.GetString(BaseUrlKey, "");
             Token = PlayerPrefs.GetString(TokenKey, "");
             Model = PlayerPrefs.GetString(ModelKey, "");
             DeviceId = PlayerPrefs.GetString(DeviceIdKey, "");
@@ -114,6 +116,75 @@ namespace Kaliv.VR
                 _renderEngine.Connect(BaseUrl, Token);
                 RefreshModels();
             }
+            else
+            {
+                // Not paired yet: look for the rig straight away, so the address is usually
+                // filled in before the user reaches for the keyboard.
+                FindRig();
+            }
+        }
+
+        private bool _scanning;
+
+        /// <summary>
+        /// Scan the local network for the ModelRig backend and fill in its address. One rig:
+        /// filled in. Several: the first is filled in and the status says how many — pressing
+        /// FIND RIG again cycles to the next. None: say so, and keep whatever was typed.
+        /// </summary>
+        public void FindRig()
+        {
+            if (_scanning) return;
+            if (_foundRigs.Count > 1 && Time.realtimeSinceStartup - _lastScanAt < 60f)
+            {
+                // A recent scan found several: step to the next instead of scanning again.
+                _foundIndex = (_foundIndex + 1) % _foundRigs.Count;
+                ShowFound();
+                return;
+            }
+
+            _scanning = true;
+            _foundRigs.Clear();
+            _foundIndex = 0;
+            _panel.SetFindRigState(true, 0f);
+            _panel.SetStatus("Leder efter riggen på netværket …", false);
+
+            int extraPort = 0;
+            if (Uri.TryCreate(_panel.RigAddressField, UriKind.Absolute, out var typed)) extraPort = typed.Port;
+
+            StartCoroutine(KalivRigDiscovery.Scan(extraPort,
+                p => _panel.SetFindRigState(true, p),
+                rig =>
+                {
+                    _foundRigs.Add(rig);
+                    if (_foundRigs.Count == 1) ShowFound();   // fill in the first at once
+                },
+                count =>
+                {
+                    _scanning = false;
+                    _lastScanAt = Time.realtimeSinceStartup;
+                    _panel.SetFindRigState(false, 0f);
+                    if (count == 0)
+                        _panel.SetStatus("Ingen rig fundet på netværket. Kører den, og er headsettet på samme Wi-Fi?", true);
+                    else
+                        ShowFound();
+                },
+                () => Paired));
+        }
+
+        private readonly List<KalivFoundRig> _foundRigs = new List<KalivFoundRig>();
+        private int _foundIndex;
+        private float _lastScanAt = -1000f;
+
+        private void ShowFound()
+        {
+            if (_foundRigs.Count == 0) return;
+            var rig = _foundRigs[_foundIndex];
+            _panel.SetRigAddress(rig.Url);
+            string version = rig.Version == null ? "" : $" (v{rig.Version})";
+            string more = _foundRigs.Count > 1
+                ? $" — {_foundIndex + 1} af {_foundRigs.Count}, tryk FIND RIG for den næste"
+                : "";
+            _panel.SetStatus($"Rig fundet: {rig.Url}{version}{more}. Indtast parringskoden.", false);
         }
 
         public void Pair(string baseUrl, string code)
@@ -177,7 +248,59 @@ namespace Kaliv.VR
                         ? "Riggen svarede, men rapporterede ingen modeller."
                         : $"Rig · {Model}", false);
                 },
-                error => _panel.SetStatus(Friendly(error), true)));
+                error =>
+                {
+                    // "(0)" is UnityWebRequest's "no HTTP answer at all": the address is dead,
+                    // not the pairing. The usual reason is that the router gave the rig a new IP.
+                    if (error != null && error.Contains("(0)")) { Relocate(); return; }
+                    _panel.SetStatus(Friendly(error), true);
+                }));
+        }
+
+        private bool _relocating;
+
+        /// <summary>
+        /// The rig cannot be reached at the saved address. Scan for it, and move to an address
+        /// where THIS headset's token is accepted — proof it is the same rig, not just any
+        /// ModelRig on the network. The token only ever goes to addresses that answered as a
+        /// ModelRig backend, and nothing changes unless that rig says yes to it.
+        /// </summary>
+        private void Relocate()
+        {
+            if (_relocating || !Paired) return;
+            _relocating = true;
+            string oldUrl = BaseUrl;
+            _panel.SetStatus("Riggen svarer ikke på sin gamle adresse — leder efter den …", false);
+
+            var candidates = new List<KalivFoundRig>();
+            int extraPort = Uri.TryCreate(oldUrl, UriKind.Absolute, out var u) ? u.Port : 0;
+            StartCoroutine(KalivRigDiscovery.Scan(extraPort, null, rig => candidates.Add(rig),
+                _ => StartCoroutine(TryCandidates(candidates, oldUrl))));
+        }
+
+        private IEnumerator TryCandidates(List<KalivFoundRig> candidates, string oldUrl)
+        {
+            foreach (var rig in candidates)
+            {
+                if (string.Equals(rig.Url, oldUrl, StringComparison.OrdinalIgnoreCase)) continue;
+                bool accepted = false;
+                yield return _client.ListModels(rig.Url, Token, _ => accepted = true, _ => { });
+                if (!accepted) continue;
+
+                BaseUrl = rig.Url;
+                PlayerPrefs.SetString(BaseUrlKey, BaseUrl);
+                PlayerPrefs.Save();
+                _relocating = false;
+                _panel.SetConnectionDefaults(BaseUrl, "");
+                _renderEngine.Connect(BaseUrl, Token);
+                _panel.SetStatus($"Riggen er flyttet til {BaseUrl} — forbundet igen.", false);
+                RefreshModels();
+                yield break;
+            }
+            _relocating = false;
+            _panel.SetStatus(candidates.Count == 0
+                ? "Riggen kan ikke nås, og den blev ikke fundet på netværket. Kører den?"
+                : "Der er en rig på netværket, men den kender ikke dette headset. Glem riggen og par igen.", true);
         }
 
         public void SelectModel(string model)
@@ -317,7 +440,13 @@ namespace Kaliv.VR
 
         private void OnDone() => FinishTurn(TurnEnd.Completed, null);
         private void OnStopped() => FinishTurn(TurnEnd.Stopped, null);
-        private void OnFailed(string error) => FinishTurn(TurnEnd.Failed, error);
+        private void OnFailed(string error)
+        {
+            FinishTurn(TurnEnd.Failed, error);
+            // No HTTP answer at all mid-conversation: the rig may have moved. PRØV IGEN then
+            // goes to the new address.
+            if (error != null && error.Contains("(0)")) Relocate();
+        }
 
         public void StopGeneration()
         {
