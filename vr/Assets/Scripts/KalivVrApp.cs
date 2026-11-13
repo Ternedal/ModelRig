@@ -14,7 +14,7 @@ namespace Kaliv.VR
     /// (KalivTurnPlan) and ends through one exit (FinishTurn), so the composer, the stop
     /// button, the history and the body can never be left half-finished.
     /// </summary>
-    public sealed class KalivVrApp : MonoBehaviour
+    public sealed partial class KalivVrApp : MonoBehaviour
     {
         private const string BaseUrlKey = "kaliv.vr.rig_url";
         private const string TokenKey = "kaliv.vr.rig_token";
@@ -22,6 +22,7 @@ namespace Kaliv.VR
         private const string RagKey = "kaliv.vr.mode.rag";
         private const string ToolsKey = "kaliv.vr.mode.tools";
         private const string RagSourceKey = "kaliv.vr.mode.rag_source";
+        private const string DeviceIdKey = "kaliv.vr.device_id";
         private const string ConversationFile = "kaliv-vr-conversation.json";
 
         private ModelRigVrClient _client;
@@ -48,6 +49,8 @@ namespace Kaliv.VR
         public string BaseUrl { get; private set; }
         public string Token { get; private set; }
         public string Model { get; private set; }
+        /// <summary>This headset's id on the rig, from pairing. Null for pairings made before it was kept.</summary>
+        public string DeviceId { get; private set; }
         public bool RagMode { get; private set; }
         public bool ToolsMode { get; private set; }
         /// <summary>Narrow VIDEN to one source; null searches all. Android's ragSourceFilter.</summary>
@@ -70,6 +73,8 @@ namespace Kaliv.VR
             BaseUrl = PlayerPrefs.GetString(BaseUrlKey, "http://192.168.1.10:8080");
             Token = PlayerPrefs.GetString(TokenKey, "");
             Model = PlayerPrefs.GetString(ModelKey, "");
+            DeviceId = PlayerPrefs.GetString(DeviceIdKey, "");
+            if (string.IsNullOrWhiteSpace(DeviceId)) DeviceId = null;
             RagMode = PlayerPrefs.GetInt(RagKey, 0) == 1;
             ToolsMode = PlayerPrefs.GetInt(ToolsKey, 0) == 1;
             RagSource = PlayerPrefs.GetString(RagSourceKey, "");
@@ -127,8 +132,10 @@ namespace Kaliv.VR
                 {
                     BaseUrl = baseUrl.Trim().TrimEnd('/');
                     Token = response.token.Trim();
+                    DeviceId = string.IsNullOrWhiteSpace(response.device_id) ? null : response.device_id.Trim();
                     PlayerPrefs.SetString(BaseUrlKey, BaseUrl);
                     PlayerPrefs.SetString(TokenKey, Token);
+                    PlayerPrefs.SetString(DeviceIdKey, DeviceId ?? "");
                     PlayerPrefs.Save();
 
                     _panel.SetBusy(false);
@@ -200,127 +207,6 @@ namespace Kaliv.VR
             PlayerPrefs.SetInt(ToolsKey, ToolsMode ? 1 : 0);
             PlayerPrefs.Save();
             _panel.SetModes(RagMode, ToolsMode, RagSource);
-        }
-
-        // =====================================================================================
-        // RIG overlay: document sources and the tool registry
-        // =====================================================================================
-
-        private bool _rigOnTools;
-
-        public void OpenRig()
-        {
-            if (!Paired) return;
-            _panel.ShowRig(true);
-            if (_rigOnTools) RigShowTools(); else RigShowSources();
-        }
-
-        public void RigShowSources()
-        {
-            _rigOnTools = false;
-            _panel.SetRigTab(true);
-            _panel.SetRigStatus("Henter kilder …", false);
-            StartCoroutine(_client.RagSources(BaseUrl, Token, RenderSources,
-                error => _panel.SetRigStatus(Friendly(error), true)));
-        }
-
-        private void RenderSources(List<KalivRagSource> sources)
-        {
-            var rows = new List<KalivVrPanel.RigRow>
-            {
-                new KalivVrPanel.RigRow
-                {
-                    Label = "ALLE KILDER",
-                    Selected = RagSource == null,
-                    OnMain = () => { SetRagSource(null); RenderSources(sources); },
-                },
-            };
-            bool filterStillExists = RagSource == null;
-            foreach (var s in sources)
-            {
-                var src = s;
-                if (src.Name == RagSource) filterStillExists = true;
-                rows.Add(new KalivVrPanel.RigRow
-                {
-                    Label = $"{src.Name}  ·  {src.Chunks} udsnit",
-                    Selected = src.Name == RagSource,
-                    Toggle = src.Enabled ? "HENTES" : "SLUKKET",
-                    ToggleOn = src.Enabled,
-                    OnMain = () => { SetRagSource(src.Name); RenderSources(sources); },
-                    OnToggle = () => ToggleSource(src, sources),
-                });
-            }
-            // A filter on a source that has since been deleted would silently find nothing.
-            if (!filterStillExists) SetRagSource(null);
-
-            _panel.SetRigRows(rows, keepPage: true);
-            _panel.SetRigStatus(sources.Count == 0
-                ? "Riggen har ingen dokumenter endnu. De tilføjes fra telefonen eller desktop."
-                : "Vælg hvad VIDEN søger i. HENTES/SLUKKET styrer om riggen må bruge kilden — intet slettes.", false);
-        }
-
-        private void ToggleSource(KalivRagSource src, List<KalivRagSource> sources)
-        {
-            _panel.SetRigStatus($"{(src.Enabled ? "Slukker" : "Tænder")} {src.Name} …", false);
-            StartCoroutine(_client.SetRagSourceEnabled(BaseUrl, Token, src.Name, !src.Enabled,
-                enabled => { src.Enabled = enabled; RenderSources(sources); },   // the rig's word, not ours
-                error => _panel.SetRigStatus(Friendly(error), true)));
-        }
-
-        private void SetRagSource(string source)
-        {
-            RagSource = source;
-            PlayerPrefs.SetString(RagSourceKey, source ?? "");
-            PlayerPrefs.Save();
-            _panel.SetModes(RagMode, ToolsMode, RagSource);
-        }
-
-        public void RigShowTools()
-        {
-            _rigOnTools = true;
-            _panel.SetRigTab(false);
-            _panel.SetRigStatus("Henter værktøjer …", false);
-            StartCoroutine(_client.ToolsList(BaseUrl, Token, RenderTools,
-                error => _panel.SetRigStatus(Friendly(error), true)));
-        }
-
-        private void RenderTools(KalivToolRegistry reg)
-        {
-            var rows = new List<KalivVrPanel.RigRow>
-            {
-                new KalivVrPanel.RigRow
-                {
-                    Label = "VÆRKTØJSLAGET (alle værktøjer)",
-                    Toggle = reg.Enabled ? "TÆNDT" : "SLUKKET",
-                    ToggleOn = reg.Enabled,
-                    OnToggle = () => SetTools(!reg.Enabled, null),
-                },
-            };
-            foreach (var t in reg.Tools)
-            {
-                var tool = t;
-                string risk = string.IsNullOrEmpty(tool.Risk) ? "" : $"  ·  {tool.Risk}";
-                rows.Add(new KalivVrPanel.RigRow
-                {
-                    Label = tool.Name + risk,
-                    Toggle = tool.Enabled ? "TÆNDT" : "SLUKKET",
-                    ToggleOn = tool.Enabled,
-                    OnMain = () => _panel.SetRigStatus(
-                        string.IsNullOrWhiteSpace(tool.Description) ? tool.Name : tool.Description, false),
-                    OnToggle = () => SetTools(!tool.Enabled, tool.Name),
-                });
-            }
-            _panel.SetRigRows(rows, keepPage: true);
-            _panel.SetRigStatus(reg.Enabled
-                ? "Riggens egen nødbremse: sluk et værktøj, eller hele laget. Et slukket værktøj fortælles ikke engang til modellen."
-                : "Værktøjslaget er slukket på riggen — VÆRKTØJER-ture bliver afvist, indtil det tændes.", false);
-        }
-
-        private void SetTools(bool enabled, string tool)
-        {
-            _panel.SetRigStatus(enabled ? "Tænder …" : "Slukker …", false);
-            StartCoroutine(_client.SetToolsEnabled(BaseUrl, Token, enabled, tool, RenderTools,
-                error => _panel.SetRigStatus(Friendly(error), true)));
         }
 
         // =====================================================================================
@@ -912,6 +798,8 @@ namespace Kaliv.VR
             StopGeneration();
             _voice.CancelRecording();
             _voice.StopSpeaking();
+            _cancelPull?.Invoke();
+            _cancelPull = null;
             CloseMedia();
             _pendingConfirmation = null;
             _panel.HideConfirmation();
@@ -924,6 +812,8 @@ namespace Kaliv.VR
             PlayerPrefs.DeleteKey(BaseUrlKey);
             PlayerPrefs.DeleteKey(TokenKey);
             PlayerPrefs.DeleteKey(ModelKey);
+            PlayerPrefs.DeleteKey(DeviceIdKey);
+            DeviceId = null;
             PlayerPrefs.Save();
 
             _renderEngine?.Disconnect();

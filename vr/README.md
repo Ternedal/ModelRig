@@ -48,7 +48,15 @@ The landed first-party VR slice provides:
 - a media browser for `kaliv-media-gallery/v1` with a transport strip (play/pause, ±10 s, format, recenter), SkyPlayer's stick mapping for video, and images on a floating plane
 - BodyRig's `screen` attention target resolves to the panel, or to the open video or image
 - an in-headset Danish keyboard for every text field — Quest shows no system keyboard for an app without the Meta XR SDK's overlay-keyboard feature
-- a RIG overlay: pick which document source VIDEN searches, switch sources on/off, and the tool registry's per-tool and layer-wide kill switch
+- a RIG overlay with the rig surfaces the Android app has screens for:
+  - **KILDER** — choose what VIDEN searches, switch sources on/off, delete a source (two presses), add a typed note to the documents
+  - **VÆRKTØJER** — the registry's per-tool and layer-wide kill switch
+  - **PERSONER** — choose who Kaliv is (body, voice and personality switch together; the avatar reloads by itself)
+  - **MODELLER** — pick the chat model, download one with live progress (verified on the shelf afterwards), delete one (two presses)
+  - **STATUS** — GPU, temperature, VRAM, CPU and uptime as the rig measures them, and FRIGØR to unload every model
+  - **ENHEDER** — paired devices, with revoke (two presses; revoking this headset forgets the rig)
+  - **PLANER** — scheduled tool runs, pause/resume
+  - **LOG** — the tool audit log, read-only
 - a capability gate on TAL from `/api/v1/health/full`, so a rig without ASR/TTS says so before you speak
 - SkyPlayer-Engine dependency pinned to an exact revision
 - Quest/Android build script using IL2CPP + ARM64 + GLES3
@@ -61,13 +69,16 @@ The landed first-party VR slice provides:
 - Kaliv-owned media facade over SkyPlayer-Engine with flat/VR180/VR360 projection bound to `KalivMedia`
 - tracking-origin compensation propagated into immersive media orientation
 
-The implementation is not yet a physically qualified finished VR product. Everything above compiles for Android and its protocol logic is covered by 73 EditMode tests, but the headset paths — the keyboard, microphone capture, spatial audio, the confirmation card, the media cache — have **not yet been exercised on a Quest**, and Quest device evidence remains its own gate.
+The implementation is not yet a physically qualified finished VR product. Everything above compiles for Android and its protocol logic is covered by 85 EditMode tests, but the headset paths — the keyboard, microphone capture, spatial audio, the confirmation card, the media cache — have **not yet been exercised on a Quest**, and Quest device evidence remains its own gate.
 
 Known gaps against Android/Desktop:
 
 - **Media has nothing to show yet.** The rig does not implement `/api/v1/media`; the browser says so. When it does, videos are fetched to a local cache with the Bearer header and played from `file://`, because SkyPlayer-Engine opens URLs through `MediaItem.fromUri` and cannot send headers. Flat top/bottom and 360° top/bottom are refused: the engine has no hint for them.
 - **No cloud path.** Android can route a turn through a cloud model with a key; the headset is rig-only by design.
-- **No ingest or source deletion** — VR can choose and switch sources, but documents are added from the phone or desktop.
+- **File ingest** (PDF, DOCX, PPTX, HTML, images) stays on the phone and desktop — the headset has no file picker. Typed notes can be added from VR.
+- **Creating schedules** happens through Kaliv (tools) or the phone, where the approval flow lives; VR lists, pauses and resumes them.
+- **Agent 3 / Agent 4** operator surfaces, the GitHub connector and privacy settings in the Control Center are not ported: they are experimental or administrative, behind their own validation gates.
+- **QR pairing and attaching a photo to a message** need the camera, which Quest does not expose to apps without the Meta XR SDK.
 - **`world:<x,y,z>` attention targets are not resolved.** The protocol does not say which coordinate frame they are in, and the renderer's rule is not to guess.
 - **180°/360° images are shown flat**, one eye's view; a sphere would need the engine's video projection path. WebP images cannot be decoded (Unity reads PNG and JPEG only).
 

@@ -303,6 +303,193 @@ namespace Kaliv.VR
                 (status, msg) => fail?.Invoke(msg));
         }
 
+        /// <summary>
+        /// Remove every excerpt of a source. Irreversible on the rig — the caller confirms first.
+        /// A 404 means the source had nothing to delete; that is reported, not swallowed.
+        /// </summary>
+        public IEnumerator DeleteRagSource(string baseUrl, string token, string source,
+                                           Action<int> ok, Action<string> fail)
+        {
+            yield return JsonRequest("DELETE",
+                Normalize(baseUrl) + "/api/v1/rag/source?source=" + UnityWebRequest.EscapeURL(source), null, token,
+                text => ok?.Invoke(KalivJson.Int(KalivJson.TryParseObject(text), "removed")),
+                (status, msg) => fail?.Invoke(msg));
+        }
+
+        /// <summary>Add a typed note to the document index — the same /rag/ingest the phone uses for text.</summary>
+        public IEnumerator IngestText(string baseUrl, string token, string source, string text,
+                                      Action<int> ok, Action<string> fail)
+        {
+            string body = KalivJson.Serialize(new Dictionary<string, object>
+            {
+                ["documents"] = new List<object>
+                {
+                    new Dictionary<string, object> { ["text"] = text, ["source"] = source },
+                },
+                ["chunk_size"] = 800L,
+                ["overlap"] = 150L,
+            });
+            yield return JsonRequest("POST", Normalize(baseUrl) + "/api/v1/rag/ingest", body, token,
+                t => ok?.Invoke(KalivJson.Int(KalivJson.TryParseObject(t), "chunks_added")),
+                (status, msg) => fail?.Invoke(msg),
+                timeoutSeconds: 300);
+        }
+
+        // ---- persons (#752) -------------------------------------------------------------------
+
+        public IEnumerator Persons(string baseUrl, string token, Action<KalivPersons> ok, Action<int, string> fail)
+        {
+            yield return JsonRequest("GET", Normalize(baseUrl) + "/api/v1/persons", null, token,
+                text => ok?.Invoke(KalivRigInfo.ParsePersons(text)), fail);
+        }
+
+        /// <summary>
+        /// Choose who Kaliv is. The rig switches body, voice and personality together; the VR
+        /// body watcher sees the new revision and reloads the avatar by itself.
+        /// </summary>
+        public IEnumerator SelectPerson(string baseUrl, string token, string personId,
+                                        Action<KalivPerson> ok, Action<string> fail)
+        {
+            string body = KalivJson.Serialize(new Dictionary<string, object> { ["person_id"] = personId });
+            yield return JsonRequest("POST", Normalize(baseUrl) + "/api/v1/persons/select", body, token,
+                text => ok?.Invoke(KalivRigInfo.ParsePerson(KalivJson.TryParseObject(text))),
+                (status, msg) => fail?.Invoke(msg));
+        }
+
+        // ---- models & system ------------------------------------------------------------------
+
+        public IEnumerator ModelsDetailed(string baseUrl, string token, Action<List<KalivModel>> ok, Action<string> fail)
+        {
+            yield return JsonRequest("GET", Normalize(baseUrl) + "/api/v1/models", null, token,
+                text => ok?.Invoke(KalivRigInfo.ParseModels(text)), (s, m) => fail?.Invoke(m));
+        }
+
+        public IEnumerator RunningModels(string baseUrl, string token, Action<List<KalivModel>> ok, Action<string> fail)
+        {
+            yield return JsonRequest("GET", Normalize(baseUrl) + "/api/v1/models/running", null, token,
+                text => ok?.Invoke(KalivRigInfo.ParseModels(text)), (s, m) => fail?.Invoke(m));
+        }
+
+        public IEnumerator SystemStatus(string baseUrl, string token, Action<KalivSystemStatus> ok, Action<int, string> fail)
+        {
+            yield return JsonRequest("GET", Normalize(baseUrl) + "/api/v1/system/status", null, token,
+                text => ok?.Invoke(KalivRigInfo.ParseSystemStatus(text)), fail, timeoutSeconds: 15);
+        }
+
+        /// <summary>Ask the rig to let go of every loaded model (keep_alive=0). Nothing restarts.</summary>
+        public IEnumerator UnloadModels(string baseUrl, string token, Action<KalivUnloadResult> ok, Action<int, string> fail)
+        {
+            yield return JsonRequest("POST", Normalize(baseUrl) + "/api/v1/models/unload", "{}", token,
+                text => ok?.Invoke(KalivRigInfo.ParseUnload(text)), fail, timeoutSeconds: 60);
+        }
+
+        /// <summary>Irreversible on the rig — the caller confirms first.</summary>
+        public IEnumerator DeleteModel(string baseUrl, string token, string name, Action ok, Action<string> fail)
+        {
+            string body = KalivJson.Serialize(new Dictionary<string, object> { ["model"] = name });
+            yield return JsonRequest("DELETE", Normalize(baseUrl) + "/api/v1/models/delete", body, token,
+                _ => ok?.Invoke(), (s, m) => fail?.Invoke(m));
+        }
+
+        /// <summary>
+        /// Download a model, with Ollama's progress relayed per line. Success needs BOTH the
+        /// final {"status":"success"} AND the model appearing in the installed list — a stream
+        /// that simply ends is a dropped connection, not a finished download.
+        /// </summary>
+        public IEnumerator PullModel(string baseUrl, string token, string name,
+                                     Action<KalivPullProgress> onProgress, Action ok, Action onStopped,
+                                     Action<string> fail, Action<Action> registerCancel = null)
+        {
+            bool sawSuccess = false;
+            string error = null;
+            void OnLine(string line)
+            {
+                if (error != null) return;
+                if (!KalivRigInfo.TryParsePull(line, out var p)) return;
+                if (p.Error != null) { error = p.Error; return; }
+                if (p.IsSuccess) sawSuccess = true;
+                onProgress?.Invoke(p);
+            }
+
+            bool streamOk = false;
+            yield return NdjsonPost(Normalize(baseUrl) + "/api/v1/models/pull", token,
+                KalivJson.Serialize(new Dictionary<string, object> { ["model"] = name }), OnLine,
+                onStopped: onStopped,
+                onHttpFail: (s, m) => fail?.Invoke(m),
+                onComplete: () => streamOk = true,
+                registerCancel: registerCancel);
+            if (!streamOk) yield break;
+
+            if (error != null) { fail?.Invoke("hentning fejlede: " + error); yield break; }
+            if (!sawSuccess)
+            {
+                fail?.Invoke("download-strømmen sluttede uden Ollamas 'success' — hentningen er IKKE fuldført. Prøv igen.");
+                yield break;
+            }
+
+            // Trust, but check the shelf.
+            List<string> installed = null;
+            string verifyError = null;
+            yield return ListModels(baseUrl, token, l => installed = l, e => verifyError = e);
+            if (installed == null) { fail?.Invoke("hentningen meldte succes, men kunne ikke verificeres: " + verifyError); yield break; }
+            if (!KalivRigInfo.IsInstalled(installed, name))
+            {
+                fail?.Invoke($"hentningen meldte succes, men {name} findes ikke i modeloversigten — tjek riggen");
+                yield break;
+            }
+            ok?.Invoke();
+        }
+
+        // ---- devices ------------------------------------------------------------------------
+
+        public IEnumerator Devices(string baseUrl, string token, Action<List<KalivDevice>> ok, Action<string> fail)
+        {
+            yield return JsonRequest("GET", Normalize(baseUrl) + "/api/v1/devices", null, token,
+                text => ok?.Invoke(KalivRigInfo.ParseDevices(text)), (s, m) => fail?.Invoke(m));
+        }
+
+        /// <summary>
+        /// Revoke a device. The rig looks devices up live on EVERY call, so the token stops
+        /// working immediately — including this headset's own, if that is the one revoked.
+        /// </summary>
+        public IEnumerator RevokeDevice(string baseUrl, string token, string deviceId, Action ok, Action<string> fail)
+        {
+            yield return JsonRequest("DELETE",
+                Normalize(baseUrl) + "/api/v1/devices/" + Seg(deviceId), null, token,
+                _ => ok?.Invoke(), (s, m) => fail?.Invoke(m));
+        }
+
+        // ---- audit & schedules --------------------------------------------------------------
+
+        public IEnumerator ToolsAudit(string baseUrl, string token, Action<List<KalivAuditEntry>> ok, Action<string> fail)
+        {
+            yield return JsonRequest("GET", Normalize(baseUrl) + "/api/v1/tools/audit?limit=50", null, token,
+                text => ok?.Invoke(KalivRigInfo.ParseAudit(text)), (s, m) => fail?.Invoke(m));
+        }
+
+        public IEnumerator ScheduleStatus(string baseUrl, string token, Action<KalivScheduleStatus> ok, Action<int, string> fail)
+        {
+            yield return JsonRequest("GET", Normalize(baseUrl) + "/api/v1/schedules/status", null, token,
+                text => ok?.Invoke(KalivRigInfo.ParseScheduleStatus(text)), fail);
+        }
+
+        public IEnumerator Schedules(string baseUrl, string token, Action<List<KalivSchedule>> ok, Action<int, string> fail)
+        {
+            yield return JsonRequest("GET", Normalize(baseUrl) + "/api/v1/schedules", null, token,
+                text => ok?.Invoke(KalivRigInfo.ParseSchedules(text)), fail);
+        }
+
+        /// <summary>Pause or resume a schedule. Returns the rig's record afterwards.</summary>
+        public IEnumerator SetScheduleEnabled(string baseUrl, string token, string scheduleId, bool enabled,
+                                              Action<KalivSchedule> ok, Action<string> fail)
+        {
+            string body = KalivJson.Serialize(new Dictionary<string, object> { ["enabled"] = enabled });
+            yield return JsonRequest("POST",
+                Normalize(baseUrl) + "/api/v1/schedules/" + Seg(scheduleId) + "/enabled", body, token,
+                text => ok?.Invoke(KalivRigInfo.ParseSchedule(KalivJson.Obj(KalivJson.TryParseObject(text), "schedule"))),
+                (s, m) => fail?.Invoke(m));
+        }
+
         // ---- voice --------------------------------------------------------------------------
 
         /// <summary>
@@ -424,8 +611,7 @@ namespace Kaliv.VR
                                             Action<bool> onResult)
         {
             if (string.IsNullOrWhiteSpace(utteranceId)) yield break;
-            string url = Normalize(baseUrl) + "/api/v1/body/speech/" +
-                         UnityWebRequest.EscapeURL(utteranceId) + "/" + ev;
+            string url = Normalize(baseUrl) + "/api/v1/body/speech/" + Seg(utteranceId) + "/" + ev;
             using var req = new UnityWebRequest(url, "POST");
             req.uploadHandler = new UploadHandlerRaw(new byte[0]);
             req.downloadHandler = new DownloadHandlerBuffer();
@@ -713,6 +899,13 @@ namespace Kaliv.VR
             int q = path.IndexOf('?');
             return q < 0 ? path : path.Substring(0, q);
         }
+
+        /// <summary>
+        /// Encode ONE path segment. A malformed id must not change which endpoint is hit —
+        /// "a/../b" or a space-as-'+' would. UnityWebRequest.EscapeURL is form encoding and
+        /// turns spaces into '+', which is wrong inside a path; EscapeDataString is not.
+        /// </summary>
+        public static string Seg(string value) => Uri.EscapeDataString(value ?? "");
 
         private static string Normalize(string baseUrl)
         {

@@ -229,6 +229,7 @@ namespace Kaliv.VR
             if (!field.transform.IsChildOf(_canvas.transform)) return false;   // not ours
 
             _kbTarget = field;
+            _kbCallback = null;
             bool prompt = field == _prompt;
             int max = field == _code ? 32 : field == _url ? 200 : 2000;
             _kb = new KalivKeyboardModel(field.text, max, capitalizeFirst: prompt);
@@ -284,15 +285,38 @@ namespace Kaliv.VR
             _kbPreview.text = _kb.Text + "|";
         }
 
+        private Action<string> _kbCallback;
+
+        /// <summary>
+        /// Ask for free text — a model name to download, a note to add to the documents.
+        /// Same keyboard as the fields; the result goes to <paramref name="onOk"/> instead.
+        /// </summary>
+        public void RequestText(string title, string initial, int maxLength, string okLabel, Action<string> onOk)
+        {
+            if (_keyboardGroup == null) return;
+            _kbTarget = null;
+            _kbCallback = onOk;
+            _kb = new KalivKeyboardModel(initial, maxLength);
+            _kbTitle.text = title;
+            _kbOkLabel.text = okLabel;
+            _keyboardOpen = true;
+            RefreshGroups();
+            _keyboardGroup.transform.SetAsLastSibling();
+            RefreshKeyboard();
+        }
+
         private void CloseKeyboard(bool commit)
         {
             var target = _kbTarget;
+            var callback = _kbCallback;
             string text = _kb?.Text ?? "";
             _kbTarget = null;
+            _kbCallback = null;
             _kb = null;
             _keyboardOpen = false;
             RefreshGroups();
 
+            if (commit && callback != null) { callback(text); return; }
             if (!commit || target == null) return;
             if (target == _prompt)
             {
@@ -321,7 +345,9 @@ namespace Kaliv.VR
         private GameObject _rigGroup;
         private bool _rigOpen;
         private Text _rigStatus;
-        private Image _rigTabSources, _rigTabTools;
+        public static readonly string[] RigTabs =
+            { "KILDER", "VÆRKTØJER", "PERSONER", "MODELLER", "STATUS", "ENHEDER", "PLANER", "LOG" };
+        private readonly List<Image> _rigTabImages = new();
         private readonly List<(Button main, Text mainText, Button toggle, Text toggleText)> _rigRowUi = new();
         private Button _rigMore;
         private List<RigRow> _rigRows = new();
@@ -332,14 +358,18 @@ namespace Kaliv.VR
         {
             _rigGroup = Group("RigOverlay", _canvas.transform);
             AddImage(_rigGroup.transform, "Backdrop", new Vector2(1200, 760), Vector2.zero, CanvasBg);
-            AddText(_rigGroup.transform, "RIG", 18, Accent, TextAnchor.MiddleLeft,
-                new Vector2(300, 40), new Vector2(-390, 330), FontStyle.Bold);
-            var tabS = AddButton(_rigGroup.transform, "KILDER", new Vector2(200, 48), new Vector2(120, 330),
-                Elevated, () => _app.RigShowSources());
-            _rigTabSources = tabS.GetComponent<Image>();
-            var tabT = AddButton(_rigGroup.transform, "VÆRKTØJER", new Vector2(220, 48), new Vector2(340, 330),
-                Elevated, () => _app.RigShowTools());
-            _rigTabTools = tabT.GetComponent<Image>();
+            // One tab per rig surface Android has a screen for, in the order you reach for them.
+            const float tabW = 134f, tabGap = 6f;
+            float tabsWidth = RigTabs.Length * (tabW + tabGap) - tabGap;
+            for (int i = 0; i < RigTabs.Length; i++)
+            {
+                int tab = i;
+                var b = AddButton(_rigGroup.transform, RigTabs[i], new Vector2(tabW, 48),
+                    new Vector2(-tabsWidth / 2f + tabW / 2f + i * (tabW + tabGap), 330),
+                    Elevated, () => _app.RigShowTab(tab));
+                b.GetComponentInChildren<Text>().fontSize = 13;
+                _rigTabImages.Add(b.GetComponent<Image>());
+            }
 
             _rigStatus = AddText(_rigGroup.transform, "", 15, Muted, TextAnchor.MiddleLeft,
                 new Vector2(1080, 44), new Vector2(0, 278));
@@ -376,10 +406,10 @@ namespace Kaliv.VR
             if (show) _rigGroup.transform.SetAsLastSibling();
         }
 
-        public void SetRigTab(bool sources)
+        public void SetRigTab(int tab)
         {
-            if (_rigTabSources != null) _rigTabSources.color = sources ? Accent : Elevated;
-            if (_rigTabTools != null) _rigTabTools.color = sources ? Elevated : Accent;
+            for (int i = 0; i < _rigTabImages.Count; i++)
+                _rigTabImages[i].color = i == tab ? Accent : Elevated;
         }
 
         public void SetRigStatus(string text, bool error)
