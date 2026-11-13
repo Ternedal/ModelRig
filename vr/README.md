@@ -45,8 +45,11 @@ The landed first-party VR slice provides:
 - tools (VÆRKTØJER): `POST /api/v1/tools/chat/stream`, with a confirmation card for proposals and `POST /api/v1/tools/confirm`
 - voice: tap-to-talk → `POST /api/v1/voice/converse/stream`, sentence audio played in order from Kaliv's body, with `/api/v1/body/speech/{id}/started|ended` so the rig's mouth follows playback
 - a persistent conversation (survives restart), PRØV IGEN and NY SAMTALE, with Android's history rules
-- a media browser for `kaliv-media-gallery/v1` with a transport strip (play/pause, ±10 s, format, recenter)
-- BodyRig's `screen` attention target resolves to the panel, or to the open video
+- a media browser for `kaliv-media-gallery/v1` with a transport strip (play/pause, ±10 s, format, recenter), SkyPlayer's stick mapping for video, and images on a floating plane
+- BodyRig's `screen` attention target resolves to the panel, or to the open video or image
+- an in-headset Danish keyboard for every text field — Quest shows no system keyboard for an app without the Meta XR SDK's overlay-keyboard feature
+- a RIG overlay: pick which document source VIDEN searches, switch sources on/off, and the tool registry's per-tool and layer-wide kill switch
+- a capability gate on TAL from `/api/v1/health/full`, so a rig without ASR/TTS says so before you speak
 - SkyPlayer-Engine dependency pinned to an exact revision
 - Quest/Android build script using IL2CPP + ARM64 + GLES3
 - BodyRig VRM avatar loading with body/package/member-digest binding
@@ -58,15 +61,15 @@ The landed first-party VR slice provides:
 - Kaliv-owned media facade over SkyPlayer-Engine with flat/VR180/VR360 projection bound to `KalivMedia`
 - tracking-origin compensation propagated into immersive media orientation
 
-The implementation is not yet a physically qualified finished VR product. Everything above compiles and its protocol logic is covered by EditMode tests, but the headset paths — microphone capture, spatial audio, the confirmation card, the media cache — have **not yet been exercised on a Quest**, and Quest device evidence remains its own gate.
+The implementation is not yet a physically qualified finished VR product. Everything above compiles for Android and its protocol logic is covered by 73 EditMode tests, but the headset paths — the keyboard, microphone capture, spatial audio, the confirmation card, the media cache — have **not yet been exercised on a Quest**, and Quest device evidence remains its own gate.
 
 Known gaps against Android/Desktop:
 
 - **Media has nothing to show yet.** The rig does not implement `/api/v1/media`; the browser says so. When it does, videos are fetched to a local cache with the Bearer header and played from `file://`, because SkyPlayer-Engine opens URLs through `MediaItem.fromUri` and cannot send headers. Flat top/bottom and 360° top/bottom are refused: the engine has no hint for them.
 - **No cloud path.** Android can route a turn through a cloud model with a key; the headset is rig-only by design.
-- **No RAG source filter, ingest or source management** — VR reads documents, it does not manage them.
+- **No ingest or source deletion** — VR can choose and switch sources, but documents are added from the phone or desktop.
 - **`world:<x,y,z>` attention targets are not resolved.** The protocol does not say which coordinate frame they are in, and the renderer's rule is not to guess.
-- **Images in the gallery are listed but not displayed.**
+- **180°/360° images are shown flat**, one eye's view; a sphere would need the engine's video projection path. WebP images cannot be decoded (Unity reads PNG and JPEG only).
 
 ## The stream contract
 
