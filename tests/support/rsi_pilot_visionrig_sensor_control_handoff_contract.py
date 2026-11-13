@@ -81,7 +81,11 @@ def run_contract() -> None:
     assert "decoder.DisallowUnknownFields()" in control
     assert 'map[string]bool{"enabled": *input.Enabled}' in control
     assert "ip.IsLoopback()" in control
-    assert 'result["schema"] != visionRigSensorMetadataSchema' in control
+    # The answer's schema is checked against exactly VisionRig's v1 and v2 metadata schemas.
+    assert '!knownVisionRigSensorMetadataSchema(result["schema"])' in control
+    assert '"visionrig/sensor-metadata/v1": true,' in control
+    assert '"visionrig/sensor-metadata/v2": true,' in control
+    assert control.count('"visionrig/sensor-metadata/') == 2
     assert 'metadata["source_id"] != sourceID' in control
     assert 'metadata["enabled"] != *input.Enabled' in control
 
