@@ -101,6 +101,9 @@ class DeliveryReportTests(unittest.TestCase):
         self.assertIsNone(result["open_issues"])
         self.assertEqual(result["workflow"], "unknown")
         self.assertTrue(result["warnings"])
+        # The code, not just the type: 403 (rate limit or scope) and 404 (no access) need
+        # different operator action (#2275 item 24).
+        self.assertIn("github_api_error:HTTP403", result["warnings"])
 
     def test_empty_workflows_are_partial_not_success(self):
         def opener(request, timeout):
