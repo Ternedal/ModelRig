@@ -20,6 +20,35 @@ ARTIFACT_TYPES: Mapping[str, str] = {"image/png": ".png", "video/mp4": ".mp4"}
 
 MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
 
+MAX_FILE_NAME = 255  # UTF-16 code units: NTFS's limit for one name (ext4's is 255 UTF-8 bytes)
+
+# Characters Win32 refuses in a file name, besides control characters.
+_WINDOWS_FORBIDDEN = frozenset('<>:"/\\|?*')
+# Names Win32 resolves to a device rather than a file, also with any extension ("CON.mp4") and
+# in any case. The superscript digits are reserved too.
+_WINDOWS_DEVICES = frozenset({"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+                             | {f"{p}{d}" for p in ("COM", "LPT") for d in "0123456789¹²³"})
+
+
+def is_plain_file_name(name: object) -> bool:
+    """A file name directly inside one directory. This one rule is used wherever such a name is
+    accepted: the video adapter's output and the hand-off receipt that records it, so a render the
+    adapter accepts is never lost to a receipt that refuses its name (Codex #2357 4504060850).
+
+    A str of 1-255 UTF-16 code units, not "." or "..", with no control character, no unpaired
+    surrogate (SQLite cannot store one) and nothing Win32 would read as other than this one name in
+    this one directory (ChatGPT #2357 6716735710): no `< > : " / \\ | ? *`, no trailing space or
+    dot (Win32 strips them, so "x.mp4." opens "x.mp4"), and no device name (CON, NUL, COM1, ...).
+    Spaces and any other Unicode are fine: a workflow may name its output "rød drage.mp4"."""
+    if type(name) is not str or not name or name in (".", "..") or name[-1] in " .":
+        return False
+    if any(c in _WINDOWS_FORBIDDEN or ord(c) < 0x20 or 0x7f <= ord(c) <= 0x9f or 0xd800 <= ord(c) <= 0xdfff
+           for c in name):
+        return False
+    if len(name.encode("utf-16-le")) // 2 > MAX_FILE_NAME:
+        return False
+    return name.split(".", 1)[0].rstrip(" ").upper() not in _WINDOWS_DEVICES
+
 
 class GenerationError(ValueError):
     """A request or artifact was refused. The message never contains a prompt."""
@@ -94,6 +123,10 @@ class StagedFileArtifactSink(Protocol):
 
     Required by the seam (tests/support/staged_sink_conformance.py checks them):
     - staged() hands out a writable binary handle; the generator never sees a path.
+    - The handle may offer sync(): fsync of what was written, without a path or
+      descriptor. A generator that removes its own copy of the media (the work
+      area on the internal disk; Anders, 6 Nov 2026) calls it first, so the copy
+      is durable on the volume before its source goes.
     - adopt() accepts only a live handle this sink issued, only "video/mp4",
       only within the size bound, flushes/fsyncs and atomically promotes it,
       and returns an asset id only after durable registration.
@@ -130,13 +163,27 @@ class JobKeyedStagedSink(Protocol):
 
 @runtime_checkable
 class VerifiedMediaVolume(Protocol):
-    """The external-media mount check (ChatGPT implements it; #2316 review 5700997784).
+    """The external-media mount check (#2316 review 5700997784; production: media_volume, G1).
 
     require(path) returns only if path lies on the verified, currently mounted
-    external media volume, and raises ArtifactSinkUnavailable otherwise. Every
-    directory that ever holds generated media -- including ComfyUI's own
-    input/output/temp/user scratch -- must pass it: media never lands on the
-    internal disk, not even transiently.
+    external media volume, and raises ArtifactSinkUnavailable otherwise. This is
+    where media is PUBLISHED: the gallery and every staged file. Generation
+    happens in the MediaWorkArea below (Anders, 6 Nov 2026, #2275).
+    """
+
+    def require(self, path: str) -> None: ...
+
+
+@runtime_checkable
+class MediaWorkArea(Protocol):
+    """Where media is GENERATED: a private folder on the internal disk (Anders, 6 Nov 2026, #2275).
+
+    require(path) returns only if path lies in the verified private work area,
+    and raises ArtifactSinkUnavailable otherwise. ComfyUI's input/output/temp/user
+    folders and the staged source image must pass it. Finished media leaves it
+    only by being copied into a staged file on the VerifiedMediaVolume, checked
+    and published there in one atomic step; then the copy here is removed.
+    Production: media_work_area.PrivateWorkArea.
     """
 
     def require(self, path: str) -> None: ...

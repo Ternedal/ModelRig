@@ -1,0 +1,15 @@
+{
+  "schema": "kaliv-media-server-source-transition/v1",
+  "repository": "Ternedal/ModelRig",
+  "purpose": "Mount paired-device-authenticated media gallery endpoints; catalog adapter remains fail-closed until verified",
+  "tracked_source_transition": {
+    "path": "backend/internal/httpapi/server.go",
+    "from_git_blob_sha": "150ae8bec0a45fc8f40a353e889a109e1482eb36",
+    "to_git_blob_sha": "0cd1fa1117aefdc8a63b1a0d84a5c4db987673fa"
+  },
+  "authority_state": {
+    "production_activation_authorized": false,
+    "merge_authorized": false,
+    "release_authorized": false
+  }
+}

@@ -1,5 +1,7 @@
 # BodyRig V1 — virtual embodiment for ModelRig
 
+> **Historical ModelRig-side design note (V1).** Standalone `Ternedal/BodyRig` is the authority for BodyRig contracts (see [`BODYRIG_AUTHORITY.md`](BODYRIG_AUTHORITY.md)). BodyRig does run on `127.0.0.1:8775`, but the API list below is the original proposal and does not match BodyRig's current routes (for example, there is no `POST /api/v1/runtime/session`).
+
 ## Purpose
 
 BodyRig is the visual/physical embodiment layer for ModelRig.

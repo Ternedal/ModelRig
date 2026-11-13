@@ -53,16 +53,19 @@ check(json.loads(state_path.read_text(encoding="utf-8")) == payload,
 check(not list(state_path.parent.glob("*.tmp")),
       "atomic state updates leave no temporary file")
 
+# The pilot binds to the current era. Stage A tells the operator to run it on
+# physical-proof/<VERSION>, so a stale pin blocks the scheduler proof on the rig.
+target = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 check(
-    'CANDIDATE_BRANCH_PREFIX = "physical-proof/2.0.13"' in source
-    and 'EXPECTED_VERSION = "2.0.13"' in source
-    and module.CANDIDATE_BRANCH_PREFIX == "physical-proof/2.0.13"
-    and module.EXPECTED_VERSION == "2.0.13"
+    f'CANDIDATE_BRANCH_PREFIX = "physical-proof/{target}"' in source
+    and f'EXPECTED_VERSION = "{target}"' in source
+    and module.CANDIDATE_BRANCH_PREFIX == f"physical-proof/{target}"
+    and module.EXPECTED_VERSION == target
     and 'stage-a-checkpoint-ux' not in combined_source
     and 'current != CANDIDATE_BRANCH_PREFIX' in combined_source
     and '"git", "switch"' not in combined_source
     and '"git", "fetch"' not in combined_source,
-    "the easy flow binds to the exact active 2.0.13 rig candidate and never switches or fetches a branch",
+    f"the easy flow binds to the exact active {target} rig candidate and never switches or fetches a branch",
 )
 check(
     'if stack_ready()' in retained_source

@@ -81,7 +81,8 @@ def run_contract() -> None:
         successor_transition = successor["tracked_source_transition"]
         assert successor_transition["path"] == "backend/internal/httpapi/server.go"
         assert successor_transition["from_git_blob_sha"] == transition["to_git_blob_sha"]
-        assert successor_transition["to_git_blob_sha"] == server_sha
+        # Later features must extend, not rewrite, the sealed transition chain.
+        assert successor_transition["to_git_blob_sha"] == "f9b646350c70900ec256387b7a7e544d2de3eb0b"
         run_sensor_control_handoff_contract()
 
     new_files = handoff["new_product_files"]

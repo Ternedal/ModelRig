@@ -67,6 +67,8 @@ kaliv-tools-state.json.tmp
 /validation/rag-benchmark-latest.json.tmp
 /validation/scheduler-pilot-latest.json
 /validation/scheduler-pilot-latest.json.tmp
+/validation/scheduler-pilot-evidence-latest.json
+/validation/scheduler-pilot-evidence-latest.json.*.tmp
 /validation/scheduler-manual-observations.json
 /validation/appliance-lifecycle-observations.json
 /validation/appliance-lifecycle-evidence/

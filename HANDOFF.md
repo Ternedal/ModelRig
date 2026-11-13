@@ -401,11 +401,19 @@ halv release og lignede en hel. Flowet nu:
    public release tilbage til draft). Build-jobs uploader; release-jobbet
    verificerer asset-listen og publicerer **som sidste step**
    (`--draft=false --latest`).
+   **Kun et release-tag (`vX.Y.Z`) kan køre workflowet** (8/11-2026, #2275).
+   Indtil da kunne en `workflow_dispatch` på en gren publicere en release med
+   grenens navn som `--latest`, og den ville nå både riggen og telefonen.
+   - `version-check` stopper nu alt andet end et release-tag, og release-jobbet
+     tjekker ref'en igen.
+   - Manuel dispatch er kun til at genbygge et EKSISTERENDE tag: vælg tagget
+     under "Use workflow from", ikke en gren.
+   - Kontrakttesten er `tests/workflow_release_tag_guard.py`.
 7. Poll autentificeret med bounded sleeps (≤250s):
    `?head_sha=<full-sha>` for ci/codeql, `?branch=vX.Y.Z` for release-runnet.
    **Mellemlæsninger kan vise 5 assets — det er upload-racet, ikke en fejl.**
-   Afvent `completed`. Forventet: **9 assets** (2 APK'er, JAR, 3 exe'er, zip,
-   SHA256SUMS, +1). **Modstridende API-læsninger (404 på by-tag, "1 draft",
+   Afvent `completed`. Forventet: **9 assets** (2 APK'er, JAR, 4 exe'er —
+   server, supervisor, updater, worker — zip, SHA256SUMS). **Modstridende API-læsninger (404 på by-tag, "1 draft",
    forkert latest) er eventual consistency i publiceringsøjeblikket — mål igen
    før du konkluderer.** End-tjek altid: drafts == 0 (slet leftovers — CI
    publicerer sin egen; din API-draft kan hænge).
@@ -441,8 +449,12 @@ halv release og lignede en hel. Flowet nu:
     `STAGED_PHYSICAL_PROMOTION.md`, `STAGE_B_UPDATER_EVIDENCE.md`
     (kilde-versionen skal FORBLIVE eksplicit — kontrakterne kræver både
     kilde og mål nævnt).
-    Det strukturelle fix er en udledt gate over æra-pins (#753); indtil
-    den findes, er denne liste bump-proceduren.
+    Det strukturelle fix, en udledt gate over æra-pins (#753), findes:
+    `tests/workflow_era_pins.py` (#773, 27/8-2026) fejler PR'en ved drift,
+    men kun på de steder, den selv lister, så listen er stadig
+    bump-proceduren. Gaten kræver desuden, at `SOURCE_RELEASE_VERSION` i
+    selve gaten og `CANDIDATE_BRANCH_PREFIX`/`EXPECTED_VERSION` i
+    `scripts/stage_a_scheduler_pilot_easy.py` rykkes.
 
 ---
 
@@ -490,9 +502,10 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 - **RAG:** pdf/docx/pptx/html + foto (`/rag/ingest/image`, 501 uden
   `KALIV_VISION_MODEL`). Embeddings altid lokale (nomic-embed-text).
 - **Design:** `assets/design/kaliv-ui-guide/` er autoritativ
-  (kaliv-ui-tokens.json v1.0). Ændr tokens, ikke øjemål. Desktop følger den
-  fra v1.58.0; **Android kører ældre bronze (#8B6B3D) — alignment er en
-  ÅBEN Anders-beslutning.** Fonte (Inter/EB Garamond) mangler som filer.
+  (kaliv-ui-tokens.json v2.0). Ændr tokens, ikke øjemål. Desktop følger den
+  fra v1.58.0; Android-palettens divergens er et bevidst, pinnet
+  platformsvalg (§0 pkt. 9). Fontene (Inter/EB Garamond) ligger i
+  `android/app/src/main/res/font/`, licenserne i `docs/design/fonts/`.
 - Fuld env-liste og endpoints: `README.md` + `TROUBLESHOOTING.md`.
 
 ---
@@ -820,7 +833,98 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     tiende ikke dit arbejde. `git status --short` før `git add`, og vær
     særligt mistroisk efter en testkørsel — suiter skriver tilstand.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 6/11)
+## 9. Kø — hvem har bolden (16/7, opdateret 12/11)
+
+### 12/11: freeze-vinduet på `main` ophævet
+
+- **Anders ophævede freeze-vinduet 12/11 kl. 07:15 CET** (#2275 kommentar
+  6816274261). Reglen om, at intet merges til `main` fra `v2.0.19`-tagget,
+  til Stage A er grøn, gælder ikke længere. Baggrund: Anders tester ikke
+  fysisk, før billede og video er i en release (#2275 kommentar 6751908309),
+  og de lå i de PR'er, reglen holdt ude.
+- **Konsekvens:** når `main` har flyttet sig fra `3cbd00f1`, stopper
+  `candidate_freeze_check.py` for `v2.0.19`, så `v2.0.19` bliver ikke Stage
+  A-valideret, som den er. Næste release tagges og valideres på sin egen SHA.
+- **Uændret:** SHA-accept, fuld CI, Anders' go pr. merge til `main` og hans go
+  til release. Ophævelsen godkender ingen bestemt PR.
+- #2382 skriver afgørelsen ind i `RIGDAG_SIMPEL.md` og
+  `STAGED_PHYSICAL_PROMOTION.md` og retter D3-kontrakten i
+  `tests/workflow_staged_promotion_runbook.py`. Indtil den er landet, står
+  reglen stadig som gældende i de to kørebøger; den er det ikke.
+- **`main` flyttede sig første gang 12/11 kl. 09:33 CET:** #2372 landede som
+  `8bdcd743` (bytecode-flag i ti launchere, egen default-rapportsti for
+  `scheduler_pilot_evidence.py`, og `START_STAGE_B_TEST.cmd` nævner ikke
+  længere en forældet kildeversion).
+
+### 8.–11/11: D3 ændret, v2.0.19 publiceret, `physical-proof/2.0.19` oprettet
+
+**[11/11 — status. main = `3cbd00f1` (merge af #2364). Landet 7.–9/11: #2345,
+#2348, #2349, #2353, #2347, #2359, #2358, #2362, #2361, #2363, #2360, #2241,
+#2364.]**
+
+- **D3 ændret (Anders, 8/11 kl. 21:10 CET, #2275 kommentar 6726564262):**
+  "Ingen test, release på grøn CI". Tag og publicering sker, når CI er grøn på
+  RC-SHA'en og Anders siger go; den fysiske test flytter til efter
+  publicering. Gengivet i D3-blokken øverst i `RIGDAG_SIMPEL.md` og
+  `STAGED_PHYSICAL_PROMOTION.md`. Rækkefølgen i kommentaren: bump-PR med fuld
+  CI → go til bump-merge → RC-SHA = `main` med fuld CI → release-go → tag og
+  publicering via CI → release-verifikation → fysisk test og updater-vejen.
+- **Før bumpet (8/11):** #2363 (build-and-release kører kun på et
+  release-tag, jf. §4 pkt. 6), #2360 (voice-Stop lukker streamen; en stoppet
+  tur skriver intet) og #2241 (strandet v2.0.18-updater + Windows
+  self-replacement) landede.
+- **Release 9/11:** #2364 (bump, versionCode 299) merget 08:33 UTC som
+  `3cbd00f1`. Tagget `v2.0.19` peger på `3cbd00f1`, og releasen blev
+  publiceret 17:01 UTC med 9 assets: `kaliv-latest.apk`, `modelrig-v2.0.19.apk`,
+  `Kaliv-windows-x64-2.0.19.jar`, fire exe'er (server, supervisor, updater,
+  worker), `modelrig-v2.0.19.zip` og `SHA256SUMS.txt`.
+- **`physical-proof/2.0.19`** findes på origin og peger på tag-SHA'en
+  `3cbd00f1`. Stage A/B efter publicering følger `RIGDAG_SIMPEL.md`.
+  **Historisk regel, ophævet 12/11 (se øverst i §9):** fra tagget, til Stage A
+  var grøn, måtte intet merges til `main` (Blok 0 dér). Afvigelser rapporteres
+  i #2275.
+- **Dokumentationsgennemgang (Claude, 11/11, på Anders' bestilling):** #2370
+  (draft) retter dokumentationen mod koden og tilføjer `docs/README.md`
+  (indeks) og `docs/KALIV_ECOSYSTEM.md` (repositories og kontrakter). Kun
+  `.md`-filer; ingen genererede filer. Kræver ChatGPT's SHA-accept og Anders'
+  go (freeze-vinduet blev ophævet 12/11, se ovenfor). De afgørelser og kodefund,
+  gennemgangen ikke selv kunne lukke, står i #2371. Tilsvarende PR'er er åbnet
+  i de øvrige Kaliv-repositories samme dag.
+
+### 7/11: PR-scopede compile-jobs, voice-pins landet, #2244 synkroniseret
+
+**[7/11 kl. ~08:00 UTC — status. main = `0431cd9f`. Landet i dag: #2352
+(HANDOFF 6/11), #2342 (piper-tts 1.8.0), #2256 (soundfile 0.14.0), #2354.]**
+
+- **#2354 — PR-scopede compile/package-jobs:** `android-compile`,
+  `desktop-compile` og `windows-worker-package` starter nu med
+  `scripts/ci_pr_scope.py` (PR'ens ændrede stier via compare base…head) og
+  springer de tunge trin over, når diffen ligger uden for jobbets inputs.
+  Scopes: `android/`+`contracts/`, `desktop/`+`contracts/`,
+  `worker/`+`bodyrig/`+`scripts/`+`deploy/`+`VERSION`+`backend/`; workflow-filen
+  og scriptet er altid i scope. Jobbet kører stadig og rapporterer sin
+  required-status (branch protection uændret); push/tag/dispatch kører alt;
+  kan diffen ikke læses (eller er den ved compare-API'ets 300-fil-cap) →
+  fail OPEN. Gate: `tests/workflow_ci_pr_scope.py`. Tre Codex-fund (cap,
+  `bodyrig/`, `contracts/`) er rettet før landing — lektie: led efter inputs
+  UDEN FOR jobbets mappe, før et job indsnævres.
+- **Voice-pins:** piper-tts 1.8.0 og soundfile 0.14.0 på main. API-fladen
+  `voice_tts.py` bruger er identisk; `windows-worker-package` (install +
+  pyinstaller-frys + verify + boot) grøn. Fysisk rest = syntese/optagelse
+  gennem den frosne pakke ved næste release-kandidats Stage B.
+- **#2244 (midchain-2-split):** synkroniseret med main som `18e6c60e`.
+  Første måling af splittet: `midchain-2b` 51 min, `midchain-1` 38, `midchain-3`
+  80 — mod 186 min for den udelte midchain-2 på main `4d6e8bb3`. Landes efter
+  fuld Stage-B med begge kohorter + re-synk.
+- **Søsterrepoer:** BodyRig CI "Test Python" 163 → 115 → 60–75 s (#1379
+  normaler ×96, #1381 eye-valg ×78 m. Python-3.12-kompenseret sum,
+  #1391 xdist `-n 2` på Linux); VisionRig #184 (draft) retter også en latent
+  crash: Starlette 1.x har fjernet `app.add_event_handler()` — ModelRig
+  bruger `app.router.add_event_handler`, som FastAPIs `APIRouter` stadig
+  shimmer, og er ikke ramt.
+- **Lektie (egen, to gange):** lokalt miljø ≠ CI-miljø. Gates må ikke
+  importere PyYAML (findes ikke i workerens testmiljø), og oracle-tests af
+  float-semantik skal køres på hele CI-matricen (3.11 OG 3.12+).
 
 ### 6/11: Stage-B kører én gang pr. main-push; RAG-ingest batcher embeddings
 
@@ -1307,6 +1411,13 @@ v2.0.10. Kandidat = `origin/physical-proof/2.0.11`, som SKAL være lig
 #720). Åbne issues: 33. 18/8-blokken længere nede er historik.]**
 
 ### FREEZE-VINDUE — læs før enhver landing på main
+
+> **Under D3 (8/11-2026):** tag og publicering kommer før Stage A, og vinduet
+> løb fra tagget, til Stage A var grøn (`RIGDAG_SIMPEL.md` Blok 0,
+> `STAGED_PHYSICAL_PROMOTION.md` A0). **Anders ophævede det vindue
+> 12/11-2026** (#2275 kommentar 6816274261): `main` er åben igen, og `v2.0.19`
+> bliver ikke Stage A-valideret, som den er. Koordinering sker i #2275. #731,
+> `v2.0.11` og rækkefølgen i punkt 3 nedenfor er 2.0.11-æraens.
 
 Fra det øjeblik riggen har produceret et grønt `candidate_freeze_check.py`-
 receipt på en exact SHA (meldt som kommentar på #731 / #58), og indtil den SHA
@@ -2056,7 +2167,7 @@ klienter, scripts og CI. Fem kontraktpunkter kræver paritetstest FØR ændring.
 
 ## 10. Dok-kort
 
-`STATUS.md` linje 3 = altid-aktuel one-liner (resten: release-historik) ·
+`STATUS.md` = release-log (aktuel tilstand: `CURRENT_STATE.md`) ·
 `ROADMAP.md` = retning, lukket-endet ved V15 · `DEVICE_TEST.md` = test-
 runbooks (S1–S4 streaming) · `TROUBLESHOOTING.md` = symptom→fix fra faktiske
 fejl · `MODELS.md` = modelvalg + voice-modeller · `CLOUD_TOOLS.md` =
@@ -2072,7 +2183,7 @@ PLAN_v1.13.0,
 ALVA_VOICE_ROADMAP_DELTA, CLIENT_BUILD_AND_TEST, KRAVSPEC_V5 (leveret).
 
 **Tilføjet i 2.0-æraen:** `docs/design/DDR-001*` = designbeslutning efter
-ADR-mønsteret, og `assets/design/kaliv-ui-tokens.json` er fortsat eneste
+ADR-mønsteret, og `assets/design/kaliv-ui-guide/kaliv-ui-tokens.json` er fortsat eneste
 tokenkilde · `docs/agent3/ADR-A3-001_CHAT_AGENT_SURFACE.md` = chattens
 adgang til Agent 3 · `AGENT_4_ARCHITECTURE_DECISIONS.md` = det KOMPLETTE
 ADR-indeks for Agent 4 · `ROUTE_INVENTORY.md` = genereret ruteliste (prober

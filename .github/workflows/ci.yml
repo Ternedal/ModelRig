@@ -52,10 +52,21 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.11"
+      - name: Decide whether this PR touches the job's inputs
+        id: scope
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # bodyrig/ is bundled into the frozen worker (build_identity fingerprints it)
+        run: python scripts/ci_pr_scope.py --scope worker/ --scope bodyrig/ --scope scripts/ --scope deploy/ --scope VERSION --scope backend/ --scope tests/fixtures/piper/ --scope tests/support/check_wav.py
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: steps.scope.outputs.relevant == 'true'
         with:
           go-version: "1.23"
       - name: Build the release worker package
+        if: steps.scope.outputs.relevant == 'true'
         run: |
           $actual = (git rev-parse HEAD).Trim()
           if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_BUILD_SHA) { throw "worker package checkout identity mismatch" }
@@ -66,6 +77,7 @@ jobs:
           python scripts/verify_frozen_voice_package.py dist/modelrig-worker-windows-x64.exe
           if ($LASTEXITCODE -ne 0) { throw "frozen voice payload verification failed" }
       - name: Boot the frozen worker outside the checkout
+        if: steps.scope.outputs.relevant == 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -79,6 +91,19 @@ jobs:
           $env:MODELRIG_WORKER_HOST = "127.0.0.1"
           $env:MODELRIG_WORKER_PORT = "8099"
           $env:MODELRIG_OLLAMA_URL = "http://127.0.0.1:9"
+          # The frozen package must synthesize, not only report TTS as installed (#2275, v2.0.19
+          # T4: piper-tts 1.8.0 inside PyInstaller). The voice is the committed offline fixture from
+          # tests/support/make_piper_ci_voice.py: Piper's real espeak phonemizer and onnxruntime
+          # run, with no download, and return a 440 Hz tone -- a package smoke test, not speech
+          # quality. Piper is forced so an absent VoiceRig cannot satisfy the check.
+          $voices = (Resolve-Path tests/fixtures/piper).Path
+          $voice = "kaliv-ci-tone"
+          foreach ($file in @("$voice.onnx", "$voice.onnx.json")) {
+            if (-not (Test-Path (Join-Path $voices $file))) { throw "CI Piper fixture missing: tests/fixtures/piper/$file" }
+          }
+          $env:KALIV_TTS_VOICES_DIR = $voices
+          $env:KALIV_TTS_VOICE = $voice
+          $env:KALIV_TTS_PROVIDER = "piper"
           $worker = Start-Process -FilePath $exe -WorkingDirectory $env:RUNNER_TEMP -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
           try {
             $health = $null
@@ -113,6 +138,20 @@ jobs:
             $asr = Invoke-RestMethod http://127.0.0.1:8099/voice/asr/status -TimeoutSec 10
             $tts = Invoke-RestMethod http://127.0.0.1:8099/voice/tts/status -TimeoutSec 10
             if ($asr.available -ne $true -or $tts.available -ne $true) { throw "frozen voice providers are unavailable" }
+            $wav = Join-Path $env:RUNNER_TEMP "frozen-tts.wav"
+            $body = @{ text = "Hej fra Kaliv."; out_path = $wav } | ConvertTo-Json
+            try {
+              $spoken = Invoke-RestMethod -Method Post http://127.0.0.1:8099/voice/tts/synthesize -ContentType "application/json" -Body $body -TimeoutSec 120
+            } catch {
+              throw "frozen Piper synthesis refused (501 = piper missing from the package, 503 = voice not loadable): $($_.ErrorDetails.Message) $($_.Exception.Message)"
+            }
+            if ($spoken.provider -ne "piper" -or $spoken.voice -ne $voice) {
+              throw "frozen synthesis did not use the Piper fixture voice: $($spoken | ConvertTo-Json -Compress)"
+            }
+            # Parses the RIFF structure (PCM fmt and data chunks) instead of assuming a 44-byte header.
+            $verdict = python tests/support/check_wav.py $wav --rate 22050 --min-seconds 0.1
+            if ($LASTEXITCODE -ne 0) { throw "frozen Piper synthesis gave no valid audio: $verdict" }
+            Write-Host "frozen worker ran Piper (offline tone fixture, not real speech): $verdict"
             Write-Host "frozen worker started outside the checkout: $expected"
           }
           finally {
@@ -122,6 +161,7 @@ jobs:
           }
 
       - name: Delayed frozen worker survives supervisor and updater readiness
+        if: steps.scope.outputs.relevant == 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -254,16 +294,29 @@ jobs:
         env:
           EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - name: Decide whether this PR touches the job's inputs
+        id: scope
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # contracts/: the client unit tests read the shared capability fixtures
+        run: python scripts/ci_pr_scope.py --scope android/ --scope contracts/
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        if: steps.scope.outputs.relevant == 'true'
         with:
           distribution: temurin
           java-version: "21"
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        if: steps.scope.outputs.relevant == 'true'
         with:
           packages: platform-tools
       - name: Install platform + build-tools
+        if: steps.scope.outputs.relevant == 'true'
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - name: Compile Android Kotlin and run unit tests
+        if: steps.scope.outputs.relevant == 'true'
         working-directory: android
         run: |
           echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
@@ -283,11 +336,22 @@ jobs:
         env:
           EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - name: Decide whether this PR touches the job's inputs
+        id: scope
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # contracts/: the client unit tests read the shared capability fixtures
+        run: python scripts/ci_pr_scope.py --scope desktop/ --scope contracts/
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        if: steps.scope.outputs.relevant == 'true'
         with:
           distribution: temurin
           java-version: "21"
       - name: Compile desktop Kotlin and run unit tests
+        if: steps.scope.outputs.relevant == 'true'
         working-directory: desktop
         run: ./gradlew :composeApp:test --no-daemon --console=plain
 
@@ -305,11 +369,24 @@ jobs:
         run: |
           $actual = (git rev-parse HEAD).Trim()
           if ($actual -ne $env:EXPECTED_SHA) { throw "checkout authority mismatch: expected $env:EXPECTED_SHA, got $actual" }
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - name: Decide whether this PR touches the job's inputs
+        id: scope
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # Same inputs as desktop-compile (contracts/: the client unit tests
+        # read the shared capability fixtures). Measured 162 s of Windows
+        # time per PR sync, billed double, on PRs that never touch desktop/.
+        run: python scripts/ci_pr_scope.py --scope desktop/ --scope contracts/
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        if: steps.scope.outputs.relevant == 'true'
         with:
           distribution: temurin
           java-version: "21"
       - name: Run desktop credential tests against Windows DPAPI
+        if: steps.scope.outputs.relevant == 'true'
         working-directory: desktop
         run: .\gradlew.bat :composeApp:test --no-daemon --console=plain
 

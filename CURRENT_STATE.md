@@ -6,7 +6,7 @@
 > code, so it cannot quietly become untrue. If a fact belongs here, teach
 > the generator to read it -- do not type it in.
 
-**Version:** 2.0.18
+**Version:** 2.0.19
 
 ## Tools the model can see
 
@@ -69,6 +69,8 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` |
 | `KALIV_HOME_RIG_PILOT` | `0` |
 | `KALIV_MAX_UPLOAD_MB` | `25` |
+| `KALIV_MEDIA_EXECUTOR` | `(unset)` |
+| `KALIV_MEDIA_JOBS_API` | `0` |
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` |
 | `KALIV_READ_CONNECTOR_PILOT` | `0` |
 | `KALIV_SCHEDULER` | `` |
@@ -368,6 +370,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_diffusers_image_adapter.py`
 - `tests/worker_e2e_latency_runtime.py`
 - `tests/worker_e2e_latency_voice_mount.py`
+- `tests/worker_e2e_latency_voice_route.py`
 - `tests/worker_eval.py`
 - `tests/worker_file_capabilities.py`
 - `tests/worker_file_capabilities_audit.py`
@@ -383,17 +386,34 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_jobs.py`
 - `tests/worker_kaliv_bodyrig_digital_twin_m6_qualifier.py`
 - `tests/worker_kaliv_bodyrig_photoreal_qualifier.py`
+- `tests/worker_kaliv_e2e_latency_voice_driver.py`
 - `tests/worker_kaliv_end_to_end_latency_qualifier.py`
+- `tests/worker_kaliv_recovery_soak_collector.py`
+- `tests/worker_kaliv_recovery_soak_qualification.py`
 - `tests/worker_kaliv_release_manifest_assembler.py`
 - `tests/worker_kaliv_repository_authority_qualifier.py`
 - `tests/worker_kaliv_software_exact_green_qualifier.py`
 - `tests/worker_kaliv_voicerig_physical_qualifier.py`
+- `tests/worker_lease_dir_acl.py`
 - `tests/worker_media_executor.py`
+- `tests/worker_media_executor_image_to_video.py`
 - `tests/worker_media_executor_main.py`
+- `tests/worker_media_executor_main_video.py`
+- `tests/worker_media_gallery_api.py`
 - `tests/worker_media_generation_profiles.py`
 - `tests/worker_media_generation_reconciliation.py`
 - `tests/worker_media_generation_runner.py`
+- `tests/worker_media_image_env.py`
+- `tests/worker_media_job_api.py`
+- `tests/worker_media_job_to_gallery.py`
+- `tests/worker_media_preflight.py`
+- `tests/worker_media_recovery_inventory.py`
+- `tests/worker_media_repair.py`
+- `tests/worker_media_security_properties.py`
 - `tests/worker_media_source_image.py`
+- `tests/worker_media_staged_video_sink.py`
+- `tests/worker_media_volume.py`
+- `tests/worker_media_work_area.py`
 - `tests/worker_migrate.py`
 - `tests/worker_netguard.py`
 - `tests/worker_occurrence_ledger.py`
@@ -529,6 +549,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_candidate_freeze.py`
 - `tests/workflow_candidate_gate.py`
 - `tests/workflow_chain_argument_check.py`
+- `tests/workflow_ci_pr_scope.py`
 - `tests/workflow_client_capability_gates.py`
 - `tests/workflow_client_microcopy_parity.py`
 - `tests/workflow_client_path_segments.py`
@@ -552,8 +573,10 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_kaliv_system_release_bind_consciousness.py`
 - `tests/workflow_kaliv_v1_rig_smoke.py`
 - `tests/workflow_kaliv_vr_renderer.py`
+- `tests/workflow_launcher_bytecode.py`
 - `tests/workflow_media_gallery_asset.py`
 - `tests/workflow_media_gallery_catalog.py`
+- `tests/workflow_media_gallery_contract_fixture.py`
 - `tests/workflow_media_gallery_index_writer.py`
 - `tests/workflow_media_gallery_range.py`
 - `tests/workflow_media_gallery_store.py`
@@ -580,8 +603,10 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_proof_scope_git_fail_closed.py`
 - `tests/workflow_ps1_encoding.py`
 - `tests/workflow_release.py`
+- `tests/workflow_release_tag_guard.py`
 - `tests/workflow_remaining_physical_pilots.py`
 - `tests/workflow_repository_authority.py`
+- `tests/workflow_repository_authority_wrapper.py`
 - `tests/workflow_rig_preflight.py`
 - `tests/workflow_route_inventory.py`
 - `tests/workflow_runner_offline.py`
@@ -616,5 +641,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_voice_change_observations.py`
 - `tests/workflow_voice_runtime_preflight.py`
 - `tests/workflow_voicerig_cross_repo_contract.py`
+- `tests/workflow_wav_check.py`
 - `tests/workflow_web_research_parity.py`
+- `tests/workflow_windows_lease_dir_acl_junction.py`
 - `tests/workflow_worker_entrypoints.py`

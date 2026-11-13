@@ -26,15 +26,16 @@ A generator runs only if **all** of these hold:
 6. The GPU lease for that UUID is free.
 7. With the lease held, torch's `cuda:N` reports that UUID, and the device has `min_usable_gib` free above `reserve_gib`.
 
-The lease is held for as long as the model is loaded: budget, load, inference and the resident lifetime, until `close()`. Another generator **that takes this lease**, such as a second image executor or (next slice) the Wan/ComfyUI adapter, gets `GpuBusy` for that GPU instead of loading on top of it.
+The lease is held for as long as the model is loaded: budget, load, inference and the resident lifetime, until `close()`. Another generator **that takes this lease**, such as a second image executor or the Wan/ComfyUI adapter (`worker/app/comfy_video_adapter.py`), gets `GpuBusy` for that GPU instead of loading on top of it.
 
 **Scope (decision 6491161681).** The lease coordinates only processes that take it. Ollama, a WSL2 instance and any worker that does not use `gpu_lease` are **not** covered. Whole-rig GPU exclusivity is **unproven** and not claimed until a common arbiter, or explicit coordination, and physical tests exist.
 
 ## GPU lease
 
 - `KALIV_GPU_LEASE_DIR` is an existing absolute, non-symlink, **local** directory, not on removable media, so the lease works while the media volume is missing.
-  - On POSIX it must be owned by the running user and not group- or world-writable.
-  - On Windows its ACLs are not checked by this code; that is a stated limit.
+  - **Who may change it.** It must be owned by the process user, and nobody else may add, replace, delete or re-permission a lock file. On POSIX that is the owner and mode check.
+  - **On Windows** the owner and DACL are read through a directory handle that never follows a junction (`lease_dir_acl_windows`). Owner: the process user, SYSTEM or Administrators. Any other principal may at most list, traverse and read attributes. Inherit-only grants count, because they reach the lock files. Anything else is `GpuLeaseError`, which the entry point reports as exit 78. (Gap G5, #2296.)
+  - **Shapes.** A new folder under `%LOCALAPPDATA%` passes as it is. A folder under `C:\` needs `icacls <dir> /inheritance:r /grant:r "*<your SID>:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F"`, because `C:\` gives Authenticated Users Modify on everything below it.
 - Lock files are named after the GPU UUID (`GPU-….lock`), not after a CUDA index, which can change with `CUDA_VISIBLE_DEVICES` or ordering.
 - The lease is an OS file lock on that file:
   - `fcntl.flock` on Linux and `msvcrt.locking` on Windows;
@@ -70,7 +71,7 @@ The placeholders above are rejected on purpose: a revision must be 40 lower-case
 
 - **Backends:**
   - `diffusers` serves image profiles;
-  - `comfyui` serves video profiles (Wan), and its adapter is the next slice.
+  - `comfyui` serves video profiles (Wan) through `ComfyVideoAdapter` (`worker/app/comfy_video_adapter.py`); see `docs/MEDIA_VIDEO_GENERATION.md`.
 - **Diffusers pipelines (allowlist):** `QwenImagePipeline`, `StableDiffusionXLPipeline`, `FluxPipeline`. The adapter never loads any other class.
 - **Licence:** recorded per profile. Some candidate models carry non-commercial licences; that is the operator's responsibility to respect.
 
@@ -79,7 +80,5 @@ The placeholders above are rejected on purpose: a revision must be 40 lower-case
 The executor process that drives these adapters is described in `docs/MEDIA_EXECUTOR.md` (G2, default-off).
 
 
-- the executor process and its wiring to the media store (once `ArtifactSink` has an implementation on the gallery side);
 - image-to-image (it needs input bytes from the media store);
-- the Wan/ComfyUI video adapter (submit/poll), which uses the same lease;
 - any route.

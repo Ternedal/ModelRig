@@ -14,6 +14,12 @@ executor per GPU claims and transitions jobs as `<GPU UUID>:<instance>`:
     queued --claim_for--> running --begin_publish--> publishing --complete--> completed
                           running/publishing --fail--> failed
                           running --finish_cancelled--> cancelled   (after request_cancel)
+    queued --(24 h without a claim)--> expired   (error 'expired_unclaimed'; Anders, 6 Nov 2026)
+
+A queued job expires once time.time() - created >= QUEUED_MAX_AGE_S (24 h). expire_queued()
+runs it; claim_for() and submit() run it in their own transaction (so a stale job is never
+claimed and never holds one of the 16 queue places), and get() does when it reads a stale job
+(so the owner sees it even while media is off). Running and publishing jobs never expire.
 
 begin_publish() is the commit point between cancellation and publication: one
 transaction moves running -> publishing only if no cancel was requested, and
@@ -23,8 +29,8 @@ recover_gpu() runs only while the executor holds its GPU's executor lock
 (gpu_lease.acquire_executor_lock), so every other claim for that GPU belongs to
 a dead process. Transitions require the caller's own instance id, so a stale
 process cannot complete, fail or cancel a recovered job. A job that was
-publishing when its executor died is failed as "interrupted during
-publication": an asset may exist and must be reconciled by the sink owner.
+publishing when its executor died is failed as `interrupted_during_publication`:
+an asset may exist and must be reconciled by the sink owner.
 The migration is additive (two columns), and the legacy single-process API
 (claim/finish/cancel/recover_interrupted) still works for GenerationJobRunner.
 """
@@ -38,6 +44,8 @@ import time
 import uuid
 from pathlib import Path
 from typing import Callable
+
+from .media_generation_contract import is_plain_file_name
 
 
 class ImageJobError(ValueError):
@@ -73,7 +81,86 @@ def _encode_params(params: object) -> str:
 # blanked 30 days after it finished. The row stays (id, owner, state, asset, error), so the
 # gallery and the audit trail still resolve; only the user's text goes.
 PROMPT_RETENTION_S = 30 * 24 * 3600
-_FINISHED = ("completed", "failed", "cancelled")
+
+HANDOFF_STAGES = ("copying", "copied")
+_HANDOFF_ASSET = re.compile(r"[A-Za-z0-9_-]{1,128}")
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def _nonnegative_int(value: object) -> bool:
+    return type(value) is int and 0 <= value < 2 ** 64
+
+
+def _file_id(value: object) -> bool:
+    # st_dev/st_ino: ReFS file ids are 128-bit (FILE_ID_128), and the receipt is JSON text, so
+    # wide ids are kept exactly. #2357 review P3-1 and Codex 4522272230: a 64-bit bound refused
+    # every receipt on a ReFS work area or publication volume, and the render was deleted.
+    return type(value) is int and 0 <= value < 2 ** 128
+
+
+def _file_identity(value: object, *, named: bool) -> bool:
+    keys = {"name", "dev", "ino", "size"} if named else {"dev", "ino"}
+    return (isinstance(value, dict) and set(value) == keys
+            and all(_file_id(value[k]) for k in ("dev", "ino"))
+            and (not named or _nonnegative_int(value["size"]))
+            # The adapter's own rule for its output name, so a render it accepted is never refused
+            # here and then deleted as an explicit refusal (Codex #2357 4504060850).
+            and (not named or is_plain_file_name(value["name"])))
+
+
+def check_handoff_record(record: object) -> dict:
+    """A hand-off receipt, or ImageJobError. Allowed keys only:
+    - stage: "copying" (before the copy) or "copied" (after copy and sync);
+    - output: {name, dev, ino, size} of the finished file in the work area (a plain file name);
+    - sha256 and size: of the copy, once "copied";
+    - volume: {dev, ino} of the publication volume's root at hand-off;
+    - source_asset_id and source_sha256: the source of an image-to-video job."""
+    if not isinstance(record, dict) or not set(record) <= {"stage", "output", "sha256", "size", "volume",
+                                                           "source_asset_id", "source_sha256"}:
+        raise ImageJobError("hand-off record has unknown fields")
+    if record.get("stage") not in HANDOFF_STAGES or not _file_identity(record.get("output"), named=True):
+        raise ImageJobError("hand-off record needs a stage and the output's identity")
+    if record["stage"] == "copied" and not (type(record.get("sha256")) is str and _SHA256.fullmatch(record["sha256"])
+                                            and _nonnegative_int(record.get("size"))):
+        raise ImageJobError("a copied hand-off needs sha256 and size")
+    if record["stage"] == "copying" and ("sha256" in record or "size" in record):
+        raise ImageJobError("sha256 and size are known only once copied")
+    if "volume" in record and not _file_identity(record["volume"], named=False):
+        raise ImageJobError("hand-off volume identity is malformed")
+    if "source_asset_id" in record and not (type(record["source_asset_id"]) is str
+                                            and _HANDOFF_ASSET.fullmatch(record["source_asset_id"])):
+        raise ImageJobError("hand-off source asset id is malformed")
+    if "source_sha256" in record and not (type(record["source_sha256"]) is str
+                                          and _SHA256.fullmatch(record["source_sha256"])):
+        raise ImageJobError("hand-off source hash is malformed")
+    return dict(record)
+
+
+_FINISHED = ("completed", "failed", "cancelled", "expired")
+
+# Anders, 6 Nov 2026 (#2275 6691069504): a queued job that no executor claims within 24 hours of
+# being submitted expires. Measured from the persisted `created` (time.time(): seconds since the
+# epoch, UTC by definition, so time zones and DST never move it).
+QUEUED_MAX_AGE_S = 24 * 3600
+EXPIRED_ERROR = "expired_unclaimed"
+COMPLETED_ASSETS_MAX = 10_000  # the gallery index holds at most this many items (_MAX_INDEX_ITEMS)
+_ASSET_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,128}")
+
+# Restart recovery's errors, as machine codes (#2275 6693665083). Rows written before the codes
+# keep their sentences: nothing rewrites stored errors. public_error() maps both forms, so a route
+# can expose codes only, and an older build that still writes sentences is mapped too.
+INTERRUPTED_BY_RESTART = "interrupted_by_restart"
+INTERRUPTED_DURING_PUBLICATION = "interrupted_during_publication"
+LEGACY_ERRORS = {
+    "interrupted by restart": INTERRUPTED_BY_RESTART,
+    "interrupted during publication": INTERRUPTED_DURING_PUBLICATION,
+}
+
+
+def public_error(error: str | None) -> str | None:
+    """The owner-visible code for a stored error: legacy sentences become their codes; None stays None."""
+    return LEGACY_ERRORS.get(error, error) if error is not None else None
+_EXPIRE_SQL = "UPDATE image_jobs SET state='expired',error=?,updated=? WHERE state='queued' AND created <= ?"
 
 
 class ImageJobStore:
@@ -108,6 +195,11 @@ class ImageJobStore:
             # text in free space (a state update can move a row and free its old copy without
             # zeroing it). The first time this version opens it, a scrub is owed; purge_prompts
             # pays it with a VACUUM (#2340 review 4477941179).
+            # Hand-off receipts (Anders, 6 Nov: generate on C:, publish on Z:): what a video job handed
+            # from the work area to the volume, so C6 can correlate leftovers with jobs. Its own table:
+            # SELECT * on image_jobs is unchanged, and a receipt never holds a prompt or parameters.
+            db.execute("CREATE TABLE IF NOT EXISTS image_jobs_handoff (job_id TEXT PRIMARY KEY, "
+                       "record TEXT NOT NULL, updated REAL NOT NULL)")
             if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='image_jobs_scrub'").fetchone() is None:
                 db.execute("CREATE TABLE image_jobs_scrub (id INTEGER PRIMARY KEY CHECK (id = 1), "
                            "owed INTEGER NOT NULL)")
@@ -191,6 +283,8 @@ class ImageJobStore:
         job_id, now = uuid.uuid4().hex, time.time()
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
+            # Expired jobs never hold queue places, even while media is off and nothing claims.
+            db.execute(_EXPIRE_SQL, (EXPIRED_ERROR, now, now - QUEUED_MAX_AGE_S))
             queued = db.execute("SELECT count(*) FROM image_jobs WHERE state='queued'").fetchone()[0]
             if queued >= max_queued:
                 raise ImageJobError("image job queue full")
@@ -207,7 +301,27 @@ class ImageJobStore:
     def get(self, job_id: str, owner: str) -> dict | None:
         with self._db() as db:
             row = db.execute("SELECT * FROM image_jobs WHERE id=? AND owner=?", (job_id, owner)).fetchone()
-            return dict(row) if row else None
+        if row is not None and row["state"] == "queued" and row["created"] <= time.time() - QUEUED_MAX_AGE_S:
+            # Media may be off and no executor running: the owner still sees the job expire.
+            self.expire_queued()
+            with self._db() as db:
+                row = db.execute("SELECT * FROM image_jobs WHERE id=? AND owner=?", (job_id, owner)).fetchone()
+        return dict(row) if row else None
+
+    def expire_queued(self, *, max_age_s: float = QUEUED_MAX_AGE_S, now: float | None = None) -> int:
+        """Expire every queued job submitted at least max_age_s ago: terminal state 'expired', error
+        'expired_unclaimed'. Returns how many. Running and publishing jobs are never touched.
+
+        The age is now - created, both from time.time(). A job whose `created` lies in the future
+        (the clock was set back after it was submitted) is not old: it expires only once the clock
+        has passed it by max_age_s, never early. A clock set forward makes jobs older at once;
+        that is the wall clock's verdict, and only queued jobs are affected."""
+        if type(max_age_s) not in (int, float) or not max_age_s > 0:
+            raise ImageJobError("invalid queued job age")
+        now = time.time() if now is None else now
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            return db.execute(_EXPIRE_SQL, (EXPIRED_ERROR, now, now - max_age_s)).rowcount
 
     def owns_completed_asset(self, owner: str, asset_id: str) -> bool:
         """Authorize only completed assets of the authenticated principal.
@@ -225,13 +339,34 @@ class ImageJobStore:
                 "AND state='completed' LIMIT 1", (owner, asset_id)
             ).fetchone() is not None
 
+    def completed_assets_for(self, owner: str, *, limit: int = COMPLETED_ASSETS_MAX) -> frozenset[str]:
+        """Every asset id the authenticated principal owns through a completed job, in one bounded
+        read (#2275 6697074518: a gallery projection filters with this instead of one
+        owns_completed_asset query per index entry). Same authority as owns_completed_asset: the
+        caller supplies the owner from verified pairing/auth; failed, running, publishing, expired
+        and other owners' jobs are never in it. More than `limit` assets is a refusal, never a
+        partial set; a database error propagates, never reads as "owns nothing"."""
+        if type(limit) is not int or not 1 <= limit <= COMPLETED_ASSETS_MAX:
+            raise ImageJobError("invalid limit")
+        if type(owner) is not str or not owner.strip() or len(owner) > 256:
+            return frozenset()
+        with self._db() as db:
+            rows = db.execute(
+                "SELECT DISTINCT asset_id FROM image_jobs WHERE owner=? AND state='completed' "
+                "AND asset_id IS NOT NULL LIMIT ?", (owner, limit + 1)).fetchall()
+        if len(rows) > limit:
+            raise ImageJobError("owner_asset_limit")
+        return frozenset(r[0] for r in rows if type(r[0]) is str and _ASSET_ID_RE.fullmatch(r[0]))
+
     def claim(self) -> dict | None:
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
+            now = time.time()
+            # Like claim_for(): a stale queued job expires in this transaction and is never claimed.
+            db.execute(_EXPIRE_SQL, (EXPIRED_ERROR, now, now - QUEUED_MAX_AGE_S))
             row = db.execute("SELECT * FROM image_jobs WHERE state='queued' ORDER BY created,id LIMIT 1").fetchone()
             if row is None:
                 return None
-            now = time.time()
             db.execute("UPDATE image_jobs SET state='running',updated=? WHERE id=? AND state='queued'",
                        (now, row["id"]))
             return dict(row) | {"state": "running", "updated": now}
@@ -260,8 +395,8 @@ class ImageJobStore:
         # jobs. With several executors use recover_gpu(), which leaves other executors' jobs alone.
         with self._db() as db:
             result = db.execute(
-                "UPDATE image_jobs SET state='failed',error='interrupted by restart',updated=? WHERE state='running'",
-                (time.time(),))
+                "UPDATE image_jobs SET state='failed',error=?,updated=? WHERE state='running'",
+                (INTERRUPTED_BY_RESTART, time.time()))
             return result.rowcount
 
     # --- executor protocol (G2) ----------------------------------------------------------------
@@ -272,7 +407,9 @@ class ImageJobStore:
         return instance
 
     def claim_for(self, profile_ids, instance: str) -> dict | None:
-        """The oldest queued job for one of these profiles, claimed by this executor instance."""
+        """The oldest queued job for one of these profiles, claimed by this executor instance. Jobs
+        older than QUEUED_MAX_AGE_S are expired in the same transaction and never claimed, so an
+        executor that starts after a long pause cannot run a job its owner has given up on."""
         instance = self._instance(instance)
         ids = sorted(set(profile_ids))
         if not ids or any(not isinstance(p, str) or not _PROFILE_ID.fullmatch(p) for p in ids):
@@ -280,11 +417,12 @@ class ImageJobStore:
         marks = ",".join("?" * len(ids))
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
+            now = time.time()
+            db.execute(_EXPIRE_SQL, (EXPIRED_ERROR, now, now - QUEUED_MAX_AGE_S))
             row = db.execute(f"SELECT * FROM image_jobs WHERE state='queued' AND profile_id IN ({marks}) "
                              "ORDER BY created,id LIMIT 1", ids).fetchone()
             if row is None:
                 return None
-            now = time.time()
             db.execute("UPDATE image_jobs SET state='running',claimed_by=?,updated=? WHERE id=? AND state='queued'",
                        (instance, now, row["id"]))
             return dict(row) | {"state": "running", "claimed_by": instance, "updated": now}
@@ -327,21 +465,26 @@ class ImageJobStore:
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             running = db.execute(
-                "UPDATE image_jobs SET state='failed',error='interrupted by restart',updated=? "
+                "UPDATE image_jobs SET state='failed',error=?,updated=? "
                 "WHERE state='running' AND substr(claimed_by,1,?)=? AND claimed_by<>?",
-                (now, len(prefix), prefix, instance)).rowcount
+                (INTERRUPTED_BY_RESTART, now, len(prefix), prefix, instance)).rowcount
             publishing = db.execute(
-                "UPDATE image_jobs SET state='failed',error='interrupted during publication',updated=? "
+                "UPDATE image_jobs SET state='failed',error=?,updated=? "
                 "WHERE state='publishing' AND substr(claimed_by,1,?)=? AND claimed_by<>?",
-                (now, len(prefix), prefix, instance)).rowcount
+                (INTERRUPTED_DURING_PUBLICATION, now, len(prefix), prefix, instance)).rowcount
             return running + publishing
 
     def request_cancel(self, job_id: str, owner: str) -> str | None:
-        """'cancelled' (was queued), 'requested' (running: the executor stops it), 'too_late'
-        (publishing: it will complete), or None (not this owner's, or already finished)."""
+        """'cancelled' (was queued), 'expired' (was queued for more than 24 hours: it expires now
+        instead), 'requested' (running: the executor stops it), 'too_late' (publishing: it will
+        complete), or None (not this owner's, or already finished)."""
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             now = time.time()
+            # Expiry wins over cancel, as on every other path (#2357 review P3-3).
+            if db.execute(_EXPIRE_SQL + " AND id=? AND owner=?",
+                          (EXPIRED_ERROR, now, now - QUEUED_MAX_AGE_S, job_id, owner)).rowcount:
+                return "expired"
             if db.execute("UPDATE image_jobs SET state='cancelled',updated=? WHERE id=? AND owner=? AND state='queued'",
                           (now, job_id, owner)).rowcount:
                 return "cancelled"
@@ -358,6 +501,21 @@ class ImageJobStore:
             row = db.execute("SELECT cancel_requested FROM image_jobs WHERE id=? AND state='running' AND claimed_by=?",
                              (job_id, self._instance(instance))).fetchone()
             return bool(row and row[0])
+
+    def record_handoff(self, job_id: str, instance: str, record: dict) -> bool:
+        """Store the hand-off receipt of the executor's own running or publishing job (replaces the
+        previous one). Only names, sizes, file ids, asset ids and hashes: never a prompt, an owner or
+        parameters. Raises ImageJobError on anything else; False if the job is not this instance's."""
+        checked = check_handoff_record(record)
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute("SELECT 1 FROM image_jobs WHERE id=? AND state IN ('running','publishing') AND claimed_by=?",
+                          (job_id, self._instance(instance))).fetchone() is None:
+                return False
+            db.execute("INSERT INTO image_jobs_handoff (job_id, record, updated) VALUES (?,?,?) "
+                       "ON CONFLICT(job_id) DO UPDATE SET record=excluded.record, updated=excluded.updated",
+                       (job_id, json.dumps(checked, sort_keys=True), time.time()))
+            return True
 
     def begin_publish(self, job_id: str, instance: str) -> bool:
         """The commit point: running -> publishing only if no cancel was requested. Publish only after True."""
