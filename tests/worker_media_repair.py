@@ -30,7 +30,9 @@ from app.media_gallery_catalog import list_gallery  # noqa: E402
 from app.media_gallery_store import ExternalMediaSink  # noqa: E402
 from app.media_generation_contract import ArtifactSinkUnavailable  # noqa: E402
 from app.media_repair import RepairRefused, adopt, reconcile, remove_stale_temp, remove_work_file  # noqa: E402
+from app.media_volume import MARKER_NAME  # noqa: E402
 from app.media_work_area import PrivateWorkArea  # noqa: E402
+from worker_media_volume import VOLUME_ID, FakeProbe  # noqa: E402
 
 GPU = "GPU-6a7f0c2e-1b2d-4c3e-8f9a-0123456789ab"
 DEAD = "GPU-6a7f0c2e-1b2d-4c3e-8f9a-0123456789ab:00000000000000aa"
@@ -48,6 +50,9 @@ class MediaRepairTests(unittest.TestCase):
         self.lease = os.path.join(self.base, "lease")
         os.mkdir(self.lease, 0o700)
         self.mounted = {self.volume}
+        Path(self.volume, MARKER_NAME).write_text(VOLUME_ID, encoding="ascii")  # G1's marker
+        self.probe = FakeProbe(())
+        self.probe.mounts = self.mounted  # the same set: unmounting in a test unmounts for the CLI too
         patcher = patch("app.media_gallery_catalog.os.path.ismount", side_effect=lambda p: str(p) in self.mounted)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -363,18 +368,23 @@ class MediaRepairTests(unittest.TestCase):
 
     # -- the CLI ---------------------------------------------------------------------------------
 
-    def cli(self, *args):
+    @staticmethod
+    def tool():
         spec = importlib.util.spec_from_file_location("media_volume_repair", ROOT / "scripts/media_volume_repair.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        return module
+
+    def cli(self, *args, module=None):
+        module = module or self.tool()
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = module.main(list(args))
+            code = module.main(list(args), volume_probe=self.probe)
         return code, out.getvalue(), err.getvalue()
 
     def test_cli_report_adopt_and_exit_codes(self):
         _, asset = self.job()
-        common = ["--media-root", self.media, "--volume-root", self.volume]
+        common = ["--media-root", self.media, "--volume-root", self.volume, "--volume-id", VOLUME_ID]
         code, out, _ = self.cli("report", *common, "--job-db", self.db, "--lease-dir", self.lease)
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["counts"]["adoptable"], 1)
@@ -388,7 +398,8 @@ class MediaRepairTests(unittest.TestCase):
 
     def test_cli_work_area_report_and_removal(self):
         rel, dev, ino = self.leftover(self.output, "kaliv_00001_.mp4")
-        common = ["--media-root", self.media, "--volume-root", self.volume, "--job-db", self.db]
+        common = ["--media-root", self.media, "--volume-root", self.volume, "--volume-id", VOLUME_ID,
+                  "--job-db", self.db]
         work = ["--work-root", self.work, "--work-dir", self.output]
         code, out, err = self.cli("report", *common, *work)
         self.assertEqual(code, 0, err)
@@ -402,6 +413,94 @@ class MediaRepairTests(unittest.TestCase):
         code, _, err = self.cli("report", *common, *work)
         self.assertEqual(code, 75)
         self.assertIn("work area refused", err)
+
+    def test_cli_verifies_the_pinned_volume_before_it_reads_or_repairs(self):
+        """H1 (#2390): the tool takes the volume id and runs G1's checks, as the executor does."""
+        _, asset = self.job()
+        index = Path(self.media, "index.json")
+        before = index.read_bytes() if index.exists() else None
+        common = ["--media-root", self.media, "--volume-root", self.volume]
+        repair = ["--job-db", self.db, "--lease-dir", self.lease]
+        # Another disk under the same letter, carrying another disk's marker: nothing is read or adopted.
+        Path(self.volume, MARKER_NAME).write_text("kaliv-media-9999", encoding="ascii")
+        for command in (["report"], ["adopt", "--asset", asset]):
+            code, out, err = self.cli(*command, *common, "--volume-id", VOLUME_ID, *repair)
+            self.assertEqual((code, out), (75, ""), err)
+            self.assertIn("media_volume_marker_mismatch", err)
+        self.assertEqual(index.read_bytes() if index.exists() else None, before, "nothing was adopted")
+        Path(self.volume, MARKER_NAME).write_text(VOLUME_ID, encoding="ascii")
+        # A network or subst letter, or an invalid id, is a configuration error (78), not "not here".
+        for kind in ("remote", "subst"):
+            self.probe.kind = kind
+            code, _, err = self.cli("report", *common, "--volume-id", VOLUME_ID, *repair)
+            self.assertEqual(code, 78, err)
+            self.assertIn(f"media_volume_{kind}_refused", err)
+        self.probe.kind = "local"
+        code, _, err = self.cli("report", *common, "--volume-id", "not an id", *repair)
+        self.assertEqual(code, 78, err)
+        self.assertIn("media_volume_id_invalid", err)
+        # The gallery folder must be on that volume.
+        elsewhere = os.path.join(self.base, "elsewhere")
+        os.mkdir(elsewhere)
+        code, _, err = self.cli("report", "--media-root", elsewhere, "--volume-root", self.volume,
+                                "--volume-id", VOLUME_ID, *repair)
+        self.assertEqual(code, 75, err)
+        self.assertIn("media_path_outside_volume", err)
+        # The id is required.
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            self.cli("report", *common, *repair)
+        # With the right disk it works, and adopts.
+        code, out, err = self.cli("adopt", *common, "--volume-id", VOLUME_ID, *repair, "--asset", asset)
+        self.assertEqual((code, json.loads(out)["adopted"]), (0, asset), err)
+
+    def test_cli_says_so_when_the_disk_changes_while_it_runs(self):
+        module = self.tool()
+
+        def swap_during_report(*args, **kwargs):
+            Path(self.volume, MARKER_NAME).write_text("kaliv-media-9999", encoding="ascii")
+            return {"counts": {}}
+
+        with patch.object(module, "reconcile", side_effect=swap_during_report):
+            code, out, err = self.cli("report", "--media-root", self.media, "--volume-root", self.volume,
+                                      "--volume-id", VOLUME_ID, "--job-db", self.db, module=module)
+        self.assertEqual((code, out), (75, ""), err)
+        self.assertIn("media_volume_marker_mismatch", err)
+        self.assertNotIn("may already have changed state", err, "a report changes nothing")
+
+    def test_a_disk_change_after_a_repair_says_the_repair_may_have_happened(self):
+        """P3 (6858965370, 6859352124): the real adopt or remove-temp runs, then the disk changes.
+
+        Exit 75, no unverified result on stdout, and stderr says the change may already have been made."""
+        _, asset = self.job()
+        name, dev, ino = self.stale()
+        common = ["--media-root", self.media, "--volume-root", self.volume, "--volume-id", VOLUME_ID,
+                  "--lease-dir", self.lease]
+        for command, real, extra, item in (
+                ("adopt", "adopt", ["--job-db", self.db, "--asset", asset], f"asset {asset}"),
+                ("remove-temp", "remove_stale_temp", ["--name", name, "--device", str(dev), "--inode", str(ino)],
+                 f"temp file {name}")):
+            module = self.tool()
+            original = getattr(module, real)
+
+            def then_swap(*args, _original=original, **kwargs):
+                result = _original(*args, **kwargs)
+                Path(self.volume, MARKER_NAME).write_text("kaliv-media-9999", encoding="ascii")
+                return result
+
+            with patch.object(module, real, side_effect=then_swap):
+                code, out, err = self.cli(command, *common, *extra, module=module)
+            self.assertEqual((code, out), (75, ""), err)
+            self.assertIn(f"after {command} of {item}", err)
+            self.assertIn("media_volume_marker_mismatch", err)
+            self.assertIn("The operation may already have changed state; re-inventory on the verified volume "
+                          "before retry.", err)
+            Path(self.volume, MARKER_NAME).write_text(VOLUME_ID, encoding="ascii")
+        # Both changes were in fact made, which is why the message must not read as "nothing happened".
+        code, out, err = self.cli("report", "--media-root", self.media, "--volume-root", self.volume,
+                                  "--volume-id", VOLUME_ID, "--job-db", self.db, "--lease-dir", self.lease)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["counts"]["adoptable"], 0)
+        self.assertFalse(Path(self.media, name).exists())
 
 
 if __name__ == "__main__":
