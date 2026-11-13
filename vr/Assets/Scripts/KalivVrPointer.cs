@@ -18,6 +18,13 @@ namespace Kaliv.VR
         private int _interactionMask;
         private InputAction _rightPos, _rightRot, _leftPos, _leftRot;
 
+        /// <summary>
+        /// Who handles a click on a text field. The panel sets this to open its own keyboard:
+        /// ActivateInputField only asks Android for an IME, and Quest shows none for an app
+        /// without the Meta overlay-keyboard feature — the field would focus invisibly.
+        /// </summary>
+        public static System.Func<InputField, bool> InputFieldHandler;
+
         public void Initialize(Camera camera)
         {
             _camera = camera;
@@ -127,6 +134,7 @@ namespace Kaliv.VR
             var input = _current.GetComponent<InputField>() ?? _current.GetComponentInParent<InputField>();
             if (input != null && input.interactable)
             {
+                if (InputFieldHandler != null && InputFieldHandler(input)) return;
                 EventSystem.current.SetSelectedGameObject(input.gameObject);
                 input.ActivateInputField();
                 return;
