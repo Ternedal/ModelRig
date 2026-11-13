@@ -19,6 +19,8 @@ namespace Kaliv.VR
         public bool Stopped;
         /// <summary>True when this turn came in by voice.</summary>
         public bool Spoken;
+        /// <summary>Who answered, when the rig has a Person Profile selected (#752); null otherwise.</summary>
+        public string Person;
         public long At;
 
         public KalivMessage() { }
@@ -161,6 +163,7 @@ namespace Kaliv.VR
                 if (!string.IsNullOrEmpty(m.Tool)) o["tool"] = m.Tool;
                 if (m.Stopped) o["stopped"] = true;
                 if (m.Spoken) o["spoken"] = true;
+                if (!string.IsNullOrEmpty(m.Person)) o["person"] = m.Person;
                 list.Add(o);
             }
             return KalivJson.Serialize(new Dictionary<string, object>
@@ -196,6 +199,7 @@ namespace Kaliv.VR
                     Tool = KalivJson.Has(o, "tool") ? KalivJson.Str(o, "tool") : null,
                     Stopped = KalivJson.Bool(o, "stopped"),
                     Spoken = KalivJson.Bool(o, "spoken"),
+                    Person = KalivJson.Has(o, "person") ? KalivJson.Str(o, "person") : null,
                 };
                 var src = KalivJson.Arr(o, "sources");
                 if (src != null) foreach (var s in src) if (s is string name) m.Sources.Add(name);

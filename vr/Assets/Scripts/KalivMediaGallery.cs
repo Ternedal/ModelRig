@@ -110,6 +110,19 @@ namespace Kaliv.VR
             }
         }
 
+        /// <summary>
+        /// Which part of a stereo image ONE eye should see, as a UV rect (x, y, w, h).
+        /// A side-by-side photo shown whole is two photos next to each other; showing the left
+        /// eye's half gives a correct flat picture. Top/bottom keeps the top half (Unity's UV
+        /// origin is bottom-left, hence y = 0.5).
+        /// </summary>
+        public static UnityEngine.Rect ImageUvRect(string stereo) => stereo switch
+        {
+            "left_right" => new UnityEngine.Rect(0f, 0f, 0.5f, 1f),
+            "top_bottom" => new UnityEngine.Rect(0f, 0.5f, 1f, 0.5f),
+            _ => new UnityEngine.Rect(0f, 0f, 1f, 1f),
+        };
+
         /// <summary>Parse one page. Throws FormatException on page-level damage.</summary>
         public static KalivMediaPage ParsePage(string body)
         {
