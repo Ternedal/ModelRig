@@ -115,7 +115,9 @@ check("auto" not in body.lower() and "router" not in body.lower()
 loop_src = inspect.getsource(main)
 i = loop_src.find("_rag_cloud_allowed(req)")
 window = loop_src[max(0, i - 400):i + 120]
-check("matches and req.cloud_key" in window,
+# "Cloud" is either field: chat_tools posts to cloud_base_url with or without a key (#2275 item 25).
+check("matches and _cloud_upstream(req)" in window
+      and "req.cloud_key or req.cloud_base_url" in inspect.getsource(main._cloud_upstream),
       "403'en kraever BAADE dokumentmatch OG en cloud-model -- den blokerer "
       "ikke lokale ture og ikke cloud-ture uden RAG")
 
