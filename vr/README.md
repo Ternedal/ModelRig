@@ -48,6 +48,8 @@ The landed first-party VR slice provides:
 - a media browser for `kaliv-media-gallery/v1` with a transport strip (play/pause, ±10 s, format, recenter), SkyPlayer's stick mapping for video, and images on a floating plane
 - BodyRig's `screen` attention target resolves to the panel, or to the open video or image
 - an in-headset Danish keyboard for every text field — Quest shows no system keyboard for an app without the Meta XR SDK's overlay-keyboard feature
+- **FIND RIG**: the headset finds the backend on its own subnet by asking every address for the unauthenticated `GET /healthz` and accepting only `service=modelrig-server` (at most the /24 around the headset, 48 in flight, 1 s timeouts). It runs by itself on first start. Once paired, if the saved address gets no HTTP answer, the headset scans again and moves to the address where its own token is accepted — so a rig whose DHCP address changes is followed, never swapped for another rig. Not across Tailscale; there the address is typed.
+- the panel waits for a tracked head pose before placing itself, then stands 2 m ahead at eye height, upright, along the head's yaw only; **B** or **Y** brings it back in front, and CENTRER brings both the panel and Kaliv
 - a RIG overlay with the rig surfaces the Android app has screens for:
   - **KILDER** — choose what VIDEN searches, switch sources on/off, delete a source (two presses), add a typed note to the documents
   - **VÆRKTØJER** — the registry's per-tool and layer-wide kill switch
@@ -69,7 +71,9 @@ The landed first-party VR slice provides:
 - Kaliv-owned media facade over SkyPlayer-Engine with flat/VR180/VR360 projection bound to `KalivMedia`
 - tracking-origin compensation propagated into immersive media orientation
 
-The implementation is not yet a physically qualified finished VR product. Everything above compiles for Android and its protocol logic is covered by 85 EditMode tests, but the headset paths — the keyboard, microphone capture, spatial audio, the confirmation card, the media cache — have **not yet been exercised on a Quest**, and Quest device evidence remains its own gate.
+The implementation is not yet a physically qualified finished VR product. Everything above compiles for Android and its protocol logic is covered by 91 EditMode tests.
+
+**On a Quest 3 so far (13 Nov, without a running rig):** passthrough, the panel's placement, the pointer, the keyboard (typing, LUK discarding the edit) and the pairing screen's refusal without a code. **Not yet exercised:** everything that needs the rig answering — chat, voice and spatial audio, the avatar, the RIG tabs, the confirmation card, FIND RIG against a live backend and the media cache. Quest device evidence remains its own gate.
 
 Known gaps against Android/Desktop:
 
