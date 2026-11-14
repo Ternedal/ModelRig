@@ -90,6 +90,8 @@ namespace Kaliv.VR
             _renderEngine.Initialize(camera);
 
             _panel = KalivVrPanel.Create(camera, this, _renderEngine.UiRoot);
+            // Splash on top, like SkyPlayer's: shown only once the art is bundled.
+            KalivSplash.Show(camera, transform);
             _renderEngine.AttachUi(_panel.gameObject);
             _renderEngine.StatusChanged += (status, error) => _panel.SetBodyStatus(status, error);
             _renderEngine.MediaEnded += OnMediaEnded;
@@ -124,6 +126,8 @@ namespace Kaliv.VR
                 // Not paired yet: look for the rig straight away, so the address is usually
                 // filled in before the user reaches for the keyboard.
                 FindRig();
+                // Used Stash last time and no rig: start in the library, not on a pairing form.
+                if (_stashSource && !string.IsNullOrWhiteSpace(_stash.BaseUrl)) OpenStash();
             }
         }
 
@@ -805,8 +809,20 @@ namespace Kaliv.VR
             UpdateTransport();
         }
 
+        /// <summary>
+        /// LUK on the transport strip: back to the list you picked from, on the same page —
+        /// as in SkyPlayer — not all the way out to the first screen.
+        /// </summary>
+        public void CloseMediaToBrowser()
+        {
+            CloseMedia();
+            _panel.ShowMediaBrowser(true);
+            _panel.SetMediaStatus("Vælg en ny video — eller LUK for at gå tilbage.", false);
+        }
+
         public void CloseMedia()
         {
+            _resumeTarget = 0;
             _cancelDownload?.Invoke();
             StashReportProgress(finished: false);   // remember where a Stash scene was left
             _stashPlaying = null;
@@ -898,7 +914,11 @@ namespace Kaliv.VR
             string time = _renderEngine.MediaLength > 0
                 ? $"{Clock(_renderEngine.MediaTime)} / {Clock(_renderEngine.MediaLength)}"
                 : "";
-            _panel.SetTransportInfo($"{fmt}\n{time}", _renderEngine.MediaPlaying);
+            // The panel (and its status line) is hidden during playback, so the strip says what plays.
+            string title = _stashPlaying?.Title ?? "";
+            if (title.Length > 26) title = title.Substring(0, 25) + "…";
+            string head = title.Length > 0 ? title + "\n" : "";
+            _panel.SetTransportInfo($"{head}{fmt}  {time}", _renderEngine.MediaPlaying);
         }
 
         private float _transportTick;

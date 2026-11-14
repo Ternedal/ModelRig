@@ -163,12 +163,17 @@ namespace Kaliv.VR
             var bg = AddImage(_canvas.transform, "Background", new Vector2(1200, 760), Vector2.zero, CanvasBg);
             bg.transform.SetAsFirstSibling();
 
-            AddText(_canvas.transform, "KALIV", 18, Accent, TextAnchor.MiddleLeft,
+            var brand = AddText(_canvas.transform, "KALIV", 18, Accent, TextAnchor.MiddleLeft,
                 new Vector2(1020, 42), new Vector2(-20, 337), FontStyle.Bold);
-            AddText(_canvas.transform, "VR", 38, TextMain, TextAnchor.MiddleLeft,
+            var vr = AddText(_canvas.transform, "VR", 38, TextMain, TextAnchor.MiddleLeft,
                 new Vector2(1020, 52), new Vector2(-20, 292));
             _status = AddText(_canvas.transform, "Ikke forbundet", 17, Muted, TextAnchor.MiddleRight,
                 new Vector2(640, 42), new Vector2(250, 337));
+            // The panel's frame: hidden while a video plays, so nothing stands between you and it.
+            _chrome.Add(bg.gameObject);
+            _chrome.Add(brand.gameObject);
+            _chrome.Add(vr.gameObject);
+            _chrome.Add(_status.gameObject);
 
             BuildPairGroup();
             BuildChatGroup();
@@ -687,6 +692,8 @@ namespace Kaliv.VR
                 Elevated, () => _app.MediaPrevPage());
             _mediaMore = AddButton(_mediaGroup.transform, "FLERE", new Vector2(200, 52), new Vector2(0, -300),
                 Elevated, () => _app.MediaNextPage());
+            AddButton(_mediaGroup.transform, "AFSLUT", new Vector2(140, 52), new Vector2(460, -300),
+                Danger, () => _app.QuitApp());
             AddButton(_mediaGroup.transform, "LUK", new Vector2(200, 52), new Vector2(250, -300),
                 Elevated, () => ShowMediaBrowser(false));
             _mediaGroup.SetActive(false);
@@ -709,7 +716,7 @@ namespace Kaliv.VR
             var rum = AddButton(_transportGroup.transform, "RUM", new Vector2(120, 52), new Vector2(310, -440), Elevated, () => _app.KeyToggle());
             _rumLabel = rum.GetComponentInChildren<Text>();
             _rumImage = rum.GetComponent<Image>();
-            AddButton(_transportGroup.transform, "LUK", new Vector2(110, 52), new Vector2(440, -440), Danger, () => _app.CloseMedia());
+            AddButton(_transportGroup.transform, "LUK", new Vector2(110, 52), new Vector2(440, -440), Danger, () => _app.CloseMediaToBrowser());
 
             // The key row, only while RUM is on — as in SkyPlayer.
             _keyGroup = Group("KeyRow", _transportGroup.transform);
@@ -773,14 +780,19 @@ namespace Kaliv.VR
             // The keyboard sits above everything: it is always opened FROM a field on screen and
             // closes back to it. A confirmation card that arrives meanwhile waits underneath.
             bool kb = _keyboardOpen;
+            // While a video or image is open the panel steps aside: only the transport strip
+            // (and a confirmation card, which must never wait unseen) is shown.
+            bool play = _playback;
+            foreach (var c in _chrome) if (c != null) c.SetActive(!play || _confirmOpen);
             _keyboardGroup?.SetActive(kb);
             // MEDIER opens without a rig too: Stash is a different server and needs no pairing.
-            _pairGroup?.SetActive(!_paired && !_mediaOpen && !kb);
+            _pairGroup?.SetActive(!_paired && !_mediaOpen && !kb && !play);
             _confirmGroup?.SetActive(_paired && _confirmOpen && !kb);
             bool overlay = _confirmOpen || kb;
-            _rigGroup?.SetActive(_paired && _rigOpen && !overlay);
-            _mediaGroup?.SetActive(_mediaOpen && !_rigOpen && !overlay);
-            _chatGroup?.SetActive(_paired && !_mediaOpen && !_rigOpen && !overlay);
+            _rigGroup?.SetActive(_paired && _rigOpen && !overlay && !play);
+            _mediaGroup?.SetActive(_mediaOpen && !_rigOpen && !overlay && !play);
+            _chatGroup?.SetActive(_paired && !_mediaOpen && !_rigOpen && !overlay && !play);
+            _transportGroup?.SetActive(play && _controlsVisible && !overlay);
         }
 
         public void SetStatus(string text, bool error)
@@ -954,6 +966,7 @@ namespace Kaliv.VR
         private void LateUpdate()
         {
             UpdatePlacement();
+            UpdatePlaybackControls();
 
             if (_confirmGroup != null && _confirmGroup.activeSelf && _confirmDeadline > 0f)
             {
@@ -1162,13 +1175,77 @@ namespace Kaliv.VR
             _mediaRows[index].Data?.OnClick?.Invoke();
         }
 
+        /// <summary>
+        /// Playback mode on/off. On: the panel disappears and only the transport strip remains;
+        /// it hides itself after a few seconds of playing and comes back on the trigger or A/X.
+        /// Off: the panel returns where it was.
+        /// </summary>
         public void ShowTransport(bool show)
         {
-            _transportGroup?.SetActive(show);
+            _playback = show;
+            _controlsVisible = true;
+            _controlsIdle = 0f;
+            RefreshGroups();
+        }
+
+        private readonly List<GameObject> _chrome = new List<GameObject>();
+        private bool _playback;
+        private bool _controlsVisible = true;
+        private float _controlsIdle;
+        private bool _transportPlaying;
+        private bool _prevShowButton;
+        private bool _prevTrigger;
+        private const float ControlsHideAfter = 6f;
+
+        /// <summary>Controls during playback, SkyPlayer-style: out of the way until asked for.</summary>
+        private void UpdatePlaybackControls()
+        {
+            if (!_playback) return;
+            bool show = Button(UnityEngine.XR.XRNode.RightHand, UnityEngine.XR.CommonUsages.primaryButton) ||
+                        Button(UnityEngine.XR.XRNode.LeftHand, UnityEngine.XR.CommonUsages.primaryButton);
+            bool trigger = Button(UnityEngine.XR.XRNode.RightHand, UnityEngine.XR.CommonUsages.triggerButton) ||
+                           Button(UnityEngine.XR.XRNode.LeftHand, UnityEngine.XR.CommonUsages.triggerButton);
+
+            if (show && !_prevShowButton)
+            {
+                // A/X toggles: show the strip, or put it away at once.
+                _controlsVisible = !_controlsVisible;
+                _controlsIdle = 0f;
+                RefreshGroups();
+            }
+            else if (trigger && !_prevTrigger)
+            {
+                // The trigger only ever brings the strip back; a click ON it is a button press.
+                _controlsIdle = 0f;
+                if (!_controlsVisible) { _controlsVisible = true; RefreshGroups(); }
+            }
+            _prevShowButton = show;
+            _prevTrigger = trigger;
+
+            // Paused stays visible — you are about to do something. Playing hides after a while.
+            if (_controlsVisible && _transportPlaying && !_confirmOpen && !_keyboardOpen)
+            {
+                if ((_controlsIdle += Time.unscaledDeltaTime) > ControlsHideAfter)
+                {
+                    _controlsVisible = false;
+                    RefreshGroups();
+                }
+            }
+            else
+            {
+                _controlsIdle = 0f;
+            }
+        }
+
+        private static bool Button(UnityEngine.XR.XRNode node, UnityEngine.XR.InputFeatureUsage<bool> usage)
+        {
+            var d = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(node);
+            return d.isValid && d.TryGetFeatureValue(usage, out bool v) && v;
         }
 
         public void SetTransportInfo(string info, bool playing)
         {
+            _transportPlaying = playing;
             if (_transportInfo != null) _transportInfo.text = info ?? "";
             if (_transportPlay != null) _transportPlay.text = playing ? "PAUSE" : "AFSPIL";
         }

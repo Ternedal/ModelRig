@@ -251,8 +251,12 @@ namespace Kaliv.VR
             _stashPlaying = scene;
             _stashProgressTimer = 0f;
             double resume = KalivStash.ResumeFrom(scene);
-            _mediaFormatIndex = Array.IndexOf(SkyPlayerFormats, scene.FormatHint);
-            _renderEngine.OpenMedia(scene.StreamUrl, scene.FormatHint, resume);
+            // Anders' library is VR180 side-by-side: every Stash video starts there, whatever
+            // the file name suggests. FORMAT still cycles from it.
+            _mediaFormatIndex = Array.IndexOf(SkyPlayerFormats, StashStartFormat);
+            _renderEngine.OpenMedia(scene.StreamUrl, StashStartFormat, resume);
+            _resumeTarget = resume;
+            _resumeDeadline = Time.realtimeSinceStartup + 20f;
             _renderEngine.SetMediaScreenAsGazeTarget(true);
             _mediaOpen = true;
             _panel.ShowMediaBrowser(false);
@@ -262,8 +266,30 @@ namespace Kaliv.VR
             _panel.SetStatus(resume > 0 ? $"Fortsætter {scene.Title} fra {Clock(resume)}" : scene.Title, false);
         }
 
+        private const string StashStartFormat = "VR180_SBS";
+        private double _resumeTarget;
+        private float _resumeDeadline;
+
+        /// <summary>
+        /// The engine seeks to the resume point only if the stream reports its length the
+        /// moment it is ready; over HTTP that can come a little later, and the video then
+        /// starts from 0:00. Once the length is known, check, and seek ourselves if needed.
+        /// </summary>
+        private void ResumeCheck()
+        {
+            if (_resumeTarget <= 0) return;
+            if (Time.realtimeSinceStartup > _resumeDeadline) { _resumeTarget = 0; return; }
+            if (_renderEngine.MediaLength <= 0 || _renderEngine.MediaTime <= 0.3) return;
+            double target = _resumeTarget;
+            _resumeTarget = 0;
+            if (target >= _renderEngine.MediaLength - 2) return;
+            double gap = target - _renderEngine.MediaTime;
+            if (gap > 5) _renderEngine.SeekMediaRelative(gap);
+        }
+
         private void StashProgressTick()
         {
+            ResumeCheck();
             if (_stashPlaying == null) return;
             if ((_stashProgressTimer += Time.unscaledDeltaTime) < 15f) return;
             _stashProgressTimer = 0f;
