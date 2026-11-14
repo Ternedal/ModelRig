@@ -6,7 +6,15 @@ using UnityEngine.UI;
 
 namespace Kaliv.VR
 {
-    /// <summary>Code-driven world-space UI using the shared Kaliv dark/gold design language.</summary>
+    /// <summary>
+    /// Code-driven world-space UI in the shared Kaliv dark/gold design language.
+    ///
+    /// The panel shows state; it does not own it. The conversation lives in
+    /// KalivConversation, turn logic in KalivVrApp. That split is why the transcript is
+    /// re-rendered from the conversation rather than appended to: retry, history restore and
+    /// error bubbles all change what is on screen, and a panel that kept its own copy of the
+    /// text would drift from what is actually sent to the rig.
+    /// </summary>
     public sealed class KalivVrPanel : MonoBehaviour
     {
         private static readonly Color CanvasBg = Hex("#0B0A09");
@@ -18,6 +26,15 @@ namespace Kaliv.VR
         private static readonly Color Accent = Hex("#D4AB52");
         private static readonly Color Danger = Hex("#C96B5D");
         private static readonly Color Ok = Hex("#77836D");
+        private static readonly Color OnAccent = Hex("#2B1C05");
+
+        private const string AccentHex = "#D4AB52";
+        private const string MutedHex = "#A89D90";
+        private const string DangerHex = "#C96B5D";
+        private const string OkHex = "#9DAA91";
+
+        /// <summary>Characters of transcript kept in the Text component. Older text scrolls off the top.</summary>
+        private const int TranscriptWindow = 3200;
 
         private KalivVrApp _app;
         private Canvas _canvas;
@@ -33,23 +50,98 @@ namespace Kaliv.VR
         private Text _bodyStatus;
         private Button _pairButton;
         private Button _sendButton;
+        private Button _stopButton;
+        private Button _retryButton;
+        private Button _talkButton;
+        private Text _talkLabel;
+        private Image _talkImage;
+        private Text _ragLabel;
+        private Image _ragImage;
+        private Text _toolsLabel;
+        private Image _toolsImage;
+
+        private KalivConversation _conversation;
+        private bool _transcriptDirty;
+        private string _liveSuffix;          // e.g. "▌" while streaming
+
         private readonly List<string> _models = new();
         private int _modelIndex;
-        private readonly StringBuilder _conversation = new();
+
+        // Confirmation card
+        private GameObject _confirmGroup;
+        private Text _confirmTitle;
+        private Text _confirmBody;
+        private Text _confirmExpiry;
+        private Button _approveButton;
+        private Button _denyButton;
+        private float _confirmDeadline;
+
+        // Media browser + transport
+        private GameObject _mediaGroup;
+        private Text _mediaStatus;
+        private readonly List<MediaRow> _mediaRows = new();
+        private Button _mediaMore;
+        private GameObject _transportGroup;
+        private Text _transportInfo;
+        private Text _transportPlay;
+
+        // Keyboard
+        private GameObject _keyboardGroup;
+        private Text _kbTitle;
+        private Text _kbPreview;
+        private readonly List<Button[]> _kbRows = new();
+        private Text _kbShiftLabel;
+        private Text _kbLayerLabel;
+        private Text _kbOkLabel;
+        private KalivKeyboardModel _kb;
+        private InputField _kbTarget;
+        private bool _keyboardOpen;
+
+        private sealed class MediaRow
+        {
+            public GameObject Root;
+            public Text Label;
+            public RawImage Thumb;
+            public MediaRowData Data;
+        }
+
+        /// <summary>One line in the media browser: a rig item, a Stash scene, or a studio/tag to pick.</summary>
+        public sealed class MediaRowData
+        {
+            /// <summary>Thumbnails are matched to rows by this key; null = no thumbnail.</summary>
+            public string Key;
+            public string Label;
+            public Action OnClick;
+        }
+
+        // Media source tabs and the Stash controls
+        private Image _srcRigImage, _srcStashImage;
+        private GameObject _stashControls;
+        private Text _stashOrderLabel, _stashStudioLabel, _stashTagLabel, _stashQueryLabel;
+        private Button _mediaPrev;
+
+        // AR key strip under the transport
+        private GameObject _keyGroup;
+        private Text _rumLabel, _keyModeLabel, _keyValueLabel, _holeLabel, _pipetLabel;
+        private Image _rumImage;
+
+        public Transform PanelTransform => _canvas != null ? _canvas.transform : transform;
 
         public static KalivVrPanel Create(Camera camera, KalivVrApp app, Transform persistentParent)
         {
             var go = new GameObject("KalivVrPanel");
-            if (persistentParent != null)
-                go.transform.SetParent(persistentParent, false);
-            else
-                DontDestroyOnLoad(go);
+            if (persistentParent != null) go.transform.SetParent(persistentParent, false);
+            else DontDestroyOnLoad(go);
 
             var panel = go.AddComponent<KalivVrPanel>();
             panel._app = app;
             panel.Build(camera);
             return panel;
         }
+
+        // =====================================================================================
+        // Layout
+        // =====================================================================================
 
         private void Build(Camera camera)
         {
@@ -61,8 +153,12 @@ namespace Kaliv.VR
             var rt = (RectTransform)_canvas.transform;
             rt.sizeDelta = new Vector2(1200, 760);
             rt.localScale = Vector3.one * 0.00155f;
-            rt.position = camera.transform.position + camera.transform.forward * 2.15f;
-            rt.rotation = Quaternion.LookRotation(camera.transform.forward, camera.transform.up);
+            // NOT placed here. At this point the headset has usually not delivered a head pose
+            // yet, so the camera sits at the floor-level origin and a panel placed "in front"
+            // of it lands low and tilted up — exactly what the first headset test showed. The
+            // panel waits for tracking in LateUpdate (WaitForTrackingThenPlace).
+            _camera = camera;
+            _placeAfter = Time.realtimeSinceStartup + PlaceFallbackSeconds;
 
             var bg = AddImage(_canvas.transform, "Background", new Vector2(1200, 760), Vector2.zero, CanvasBg);
             bg.transform.SetAsFirstSibling();
@@ -70,14 +166,335 @@ namespace Kaliv.VR
             AddText(_canvas.transform, "KALIV", 18, Accent, TextAnchor.MiddleLeft,
                 new Vector2(1020, 42), new Vector2(-20, 337), FontStyle.Bold);
             AddText(_canvas.transform, "VR", 38, TextMain, TextAnchor.MiddleLeft,
-                new Vector2(1020, 52), new Vector2(-20, 292), FontStyle.Normal);
+                new Vector2(1020, 52), new Vector2(-20, 292));
             _status = AddText(_canvas.transform, "Ikke forbundet", 17, Muted, TextAnchor.MiddleRight,
-                new Vector2(500, 42), new Vector2(320, 337));
+                new Vector2(640, 42), new Vector2(250, 337));
 
-            _pairGroup = new GameObject("PairGroup", typeof(RectTransform));
-            _pairGroup.transform.SetParent(_canvas.transform, false);
-            _url = AddInput(_pairGroup.transform, "Rig-adresse", "http://192.168.1.10:8080",
-                new Vector2(780, 62), new Vector2(-90, 120));
+            BuildPairGroup();
+            BuildChatGroup();
+            BuildConfirmCard();
+            BuildMediaBrowser();
+            BuildTransport();
+            BuildRigOverlay();
+            BuildKeyboard();
+
+            // Every text field in the panel opens the in-headset keyboard instead of waiting for
+            // a system keyboard that Quest will not show for this app.
+            KalivVrPointer.InputFieldHandler = OpenKeyboard;
+
+            SetPaired(false);
+        }
+
+        private void OnDestroy()
+        {
+            if (KalivVrPointer.InputFieldHandler == (Func<InputField, bool>)OpenKeyboard)
+                KalivVrPointer.InputFieldHandler = null;
+        }
+
+        private void BuildKeyboard()
+        {
+            _keyboardGroup = Group("Keyboard", _canvas.transform);
+            AddImage(_keyboardGroup.transform, "Backdrop", new Vector2(1200, 760), Vector2.zero, CanvasBg);
+            _kbTitle = AddText(_keyboardGroup.transform, "", 16, Accent, TextAnchor.MiddleLeft,
+                new Vector2(1080, 36), new Vector2(0, 322), FontStyle.Bold);
+            var previewBg = AddImage(_keyboardGroup.transform, "Preview", new Vector2(1092, 74), new Vector2(0, 262), Elevated);
+            var outline = previewBg.gameObject.AddComponent<Outline>();
+            outline.effectColor = Border;
+            outline.effectDistance = new Vector2(1.5f, -1.5f);
+            previewBg.gameObject.AddComponent<RectMask2D>();
+            _kbPreview = AddText(previewBg.transform, "", 22, TextMain, TextAnchor.MiddleRight,
+                new Vector2(1060, 64), Vector2.zero);
+            _kbPreview.horizontalOverflow = HorizontalWrapMode.Overflow;
+
+            const float keyW = 92f, keyH = 78f, gap = 8f;
+            int perRow = KalivKeyboardModel.MaxKeysPerRow;
+            for (int r = 0; r < KalivKeyboardModel.Rows; r++)
+            {
+                var row = new Button[perRow];
+                float y = 160f - r * (keyH + gap);
+                for (int c = 0; c < perRow; c++)
+                {
+                    int rr = r, cc = c;
+                    row[c] = AddButton(_keyboardGroup.transform, "", new Vector2(keyW, keyH), new Vector2(0, y),
+                        Surface, () => PressKey(rr, cc));
+                    row[c].GetComponentInChildren<Text>().fontSize = 24;
+                }
+                _kbRows.Add(row);
+            }
+
+            float by = 160f - KalivKeyboardModel.Rows * (keyH + gap);
+            var shift = AddButton(_keyboardGroup.transform, KalivKeyboardModel.Shift, new Vector2(130, keyH), new Vector2(-480, by),
+                Elevated, () => PressNamed(KalivKeyboardModel.Shift));
+            _kbShiftLabel = shift.GetComponentInChildren<Text>();
+            var layer = AddButton(_keyboardGroup.transform, KalivKeyboardModel.ToSymbols, new Vector2(140, keyH), new Vector2(-340, by),
+                Elevated, () => PressNamed(_kb != null && _kb.Current == KalivKeyboardModel.Layer.Symbols
+                    ? KalivKeyboardModel.ToLetters : KalivKeyboardModel.ToSymbols));
+            _kbLayerLabel = layer.GetComponentInChildren<Text>();
+            AddButton(_keyboardGroup.transform, KalivKeyboardModel.Space, new Vector2(400, keyH), new Vector2(-55, by),
+                Surface, () => PressNamed(KalivKeyboardModel.Space));
+            AddButton(_keyboardGroup.transform, KalivKeyboardModel.Delete, new Vector2(150, keyH), new Vector2(230, by),
+                Elevated, () => PressNamed(KalivKeyboardModel.Delete));
+            AddButton(_keyboardGroup.transform, KalivKeyboardModel.Clear, new Vector2(130, keyH), new Vector2(380, by),
+                Elevated, () => PressNamed(KalivKeyboardModel.Clear));
+            AddButton(_keyboardGroup.transform, "LUK", new Vector2(110, keyH), new Vector2(505, by),
+                Danger, () => CloseKeyboard(false));
+
+            var ok = AddButton(_keyboardGroup.transform, "OK", new Vector2(360, 64), new Vector2(0, by - 90),
+                Accent, () => CloseKeyboard(true));
+            _kbOkLabel = ok.GetComponentInChildren<Text>();
+
+            _keyboardGroup.SetActive(false);
+        }
+
+        /// <summary>Called by the pointer when a text field is clicked. Returns true when handled.</summary>
+        private bool OpenKeyboard(InputField field)
+        {
+            if (field == null || _keyboardGroup == null) return false;
+            if (!field.transform.IsChildOf(_canvas.transform)) return false;   // not ours
+
+            _kbTarget = field;
+            _kbCallback = null;
+            bool prompt = field == _prompt;
+            int max = field == _code ? 32 : field == _url ? 200 : 2000;
+            _kb = new KalivKeyboardModel(field.text, max, capitalizeFirst: prompt);
+            string name = field.gameObject.name;
+            _kbTitle.text = name.ToUpperInvariant();
+            _kbOkLabel.text = prompt ? "SEND" : "OK";
+            _keyboardOpen = true;
+            RefreshGroups();
+            _keyboardGroup.transform.SetAsLastSibling();
+            RefreshKeyboard();
+            return true;
+        }
+
+        private void PressKey(int row, int col)
+        {
+            if (_kb == null) return;
+            string keys = _kb.RowKeys(row);
+            if (col < 0 || col >= keys.Length) return;
+            _kb.Press(keys[col].ToString());
+            RefreshKeyboard();
+        }
+
+        private void PressNamed(string key)
+        {
+            if (_kb == null) return;
+            _kb.Press(key);
+            RefreshKeyboard();
+        }
+
+        private void RefreshKeyboard()
+        {
+            if (_kb == null) return;
+            for (int r = 0; r < _kbRows.Count; r++)
+            {
+                string keys = _kb.RowKeys(r);
+                var row = _kbRows[r];
+                float keyW = 92f, gap = 8f;
+                float width = keys.Length * (keyW + gap) - gap;
+                for (int c = 0; c < row.Length; c++)
+                {
+                    bool used = c < keys.Length;
+                    row[c].gameObject.SetActive(used);
+                    if (!used) continue;
+                    row[c].GetComponentInChildren<Text>().text = keys[c].ToString();
+                    var rt = (RectTransform)row[c].transform;
+                    rt.anchoredPosition = new Vector2(-width / 2f + keyW / 2f + c * (keyW + gap), rt.anchoredPosition.y);
+                }
+            }
+            _kbShiftLabel.text = _kb.Current == KalivKeyboardModel.Layer.Upper ? "SHIFT ●" : KalivKeyboardModel.Shift;
+            _kbLayerLabel.text = _kb.Current == KalivKeyboardModel.Layer.Symbols
+                ? KalivKeyboardModel.ToLetters : KalivKeyboardModel.ToSymbols;
+            // The caret makes "is there a trailing space?" answerable at a glance.
+            _kbPreview.text = _kb.Text + "|";
+        }
+
+        private Action<string> _kbCallback;
+
+        /// <summary>
+        /// Ask for free text — a model name to download, a note to add to the documents.
+        /// Same keyboard as the fields; the result goes to <paramref name="onOk"/> instead.
+        /// </summary>
+        public void RequestText(string title, string initial, int maxLength, string okLabel, Action<string> onOk)
+        {
+            if (_keyboardGroup == null) return;
+            _kbTarget = null;
+            _kbCallback = onOk;
+            _kb = new KalivKeyboardModel(initial, maxLength);
+            _kbTitle.text = title;
+            _kbOkLabel.text = okLabel;
+            _keyboardOpen = true;
+            RefreshGroups();
+            _keyboardGroup.transform.SetAsLastSibling();
+            RefreshKeyboard();
+        }
+
+        private void CloseKeyboard(bool commit)
+        {
+            var target = _kbTarget;
+            var callback = _kbCallback;
+            string text = _kb?.Text ?? "";
+            _kbTarget = null;
+            _kbCallback = null;
+            _kb = null;
+            _keyboardOpen = false;
+            RefreshGroups();
+
+            if (commit && callback != null) { callback(text); return; }
+            if (!commit || target == null) return;
+            if (target == _prompt)
+            {
+                target.text = "";
+                _app.Send(text);
+                return;
+            }
+            target.text = text;
+        }
+
+        public bool KeyboardOpen => _keyboardOpen;
+
+        // ---- RIG overlay: document sources & tool registry ------------------------------
+
+        /// <summary>One row in the RIG overlay: a main action and an optional on/off switch.</summary>
+        public sealed class RigRow
+        {
+            public string Label;
+            public string Toggle;          // null = no switch
+            public bool ToggleOn;
+            public bool Selected;
+            public Action OnMain;
+            public Action OnToggle;
+        }
+
+        private GameObject _rigGroup;
+        private bool _rigOpen;
+        private Text _rigStatus;
+        public static readonly string[] RigTabs =
+            { "KILDER", "VÆRKTØJER", "PERSONER", "MODELLER", "STATUS", "ENHEDER", "PLANER", "LOG" };
+        private readonly List<Image> _rigTabImages = new();
+        private readonly List<(Button main, Text mainText, Button toggle, Text toggleText)> _rigRowUi = new();
+        private Button _rigMore;
+        private List<RigRow> _rigRows = new();
+        private int _rigPage;
+        private const int RigRowsPerPage = 7;
+
+        private void BuildRigOverlay()
+        {
+            _rigGroup = Group("RigOverlay", _canvas.transform);
+            AddImage(_rigGroup.transform, "Backdrop", new Vector2(1200, 760), Vector2.zero, CanvasBg);
+            // One tab per rig surface Android has a screen for, in the order you reach for them.
+            const float tabW = 134f, tabGap = 6f;
+            float tabsWidth = RigTabs.Length * (tabW + tabGap) - tabGap;
+            for (int i = 0; i < RigTabs.Length; i++)
+            {
+                int tab = i;
+                var b = AddButton(_rigGroup.transform, RigTabs[i], new Vector2(tabW, 48),
+                    new Vector2(-tabsWidth / 2f + tabW / 2f + i * (tabW + tabGap), 330),
+                    Elevated, () => _app.RigShowTab(tab));
+                b.GetComponentInChildren<Text>().fontSize = 13;
+                _rigTabImages.Add(b.GetComponent<Image>());
+            }
+
+            _rigStatus = AddText(_rigGroup.transform, "", 15, Muted, TextAnchor.MiddleLeft,
+                new Vector2(1080, 44), new Vector2(0, 278));
+            _rigStatus.horizontalOverflow = HorizontalWrapMode.Wrap;
+
+            for (int i = 0; i < RigRowsPerPage; i++)
+            {
+                int index = i;
+                float y = 215 - i * 68;
+                var main = AddButton(_rigGroup.transform, "", new Vector2(860, 58), new Vector2(-110, y),
+                    Surface, () => OnRigMain(index));
+                var mt = main.GetComponentInChildren<Text>();
+                mt.alignment = TextAnchor.MiddleLeft;
+                mt.fontStyle = FontStyle.Normal;
+                mt.rectTransform.sizeDelta = new Vector2(820, 54);
+                var toggle = AddButton(_rigGroup.transform, "", new Vector2(200, 58), new Vector2(430, y),
+                    Elevated, () => OnRigToggle(index));
+                _rigRowUi.Add((main, mt, toggle, toggle.GetComponentInChildren<Text>()));
+                main.gameObject.SetActive(false);
+                toggle.gameObject.SetActive(false);
+            }
+
+            _rigMore = AddButton(_rigGroup.transform, "FLERE", new Vector2(200, 52), new Vector2(-150, -300),
+                Elevated, () => { _rigPage++; RenderRigRows(); });
+            AddButton(_rigGroup.transform, "LUK", new Vector2(200, 52), new Vector2(150, -300),
+                Elevated, () => ShowRig(false));
+            _rigGroup.SetActive(false);
+        }
+
+        public void ShowRig(bool show)
+        {
+            _rigOpen = show;
+            RefreshGroups();
+            if (show) _rigGroup.transform.SetAsLastSibling();
+        }
+
+        public void SetRigTab(int tab)
+        {
+            for (int i = 0; i < _rigTabImages.Count; i++)
+                _rigTabImages[i].color = i == tab ? Accent : Elevated;
+        }
+
+        public void SetRigStatus(string text, bool error)
+        {
+            if (_rigStatus == null) return;
+            _rigStatus.text = text ?? "";
+            _rigStatus.color = error ? Danger : Muted;
+        }
+
+        public void SetRigRows(List<RigRow> rows, bool keepPage = false)
+        {
+            _rigRows = rows ?? new List<RigRow>();
+            if (!keepPage) _rigPage = 0;
+            RenderRigRows();
+        }
+
+        private void RenderRigRows()
+        {
+            int pages = Math.Max(1, (_rigRows.Count + RigRowsPerPage - 1) / RigRowsPerPage);
+            if (_rigPage >= pages) _rigPage = 0;
+            int start = _rigPage * RigRowsPerPage;
+            for (int i = 0; i < _rigRowUi.Count; i++)
+            {
+                var ui = _rigRowUi[i];
+                int idx = start + i;
+                var row = idx < _rigRows.Count ? _rigRows[idx] : null;
+                ui.main.gameObject.SetActive(row != null);
+                ui.toggle.gameObject.SetActive(row != null && row.Toggle != null);
+                if (row == null) continue;
+                ui.mainText.text = (row.Selected ? "● " : "   ") + row.Label;
+                ((Image)ui.main.targetGraphic).color = row.Selected ? Elevated : Surface;
+                if (row.Toggle != null)
+                {
+                    ui.toggleText.text = row.Toggle;
+                    ((Image)ui.toggle.targetGraphic).color = row.ToggleOn ? Ok : Danger;
+                }
+            }
+            if (_rigMore != null) _rigMore.gameObject.SetActive(pages > 1);
+        }
+
+        private void OnRigMain(int index)
+        {
+            int idx = _rigPage * RigRowsPerPage + index;
+            if (idx < _rigRows.Count) _rigRows[idx].OnMain?.Invoke();
+        }
+
+        private void OnRigToggle(int index)
+        {
+            int idx = _rigPage * RigRowsPerPage + index;
+            if (idx < _rigRows.Count) _rigRows[idx].OnToggle?.Invoke();
+        }
+
+        private void BuildPairGroup()
+        {
+            _pairGroup = Group("PairGroup", _canvas.transform);
+            _url = AddInput(_pairGroup.transform, "Rig-adresse", "http://riggens-adresse:8080",
+                new Vector2(600, 62), new Vector2(-180, 120));
+            // The rig's address changes with the router's whim; FIND RIG asks the local network.
+            _findButton = AddButton(_pairGroup.transform, "FIND RIG",
+                new Vector2(300, 62), new Vector2(315, 120), Elevated, () => _app.FindRig());
+            _findLabel = _findButton.GetComponentInChildren<Text>();
             _code = AddInput(_pairGroup.transform, "Parringskode", "XXXX-XXXX",
                 new Vector2(420, 62), new Vector2(-270, 35));
             _pairButton = AddButton(_pairGroup.transform, "FORBIND",
@@ -85,48 +502,239 @@ namespace Kaliv.VR
             AddText(_pairGroup.transform,
                 "Backend skal være tilgængelig fra Quest (LAN/Tailscale) — ikke kun 127.0.0.1.",
                 15, Muted, TextAnchor.MiddleLeft, new Vector2(920, 54), new Vector2(-20, -60));
+        }
 
-            _chatGroup = new GameObject("ChatGroup", typeof(RectTransform));
-            _chatGroup.transform.SetParent(_canvas.transform, false);
+        private void BuildChatGroup()
+        {
+            _chatGroup = Group("ChatGroup", _canvas.transform);
 
+            // Header row: model + body status
+            _modelLabel = AddText(_chatGroup.transform, "MODEL", 14, Accent, TextAnchor.MiddleLeft,
+                new Vector2(520, 36), new Vector2(-280, 250), FontStyle.Bold);
+            _bodyStatus = AddText(_chatGroup.transform, "KROP · initialiserer", 13, Muted, TextAnchor.MiddleRight,
+                new Vector2(480, 36), new Vector2(290, 250));
+
+            // Mode row: the two switches that decide the turn's route, then model + media.
+            // Same two toggles as Android's composer, so the same turn routes the same way.
+            var rag = AddButton(_chatGroup.transform, "VIDEN · FRA", new Vector2(220, 44), new Vector2(-430, 205),
+                Elevated, () => _app.ToggleRag());
+            _ragLabel = rag.GetComponentInChildren<Text>();
+            _ragImage = rag.GetComponent<Image>();
+            var tools = AddButton(_chatGroup.transform, "VÆRKTØJER · FRA", new Vector2(220, 44), new Vector2(-200, 205),
+                Elevated, () => _app.ToggleTools());
+            // Which documents VIDEN searches, and which tools exist and are allowed — the
+            // rig's own switches, so the headset can pull the brake without a phone.
+            AddButton(_chatGroup.transform, "RIG", new Vector2(110, 44), new Vector2(-25, 205),
+                Elevated, () => _app.OpenRig());
+            _toolsLabel = tools.GetComponentInChildren<Text>();
+            _toolsImage = tools.GetComponent<Image>();
+            AddButton(_chatGroup.transform, "SKIFT MODEL", new Vector2(190, 44), new Vector2(255, 205), Elevated, CycleModel);
+            AddButton(_chatGroup.transform, "MEDIER", new Vector2(150, 44), new Vector2(440, 205), Elevated, () => _app.OpenMediaBrowser());
+
+            // Transcript. Bottom-anchored inside a mask: the NEWEST line is always visible and
+            // older text scrolls off the top. The first VR slice was top-anchored with
+            // Truncate, which silently cut off exactly the part you had just asked for.
             var transcriptBg = AddImage(_chatGroup.transform, "TranscriptPanel",
-                new Vector2(1080, 410), new Vector2(0, 40), Surface);
+                new Vector2(1080, 360), new Vector2(0, 0), Surface);
             var border = transcriptBg.gameObject.AddComponent<Outline>();
             border.effectColor = Border;
             border.effectDistance = new Vector2(1.5f, -1.5f);
+            transcriptBg.gameObject.AddComponent<RectMask2D>();
 
-            _transcript = AddText(transcriptBg.transform,
-                "Kaliv VR er forbundet. Skriv noget nedenfor.",
-                18, TextMain, TextAnchor.UpperLeft, new Vector2(1010, 350), new Vector2(0, -8));
+            _transcript = AddText(transcriptBg.transform, "", 18, TextMain, TextAnchor.LowerLeft,
+                new Vector2(1030, 340), new Vector2(0, 0));
+            _transcript.supportRichText = true;
             _transcript.horizontalOverflow = HorizontalWrapMode.Wrap;
-            _transcript.verticalOverflow = VerticalWrapMode.Truncate;
+            _transcript.verticalOverflow = VerticalWrapMode.Overflow;
+            var trt = _transcript.rectTransform;
+            trt.pivot = new Vector2(0.5f, 0f);
+            trt.anchoredPosition = new Vector2(0, -170 + 10);
 
-            _modelLabel = AddText(_chatGroup.transform, "MODEL", 14, Accent, TextAnchor.MiddleLeft,
-                new Vector2(520, 42), new Vector2(-280, 278), FontStyle.Bold);
-            _bodyStatus = AddText(_chatGroup.transform, "KROP · initialiserer", 13, Muted, TextAnchor.MiddleLeft,
-                new Vector2(430, 42), new Vector2(210, 278), FontStyle.Normal);
-            AddButton(_chatGroup.transform, "SKIFT MODEL",
-                new Vector2(190, 44), new Vector2(440, 228), Elevated, CycleModel);
-
+            // Composer
             _prompt = AddInput(_chatGroup.transform, "Besked til Kaliv", "Skriv en besked …",
-                new Vector2(850, 68), new Vector2(-105, -245));
-            _sendButton = AddButton(_chatGroup.transform, "SEND",
-                new Vector2(190, 68), new Vector2(435, -245), Accent, () =>
+                new Vector2(690, 64), new Vector2(-185, -225));
+            var talk = AddButton(_chatGroup.transform, "TAL", new Vector2(160, 64), new Vector2(255, -225),
+                Elevated, () => _app.ToggleVoice());
+            _talkButton = talk;
+            _talkLabel = talk.GetComponentInChildren<Text>();
+            _talkImage = talk.GetComponent<Image>();
+            _sendButton = AddButton(_chatGroup.transform, "SEND", new Vector2(170, 64), new Vector2(440, -225),
+                Accent, () =>
                 {
                     string value = _prompt.text;
                     _prompt.text = "";
                     _app.Send(value);
                 });
 
-            AddButton(_chatGroup.transform, "KROP IGEN",
-                new Vector2(170, 44), new Vector2(-440, -318), Elevated, _app.RefreshBody);
-            AddButton(_chatGroup.transform, "CENTRER KROP",
-                new Vector2(190, 44), new Vector2(-245, -318), Elevated, _app.RecenterBody);
-            AddButton(_chatGroup.transform, "GLEMME RIG",
-                new Vector2(220, 44), new Vector2(410, -318), Elevated, _app.ForgetRig);
+            // Bottom row
+            _stopButton = AddButton(_chatGroup.transform, "STOP", new Vector2(150, 44), new Vector2(-455, -305),
+                Danger, () => _app.StopGeneration());
+            _retryButton = AddButton(_chatGroup.transform, "PRØV IGEN", new Vector2(170, 44), new Vector2(-290, -305),
+                Elevated, () => _app.Retry());
+            AddButton(_chatGroup.transform, "NY SAMTALE", new Vector2(180, 44), new Vector2(-110, -305),
+                Elevated, () => _app.NewConversation());
+            AddButton(_chatGroup.transform, "KROP IGEN", new Vector2(160, 44), new Vector2(70, -305),
+                Elevated, () => _app.RefreshBody());
+            AddButton(_chatGroup.transform, "CENTRER", new Vector2(150, 44), new Vector2(235, -305),
+                Elevated, () => _app.RecenterBody());
+            AddButton(_chatGroup.transform, "GLEM RIG", new Vector2(160, 44), new Vector2(405, -305),
+                Elevated, () => _app.ForgetRig());
 
-            SetPaired(false);
+            SetStopAvailable(false);
+            SetRetryAvailable(false);
         }
+
+        /// <summary>
+        /// The confirmation card. It shows what the RIG says the action is — tool, its own
+        /// risk and impact, the summary it parked — and nothing the client composed. The
+        /// client never sends the arguments back, so what you approve is exactly what runs.
+        /// </summary>
+        private void BuildConfirmCard()
+        {
+            _confirmGroup = Group("ConfirmCard", _canvas.transform);
+            var card = AddImage(_confirmGroup.transform, "Card", new Vector2(820, 380), new Vector2(0, 10), Elevated);
+            var outline = card.gameObject.AddComponent<Outline>();
+            outline.effectColor = Accent;
+            outline.effectDistance = new Vector2(2f, -2f);
+
+            _confirmTitle = AddText(_confirmGroup.transform, "KALIV VIL UDFØRE EN HANDLING", 17, Accent,
+                TextAnchor.MiddleLeft, new Vector2(740, 40), new Vector2(0, 160), FontStyle.Bold);
+            _confirmBody = AddText(_confirmGroup.transform, "", 18, TextMain, TextAnchor.UpperLeft,
+                new Vector2(740, 190), new Vector2(0, 40));
+            _confirmBody.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _confirmBody.supportRichText = true;
+            _confirmExpiry = AddText(_confirmGroup.transform, "", 14, Muted, TextAnchor.MiddleLeft,
+                new Vector2(740, 30), new Vector2(0, -78));
+            _approveButton = AddButton(_confirmGroup.transform, "GODKEND", new Vector2(250, 60), new Vector2(-150, -130),
+                Accent, () => _app.AnswerConfirmation(true));
+            _denyButton = AddButton(_confirmGroup.transform, "AFVIS", new Vector2(250, 60), new Vector2(150, -130),
+                Danger, () => _app.AnswerConfirmation(false));
+            _confirmGroup.SetActive(false);
+        }
+
+        private void BuildMediaBrowser()
+        {
+            _mediaGroup = Group("MediaBrowser", _canvas.transform);
+            AddImage(_mediaGroup.transform, "Backdrop", new Vector2(1200, 760), Vector2.zero, CanvasBg);
+            AddText(_mediaGroup.transform, "MEDIER", 18, Accent, TextAnchor.MiddleLeft,
+                new Vector2(500, 40), new Vector2(-290, 330), FontStyle.Bold);
+
+            // Two sources on two different machines: the RIG's own generated media, and the
+            // STASH server's library through the SkyPlayer companion.
+            var srcRig = AddButton(_mediaGroup.transform, "RIG", new Vector2(160, 46), new Vector2(270, 330),
+                Elevated, () => _app.MediaShowRig());
+            _srcRigImage = srcRig.GetComponent<Image>();
+            var srcStash = AddButton(_mediaGroup.transform, "STASH", new Vector2(160, 46), new Vector2(440, 330),
+                Elevated, () => _app.MediaShowStash());
+            _srcStashImage = srcStash.GetComponent<Image>();
+
+            // SkyPlayer's library controls, in SkyPlayer's words.
+            _stashControls = Group("StashControls", _mediaGroup.transform);
+            AddButton(_stashControls.transform, "FIND STASH", new Vector2(180, 46), new Vector2(-445, 275),
+                Elevated, () => _app.StashFind());
+            var q = AddButton(_stashControls.transform, "SØG", new Vector2(150, 46), new Vector2(-280, 275),
+                Elevated, () => _app.StashSearch());
+            _stashQueryLabel = q.GetComponentInChildren<Text>();
+            var st = AddButton(_stashControls.transform, "STUDIE", new Vector2(170, 46), new Vector2(-115, 275),
+                Elevated, () => _app.StashPickFacet(true));
+            _stashStudioLabel = st.GetComponentInChildren<Text>();
+            var tg = AddButton(_stashControls.transform, "KATEGORI", new Vector2(170, 46), new Vector2(65, 275),
+                Elevated, () => _app.StashPickFacet(false));
+            _stashTagLabel = tg.GetComponentInChildren<Text>();
+            var ord = AddButton(_stashControls.transform, "SENESTE", new Vector2(170, 46), new Vector2(245, 275),
+                Elevated, () => _app.StashCycleOrder());
+            _stashOrderLabel = ord.GetComponentInChildren<Text>();
+            AddButton(_stashControls.transform, "ROULETTE", new Vector2(170, 46), new Vector2(430, 275),
+                Accent, () => _app.StashRoulette());
+            foreach (var t in _stashControls.GetComponentsInChildren<Text>()) t.fontSize = 13;
+            _stashControls.SetActive(false);
+
+            _mediaStatus = AddText(_mediaGroup.transform, "", 15, Muted, TextAnchor.MiddleLeft,
+                new Vector2(1080, 36), new Vector2(0, 228));
+            _mediaStatus.horizontalOverflow = HorizontalWrapMode.Wrap;
+
+            for (int i = 0; i < 6; i++)
+            {
+                int index = i;
+                float y = 170 - i * 74;
+                var root = AddButton(_mediaGroup.transform, "", new Vector2(1080, 66), new Vector2(0, y),
+                    Surface, () => OnMediaRow(index));
+                var thumbGo = new GameObject("Thumb", typeof(RawImage));
+                thumbGo.transform.SetParent(root.transform, false);
+                var thumb = thumbGo.GetComponent<RawImage>();
+                thumb.rectTransform.sizeDelta = new Vector2(104, 58);
+                thumb.rectTransform.anchoredPosition = new Vector2(-480, 0);
+                thumb.color = Border;
+                thumb.raycastTarget = false;
+                var label = root.GetComponentInChildren<Text>();
+                label.alignment = TextAnchor.MiddleLeft;
+                label.fontStyle = FontStyle.Normal;
+                label.rectTransform.sizeDelta = new Vector2(920, 64);
+                label.rectTransform.anchoredPosition = new Vector2(70, 0);
+                _mediaRows.Add(new MediaRow { Root = root.gameObject, Label = label, Thumb = thumb });
+                root.gameObject.SetActive(false);
+            }
+
+            _mediaPrev = AddButton(_mediaGroup.transform, "FORRIGE", new Vector2(200, 52), new Vector2(-250, -300),
+                Elevated, () => _app.MediaPrevPage());
+            _mediaMore = AddButton(_mediaGroup.transform, "FLERE", new Vector2(200, 52), new Vector2(0, -300),
+                Elevated, () => _app.MediaNextPage());
+            AddButton(_mediaGroup.transform, "LUK", new Vector2(200, 52), new Vector2(250, -300),
+                Elevated, () => ShowMediaBrowser(false));
+            _mediaGroup.SetActive(false);
+        }
+
+        /// <summary>A floating strip under the panel while a video is open.</summary>
+        private void BuildTransport()
+        {
+            _transportGroup = Group("Transport", _canvas.transform);
+            AddImage(_transportGroup.transform, "Strip", new Vector2(1200, 90), new Vector2(0, -440), CanvasBg);
+            _transportInfo = AddText(_transportGroup.transform, "", 14, Muted, TextAnchor.MiddleLeft,
+                new Vector2(220, 60), new Vector2(-470, -440));
+            AddButton(_transportGroup.transform, "−10s", new Vector2(100, 52), new Vector2(-300, -440), Elevated, () => _app.MediaSeek(-10));
+            var play = AddButton(_transportGroup.transform, "PAUSE", new Vector2(120, 52), new Vector2(-185, -440), Accent, () => _app.MediaTogglePlay());
+            _transportPlay = play.GetComponentInChildren<Text>();
+            AddButton(_transportGroup.transform, "+10s", new Vector2(100, 52), new Vector2(-70, -440), Elevated, () => _app.MediaSeek(10));
+            AddButton(_transportGroup.transform, "FORMAT", new Vector2(120, 52), new Vector2(50, -440), Elevated, () => _app.MediaCycleFormat());
+            AddButton(_transportGroup.transform, "CENTRER", new Vector2(120, 52), new Vector2(180, -440), Elevated, () => _app.MediaRecenter());
+            // RUM: SkyPlayer's AR background key — the people in the video, in your room.
+            var rum = AddButton(_transportGroup.transform, "RUM", new Vector2(120, 52), new Vector2(310, -440), Elevated, () => _app.KeyToggle());
+            _rumLabel = rum.GetComponentInChildren<Text>();
+            _rumImage = rum.GetComponent<Image>();
+            AddButton(_transportGroup.transform, "LUK", new Vector2(110, 52), new Vector2(440, -440), Danger, () => _app.CloseMedia());
+
+            // The key row, only while RUM is on — as in SkyPlayer.
+            _keyGroup = Group("KeyRow", _transportGroup.transform);
+            AddImage(_keyGroup.transform, "Strip", new Vector2(1200, 76), new Vector2(0, -525), CanvasBg);
+            AddButton(_keyGroup.transform, "KEY −", new Vector2(120, 50), new Vector2(-330, -525), Elevated, () => _app.KeyAdjust(-1));
+            _keyValueLabel = AddText(_keyGroup.transform, "", 15, TextMain, TextAnchor.MiddleCenter,
+                new Vector2(110, 50), new Vector2(-210, -525));
+            AddButton(_keyGroup.transform, "KEY +", new Vector2(120, 50), new Vector2(-90, -525), Elevated, () => _app.KeyAdjust(1));
+            var mode = AddButton(_keyGroup.transform, "AUTO BG", new Vector2(170, 50), new Vector2(65, -525), Elevated, () => _app.KeyCycleMode());
+            _keyModeLabel = mode.GetComponentInChildren<Text>();
+            var hole = AddButton(_keyGroup.transform, "HUL-FIX", new Vector2(140, 50), new Vector2(230, -525), Elevated, () => _app.KeyCycleDetail());
+            _holeLabel = hole.GetComponentInChildren<Text>();
+            var pip = AddButton(_keyGroup.transform, "PIPET", new Vector2(130, 50), new Vector2(375, -525), Elevated, () => _app.KeyPipette());
+            _pipetLabel = pip.GetComponentInChildren<Text>();
+            _keyGroup.SetActive(false);
+            _transportGroup.SetActive(false);
+        }
+
+        /// <summary>RUM state and the key row's labels.</summary>
+        public void SetKeyState(bool on, string modeLabel, float threshold, string detailLabel, bool pipetActive, bool immersive)
+        {
+            if (_rumLabel != null) _rumLabel.text = on ? "RUM ●" : "RUM";
+            if (_rumImage != null) _rumImage.color = on ? Ok : Elevated;
+            if (_keyGroup != null) _keyGroup.SetActive(on);
+            if (_keyModeLabel != null) _keyModeLabel.text = modeLabel;
+            if (_keyValueLabel != null) _keyValueLabel.text = immersive ? threshold.ToString("0.00") : "kun 180/360";
+            if (_holeLabel != null) _holeLabel.text = detailLabel;
+            if (_pipetLabel != null) _pipetLabel.text = pipetActive ? "PIPET ●" : "PIPET";
+        }
+
+        // =====================================================================================
+        // State in
+        // =====================================================================================
 
         public void SetConnectionDefaults(string baseUrl, string code)
         {
@@ -134,10 +742,36 @@ namespace Kaliv.VR
             if (_code != null) _code.text = code ?? "";
         }
 
+        private bool _paired;
+        private bool _mediaOpen;
+        private bool _confirmOpen;
+
         public void SetPaired(bool paired)
         {
-            _pairGroup?.SetActive(!paired);
-            _chatGroup?.SetActive(paired);
+            _paired = paired;
+            if (!paired) { _mediaOpen = false; _confirmOpen = false; _rigOpen = false; }
+            RefreshGroups();
+        }
+
+        /// <summary>
+        /// Exactly one interactive layer at a time. The pointer hits BoxColliders by physics
+        /// raycast and every group sits in the same plane, so an overlay drawn "on top" of the
+        /// chat would still have the chat's buttons under it at the same depth — and the ray
+        /// could click a button you cannot see. Hiding the layer underneath is the only
+        /// arrangement where what you see is what you click.
+        /// </summary>
+        private void RefreshGroups()
+        {
+            // The keyboard sits above everything: it is always opened FROM a field on screen and
+            // closes back to it. A confirmation card that arrives meanwhile waits underneath.
+            bool kb = _keyboardOpen;
+            _keyboardGroup?.SetActive(kb);
+            _pairGroup?.SetActive(!_paired && !kb);
+            _confirmGroup?.SetActive(_paired && _confirmOpen && !kb);
+            bool overlay = _confirmOpen || kb;
+            _rigGroup?.SetActive(_paired && _rigOpen && !overlay);
+            _mediaGroup?.SetActive(_paired && _mediaOpen && !_rigOpen && !overlay);
+            _chatGroup?.SetActive(_paired && !_mediaOpen && !_rigOpen && !overlay);
         }
 
         public void SetStatus(string text, bool error)
@@ -159,6 +793,24 @@ namespace Kaliv.VR
             if (_pairButton != null) _pairButton.interactable = !busy;
         }
 
+        private Button _findButton;
+        private Text _findLabel;
+
+        public string RigAddressField => _url != null ? _url.text : "";
+
+        public void SetRigAddress(string url)
+        {
+            if (_url != null) _url.text = url ?? "";
+        }
+
+        /// <summary>The FIND RIG button shows the scan's progress while it runs.</summary>
+        public void SetFindRigState(bool scanning, float progress)
+        {
+            if (_findLabel != null)
+                _findLabel.text = scanning ? $"SØGER {Mathf.RoundToInt(progress * 100)} %" : "FIND RIG";
+            if (_findButton != null) _findButton.interactable = !scanning;
+        }
+
         public void SetComposerBusy(bool busy)
         {
             if (_sendButton != null) _sendButton.interactable = !busy;
@@ -173,25 +825,352 @@ namespace Kaliv.VR
             RefreshModelLabel();
         }
 
-        public void AppendUser(string text) => Append("DIG", text);
-        public void AppendAssistant(string text) => Append("KALIV", text);
-
-        private void Append(string who, string text)
+        public void SetModes(bool rag, bool tools, string ragSource = null)
         {
-            if (_conversation.Length > 0) _conversation.Append("\n\n");
-            _conversation.Append(who).Append("\n").Append(text?.Trim());
-            if (_conversation.Length > 5000)
-                _conversation.Remove(0, _conversation.Length - 5000);
-            if (_transcript != null) _transcript.text = _conversation.ToString();
+            string src = string.IsNullOrEmpty(ragSource) ? "TIL"
+                : (ragSource.Length > 10 ? ragSource.Substring(0, 9) + "…" : ragSource);
+            if (_ragLabel != null) _ragLabel.text = rag ? "VIDEN · " + src : "VIDEN · FRA";
+            if (_ragImage != null) _ragImage.color = rag ? Ok : Elevated;
+            if (_toolsLabel != null) _toolsLabel.text = tools ? "VÆRKTØJER · TIL" : "VÆRKTØJER · FRA";
+            if (_toolsImage != null) _toolsImage.color = tools ? Ok : Elevated;
         }
+
+        public void SetStopAvailable(bool available)
+        {
+            if (_stopButton != null) _stopButton.gameObject.SetActive(available);
+        }
+
+        public void SetRetryAvailable(bool available)
+        {
+            if (_retryButton != null) _retryButton.gameObject.SetActive(available);
+        }
+
+        /// <summary>The talk button doubles as the recording indicator.</summary>
+        public void SetVoiceState(bool recording, float level, float seconds, bool enabled)
+        {
+            if (_talkButton != null) _talkButton.interactable = enabled || recording;
+            if (_talkLabel != null)
+                _talkLabel.text = recording ? $"SEND TALE {Mathf.FloorToInt(seconds)}s" : "TAL";
+            if (_talkImage != null)
+                _talkImage.color = recording ? Color.Lerp(Danger, Accent, Mathf.Clamp01(level * 3f)) : Elevated;
+        }
+
+        // ---- transcript -------------------------------------------------------------------
+
+        public void BindConversation(KalivConversation conversation)
+        {
+            if (_conversation != null) _conversation.Changed -= MarkTranscriptDirty;
+            _conversation = conversation;
+            if (_conversation != null) _conversation.Changed += MarkTranscriptDirty;
+            MarkTranscriptDirty();
+        }
+
+        /// <summary>A streaming caret, or null. Shown after the last message while it grows.</summary>
+        public void SetLiveSuffix(string suffix)
+        {
+            _liveSuffix = suffix;
+            MarkTranscriptDirty();
+        }
+
+        /// <summary>
+        /// Called per token. The Text component is NOT rebuilt here: a token arrives every few
+        /// tens of milliseconds and each assignment re-lays out the whole transcript, which is
+        /// real work on a Quest. LateUpdate coalesces it to at most one rebuild per frame.
+        /// </summary>
+        public void MarkTranscriptDirty() => _transcriptDirty = true;
+
+        // ---- placement -------------------------------------------------------------------
+
+        private Camera _camera;
+        private bool _placed;
+        private float _placeAfter;
+        private bool _prevRecenterButton;
+        private const float PlaceFallbackSeconds = 3f;
+        private const float PanelDistance = 2.0f;
+        /// <summary>A head higher than this above the floor-level origin means tracking has arrived.</summary>
+        private const float TrackedHeadHeight = 0.5f;
+
+        /// <summary>
+        /// Put the panel in front of the user at eye height, upright and facing them. Only the
+        /// head's YAW is used: looking down at the controller while it is placed must not leave
+        /// the panel tilted on the floor. Slightly below eye level reads most comfortably.
+        /// </summary>
+        public void PlaceInFront()
+        {
+            if (_camera == null || _canvas == null) return;
+            var head = _camera.transform;
+            Vector3 fwd = head.forward;
+            fwd.y = 0f;
+            // Looking straight down, the top of the head points the way the user faces;
+            // looking straight up, it points behind them.
+            if (fwd.sqrMagnitude < 0.001f) fwd = head.forward.y < 0 ? head.up : -head.up;
+            fwd.y = 0f;
+            if (fwd.sqrMagnitude < 0.001f) fwd = Vector3.forward;
+            fwd.Normalize();
+
+            var rt = (RectTransform)_canvas.transform;
+            rt.position = head.position + fwd * PanelDistance + Vector3.down * 0.12f;
+            rt.rotation = Quaternion.LookRotation(fwd, Vector3.up);
+            _placed = true;
+        }
+
+        /// <summary>
+        /// First placement waits for a real head pose (or gives up waiting after a few seconds,
+        /// so a seated user at a low origin still gets a panel). After that, B or Y brings the
+        /// panel back in front — the same buttons recenter in SkyPlayer.
+        /// </summary>
+        private void UpdatePlacement()
+        {
+            if (_camera == null) return;
+            if (!_placed)
+            {
+                bool tracked = _camera.transform.localPosition.y > TrackedHeadHeight ||
+                               _camera.transform.position.y > TrackedHeadHeight;
+                if (tracked || Time.realtimeSinceStartup > _placeAfter) PlaceInFront();
+                return;
+            }
+
+            bool pressed = SecondaryButton(UnityEngine.XR.XRNode.RightHand) ||
+                           SecondaryButton(UnityEngine.XR.XRNode.LeftHand);
+            if (pressed && !_prevRecenterButton) PlaceInFront();
+            _prevRecenterButton = pressed;
+        }
+
+        private static bool SecondaryButton(UnityEngine.XR.XRNode node)
+        {
+            var d = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(node);
+            return d.isValid && d.TryGetFeatureValue(UnityEngine.XR.CommonUsages.secondaryButton, out bool v) && v;
+        }
+
+        private void LateUpdate()
+        {
+            UpdatePlacement();
+
+            if (_confirmGroup != null && _confirmGroup.activeSelf && _confirmDeadline > 0f)
+            {
+                float left = _confirmDeadline - Time.realtimeSinceStartup;
+                _confirmExpiry.text = left > 0
+                    ? $"Udløber om {Mathf.CeilToInt(left)} s — intet sker, hvis du ikke svarer."
+                    : "Forslaget er udløbet — intet blev udført.";
+                if (left <= 0) { _approveButton.interactable = false; }
+            }
+
+            if (!_transcriptDirty || _transcript == null) return;
+            _transcriptDirty = false;
+            _transcript.text = RenderTranscript();
+        }
+
+        private string RenderTranscript()
+        {
+            if (_conversation == null || _conversation.Count == 0)
+                return $"<color={MutedHex}>Kaliv VR er forbundet. Skriv eller tal nedenfor.</color>";
+
+            // Build from the newest message backwards until the window is full, so a long
+            // conversation costs the same as a short one.
+            var blocks = new List<string>();
+            int total = 0;
+            var msgs = _conversation.Messages;
+            for (int i = msgs.Count - 1; i >= 0 && total < TranscriptWindow; i--)
+            {
+                string block = RenderMessage(msgs[i], i == msgs.Count - 1);
+                blocks.Add(block);
+                total += block.Length;
+            }
+            blocks.Reverse();
+            return string.Join("\n\n", blocks);
+        }
+
+        private string RenderMessage(KalivMessage m, bool isLast)
+        {
+            var sb = new StringBuilder();
+            bool user = m.Role == "user";
+            // When the rig has a Person Profile selected, say who answered — as Android does.
+            string who = user ? "DIG" : string.IsNullOrEmpty(m.Person) ? "KALIV" : "KALIV · " + m.Person.ToUpperInvariant();
+            sb.Append("<b><color=").Append(AccentHex).Append('>').Append(who);
+            if (m.Spoken) sb.Append(" · tale");
+            sb.Append("</color></b>\n");
+
+            string text = m.Text ?? "";
+            if (m.Error)
+                sb.Append("<color=").Append(DangerHex).Append('>').Append(Escape(text)).Append("</color>");
+            else
+                sb.Append(Escape(text));
+
+            if (isLast && !string.IsNullOrEmpty(_liveSuffix)) sb.Append(_liveSuffix);
+            if (m.Stopped) sb.Append("\n<color=").Append(MutedHex).Append(">— stoppet</color>");
+            if (!string.IsNullOrEmpty(m.Tool))
+                sb.Append("\n<color=").Append(OkHex).Append(">værktøj · ").Append(Escape(m.Tool)).Append("</color>");
+            if (m.Sources.Count > 0)
+                sb.Append("\n<color=").Append(MutedHex).Append(">kilder · ")
+                  .Append(Escape(string.Join(" · ", m.Sources))).Append("</color>");
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Unity's Text has no escape for rich text. A zero-width space after '<' stops the
+        /// model's own output (say, "<b>" in a code answer) from being read as markup.
+        /// </summary>
+        private static string Escape(string s) =>
+            string.IsNullOrEmpty(s) ? "" : s.Replace("<", "<​");
+
+        // ---- confirmation -----------------------------------------------------------------
+
+        public void ShowConfirmation(KalivToolTurn turn)
+        {
+            if (_confirmGroup == null || turn == null) return;
+            var sb = new StringBuilder();
+            sb.Append("<b>").Append(Escape(turn.Tool ?? "værktøj")).Append("</b>");
+            if (!string.IsNullOrEmpty(turn.Risk) || !string.IsNullOrEmpty(turn.Impact))
+            {
+                sb.Append("   <color=").Append(DangerHex).Append('>');
+                sb.Append(Escape(turn.Impact ?? turn.Risk));
+                sb.Append("</color>");
+            }
+            sb.Append("\n\n").Append(Escape(turn.Summary ?? "Riggen sendte ingen beskrivelse af handlingen."));
+            _confirmBody.text = sb.ToString();
+            _confirmDeadline = turn.ExpiresInSeconds > 0 ? Time.realtimeSinceStartup + turn.ExpiresInSeconds : 0f;
+            _confirmExpiry.text = _confirmDeadline > 0 ? "" : "Intet sker, hvis du ikke svarer.";
+            SetConfirmationBusy(false);
+            _confirmOpen = true;
+            RefreshGroups();
+            _confirmGroup.transform.SetAsLastSibling();
+        }
+
+        public void SetConfirmationBusy(bool busy)
+        {
+            if (_approveButton != null) _approveButton.interactable = !busy;
+            if (_denyButton != null) _denyButton.interactable = !busy;
+        }
+
+        public void HideConfirmation()
+        {
+            _confirmDeadline = 0f;
+            _confirmOpen = false;
+            RefreshGroups();
+        }
+
+        public bool ConfirmationOpen => _confirmOpen;
+
+        // ---- media ------------------------------------------------------------------------
+
+        public void ShowMediaBrowser(bool show)
+        {
+            if (_mediaGroup == null) return;
+            _mediaOpen = show;
+            RefreshGroups();
+            if (show) _mediaGroup.transform.SetAsLastSibling();
+        }
+
+        public void SetMediaStatus(string text, bool error)
+        {
+            if (_mediaStatus == null) return;
+            _mediaStatus.text = text ?? "";
+            _mediaStatus.color = error ? Danger : Muted;
+        }
+
+        /// <summary>Rig gallery items as rows; a click plays the item.</summary>
+        public void SetMediaItems(IReadOnlyList<KalivMediaItem> items, bool hasMore)
+        {
+            var rows = new List<MediaRowData>();
+            if (items != null)
+                foreach (var it in items)
+                {
+                    var item = it;
+                    rows.Add(new MediaRowData { Key = item.Id, Label = DescribeMedia(item), OnClick = () => _app.PlayMedia(item) });
+                }
+            SetMediaRows(rows, false, hasMore);
+        }
+
+        public void SetMediaRows(IReadOnlyList<MediaRowData> rows, bool hasPrev, bool hasMore)
+        {
+            for (int i = 0; i < _mediaRows.Count; i++)
+            {
+                var row = _mediaRows[i];
+                row.Data = rows != null && i < rows.Count ? rows[i] : null;
+                row.Root.SetActive(row.Data != null);
+                row.Thumb.texture = null;
+                row.Thumb.color = Border;
+                row.Thumb.gameObject.SetActive(row.Data?.Key != null);
+                if (row.Data != null) row.Label.text = row.Data.Label;
+            }
+            if (_mediaPrev != null) _mediaPrev.gameObject.SetActive(hasPrev);
+            if (_mediaMore != null) _mediaMore.gameObject.SetActive(hasMore);
+        }
+
+        public void SetMediaThumbnail(string key, Texture2D texture)
+        {
+            foreach (var row in _mediaRows)
+            {
+                if (row.Data == null || row.Data.Key != key) continue;
+                row.Thumb.texture = texture;
+                row.Thumb.color = Color.white;
+            }
+        }
+
+        public void SetMediaSource(bool stash)
+        {
+            if (_srcRigImage != null) _srcRigImage.color = stash ? Elevated : Accent;
+            if (_srcStashImage != null) _srcStashImage.color = stash ? Accent : Elevated;
+            _stashControls?.SetActive(stash);
+        }
+
+        public void SetStashControls(string order, string studio, string tag, string query)
+        {
+            if (_stashOrderLabel != null) _stashOrderLabel.text = order;
+            if (_stashStudioLabel != null) _stashStudioLabel.text = Short(studio ?? "STUDIE", 14);
+            if (_stashTagLabel != null) _stashTagLabel.text = Short(tag ?? "KATEGORI", 14);
+            if (_stashQueryLabel != null) _stashQueryLabel.text = string.IsNullOrEmpty(query) ? "SØG" : Short("\"" + query + "\"", 12);
+        }
+
+        private static string Short(string s, int max) => s.Length > max ? s.Substring(0, max - 1) + "…" : s;
+
+        private static string DescribeMedia(KalivMediaItem item)
+        {
+            var sb = new StringBuilder();
+            sb.Append(item.Kind == KalivMediaKind.Video ? "VIDEO" : "BILLEDE");
+            sb.Append("  ·  ").Append(item.CreatedAtUtc.ToLocalTime().ToString("dd-MM-yyyy HH:mm"));
+            if (item.DurationSeconds != null)
+            {
+                var t = TimeSpan.FromSeconds(item.DurationSeconds.Value);
+                sb.Append("  ·  ").Append(t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss"));
+            }
+            sb.Append("  ·  ").Append(FormatSize(item.SizeBytes));
+            string hint = item.FormatHint;
+            sb.Append("  ·  ").Append(hint ?? "format ikke understøttet");
+            return sb.ToString();
+        }
+
+        private static string FormatSize(long bytes)
+        {
+            if (bytes >= 1L << 30) return (bytes / (double)(1L << 30)).ToString("0.0") + " GB";
+            if (bytes >= 1L << 20) return (bytes / (double)(1L << 20)).ToString("0") + " MB";
+            return Math.Max(1, bytes / 1024) + " KB";
+        }
+
+        private void OnMediaRow(int index)
+        {
+            if (index < 0 || index >= _mediaRows.Count) return;
+            _mediaRows[index].Data?.OnClick?.Invoke();
+        }
+
+        public void ShowTransport(bool show)
+        {
+            _transportGroup?.SetActive(show);
+        }
+
+        public void SetTransportInfo(string info, bool playing)
+        {
+            if (_transportInfo != null) _transportInfo.text = info ?? "";
+            if (_transportPlay != null) _transportPlay.text = playing ? "PAUSE" : "AFSPIL";
+        }
+
+        // =====================================================================================
+        // Helpers
+        // =====================================================================================
 
         private void CycleModel()
         {
-            if (_models.Count == 0)
-            {
-                _app.RefreshModels();
-                return;
-            }
+            if (_models.Count == 0) { _app.RefreshModels(); return; }
             _modelIndex = (_modelIndex + 1) % _models.Count;
             _app.SelectModel(_models[_modelIndex]);
             RefreshModelLabel();
@@ -201,6 +1180,13 @@ namespace Kaliv.VR
         {
             if (_modelLabel == null) return;
             _modelLabel.text = _models.Count == 0 ? "MODEL · ingen" : "MODEL · " + _models[_modelIndex];
+        }
+
+        private static GameObject Group(string name, Transform parent)
+        {
+            var go = new GameObject(name, typeof(RectTransform));
+            go.transform.SetParent(parent, false);
+            return go;
         }
 
         private static Image AddImage(Transform parent, string name, Vector2 size, Vector2 pos, Color color)
@@ -268,7 +1254,8 @@ namespace Kaliv.VR
         private static Button AddButton(Transform parent, string label, Vector2 size, Vector2 pos,
                                         Color color, UnityEngine.Events.UnityAction click)
         {
-            var root = new GameObject(label, typeof(Image), typeof(Button), typeof(BoxCollider));
+            var root = new GameObject(string.IsNullOrEmpty(label) ? "Button" : label,
+                typeof(Image), typeof(Button), typeof(BoxCollider));
             root.transform.SetParent(parent, false);
             var image = root.GetComponent<Image>();
             image.color = color;
@@ -276,8 +1263,7 @@ namespace Kaliv.VR
             rt.sizeDelta = size;
             rt.anchoredPosition = pos;
 
-            AddText(root.transform, label, 15,
-                color == Accent ? Hex("#2B1C05") : TextMain,
+            AddText(root.transform, label, 15, color == Accent ? OnAccent : TextMain,
                 TextAnchor.MiddleCenter, size, Vector2.zero, FontStyle.Bold);
 
             var button = root.GetComponent<Button>();

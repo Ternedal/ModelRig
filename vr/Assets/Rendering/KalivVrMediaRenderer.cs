@@ -61,6 +61,22 @@ namespace Kaliv.VR.Rendering
         public void AdjustZoom(float delta) => _player?.AdjustZoom(delta);
         public void Pan(float yawDegrees, float pitchDegrees) => _player?.Pan(yawDegrees, pitchDegrees);
 
+        /// <summary>
+        /// The engine's AR background key (RUM): removes the video's backdrop so the people in
+        /// it stand in the real room through passthrough. Only acts on 180°/360° video — the
+        /// engine itself ignores it for flat.
+        /// </summary>
+        public void ApplyBackgroundKey(BackgroundKeySettings settings) => _player?.ApplyBackgroundKey(settings);
+
+        /// <summary>PIPET: read the video's colour where the user looks, so that colour can be keyed.</summary>
+        public bool TrySampleKeyColorAtGaze(out Color color)
+        {
+            color = Color.clear;
+            return _player != null && _player.TrySampleKeyColorAtGaze(out color);
+        }
+
+        public bool IsImmersive => _player != null && _player.Projection.Geometry == Geometry.Sphere;
+
         public void ApplyOriginShift(Quaternion rotationDelta)
         {
             if (_player == null || _player.Projection.Geometry != Geometry.Sphere)

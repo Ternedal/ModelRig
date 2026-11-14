@@ -60,6 +60,14 @@ namespace Kaliv.VR.Rendering
             spatialTargets = registry;
         }
 
+        private Transform screenTarget;
+
+        /// <summary>What the canonical `screen` attention target resolves to: the panel, or an open video.</summary>
+        public void SetScreenTarget(Transform value)
+        {
+            screenTarget = value;
+        }
+
         public void SetAuthoredMotionActive(bool active)
         {
             authoredMotionActive = active;
@@ -335,6 +343,12 @@ namespace Kaliv.VR.Rendering
                     return defaultGazeTarget;
                 }
                 return Camera.main != null ? Camera.main.transform : null;
+            }
+            if (target == "screen")
+            {
+                // A canonical BodyRig target (PROTOCOL.md §7). Null when nothing is showing,
+                // which is the same no-op as any other target this renderer cannot place.
+                return screenTarget;
             }
 
             if ((target.StartsWith("object:", StringComparison.Ordinal) ||
