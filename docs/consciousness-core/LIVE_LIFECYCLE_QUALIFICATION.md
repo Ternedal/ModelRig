@@ -122,26 +122,31 @@ local operator session:
     $env:KALIV_CONSCIOUSNESS_QUALIFICATION_EVIDENCE_ENABLED="1"
 
 The endpoint is loopback-only and remains disabled unless the exact flag above
-is set. Capture the ordinary privacy-safe status before restarting the worker:
+is set.
 
-    Invoke-RestMethod http://127.0.0.1:8099/experimental/consciousness/status |
-      ConvertTo-Json -Depth 20 |
-      Set-Content validation/consciousness-status-pre-restart.json -Encoding utf8
+**Save every response byte for byte with `Invoke-WebRequest -OutFile`.** Do not
+round-trip it through `Invoke-RestMethod | ConvertTo-Json | Set-Content`. That
+rewrites the response: in PowerShell 7.4.6 the same answer grew from 249 to 753
+bytes and a `+00:00` timestamp became `+01:00`, and in Windows PowerShell 5.1
+`Set-Content -Encoding utf8` adds a BOM, which the assembler refuses (#2390, F4).
+
+Capture the ordinary privacy-safe status before restarting the worker:
+
+    Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8099/experimental/consciousness/status `
+      -OutFile validation/consciousness-status-pre-restart.json
 
 After the worker has restarted and produced one lived-continuity receipt, capture
 the first qualification snapshot:
 
-    Invoke-RestMethod http://127.0.0.1:8099/experimental/consciousness/qualification-snapshot |
-      ConvertTo-Json -Depth 30 |
-      Set-Content validation/consciousness-pre-swap.json -Encoding utf8
+    Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8099/experimental/consciousness/qualification-snapshot `
+      -OutFile validation/consciousness-pre-swap.json
 
 Replace only the configured CognitiveProfile/model calibration. Do not run
 another cognitive cycle and do not restart the worker. Then capture the second
 snapshot:
 
-    Invoke-RestMethod http://127.0.0.1:8099/experimental/consciousness/qualification-snapshot |
-      ConvertTo-Json -Depth 30 |
-      Set-Content validation/consciousness-post-swap.json -Encoding utf8
+    Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8099/experimental/consciousness/qualification-snapshot `
+      -OutFile validation/consciousness-post-swap.json
 
 Assemble the qualification input directly from those snapshots:
 
