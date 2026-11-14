@@ -819,6 +819,23 @@ namespace Kaliv.VR
             _panel.ShowTransport(false);
         }
 
+        /// <summary>
+        /// AFSLUT: stop playback (which sends the Stash resume point), give that request a
+        /// moment to leave the headset, then quit back to Quest Home.
+        /// </summary>
+        public void QuitApp()
+        {
+            StartCoroutine(QuitRoutine());
+        }
+
+        private IEnumerator QuitRoutine()
+        {
+            if (_mediaOpen) CloseMedia();
+            PlayerPrefs.Save();
+            yield return new WaitForSecondsRealtime(0.6f);
+            Application.Quit();
+        }
+
         private KalivImageViewer _images;
         private bool _showingImage;
 

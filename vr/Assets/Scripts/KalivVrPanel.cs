@@ -506,6 +506,8 @@ namespace Kaliv.VR
             // Stash lives on its own server: reachable before (and without) pairing a rig.
             AddButton(_pairGroup.transform, "STASH",
                 new Vector2(300, 62), new Vector2(315, -60), Elevated, () => _app.OpenStash());
+            AddButton(_pairGroup.transform, "AFSLUT", new Vector2(140, 40), new Vector2(480, 250),
+                Danger, () => _app.QuitApp());
         }
 
         private void BuildChatGroup()
@@ -516,7 +518,9 @@ namespace Kaliv.VR
             _modelLabel = AddText(_chatGroup.transform, "MODEL", 14, Accent, TextAnchor.MiddleLeft,
                 new Vector2(520, 36), new Vector2(-280, 250), FontStyle.Bold);
             _bodyStatus = AddText(_chatGroup.transform, "KROP · initialiserer", 13, Muted, TextAnchor.MiddleRight,
-                new Vector2(480, 36), new Vector2(290, 250));
+                new Vector2(380, 36), new Vector2(210, 250));
+            AddButton(_chatGroup.transform, "AFSLUT", new Vector2(140, 40), new Vector2(480, 250),
+                Danger, () => _app.QuitApp());
 
             // Mode row: the two switches that decide the turn's route, then model + media.
             // Same two toggles as Android's composer, so the same turn routes the same way.
