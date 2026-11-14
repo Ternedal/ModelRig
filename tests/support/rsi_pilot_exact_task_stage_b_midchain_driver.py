@@ -79,13 +79,24 @@ def _selected_contract_files() -> tuple[str, ...]:
     raw = os.environ.get(_CONTRACT_SHARD_ENV, "").strip()
     if not raw:
         return _CONTRACT_FILES
+    # Retain the original 1/3, 2/3, 3/3 partition for direct callers.
+    # Hosted midchain-2 is divided into two serial cohorts to keep EACH
+    # qualification job within its 355-minute limit. The union is exactly
+    # the original 2/3 contract set, with no repetitions or skipped files.
+    if raw in {"2a/3", "2b/3"}:
+        original_second_shard = _CONTRACT_FILES[1::_REQUIRED_SHARD_COUNT]
+        offset = 0 if raw == "2a/3" else 1
+        selected = original_second_shard[offset::2]
+        if not selected:
+            raise AssertionError(f"empty Stage-B half-shard: {raw}")
+        return selected
     try:
         index_text, total_text = raw.split("/", 1)
         index = int(index_text)
         total = int(total_text)
     except (ValueError, TypeError) as exc:
         raise AssertionError(
-            f"invalid Stage-B contract shard {raw!r}; expected 1/3, 2/3, or 3/3"
+            f"invalid Stage-B contract shard {raw!r}; expected 1/3, 2/3, 2a/3, 2b/3, or 3/3"
         ) from exc
     if total != _REQUIRED_SHARD_COUNT or not 1 <= index <= total:
         raise AssertionError(
@@ -112,14 +123,14 @@ def _contract_timeout_seconds(filename: str | None = None) -> int:
     shard = os.environ.get(_CONTRACT_SHARD_ENV, "").strip()
     return (
         _DEEP_SHARD_TIMEOUT_SECONDS
-        if shard == "2/3"
+        if shard in {"2/3", "2a/3", "2b/3"}
         else _PER_CONTRACT_TIMEOUT_SECONDS
     )
 
 
 def _worker_count(contract_count: int) -> int:
     shard = os.environ.get(_CONTRACT_SHARD_ENV, "").strip()
-    if shard == "2/3":
+    if shard in {"2/3", "2a/3", "2b/3"}:
         return 1
     return min(
         _MAX_PARALLEL_CONTRACTS,
