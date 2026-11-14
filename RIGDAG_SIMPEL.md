@@ -1,10 +1,10 @@
-# RIGDAG_SIMPEL — ModelRig 2.0.19
+# RIGDAG_SIMPEL — ModelRig 2.0.20
 
-> **Publiceret 9/11-2026, ikke fysisk godkendelse:** `v2.0.19` er publiceret, og `physical-proof/2.0.19` peger på tag-SHA'en. Releasen er ikke fysisk kvalificeret, før Stage A/B nedenfor er kørt grønt på den SHA med ny exact-head- og rig-evidens for v2.0.19. Kør ikke tagging eller release ud fra denne vejledning.
+> **Release-forberedelse, ikke fysisk godkendelse:** `v2.0.20` er endnu ikke tagget eller publiceret, og `physical-proof/2.0.20` findes først efter publicering. Kør ikke promotion eller tagging ud fra denne vejledning; kræv ny exact-head- og rig-evidens for v2.0.20.
 
-> **v2.0.19: Anders' release-beslutning (D3, 8/11-2026, #2275 6726564262).**
-> - **Det kræves før tag og publicering:** grøn exact-head CI på RC-SHA'en og Anders' særskilte release-go. RC-SHA'en er `main` efter merge af bump-PR'en #2364, ikke denne gren via fast-forward. Proceduren står i #2275.
-> - **Hvad denne vejledning så er:** Stage A/B nedenfor er **ikke** en forudsætning for tagget `v2.0.19`. Den er den fysiske validering, der kører **efter** publicering.
+> **v2.0.20 følger D3-rækkefølgen fra 2.0.19** (Anders, 8/11-2026, #2275 6726564262) og Anders' gate for medier: han tester fysisk, når billede og video er med i en release (9/11-2026, #2275 6751908309).
+> - **Det kræves før tag og publicering:** grøn exact-head CI på RC-SHA'en og Anders' særskilte release-go. RC-SHA'en er `main` efter merge af bump-PR'en (`release/kaliv-v2.0.20-prep-20261114`), ikke denne gren via fast-forward. Lige efter mergen står `main` stille, til Anders har kørt `verify-repository-authority.ps1` (#2390, fund 5). Proceduren står i #2275.
+> - **Hvad denne vejledning så er:** Stage A/B nedenfor er **ikke** en forudsætning for tagget `v2.0.20`. Den er den fysiske validering, der kører **efter** publicering, og medietesten (#2390) kører på samme SHA.
 > - **Det gælder stadig:** ingen launcher aktiverer produktion (`production_activation=false`), og der skabes intet release uden Anders' go.
 
 Dette er den korte operatorindgang. Den autoritative rækkefølge og alle
@@ -13,11 +13,11 @@ står i `STAGE_B_UPDATER_EVIDENCE.md`.
 
 ## Kandidat
 
-- version: `2.0.19`;
-- kandidat: den publicerede RC-SHA, den commit tagget `v2.0.19` peger på;
-- branch: `physical-proof/2.0.19`, oprettet efter publicering på RC-SHA'en; den gren Stage A-operatoren kræver;
+- version: `2.0.20`;
+- kandidat: den publicerede RC-SHA, den commit tagget `v2.0.20` peger på;
+- branch: `physical-proof/2.0.20`, oprettet efter publicering på RC-SHA'en; den gren Stage A-operatoren kræver;
 - freeze: `candidate_freeze_check.py` grøn på exact SHA;
-- exact SHA: læses fra den fetch'ede `origin/physical-proof/2.0.19`, matches mod tagget og må aldrig gættes eller kopieres fra ældre evidens;
+- exact SHA: læses fra den fetch'ede `origin/physical-proof/2.0.20`, matches mod tagget og må aldrig gættes eller kopieres fra ældre evidens;
 - produktion: ikke aktiveret.
 
 Evidens fra 2.0.12 eller fra en tidligere ugyldiggjort 2.0.13-head må ikke
@@ -25,30 +25,30 @@ genbruges.
 
 ## Blok 0 — lås checkouten
 
-Kør først, når `v2.0.19` er publiceret og verificeret, og
-`physical-proof/2.0.19` findes på origin (#2275).
+Kør først, når `v2.0.20` er publiceret og verificeret, og
+`physical-proof/2.0.20` findes på origin (#2275).
 
 ```powershell
 cd C:\Users\admin\Desktop\ModelRig-git
 git fetch origin
-git fetch --force origin tag v2.0.19
-$RcSha = (git rev-parse "v2.0.19^{commit}").Trim()
-if ($RcSha.Length -ne 40) { throw "v2.0.19 er ikke tagget paa origin" }
-git switch physical-proof/2.0.19
-git pull --ff-only origin physical-proof/2.0.19
+git fetch --force origin tag v2.0.20
+$RcSha = (git rev-parse "v2.0.20^{commit}").Trim()
+if ($RcSha.Length -ne 40) { throw "v2.0.20 er ikke tagget paa origin" }
+git switch physical-proof/2.0.20
+git pull --ff-only origin physical-proof/2.0.20
 $CandidateSha = (git rev-parse HEAD).Trim()
-$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.19).Trim()
-if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/physical-proof/2.0.19: local=$CandidateSha remote=$RemoteCandidateSha" }
-if ($CandidateSha -ne $RcSha) { throw "physical-proof/2.0.19 peger ikke paa den publicerede v2.0.19: branch=$CandidateSha tag=$RcSha" }
+$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.20).Trim()
+if ($CandidateSha -ne $RemoteCandidateSha) { throw "Lokal candidate matcher ikke origin/physical-proof/2.0.20: local=$CandidateSha remote=$RemoteCandidateSha" }
+if ($CandidateSha -ne $RcSha) { throw "physical-proof/2.0.20 peger ikke paa den publicerede v2.0.20: branch=$CandidateSha tag=$RcSha" }
 if (git status --short) { throw "Working tree er ikke ren" }
-if ((Get-Content VERSION -Raw).Trim() -ne "2.0.19") { throw "Forkert version" }
+if ((Get-Content VERSION -Raw).Trim() -ne "2.0.20") { throw "Forkert version" }
 python scripts/candidate_freeze_check.py --expected-sha $CandidateSha
 if ($LASTEXITCODE -ne 0) { throw "Candidate er ikke frozen paa exact SHA $CandidateSha" }
 ```
 
-`v2.0.19`, `origin/physical-proof/2.0.19` og den grønne
+`v2.0.20`, `origin/physical-proof/2.0.20` og den grønne
 `candidate_freeze_check.py` er den aktuelle kandidat-authority. Release-prep-grenen
-`release/kaliv-v2.0.19-prep-20261108`, historiske freeze-PR'er eller ældre
+`release/kaliv-v2.0.20-prep-20261114`, historiske freeze-PR'er eller ældre
 2.0.13-heads må ikke bruges som SHA-reference.
 
 Freeze-kontrollen og operatoren kræver, at den aktuelle `origin/main` er
@@ -59,7 +59,7 @@ på RC-SHA'en.
 > Reglen om, at intet merges til `main` fra tagget, til Stage A er grøn, gælder
 > ikke længere. Anders tester ikke fysisk, før billede og video er i en release
 > (#2275-kommentar 6751908309), og de lå i de PR'er, reglen holdt ude. Når `main`
-> har flyttet sig fra RC-SHA'en, kan Stage A ikke køres på `v2.0.19`; næste
+> har flyttet sig fra RC-SHA'en, kan Stage A ikke køres på `v2.0.20`; næste
 > release tagges og valideres på sin egen SHA.
 
 Er `main` flyttet, stopper kontrollen. Den må ikke omgås; stop og rapportér i
@@ -112,14 +112,23 @@ Stage A merger, tagger, releaser og aktiverer intet.
 ## Beslutningspunkt
 
 Under D3 ligger beslutningspunktet før Stage A: Anders' særskilte release-go på
-grøn exact-head CI på RC-SHA'en. Først derefter tagges `v2.0.19` og publiceres
+grøn exact-head CI på RC-SHA'en. Først derefter tagges `v2.0.20` og publiceres
 som et komplet signeret release-sæt. Et rødt fysisk resultat ændrer ikke den
 publicerede release af sig selv; det rapporteres i #2275, og den videre
 handling er Anders' beslutning.
 
 ## Blok 2 — Stage B
 
-Kildereleasen er den signerede 2.0.12; target er 2.0.19. Target-updaterens
+**Før Stage B: start recovery-soak-prøvetagningen** (V1 gate 9, #2390). Vinduet
+skal række hen over Stage B's reboot, backend- og worker-genstart og
+afbrydelse. Startes den først bagefter, kræver gate 9 en hel ny Stage B. Kør
+smoke-trinet og start prøvetagningen efter
+`docs/KALIV_RECOVERY_SOAK_QUALIFICATION.md` §0 og §1
+(`scripts\kaliv_recovery_soak_collector.py`), og lad den køre videre under
+Stage B. Collectoren sender kun GET til loopback og starter, stopper eller
+aktiverer intet.
+
+Kildereleasen er den signerede 2.0.12; target er 2.0.20. Target-updaterens
 checksum og provenance verificeres som den autoritative bootstrap-grænse, før
 server, supervisor og worker må flyttes gennem updateren. Stage B-runbooken er
 autoritet for den præcise updater-/self-update-semantik; der må ikke håndkopieres
@@ -155,7 +164,7 @@ summary.total=9
 
 Det særskilte automatiske signed-release-to-signed-release self-update-bevis
 forbliver under #401 og må ikke antages ud fra versionsbumpet alene. Det
-blokerer ikke promotion af 2.0.19, medmindre #401's authority ændres særskilt.
+blokerer ikke promotion af 2.0.20, medmindre #401's authority ændres særskilt.
 
 ## Stopregler
 

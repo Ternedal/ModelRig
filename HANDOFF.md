@@ -833,7 +833,24 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     tiende ikke dit arbejde. `git status --short` før `git add`, og vær
     særligt mistroisk efter en testkørsel — suiter skriver tilstand.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 12/11)
+## 9. Kø — hvem har bolden (16/7, opdateret 14/11)
+
+### 13.–14/11: alt til 2.0.20 er landet; bumpet er åbnet
+
+**[14/11 — status. main = `6824edf6` (merge af #2244). Landet 12.–14/11 i
+denne rækkefølge: #2365 (medie-stakken med #2357, #2366, #2368, #2386), #2394
+(Dependabot) med #2387, #2398 (V1-instrumentering: #2391, #2395, #2396),
+#2397 (HANDOFF-docs), #2367 (Android A1), #2401 (H1), #2244 (Stage B-split).]**
+
+- **Hver merge undtagen #2397** (en squash) var en merge commit låst til en SHA
+  med ChatGPT's SHA-accept og Anders' go pr. PR (#2275). Efter hver merge var `main`'s træ lig PR'ens.
+- **Bumpet til 2.0.20** (`release/kaliv-v2.0.20-prep-20261114`, versionCode
+  300) følger opskriften fra 2.0.19 (#2364). Kandidaten er
+  `physical-proof/2.0.20`, når `v2.0.20` er publiceret. Stage B's kilde er
+  stadig den signerede 2.0.12.
+- **Lige efter bump-mergen står `main` stille,** til Anders har kørt
+  `verify-repository-authority.ps1` (#2390, fund 5).
+- **Ingen tag, release eller signering** uden Anders' særskilte release-go.
 
 ### 12/11: freeze-vinduet på `main` ophævet
 
@@ -897,7 +914,7 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
   minutter. En melding skal ligge INDE i den gren, hvor merge-svaret,
   `ls-remote`, REST-ref og PR-status er bekræftet ens.
 
-### 8.–11/11: D3 ændret, v2.0.19 publiceret, `physical-proof/2.0.19` oprettet
+### 8.–11/11: D3 ændret, v2.0.19 publiceret, og dens `physical-proof`-gren oprettet
 
 **[11/11 — status. main = `3cbd00f1` (merge af #2364). Landet 7.–9/11: #2345,
 #2348, #2349, #2353, #2347, #2359, #2358, #2362, #2361, #2363, #2360, #2241,
