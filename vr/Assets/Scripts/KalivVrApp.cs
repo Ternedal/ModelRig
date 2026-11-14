@@ -968,21 +968,75 @@ namespace Kaliv.VR
             Vector2 left = Stick(UnityEngine.XR.XRNode.LeftHand);
             float dt = Time.unscaledDeltaTime;
 
-            if (Mathf.Abs(right.y) > 0.2f && Mathf.Abs(right.y) > Mathf.Abs(right.x))
-                _renderEngine.AdjustMediaZoom(right.y * dt);
+            // Anders' mapping: RIGHT stick is the POV; LEFT stick zooms (up/down) and skips 10 s
+            // (a flick sideways, latched until it returns to centre).
+            if (Mathf.Abs(left.y) > 0.2f && Mathf.Abs(left.y) > Mathf.Abs(left.x))
+                _renderEngine.AdjustMediaZoom(left.y * dt);
 
-            if (!_seekLatched && Mathf.Abs(right.x) > 0.75f && Mathf.Abs(right.x) > Mathf.Abs(right.y))
+            if (!_seekLatched && Mathf.Abs(left.x) > 0.75f && Mathf.Abs(left.x) > Mathf.Abs(left.y))
             {
                 _seekLatched = true;
-                MediaSeek(right.x > 0 ? 10 : -10);
+                MediaSeek(left.x > 0 ? 10 : -10);
             }
-            else if (_seekLatched && Mathf.Abs(right.x) < 0.3f)
+            else if (_seekLatched && Mathf.Abs(left.x) < 0.3f)
             {
                 _seekLatched = false;
             }
 
-            if (left.sqrMagnitude > 0.04f)
-                _renderEngine.PanMedia(left.x * 60f * dt, left.y * 45f * dt);
+            // POV on the right stick, at SkyPlayer's speeds (11°/s sideways, 10°/s up/down).
+            float yaw = Mathf.Abs(right.x) > 0.2f ? right.x * 11f * dt : 0f;
+            float pitch = Mathf.Abs(right.y) > 0.2f ? -right.y * 10f * dt : 0f;
+            if (yaw != 0f || pitch != 0f) _renderEngine.PanMedia(yaw, pitch);
+
+            GripDrag();
+
+            // B/Y: the video's POV back to where you look now (head pitch and roll too, so it
+            // works lying down) — and the controls with it. Same buttons as SkyPlayer.
+            bool recenter = Button(UnityEngine.XR.XRNode.RightHand, UnityEngine.XR.CommonUsages.secondaryButton) ||
+                            Button(UnityEngine.XR.XRNode.LeftHand, UnityEngine.XR.CommonUsages.secondaryButton);
+            if (recenter && !_prevMediaRecenter) _renderEngine.RecenterMedia();
+            _prevMediaRecenter = recenter;
+        }
+
+        private bool _prevMediaRecenter;
+        private bool _dragging;
+        private Quaternion _lastCtrlRot;
+
+        /// <summary>
+        /// Grab the picture: hold a grip and turn the controller, and the video's POV follows —
+        /// SkyPlayer's drag, measured in the head's frame so it feels the same sitting or lying.
+        /// </summary>
+        private void GripDrag()
+        {
+            bool grip = false;
+            Quaternion rot = Quaternion.identity;
+            foreach (var node in new[] { UnityEngine.XR.XRNode.RightHand, UnityEngine.XR.XRNode.LeftHand })
+            {
+                var dev = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(node);
+                if (dev.isValid &&
+                    dev.TryGetFeatureValue(UnityEngine.XR.CommonUsages.gripButton, out bool g) && g &&
+                    dev.TryGetFeatureValue(UnityEngine.XR.CommonUsages.deviceRotation, out Quaternion r))
+                { grip = true; rot = r; break; }
+            }
+            if (!grip || _camera == null) { _dragging = false; return; }
+            if (!_dragging) { _dragging = true; _lastCtrlRot = rot; return; }
+
+            // deviceRotation is tracking-space; the camera's localRotation is in the same space.
+            Quaternion inv = Quaternion.Inverse(_camera.transform.localRotation);
+            Vector3 e0 = (inv * _lastCtrlRot).eulerAngles;
+            Vector3 e1 = (inv * rot).eulerAngles;
+            float dy = Mathf.DeltaAngle(e0.y, e1.y);
+            float dp = Mathf.DeltaAngle(e0.x, e1.x);
+            float yaw = Mathf.Abs(dy) > 0.08f ? dy * 0.45f : 0f;
+            float pitch = Mathf.Abs(dp) > 0.08f ? dp * 0.45f : 0f;
+            if (yaw != 0f || pitch != 0f) _renderEngine.PanMedia(yaw, pitch);
+            _lastCtrlRot = rot;
+        }
+
+        private static bool Button(UnityEngine.XR.XRNode node, UnityEngine.XR.InputFeatureUsage<bool> usage)
+        {
+            var d = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(node);
+            return d.isValid && d.TryGetFeatureValue(usage, out bool v) && v;
         }
 
         private static Vector2 Stick(UnityEngine.XR.XRNode node)
