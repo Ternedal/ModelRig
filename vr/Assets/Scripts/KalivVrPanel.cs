@@ -102,8 +102,28 @@ namespace Kaliv.VR
             public GameObject Root;
             public Text Label;
             public RawImage Thumb;
-            public KalivMediaItem Item;
+            public MediaRowData Data;
         }
+
+        /// <summary>One line in the media browser: a rig item, a Stash scene, or a studio/tag to pick.</summary>
+        public sealed class MediaRowData
+        {
+            /// <summary>Thumbnails are matched to rows by this key; null = no thumbnail.</summary>
+            public string Key;
+            public string Label;
+            public Action OnClick;
+        }
+
+        // Media source tabs and the Stash controls
+        private Image _srcRigImage, _srcStashImage;
+        private GameObject _stashControls;
+        private Text _stashOrderLabel, _stashStudioLabel, _stashTagLabel, _stashQueryLabel;
+        private Button _mediaPrev;
+
+        // AR key strip under the transport
+        private GameObject _keyGroup;
+        private Text _rumLabel, _keyModeLabel, _keyValueLabel, _holeLabel, _pipetLabel;
+        private Image _rumImage;
 
         public Transform PanelTransform => _canvas != null ? _canvas.transform : transform;
 
@@ -597,16 +617,47 @@ namespace Kaliv.VR
             _mediaGroup = Group("MediaBrowser", _canvas.transform);
             AddImage(_mediaGroup.transform, "Backdrop", new Vector2(1200, 760), Vector2.zero, CanvasBg);
             AddText(_mediaGroup.transform, "MEDIER", 18, Accent, TextAnchor.MiddleLeft,
-                new Vector2(1080, 40), new Vector2(0, 330), FontStyle.Bold);
-            _mediaStatus = AddText(_mediaGroup.transform, "", 16, Muted, TextAnchor.MiddleLeft,
-                new Vector2(1080, 40), new Vector2(0, 290));
+                new Vector2(500, 40), new Vector2(-290, 330), FontStyle.Bold);
+
+            // Two sources on two different machines: the RIG's own generated media, and the
+            // STASH server's library through the SkyPlayer companion.
+            var srcRig = AddButton(_mediaGroup.transform, "RIG", new Vector2(160, 46), new Vector2(270, 330),
+                Elevated, () => _app.MediaShowRig());
+            _srcRigImage = srcRig.GetComponent<Image>();
+            var srcStash = AddButton(_mediaGroup.transform, "STASH", new Vector2(160, 46), new Vector2(440, 330),
+                Elevated, () => _app.MediaShowStash());
+            _srcStashImage = srcStash.GetComponent<Image>();
+
+            // SkyPlayer's library controls, in SkyPlayer's words.
+            _stashControls = Group("StashControls", _mediaGroup.transform);
+            AddButton(_stashControls.transform, "FIND STASH", new Vector2(180, 46), new Vector2(-445, 275),
+                Elevated, () => _app.StashFind());
+            var q = AddButton(_stashControls.transform, "SØG", new Vector2(150, 46), new Vector2(-280, 275),
+                Elevated, () => _app.StashSearch());
+            _stashQueryLabel = q.GetComponentInChildren<Text>();
+            var st = AddButton(_stashControls.transform, "STUDIE", new Vector2(170, 46), new Vector2(-115, 275),
+                Elevated, () => _app.StashPickFacet(true));
+            _stashStudioLabel = st.GetComponentInChildren<Text>();
+            var tg = AddButton(_stashControls.transform, "KATEGORI", new Vector2(170, 46), new Vector2(65, 275),
+                Elevated, () => _app.StashPickFacet(false));
+            _stashTagLabel = tg.GetComponentInChildren<Text>();
+            var ord = AddButton(_stashControls.transform, "SENESTE", new Vector2(170, 46), new Vector2(245, 275),
+                Elevated, () => _app.StashCycleOrder());
+            _stashOrderLabel = ord.GetComponentInChildren<Text>();
+            AddButton(_stashControls.transform, "ROULETTE", new Vector2(170, 46), new Vector2(430, 275),
+                Accent, () => _app.StashRoulette());
+            foreach (var t in _stashControls.GetComponentsInChildren<Text>()) t.fontSize = 13;
+            _stashControls.SetActive(false);
+
+            _mediaStatus = AddText(_mediaGroup.transform, "", 15, Muted, TextAnchor.MiddleLeft,
+                new Vector2(1080, 36), new Vector2(0, 228));
             _mediaStatus.horizontalOverflow = HorizontalWrapMode.Wrap;
 
             for (int i = 0; i < 6; i++)
             {
                 int index = i;
-                float y = 220 - i * 80;
-                var root = AddButton(_mediaGroup.transform, "", new Vector2(1080, 70), new Vector2(0, y),
+                float y = 170 - i * 74;
+                var root = AddButton(_mediaGroup.transform, "", new Vector2(1080, 66), new Vector2(0, y),
                     Surface, () => OnMediaRow(index));
                 var thumbGo = new GameObject("Thumb", typeof(RawImage));
                 thumbGo.transform.SetParent(root.transform, false);
@@ -624,9 +675,11 @@ namespace Kaliv.VR
                 root.gameObject.SetActive(false);
             }
 
-            _mediaMore = AddButton(_mediaGroup.transform, "FLERE", new Vector2(200, 52), new Vector2(-150, -300),
+            _mediaPrev = AddButton(_mediaGroup.transform, "FORRIGE", new Vector2(200, 52), new Vector2(-250, -300),
+                Elevated, () => _app.MediaPrevPage());
+            _mediaMore = AddButton(_mediaGroup.transform, "FLERE", new Vector2(200, 52), new Vector2(0, -300),
                 Elevated, () => _app.MediaNextPage());
-            AddButton(_mediaGroup.transform, "LUK", new Vector2(200, 52), new Vector2(150, -300),
+            AddButton(_mediaGroup.transform, "LUK", new Vector2(200, 52), new Vector2(250, -300),
                 Elevated, () => ShowMediaBrowser(false));
             _mediaGroup.SetActive(false);
         }
@@ -637,15 +690,46 @@ namespace Kaliv.VR
             _transportGroup = Group("Transport", _canvas.transform);
             AddImage(_transportGroup.transform, "Strip", new Vector2(1200, 90), new Vector2(0, -440), CanvasBg);
             _transportInfo = AddText(_transportGroup.transform, "", 14, Muted, TextAnchor.MiddleLeft,
-                new Vector2(300, 60), new Vector2(-430, -440));
-            AddButton(_transportGroup.transform, "−10s", new Vector2(110, 52), new Vector2(-215, -440), Elevated, () => _app.MediaSeek(-10));
-            var play = AddButton(_transportGroup.transform, "PAUSE", new Vector2(140, 52), new Vector2(-85, -440), Accent, () => _app.MediaTogglePlay());
+                new Vector2(220, 60), new Vector2(-470, -440));
+            AddButton(_transportGroup.transform, "−10s", new Vector2(100, 52), new Vector2(-300, -440), Elevated, () => _app.MediaSeek(-10));
+            var play = AddButton(_transportGroup.transform, "PAUSE", new Vector2(120, 52), new Vector2(-185, -440), Accent, () => _app.MediaTogglePlay());
             _transportPlay = play.GetComponentInChildren<Text>();
-            AddButton(_transportGroup.transform, "+10s", new Vector2(110, 52), new Vector2(45, -440), Elevated, () => _app.MediaSeek(10));
-            AddButton(_transportGroup.transform, "FORMAT", new Vector2(130, 52), new Vector2(180, -440), Elevated, () => _app.MediaCycleFormat());
-            AddButton(_transportGroup.transform, "CENTRER", new Vector2(130, 52), new Vector2(320, -440), Elevated, () => _app.MediaRecenter());
-            AddButton(_transportGroup.transform, "LUK", new Vector2(110, 52), new Vector2(450, -440), Danger, () => _app.CloseMedia());
+            AddButton(_transportGroup.transform, "+10s", new Vector2(100, 52), new Vector2(-70, -440), Elevated, () => _app.MediaSeek(10));
+            AddButton(_transportGroup.transform, "FORMAT", new Vector2(120, 52), new Vector2(50, -440), Elevated, () => _app.MediaCycleFormat());
+            AddButton(_transportGroup.transform, "CENTRER", new Vector2(120, 52), new Vector2(180, -440), Elevated, () => _app.MediaRecenter());
+            // RUM: SkyPlayer's AR background key — the people in the video, in your room.
+            var rum = AddButton(_transportGroup.transform, "RUM", new Vector2(120, 52), new Vector2(310, -440), Elevated, () => _app.KeyToggle());
+            _rumLabel = rum.GetComponentInChildren<Text>();
+            _rumImage = rum.GetComponent<Image>();
+            AddButton(_transportGroup.transform, "LUK", new Vector2(110, 52), new Vector2(440, -440), Danger, () => _app.CloseMedia());
+
+            // The key row, only while RUM is on — as in SkyPlayer.
+            _keyGroup = Group("KeyRow", _transportGroup.transform);
+            AddImage(_keyGroup.transform, "Strip", new Vector2(1200, 76), new Vector2(0, -525), CanvasBg);
+            AddButton(_keyGroup.transform, "KEY −", new Vector2(120, 50), new Vector2(-330, -525), Elevated, () => _app.KeyAdjust(-1));
+            _keyValueLabel = AddText(_keyGroup.transform, "", 15, TextMain, TextAnchor.MiddleCenter,
+                new Vector2(110, 50), new Vector2(-210, -525));
+            AddButton(_keyGroup.transform, "KEY +", new Vector2(120, 50), new Vector2(-90, -525), Elevated, () => _app.KeyAdjust(1));
+            var mode = AddButton(_keyGroup.transform, "AUTO BG", new Vector2(170, 50), new Vector2(65, -525), Elevated, () => _app.KeyCycleMode());
+            _keyModeLabel = mode.GetComponentInChildren<Text>();
+            var hole = AddButton(_keyGroup.transform, "HUL-FIX", new Vector2(140, 50), new Vector2(230, -525), Elevated, () => _app.KeyCycleDetail());
+            _holeLabel = hole.GetComponentInChildren<Text>();
+            var pip = AddButton(_keyGroup.transform, "PIPET", new Vector2(130, 50), new Vector2(375, -525), Elevated, () => _app.KeyPipette());
+            _pipetLabel = pip.GetComponentInChildren<Text>();
+            _keyGroup.SetActive(false);
             _transportGroup.SetActive(false);
+        }
+
+        /// <summary>RUM state and the key row's labels.</summary>
+        public void SetKeyState(bool on, string modeLabel, float threshold, string detailLabel, bool pipetActive, bool immersive)
+        {
+            if (_rumLabel != null) _rumLabel.text = on ? "RUM ●" : "RUM";
+            if (_rumImage != null) _rumImage.color = on ? Ok : Elevated;
+            if (_keyGroup != null) _keyGroup.SetActive(on);
+            if (_keyModeLabel != null) _keyModeLabel.text = modeLabel;
+            if (_keyValueLabel != null) _keyValueLabel.text = immersive ? threshold.ToString("0.00") : "kun 180/360";
+            if (_holeLabel != null) _holeLabel.text = detailLabel;
+            if (_pipetLabel != null) _pipetLabel.text = pipetActive ? "PIPET ●" : "PIPET";
         }
 
         // =====================================================================================
@@ -984,29 +1068,61 @@ namespace Kaliv.VR
             _mediaStatus.color = error ? Danger : Muted;
         }
 
+        /// <summary>Rig gallery items as rows; a click plays the item.</summary>
         public void SetMediaItems(IReadOnlyList<KalivMediaItem> items, bool hasMore)
+        {
+            var rows = new List<MediaRowData>();
+            if (items != null)
+                foreach (var it in items)
+                {
+                    var item = it;
+                    rows.Add(new MediaRowData { Key = item.Id, Label = DescribeMedia(item), OnClick = () => _app.PlayMedia(item) });
+                }
+            SetMediaRows(rows, false, hasMore);
+        }
+
+        public void SetMediaRows(IReadOnlyList<MediaRowData> rows, bool hasPrev, bool hasMore)
         {
             for (int i = 0; i < _mediaRows.Count; i++)
             {
                 var row = _mediaRows[i];
-                row.Item = items != null && i < items.Count ? items[i] : null;
-                row.Root.SetActive(row.Item != null);
+                row.Data = rows != null && i < rows.Count ? rows[i] : null;
+                row.Root.SetActive(row.Data != null);
                 row.Thumb.texture = null;
                 row.Thumb.color = Border;
-                if (row.Item != null) row.Label.text = DescribeMedia(row.Item);
+                row.Thumb.gameObject.SetActive(row.Data?.Key != null);
+                if (row.Data != null) row.Label.text = row.Data.Label;
             }
+            if (_mediaPrev != null) _mediaPrev.gameObject.SetActive(hasPrev);
             if (_mediaMore != null) _mediaMore.gameObject.SetActive(hasMore);
         }
 
-        public void SetMediaThumbnail(string itemId, Texture2D texture)
+        public void SetMediaThumbnail(string key, Texture2D texture)
         {
             foreach (var row in _mediaRows)
             {
-                if (row.Item == null || row.Item.Id != itemId) continue;
+                if (row.Data == null || row.Data.Key != key) continue;
                 row.Thumb.texture = texture;
                 row.Thumb.color = Color.white;
             }
         }
+
+        public void SetMediaSource(bool stash)
+        {
+            if (_srcRigImage != null) _srcRigImage.color = stash ? Elevated : Accent;
+            if (_srcStashImage != null) _srcStashImage.color = stash ? Accent : Elevated;
+            _stashControls?.SetActive(stash);
+        }
+
+        public void SetStashControls(string order, string studio, string tag, string query)
+        {
+            if (_stashOrderLabel != null) _stashOrderLabel.text = order;
+            if (_stashStudioLabel != null) _stashStudioLabel.text = Short(studio ?? "STUDIE", 14);
+            if (_stashTagLabel != null) _stashTagLabel.text = Short(tag ?? "KATEGORI", 14);
+            if (_stashQueryLabel != null) _stashQueryLabel.text = string.IsNullOrEmpty(query) ? "SØG" : Short("\"" + query + "\"", 12);
+        }
+
+        private static string Short(string s, int max) => s.Length > max ? s.Substring(0, max - 1) + "…" : s;
 
         private static string DescribeMedia(KalivMediaItem item)
         {
@@ -1034,8 +1150,7 @@ namespace Kaliv.VR
         private void OnMediaRow(int index)
         {
             if (index < 0 || index >= _mediaRows.Count) return;
-            var item = _mediaRows[index].Item;
-            if (item != null) _app.PlayMedia(item);
+            _mediaRows[index].Data?.OnClick?.Invoke();
         }
 
         public void ShowTransport(bool show)

@@ -148,6 +148,14 @@ namespace Kaliv.VR.Rendering
         public void SetMediaFormat(string formatHint) => _mediaRenderer?.SetFormat(formatHint);
         public void RecenterMedia() => _mediaRenderer?.Recenter();
         public void AdjustMediaZoom(float delta) => _mediaRenderer?.AdjustZoom(delta);
+        public void ApplyMediaBackgroundKey(BackgroundKeySettings settings) =>
+            _mediaRenderer?.ApplyBackgroundKey(settings);
+        public bool TrySampleMediaKeyColor(out Color color)
+        {
+            color = Color.clear;
+            return _mediaRenderer != null && _mediaRenderer.TrySampleKeyColorAtGaze(out color);
+        }
+        public bool MediaIsImmersive => _mediaRenderer != null && _mediaRenderer.IsImmersive;
         public void PanMedia(float yawDegrees, float pitchDegrees) =>
             _mediaRenderer?.Pan(yawDegrees, pitchDegrees);
 

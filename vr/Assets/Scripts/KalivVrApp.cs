@@ -24,6 +24,7 @@ namespace Kaliv.VR
         private const string ToolsKey = "kaliv.vr.mode.tools";
         private const string RagSourceKey = "kaliv.vr.mode.rag_source";
         private const string DeviceIdKey = "kaliv.vr.device_id";
+        private const string MediaSourceKey = "kaliv.vr.media.source";
         private const string ConversationFile = "kaliv-vr-conversation.json";
 
         private ModelRigVrClient _client;
@@ -100,6 +101,8 @@ namespace Kaliv.VR
             _voice = gameObject.AddComponent<KalivVoice>();
             _voice.Initialize(_renderEngine.BodyRoot);
             _voice.SpeechEvent += ReportBodySpeech;
+
+            InitializeStash();
 
             _panel.SetConnectionDefaults(BaseUrl, "");
             _panel.SetModes(RagMode, ToolsMode, RagSource);
@@ -694,20 +697,36 @@ namespace Kaliv.VR
         // Media
         // =====================================================================================
 
+        /// <summary>MEDIER opens on the source used last: the rig's gallery or the Stash library.</summary>
         public void OpenMediaBrowser()
         {
-            if (!Paired) return;
+            _panel.ShowMediaBrowser(true);
+            if (_stashSource) MediaShowStash();
+            else MediaShowRig();
+        }
+
+        public void MediaShowRig()
+        {
+            _stashSource = false;
+            PlayerPrefs.SetInt(MediaSourceKey, 0);
+            _panel.SetMediaSource(false);
             _mediaItems.Clear();
             _mediaCursor = null;
             _panel.SetMediaItems(_mediaItems, false);
+            if (!Paired) { _panel.SetMediaStatus("Riggen er ikke parret — STASH virker uden den.", true); return; }
             _panel.SetMediaStatus("Henter medier fra riggen …", false);
-            _panel.ShowMediaBrowser(true);
             LoadMediaPage(null);
         }
 
         public void MediaNextPage()
         {
+            if (_stashSource) { StashPageStep(+1); return; }
             if (_mediaCursor != null) LoadMediaPage(_mediaCursor);
+        }
+
+        public void MediaPrevPage()
+        {
+            if (_stashSource) StashPageStep(-1);
         }
 
         private void LoadMediaPage(string cursor)
@@ -756,6 +775,7 @@ namespace Kaliv.VR
                     _renderEngine.SetMediaScreenAsGazeTarget(true);
                     _mediaOpen = true;
                     _panel.ShowTransport(true);
+                    ApplyKey();
                     UpdateTransport();
                 },
                 error => { _cancelDownload = null; _panel.SetMediaStatus(error, true); },
@@ -774,12 +794,15 @@ namespace Kaliv.VR
         {
             _mediaFormatIndex = (_mediaFormatIndex + 1 + SkyPlayerFormats.Length) % SkyPlayerFormats.Length;
             _renderEngine.SetMediaFormat(SkyPlayerFormats[_mediaFormatIndex]);
+            ApplyKey();   // the key only acts on 180/360, so a format change re-decides it
             UpdateTransport();
         }
 
         public void CloseMedia()
         {
             _cancelDownload?.Invoke();
+            StashReportProgress(finished: false);   // remember where a Stash scene was left
+            _stashPlaying = null;
             _renderEngine.StopMedia();
             _renderEngine.SetMediaScreenAsGazeTarget(false);
             _images?.Hide();
@@ -838,7 +861,11 @@ namespace Kaliv.VR
                 cancel => _cancelDownload = cancel));
         }
 
-        private void OnMediaEnded() => UpdateTransport();
+        private void OnMediaEnded()
+        {
+            StashReportProgress(finished: true);
+            UpdateTransport();
+        }
 
         private void UpdateTransport()
         {
@@ -867,6 +894,7 @@ namespace Kaliv.VR
                     _transportTick = 0.5f;
                     UpdateTransport();
                 }
+                StashProgressTick();
             }
         }
 
