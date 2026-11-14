@@ -27,7 +27,7 @@ The product boundary is deliberate:
 - **ModelRig / Kaliv VR** owns pairing, auth, model selection, Kaliv UX and the Quest presentation/rendering engine.
 - **BodyRig** owns body identity and performed body-state semantics.
 - **SkyPlayer-Engine** owns reusable XR/media mechanics.
-- **Skyplayer** remains a separate Stash-oriented client of the same engine.
+- **Skyplayer** remains a separate Stash-oriented client of the same engine. Since 14 Nov, by Anders' decision, Kaliv VR can also browse and play the Stash library — through the **same SkyPlayer companion**, on the Stash server, not through the rig. The companion stays the single owner of Stash access; Kaliv VR is a second client of it, not a second implementation.
 
 ## Current landed scope
 
@@ -47,6 +47,8 @@ The landed first-party VR slice provides:
 - a persistent conversation (survives restart), PRØV IGEN and NY SAMTALE, with Android's history rules
 - a media browser for `kaliv-media-gallery/v1` with a transport strip (play/pause, ±10 s, format, recenter), SkyPlayer's stick mapping for video, and images on a floating plane
 - BodyRig's `screen` attention target resolves to the panel, or to the open video or image
+- **STASH** in MEDIER: SkyPlayer's library through the SkyPlayer companion on the Stash server — a different machine from the rig, found by its own UDP discovery (FIND STASH, port 8098), with no token. Order pills (ALLE/SENESTE/FAVORITTER/VR/TILFÆLDIG), studio and category with mutually scoped counts, search, ROULETTE, direct streaming in the engine and resume from the companion's progress
+- **RUM**, the engine's AR background key, on any 180°/360° video: eight key modes, KEY −/+, hole-fill strength, PIPET. The pinned engine (`a6c0087`) predates SkyPlayer's November key tuning, so hair keys less well here than in SkyPlayer until the pin moves
 - an in-headset Danish keyboard for every text field — Quest shows no system keyboard for an app without the Meta XR SDK's overlay-keyboard feature
 - **FIND RIG**: the headset finds the backend on its own subnet by asking every address for the unauthenticated `GET /healthz` and accepting only `service=modelrig-server` (at most the /24 around the headset, 48 in flight, 1 s timeouts). It runs by itself on first start. Once paired, if the saved address gets no HTTP answer, the headset scans again and moves to the address where its own token is accepted — so a rig whose DHCP address changes is followed, never swapped for another rig. Not across Tailscale; there the address is typed.
 - the panel waits for a tracked head pose before placing itself, then stands 2 m ahead at eye height, upright, along the head's yaw only; **B** or **Y** brings it back in front, and CENTRER brings both the panel and Kaliv
@@ -71,7 +73,7 @@ The landed first-party VR slice provides:
 - Kaliv-owned media facade over SkyPlayer-Engine with flat/VR180/VR360 projection bound to `KalivMedia`
 - tracking-origin compensation propagated into immersive media orientation
 
-The implementation is not yet a physically qualified finished VR product. Everything above compiles for Android and its protocol logic is covered by 91 EditMode tests.
+The implementation is not yet a physically qualified finished VR product. Everything above compiles for Android and its protocol logic is covered by 101 EditMode tests.
 
 **On a Quest 3 so far (13 Nov, without a running rig):** passthrough, the panel's placement, the pointer, the keyboard (typing, LUK discarding the edit) and the pairing screen's refusal without a code. **Not yet exercised:** everything that needs the rig answering — chat, voice and spatial audio, the avatar, the RIG tabs, the confirmation card, FIND RIG against a live backend and the media cache. Quest device evidence remains its own gate.
 
