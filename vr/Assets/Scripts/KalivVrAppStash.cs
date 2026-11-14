@@ -32,7 +32,17 @@ namespace Kaliv.VR
         private float _stashProgressTimer;
         private readonly List<Texture2D> _stashThumbs = new List<Texture2D>();
 
-        private BackgroundKeySettings _key = BackgroundKeySettings.Default;
+        private BackgroundKeySettings _key = SkyPlayerKeyDefaults();
+
+        // The engine's defaults differ from SkyPlayer's in one place: SkyPlayer starts on
+        // hole-fill 2 ("HÅR BLØD", soften 0.65), the engine on 1 (0.45). Start where SkyPlayer
+        // starts so the same video keys the same way in both apps.
+        private static BackgroundKeySettings SkyPlayerKeyDefaults()
+        {
+            var key = BackgroundKeySettings.Default;
+            key.DetailMode = 2;
+            return key;
+        }
         private bool _pipetActive;
 
         private static readonly string[] KeyModeLabels =
