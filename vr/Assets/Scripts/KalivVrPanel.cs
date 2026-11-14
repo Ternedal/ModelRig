@@ -80,6 +80,7 @@ namespace Kaliv.VR
         private GameObject _mediaGroup;
         private Text _mediaStatus;
         private readonly List<MediaRow> _mediaRows = new();
+        private Text _mediaPosition;
         private Button _mediaMore;
         private GameObject _transportGroup;
         private Text _transportInfo;
@@ -688,10 +689,12 @@ namespace Kaliv.VR
                 root.gameObject.SetActive(false);
             }
 
-            _mediaPrev = AddButton(_mediaGroup.transform, "FORRIGE", new Vector2(200, 52), new Vector2(-250, -300),
-                Elevated, () => _app.MediaPrevPage());
-            _mediaMore = AddButton(_mediaGroup.transform, "FLERE", new Vector2(200, 52), new Vector2(0, -300),
-                Elevated, () => _app.MediaNextPage());
+            _mediaPosition = AddText(_mediaGroup.transform, "", 14, Muted, TextAnchor.MiddleLeft,
+                new Vector2(200, 52), new Vector2(-490, -300));
+            _mediaPrev = AddButton(_mediaGroup.transform, "OP", new Vector2(200, 52), new Vector2(-250, -300),
+                Elevated, () => { if (!ScrollListPage(-1)) _app.MediaPrevPage(); });
+            _mediaMore = AddButton(_mediaGroup.transform, "NED", new Vector2(200, 52), new Vector2(0, -300),
+                Elevated, () => { if (!ScrollListPage(1)) _app.MediaNextPage(); });
             AddButton(_mediaGroup.transform, "AFSLUT", new Vector2(140, 52), new Vector2(460, -300),
                 Danger, () => _app.QuitApp());
             AddButton(_mediaGroup.transform, "LUK", new Vector2(200, 52), new Vector2(250, -300),
@@ -704,6 +707,28 @@ namespace Kaliv.VR
         {
             _transportGroup = Group("Transport", _canvas.transform);
             AddImage(_transportGroup.transform, "Strip", new Vector2(1200, 90), new Vector2(0, -440), CanvasBg);
+
+            // Timeline, as in SkyPlayer: point anywhere on it to see the time there, click to
+            // jump, hold the trigger and sweep to scrub.
+            AddImage(_transportGroup.transform, "TimelineStrip", new Vector2(1200, 64), new Vector2(0, -366), CanvasBg);
+            _timelineTime = AddText(_transportGroup.transform, "", 15, TextMain, TextAnchor.MiddleLeft,
+                new Vector2(170, 40), new Vector2(-505, -366));
+            _timelineButton = AddButton(_transportGroup.transform, "", new Vector2(1000, 34), new Vector2(75, -366),
+                Surface, () => SeekAtPointer());
+            _timelineRect = (RectTransform)_timelineButton.transform;
+            var fillGo = new GameObject("Fill", typeof(RectTransform), typeof(Image));
+            fillGo.transform.SetParent(_timelineButton.transform, false);
+            _timelineFill = fillGo.GetComponent<Image>();
+            _timelineFill.color = Accent;
+            _timelineFill.raycastTarget = false;
+            var frt = _timelineFill.rectTransform;
+            frt.anchorMin = new Vector2(0, 0);
+            frt.anchorMax = new Vector2(0, 1);
+            frt.pivot = new Vector2(0, 0.5f);
+            frt.anchoredPosition = Vector2.zero;
+            frt.sizeDelta = new Vector2(0, -12);
+            _timelineHover = AddText(_transportGroup.transform, "", 14, Accent, TextAnchor.MiddleCenter,
+                new Vector2(120, 26), new Vector2(75, -326));
             _transportInfo = AddText(_transportGroup.transform, "", 14, Muted, TextAnchor.MiddleLeft,
                 new Vector2(220, 60), new Vector2(-470, -440));
             AddButton(_transportGroup.transform, "−10s", new Vector2(100, 52), new Vector2(-300, -440), Elevated, () => _app.MediaSeek(-10));
@@ -967,6 +992,8 @@ namespace Kaliv.VR
         {
             UpdatePlacement();
             UpdatePlaybackControls();
+            UpdateListScroll();
+            UpdateTimelineScrub();
 
             if (_confirmGroup != null && _confirmGroup.activeSelf && _confirmDeadline > 0f)
             {
@@ -1103,24 +1130,137 @@ namespace Kaliv.VR
             SetMediaRows(rows, false, hasMore);
         }
 
+        // ---- The list: everything loaded so far, six rows visible, scrolled with the stick ----
+        private readonly List<MediaRowData> _listRows = new List<MediaRowData>();
+        private readonly Dictionary<string, Texture2D> _listThumbs = new Dictionary<string, Texture2D>();
+        private int _listTop;
+        private bool _listScroll;      // true: one long list (Stash, studios/categories); false: the rig's pages
+        private bool _listHasMore;
+        private bool _listLoading;
+        private float _scrollRepeat;
+        private bool _pagedPrev, _pagedMore;
+
+        /// <summary>Pages, the old way: FORRIGE/FLERE ask the app (the rig's gallery).</summary>
         public void SetMediaRows(IReadOnlyList<MediaRowData> rows, bool hasPrev, bool hasMore)
         {
-            for (int i = 0; i < _mediaRows.Count; i++)
+            _listScroll = false;
+            _pagedPrev = hasPrev;
+            _pagedMore = hasMore;
+            ResetList(rows);
+        }
+
+        /// <summary>
+        /// One long list, scrolled with either thumbstick — up/down, faster the further you
+        /// push. FORRIGE/FLERE jump a screenful. Near the end, <see cref="KalivVrApp.MediaNeedMore"/>
+        /// fetches the next batch, so it simply keeps going.
+        /// </summary>
+        public void SetMediaList(IReadOnlyList<MediaRowData> rows, bool hasMore)
+        {
+            _listScroll = true;
+            _listHasMore = hasMore;
+            _listLoading = false;
+            ResetList(rows);
+        }
+
+        public void AppendMediaList(IReadOnlyList<MediaRowData> rows, bool hasMore)
+        {
+            if (rows != null) _listRows.AddRange(rows);
+            _listHasMore = hasMore;
+            _listLoading = false;
+            RenderList();
+        }
+
+        private void ResetList(IReadOnlyList<MediaRowData> rows)
+        {
+            _listRows.Clear();
+            _listThumbs.Clear();
+            if (rows != null) _listRows.AddRange(rows);
+            _listTop = 0;
+            RenderList();
+        }
+
+        public int MediaListCount => _listRows.Count;
+
+        private void RenderList()
+        {
+            int visible = _mediaRows.Count;
+            _listTop = Mathf.Clamp(_listTop, 0, Math.Max(0, _listRows.Count - visible));
+            for (int i = 0; i < visible; i++)
             {
                 var row = _mediaRows[i];
-                row.Data = rows != null && i < rows.Count ? rows[i] : null;
+                int idx = _listTop + i;
+                row.Data = idx < _listRows.Count ? _listRows[idx] : null;
                 row.Root.SetActive(row.Data != null);
-                row.Thumb.texture = null;
-                row.Thumb.color = Border;
-                row.Thumb.gameObject.SetActive(row.Data?.Key != null);
-                if (row.Data != null) row.Label.text = row.Data.Label;
+                if (row.Data == null) continue;
+                row.Label.text = row.Data.Label;
+                row.Thumb.gameObject.SetActive(row.Data.Key != null);
+                if (row.Data.Key != null && _listThumbs.TryGetValue(row.Data.Key, out var tex) && tex != null)
+                {
+                    row.Thumb.texture = tex;
+                    row.Thumb.color = Color.white;
+                }
+                else
+                {
+                    row.Thumb.texture = null;
+                    row.Thumb.color = Border;
+                }
             }
-            if (_mediaPrev != null) _mediaPrev.gameObject.SetActive(hasPrev);
-            if (_mediaMore != null) _mediaMore.gameObject.SetActive(hasMore);
+
+            bool prev = _listScroll ? _listTop > 0 : _pagedPrev;
+            bool more = _listScroll ? (_listTop + visible < _listRows.Count || _listHasMore) : _pagedMore;
+            if (_mediaPrev != null) _mediaPrev.gameObject.SetActive(prev);
+            if (_mediaMore != null) _mediaMore.gameObject.SetActive(more);
+            if (_listScroll && _listRows.Count > 0 && _mediaPosition != null)
+                _mediaPosition.text = $"{_listTop + 1}–{Math.Min(_listRows.Count, _listTop + visible)} af {_listRows.Count}{(_listHasMore ? "+" : "")}";
+            else if (_mediaPosition != null)
+                _mediaPosition.text = "";
+
+            // Nearly at the end of what is loaded: fetch more before the user gets there.
+            if (_listScroll && _listHasMore && !_listLoading && _listTop + visible >= _listRows.Count - 4)
+            {
+                _listLoading = true;
+                _app.MediaNeedMore();
+            }
+        }
+
+        /// <summary>FORRIGE/FLERE in a long list: a screenful at a time. False: the app pages instead.</summary>
+        public bool ScrollListPage(int direction)
+        {
+            if (!_listScroll) return false;
+            _listTop += direction * _mediaRows.Count;
+            RenderList();
+            return true;
+        }
+
+        /// <summary>A failed fetch: allow the next scroll to try again.</summary>
+        public void MediaListLoadFailed() => _listLoading = false;
+
+        private void UpdateListScroll()
+        {
+            if (!_listScroll || _mediaGroup == null || !_mediaGroup.activeInHierarchy || _keyboardOpen) return;
+            float y = StickY(UnityEngine.XR.XRNode.RightHand);
+            float ly = StickY(UnityEngine.XR.XRNode.LeftHand);
+            if (Mathf.Abs(ly) > Mathf.Abs(y)) y = ly;
+            if (Mathf.Abs(y) < 0.35f) { _scrollRepeat = 0f; return; }
+
+            if ((_scrollRepeat -= Time.unscaledDeltaTime) > 0f) return;
+            // Further push, faster scroll: from ~4 to ~16 rows a second.
+            float strength = Mathf.InverseLerp(0.35f, 1f, Mathf.Abs(y));
+            _scrollRepeat = Mathf.Lerp(0.25f, 0.06f, strength);
+            _listTop += y < 0 ? 1 : -1;   // stick down = further down the list
+            RenderList();
+        }
+
+        private static float StickY(UnityEngine.XR.XRNode node)
+        {
+            var d = UnityEngine.XR.InputDevices.GetDeviceAtXRNode(node);
+            return d.isValid && d.TryGetFeatureValue(UnityEngine.XR.CommonUsages.primary2DAxis, out Vector2 v) ? v.y : 0f;
         }
 
         public void SetMediaThumbnail(string key, Texture2D texture)
         {
+            if (key == null) return;
+            _listThumbs[key] = texture;
             foreach (var row in _mediaRows)
             {
                 if (row.Data == null || row.Data.Key != key) continue;
@@ -1186,6 +1326,74 @@ namespace Kaliv.VR
             _controlsVisible = true;
             _controlsIdle = 0f;
             RefreshGroups();
+        }
+
+        // ---- Timeline ----
+        private Text _timelineTime, _timelineHover;
+        private Button _timelineButton;
+        private RectTransform _timelineRect;
+        private Image _timelineFill;
+        private double _timelineLength, _timelineNow;
+        private float _scrubThrottle;
+        private const float TimelineWidth = 1000f;
+
+        /// <summary>Position and length, from the app's transport tick.</summary>
+        public void SetTimeline(double now, double length)
+        {
+            _timelineNow = now;
+            _timelineLength = length;
+            if (_timelineTime != null)
+                _timelineTime.text = length > 0 ? $"{Clock(now)} / {Clock(length)}" : "";
+            if (_timelineFill != null)
+            {
+                float f = length > 0 ? Mathf.Clamp01((float)(now / length)) : 0f;
+                _timelineFill.rectTransform.sizeDelta = new Vector2(f * TimelineWidth, -12);
+            }
+        }
+
+        private float PointerFraction()
+        {
+            if (_timelineRect == null) return -1f;
+            Vector3 local = _timelineRect.InverseTransformPoint(KalivVrPointer.HitPoint);
+            return Mathf.Clamp01((local.x + TimelineWidth * 0.5f) / TimelineWidth);
+        }
+
+        private void SeekAtPointer()
+        {
+            if (_timelineLength <= 0) return;
+            float f = PointerFraction();
+            if (f < 0) return;
+            _controlsIdle = 0f;
+            _app.MediaSeekFraction(f);
+            SetTimeline(f * _timelineLength, _timelineLength);   // move the fill now, not at the next tick
+        }
+
+        /// <summary>Hover shows the time under the ray; a held trigger scrubs.</summary>
+        private void UpdateTimelineScrub()
+        {
+            if (_timelineButton == null || _timelineHover == null) return;
+            bool over = _playback && _timelineButton.gameObject.activeInHierarchy &&
+                        KalivVrPointer.Hovered == _timelineButton.gameObject && _timelineLength > 0;
+            if (!over) { _timelineHover.text = ""; return; }
+
+            float f = PointerFraction();
+            _timelineHover.text = Clock(f * _timelineLength);
+            var hp = _timelineHover.rectTransform.anchoredPosition;
+            _timelineHover.rectTransform.anchoredPosition = new Vector2(75 - TimelineWidth * 0.5f + f * TimelineWidth, hp.y);
+            _controlsIdle = 0f;   // pointing at the timeline counts as using the controls
+
+            bool held = Button(UnityEngine.XR.XRNode.RightHand, UnityEngine.XR.CommonUsages.triggerButton) ||
+                        Button(UnityEngine.XR.XRNode.LeftHand, UnityEngine.XR.CommonUsages.triggerButton);
+            if (!held) { _scrubThrottle = 0f; return; }
+            if ((_scrubThrottle += Time.unscaledDeltaTime) < 0.2f) return;
+            _scrubThrottle = 0f;
+            SeekAtPointer();
+        }
+
+        private static string Clock(double seconds)
+        {
+            var t = TimeSpan.FromSeconds(Math.Max(0, seconds));
+            return t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss");
         }
 
         private readonly List<GameObject> _chrome = new List<GameObject>();

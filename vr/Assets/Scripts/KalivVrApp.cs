@@ -740,6 +740,19 @@ namespace Kaliv.VR
             if (_stashSource) StashPageStep(-1);
         }
 
+        /// <summary>The list scrolled near its end: fetch the next batch (Stash only; the rig pages).</summary>
+        public void MediaNeedMore()
+        {
+            if (_stashSource) StashLoadMore();
+        }
+
+        /// <summary>Timeline click or scrub.</summary>
+        public void MediaSeekFraction(float fraction01)
+        {
+            if (!_mediaOpen || _showingImage) return;
+            _renderEngine.SeekMedia(Mathf.Clamp01(fraction01));
+        }
+
         private void LoadMediaPage(string cursor)
         {
             StartCoroutine(_client.MediaPage(BaseUrl, Token, cursor,
@@ -911,9 +924,8 @@ namespace Kaliv.VR
         {
             if (!_mediaOpen || _showingImage) return;
             string fmt = _renderEngine.MediaFormatLabel;
-            string time = _renderEngine.MediaLength > 0
-                ? $"{Clock(_renderEngine.MediaTime)} / {Clock(_renderEngine.MediaLength)}"
-                : "";
+            string time = "";   // the timeline row shows it now
+            _panel.SetTimeline(_renderEngine.MediaTime, _renderEngine.MediaLength);
             // The panel (and its status line) is hidden during playback, so the strip says what plays.
             string title = _stashPlaying?.Title ?? "";
             if (title.Length > 26) title = title.Substring(0, 25) + "…";
@@ -935,7 +947,7 @@ namespace Kaliv.VR
                 if (!_showingImage) MediaSticks();
                 if ((_transportTick -= Time.unscaledDeltaTime) <= 0f)
                 {
-                    _transportTick = 0.5f;
+                    _transportTick = 0.25f;
                     UpdateTransport();
                 }
                 StashProgressTick();

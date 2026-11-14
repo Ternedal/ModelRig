@@ -132,8 +132,7 @@ namespace Kaliv.VR
 
         private void ShowFacetPage(int page)
         {
-            _facetPage = Math.Max(0, page);
-            const int per = KalivStash.PageSize - 1;   // first row is always "all"
+            _facetPage = 0;
             var rows = new List<KalivVrPanel.MediaRowData>
             {
                 new KalivVrPanel.MediaRowData
@@ -142,10 +141,9 @@ namespace Kaliv.VR
                     OnClick = () => ChooseFacet(null),
                 },
             };
-            int start = _facetPage * per;
-            for (int i = start; i < Math.Min(_facetList.Count, start + per); i++)
+            foreach (var facet in _facetList)
             {
-                var f = _facetList[i];
+                var f = facet;
                 rows.Add(new KalivVrPanel.MediaRowData
                 {
                     Label = $"{f.Name}  ·  {f.SceneCount} scener",
@@ -153,7 +151,7 @@ namespace Kaliv.VR
                 });
             }
             _facetPicking = true;
-            _panel.SetMediaRows(rows, _facetPage > 0, start + per < _facetList.Count);
+            _panel.SetMediaList(rows, false);   // the whole list, scrolled with the stick
             _panel.SetMediaStatus(_facetStudios ? "Vælg et studie." : "Vælg en kategori.", false);
         }
 
@@ -177,51 +175,89 @@ namespace Kaliv.VR
             if (_stashPage + step >= 1) StashLoad(_stashPage + step);
         }
 
-        /// <summary>Load one page of scenes. A new shuffle per first page; the same seed while paging.</summary>
+        private int _stashLoadEpoch;
+
+        /// <summary>
+        /// Start the list over (new filter, order or search): batch 1, a new shuffle. Further
+        /// batches come from <see cref="StashLoadMore"/> as the list is scrolled — one endless list.
+        /// </summary>
         private void StashLoad(int page)
         {
             _facetPicking = false;
-            if (page <= 1) _stashSeed = UnityEngine.Random.Range(1, 99_999_999).ToString();
-            _stashPage = Math.Max(1, page);
+            _stashSeed = UnityEngine.Random.Range(1, 99_999_999).ToString();
+            _stashPage = 1;
+            int epoch = ++_stashLoadEpoch;
             _panel.SetMediaStatus("Henter fra Stash …", false);
 
-            StartCoroutine(_stash.Scenes(_stashOrder, _stashQuery, _stashStudio?.Id, _stashTag?.Id, _stashPage, _stashSeed,
+            StartCoroutine(_stash.Scenes(_stashOrder, _stashQuery, _stashStudio?.Id, _stashTag?.Id, 1, _stashSeed,
                 result =>
                 {
+                    if (epoch != _stashLoadEpoch) return;   // a newer filter won
                     ReleaseStashThumbs();
                     _stashCount = result.Count;
-                    var rows = new List<KalivVrPanel.MediaRowData>();
-                    foreach (var s in result.Scenes)
-                    {
-                        var scene = s;
-                        rows.Add(new KalivVrPanel.MediaRowData
-                        {
-                            Key = "stash:" + scene.Id,
-                            Label = KalivStash.Describe(scene),
-                            OnClick = () => StashPlay(scene),
-                        });
-                    }
-                    bool more = _stashPage * KalivStash.PageSize < _stashCount;
-                    _panel.SetMediaRows(rows, _stashPage > 1, more);
-                    int pages = Math.Max(1, (_stashCount + KalivStash.PageSize - 1) / KalivStash.PageSize);
+                    _panel.SetMediaList(StashRows(result.Scenes), KalivStash.PageSize < _stashCount);
                     _panel.SetMediaStatus(_stashCount == 0
                         ? "Ingen scener matcher filtrene."
-                        : $"{_stashCount} scener  ·  side {_stashPage} af {pages}", false);
-
-                    foreach (var s in result.Scenes)
-                    {
-                        string key = "stash:" + s.Id;
-                        StartCoroutine(_stash.Thumbnail(s.ThumbnailUrl, tex =>
-                        {
-                            _stashThumbs.Add(tex);
-                            _panel.SetMediaThumbnail(key, tex);
-                        }));
-                    }
+                        : $"{_stashCount} scener  ·  scroll med pinden", false);
+                    StashThumbs(result.Scenes, epoch);
                 },
-                error => _panel.SetMediaStatus(error, true)));
+                error => { if (epoch == _stashLoadEpoch) _panel.SetMediaStatus(error, true); }));
         }
 
-        /// <summary>Thumbnails of the last page are freed before the next: a headset's RAM is not a desktop's.</summary>
+        /// <summary>The next batch, same seed — so a shuffled list continues without repeats.</summary>
+        private void StashLoadMore()
+        {
+            if (_facetPicking) return;
+            int epoch = _stashLoadEpoch;
+            int page = _stashPage + 1;
+            StartCoroutine(_stash.Scenes(_stashOrder, _stashQuery, _stashStudio?.Id, _stashTag?.Id, page, _stashSeed,
+                result =>
+                {
+                    if (epoch != _stashLoadEpoch) return;
+                    _stashPage = page;
+                    _stashCount = result.Count;
+                    _panel.AppendMediaList(StashRows(result.Scenes), page * KalivStash.PageSize < _stashCount);
+                    StashThumbs(result.Scenes, epoch);
+                },
+                error =>
+                {
+                    if (epoch != _stashLoadEpoch) return;
+                    _panel.MediaListLoadFailed();
+                    _panel.SetMediaStatus(error, true);
+                }));
+        }
+
+        private List<KalivVrPanel.MediaRowData> StashRows(IEnumerable<KalivStashScene> scenes)
+        {
+            var rows = new List<KalivVrPanel.MediaRowData>();
+            foreach (var s in scenes)
+            {
+                var scene = s;
+                rows.Add(new KalivVrPanel.MediaRowData
+                {
+                    Key = "stash:" + scene.Id,
+                    Label = KalivStash.Describe(scene),
+                    OnClick = () => StashPlay(scene),
+                });
+            }
+            return rows;
+        }
+
+        private void StashThumbs(IEnumerable<KalivStashScene> scenes, int epoch)
+        {
+            foreach (var s in scenes)
+            {
+                string key = "stash:" + s.Id;
+                StartCoroutine(_stash.Thumbnail(s.ThumbnailUrl, tex =>
+                {
+                    if (epoch != _stashLoadEpoch) { if (tex != null) Destroy(tex); return; }
+                    _stashThumbs.Add(tex);
+                    _panel.SetMediaThumbnail(key, tex);
+                }));
+            }
+        }
+
+        /// <summary>Thumbnails of the previous list are freed when a new one starts: a headset's RAM is not a desktop's.</summary>
         private void ReleaseStashThumbs()
         {
             foreach (var t in _stashThumbs) if (t != null) Destroy(t);

@@ -25,6 +25,10 @@ namespace Kaliv.VR
         /// </summary>
         public static System.Func<InputField, bool> InputFieldHandler;
 
+        /// <summary>Where the ray hits, and what it is on — the timeline needs the point, not just the button.</summary>
+        public static Vector3 HitPoint { get; private set; }
+        public static GameObject Hovered { get; private set; }
+
         public void Initialize(Camera camera)
         {
             _camera = camera;
@@ -114,6 +118,8 @@ namespace Kaliv.VR
 
             _laser.SetPosition(0, origin);
             _laser.SetPosition(1, point);
+            HitPoint = point;
+            Hovered = target;
 
             var eventData = new PointerEventData(EventSystem.current);
             if (target != _current)

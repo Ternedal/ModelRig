@@ -55,7 +55,9 @@ namespace Kaliv.VR
         public const string DiscoveryProbe = "SKYPLAYER_DISCOVER";
         public const string ServiceName = "stash-skyplayer-companion";
         public const int DefaultPort = 8099;
-        public const int PageSize = 6;   // what the media browser shows at once
+        // One fetch from the companion. The browser shows 6 rows at a time and scrolls through
+        // everything fetched; nearing the end, it fetches the next batch.
+        public const int PageSize = 24;
 
         public static readonly string[] OrderLabels = { "ALLE", "SENESTE", "FAVORITTER", "VR", "TILFÆLDIG" };
 
