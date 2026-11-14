@@ -499,9 +499,13 @@ namespace Kaliv.VR
                 new Vector2(420, 62), new Vector2(-270, 35));
             _pairButton = AddButton(_pairGroup.transform, "FORBIND",
                 new Vector2(300, 62), new Vector2(315, 35), Accent, () => _app.Pair(_url.text, _code.text));
-            AddText(_pairGroup.transform,
-                "Backend skal være tilgængelig fra Quest (LAN/Tailscale) — ikke kun 127.0.0.1.",
-                15, Muted, TextAnchor.MiddleLeft, new Vector2(920, 54), new Vector2(-20, -60));
+            var hint = AddText(_pairGroup.transform,
+                "Riggen skal kunne nås fra Quest (LAN/Tailscale). Stash er en anden server og virker uden rig.",
+                15, Muted, TextAnchor.MiddleLeft, new Vector2(600, 54), new Vector2(-180, -60));
+            hint.horizontalOverflow = HorizontalWrapMode.Wrap;
+            // Stash lives on its own server: reachable before (and without) pairing a rig.
+            AddButton(_pairGroup.transform, "STASH",
+                new Vector2(300, 62), new Vector2(315, -60), Elevated, () => _app.OpenStash());
         }
 
         private void BuildChatGroup()
@@ -749,7 +753,7 @@ namespace Kaliv.VR
         public void SetPaired(bool paired)
         {
             _paired = paired;
-            if (!paired) { _mediaOpen = false; _confirmOpen = false; _rigOpen = false; }
+            if (!paired) { _confirmOpen = false; _rigOpen = false; }
             RefreshGroups();
         }
 
@@ -766,11 +770,12 @@ namespace Kaliv.VR
             // closes back to it. A confirmation card that arrives meanwhile waits underneath.
             bool kb = _keyboardOpen;
             _keyboardGroup?.SetActive(kb);
-            _pairGroup?.SetActive(!_paired && !kb);
+            // MEDIER opens without a rig too: Stash is a different server and needs no pairing.
+            _pairGroup?.SetActive(!_paired && !_mediaOpen && !kb);
             _confirmGroup?.SetActive(_paired && _confirmOpen && !kb);
             bool overlay = _confirmOpen || kb;
             _rigGroup?.SetActive(_paired && _rigOpen && !overlay);
-            _mediaGroup?.SetActive(_paired && _mediaOpen && !_rigOpen && !overlay);
+            _mediaGroup?.SetActive(_mediaOpen && !_rigOpen && !overlay);
             _chatGroup?.SetActive(_paired && !_mediaOpen && !_rigOpen && !overlay);
         }
 

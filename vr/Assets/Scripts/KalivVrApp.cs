@@ -705,6 +705,13 @@ namespace Kaliv.VR
             else MediaShowRig();
         }
 
+        /// <summary>STASH on the pairing screen: straight to the Stash library, no rig needed.</summary>
+        public void OpenStash()
+        {
+            _panel.ShowMediaBrowser(true);
+            MediaShowStash();
+        }
+
         public void MediaShowRig()
         {
             _stashSource = false;
