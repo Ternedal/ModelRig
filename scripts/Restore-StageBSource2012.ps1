@@ -97,6 +97,7 @@ function Stop-RunningSet {
 
 function Set-Executable([string]$From, [string]$To) {
     $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    $reported = $false
     while ($true) {
         try { Copy-Item -LiteralPath $From -Destination $To -Force; return }
         catch {
@@ -104,6 +105,7 @@ function Set-Executable([string]$From, [string]$To) {
             while ($cause.InnerException) { $cause = $cause.InnerException }
             $code = $cause.HResult -band 0xffff
             if ($code -notin @(32, 33) -or [DateTime]::UtcNow -ge $deadline) { throw }
+            if (-not $reported) { Write-Host "waiting for another process to release $To"; $reported = $true }
             Start-Sleep -Milliseconds 500
         }
     }

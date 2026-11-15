@@ -57,6 +57,10 @@ function global:Invoke-WebRequest {
 function global:Copy-Item {
     param([string]$LiteralPath, [string]$Destination, [switch]$Force)
     if ($global:FailCopyTo -and $Destination -like "*$($global:FailCopyTo)" -and $LiteralPath -like '*v2.0.12*') { throw 'simulated copy failure' }
+    if ($global:ShareFailures -gt 0 -and $Destination -like '*modelrig-server-windows-x64.exe' -and $LiteralPath -like '*v2.0.12*') {
+        $global:ShareFailures--
+        throw [IO.IOException]::new('simulated sharing violation', -2147024864)
+    }
     Microsoft.PowerShell.Management\Copy-Item -LiteralPath $LiteralPath -Destination $Destination -Force:$Force
 }
 
@@ -70,7 +74,7 @@ function New-Rig([hashtable]$liveVersion) {
 }
 function Reset([string]$health) {
     $global:Procs = @(); $global:Calls = @(); $global:Downloads = @(); $global:Prov = @()
-    $global:Health = $health; $global:HealthAfterStart = '2.0.12'; $global:BadDownload = $null; $global:FailCopyTo = $null; $global:AttReply = $null
+    $global:Health = $health; $global:HealthAfterStart = '2.0.12'; $global:BadDownload = $null; $global:FailCopyTo = $null; $global:AttReply = $null; $global:ShareFailures = 0
 }
 function Run([string]$root, [hashtable]$extra) {
     $out = & $copy -RigRoot $root @extra *>&1 | Out-String
@@ -138,6 +142,15 @@ foreach ($case in @(
     $after = @(Get-ChildItem $r -Recurse -File | Where-Object { $_.FullName -notlike '*\backups\*' -and $_.FullName -notlike '*/backups/*' } | ForEach-Object { $_.FullName + '=' + (Get-FileHash $_.FullName).Hash }) -join '|'
     Check ($before -ceq $after) "$($case.What): rig files unchanged"
 }
+
+Write-Host 'a sharing violation is reported and retried'
+Reset '2.0.20'; $r = New-Rig $all2020
+$global:ShareFailures = 2
+$o = Run $r @{ Apply = $true }
+Check ($o -match 'waiting for another process to release .*modelrig-server-windows-x64\.exe') 'says it is waiting'
+Check (([regex]::Matches($o, 'waiting for another process')).Count -eq 1) 'says it once'
+Check ($o -match 'Stage B source ready' -and (LiveIs $r '2.0.12')) 'then completes'
+Check ($global:ShareFailures -eq 0) 'both violations were met'
 
 Write-Host 'a failed swap puts 2.0.20 back and restarts'
 Reset '2.0.20'; $r = New-Rig $all2020

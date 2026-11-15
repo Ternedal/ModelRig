@@ -73,12 +73,14 @@ Assert ($global:Calls.Count -eq 0) 'Check mode touched the scheduled task'
 Write-Host 'ok: check mode changes nothing'
 
 # 2. Apply with real downloads and provenance, while another process holds the live server open
-#    for writing-exclusion until after the backups exist: the swap must wait for the handle.
+#    without write sharing until after the backups exist: the swap must hit the sharing
+#    violation, say so, and wait for the handle.
 $rig = New-Rig 'apply'
 $global:Health = '2.0.20'
 $global:HealthAfterStart = '2.0.12'
 $holder = @"
 `$f = [IO.File]::Open('$((Join-Path $rig $names[0]).Replace("'", "''"))', 'Open', 'Read', 'Read')
+[IO.File]::WriteAllText('$((Join-Path $suite 'held.txt').Replace("'", "''"))', 'held')
 `$deadline = [DateTime]::UtcNow.AddMinutes(10)
 while ([DateTime]::UtcNow -lt `$deadline) {
     if (@(Get-ChildItem -LiteralPath '$((Join-Path $rig 'backups').Replace("'", "''"))' -Recurse -Filter '$($names[2])' -ErrorAction SilentlyContinue | Where-Object { `$_.DirectoryName -like '*\v2.0.20' }).Count -gt 0) { break }
@@ -93,6 +95,8 @@ $out = Invoke-Restore $rig @{ Apply = $true } *>&1 | Out-String
 Write-Host $out
 $holderProcess.WaitForExit(60000) | Out-Null
 Assert ($out -match 'Stage B source ready') 'Apply did not report ready'
+Assert (Test-Path -LiteralPath (Join-Path $suite 'held.txt')) 'The handle holder never opened the live server'
+Assert ($out -match ('waiting for another process to release .*' + [regex]::Escape($names[0]))) 'The swap did not meet the held handle (no sharing-violation wait)'
 foreach ($n in $names) { Assert ((Hash (Join-Path $rig $n)) -ceq $h12[$n]) "$n is not the signed v2.0.12 bytes" }
 Assert ((Hash (Join-Path $rig $updaterName)) -ceq $hUpdater) 'The live updater changed'
 Assert (-not (Test-Path -LiteralPath (Join-Path $rig 'update-transaction.json'))) 'The journal was not archived'
