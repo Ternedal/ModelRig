@@ -38,6 +38,8 @@ namespace Kaliv.VR.Rendering
             _player.DisplayChanged += OnPlayerDisplayChanged;
             _player.Ended += OnPlayerEnded;
             _player.Initialize(camera);
+            // SkyPlayer's default start zoom (its Settings.defaultZoom), not the engine's 0.5.
+            _player.SetDefaultZoom(0.4f);
         }
 
         public void Open(string url, string formatHint = "FLAT", double resumeSeconds = 0)

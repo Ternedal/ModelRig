@@ -925,7 +925,7 @@ namespace Kaliv.VR
             if (!_mediaOpen || _showingImage) return;
             string fmt = _renderEngine.MediaFormatLabel;
             string time = "";   // the timeline row shows it now
-            _panel.SetTimeline(_renderEngine.MediaTime, _renderEngine.MediaLength);
+            if (!_scrubbing) _panel.SetTimeline(_renderEngine.MediaTime, _renderEngine.MediaLength);
             // The panel (and its status line) is hidden during playback, so the strip says what plays.
             string title = _stashPlaying?.Title ?? "";
             if (title.Length > 26) title = title.Substring(0, 25) + "…";
@@ -954,7 +954,6 @@ namespace Kaliv.VR
             }
         }
 
-        private bool _seekLatched;
 
         /// <summary>
         /// Joysticks while a video is open — the same mapping as SkyPlayer, so the two apps on
@@ -968,24 +967,29 @@ namespace Kaliv.VR
             Vector2 left = Stick(UnityEngine.XR.XRNode.LeftHand);
             float dt = Time.unscaledDeltaTime;
 
-            // Anders' mapping: RIGHT stick is the POV; LEFT stick zooms (up/down) and skips 10 s
-            // (a flick sideways, latched until it returns to centre).
-            if (Mathf.Abs(left.y) > 0.2f && Mathf.Abs(left.y) > Mathf.Abs(left.x))
-                _renderEngine.AdjustMediaZoom(left.y * dt);
+            // Exactly SkyPlayer's mapping (Anders, 15 Nov). RIGHT stick: up/down zoom,
+            // sideways scrub — gliding, 45 s of video per second at full deflection.
+            if (Mathf.Abs(right.y) > 0.15f && Mathf.Abs(right.y) >= Mathf.Abs(right.x))
+                _renderEngine.AdjustMediaZoom(right.y * dt);
 
-            if (!_seekLatched && Mathf.Abs(left.x) > 0.75f && Mathf.Abs(left.x) > Mathf.Abs(left.y))
+            if (Mathf.Abs(right.x) > 0.2f && Mathf.Abs(right.x) > Mathf.Abs(right.y))
             {
-                _seekLatched = true;
-                MediaSeek(left.x > 0 ? 10 : -10);
+                if (!_scrubbing) { _scrubbing = true; _scrubSec = _renderEngine.MediaTime; _scrubThrottle = 1f; }
+                _scrubSec += right.x * ScrubRate * dt;
+                double dur = _renderEngine.MediaLength;
+                _scrubSec = dur > 0 ? Math.Max(0, Math.Min(dur - 1, _scrubSec)) : Math.Max(0, _scrubSec);
+                _panel.SetTimeline(_scrubSec, dur);   // the timeline follows the scrub at once
+                if ((_scrubThrottle += dt) >= 0.12f) { _scrubThrottle = 0f; ScrubTo(_scrubSec); }
             }
-            else if (_seekLatched && Mathf.Abs(left.x) < 0.3f)
+            else if (_scrubbing)
             {
-                _seekLatched = false;
+                _scrubbing = false;
+                ScrubTo(_scrubSec);   // final, exact
             }
 
-            // POV on the right stick, at SkyPlayer's speeds (11°/s sideways, 10°/s up/down).
-            float yaw = Mathf.Abs(right.x) > 0.2f ? right.x * 11f * dt : 0f;
-            float pitch = Mathf.Abs(right.y) > 0.2f ? -right.y * 10f * dt : 0f;
+            // LEFT stick: POV, at SkyPlayer's speeds (11°/s sideways, 10°/s up/down).
+            float yaw = Mathf.Abs(left.x) > 0.2f ? left.x * 11f * dt : 0f;
+            float pitch = Mathf.Abs(left.y) > 0.2f ? -left.y * 10f * dt : 0f;
             if (yaw != 0f || pitch != 0f) _renderEngine.PanMedia(yaw, pitch);
 
             GripDrag();
@@ -996,6 +1000,17 @@ namespace Kaliv.VR
                             Button(UnityEngine.XR.XRNode.LeftHand, UnityEngine.XR.CommonUsages.secondaryButton);
             if (recenter && !_prevMediaRecenter) _renderEngine.RecenterMedia();
             _prevMediaRecenter = recenter;
+        }
+
+        private const float ScrubRate = 45f;   // SkyPlayer's: seconds of video per second at full deflection
+        private bool _scrubbing;
+        private double _scrubSec;
+        private float _scrubThrottle;
+
+        private void ScrubTo(double seconds)
+        {
+            double delta = seconds - _renderEngine.MediaTime;
+            if (Math.Abs(delta) > 0.25) _renderEngine.SeekMediaRelative(delta);
         }
 
         private bool _prevMediaRecenter;
