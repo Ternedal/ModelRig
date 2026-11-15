@@ -3,9 +3,12 @@ import io
 import json
 import unittest
 import zipfile
+from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from scripts.kaliv_vr_fixture_pack import package
-from tests.support.bodyrig_fixtures import png_fixture, vrm_fixture
+from support.bodyrig_fixtures import png_fixture, vrm_fixture
 from bodyrig.mrbody import validate_mrbody
 
 
