@@ -155,6 +155,9 @@ namespace Kaliv.VR
             _canvas = canvasGo.GetComponent<Canvas>();
             _canvas.renderMode = RenderMode.WorldSpace;
             _canvas.worldCamera = camera;
+            // Text is rasterised at fontSize × this. At 1 (the default) a world-space panel's
+            // text is drawn from a tiny glyph atlas and reads soft in the headset; 3 is crisp.
+            canvasGo.GetComponent<CanvasScaler>().dynamicPixelsPerUnit = 3f;
             var rt = (RectTransform)_canvas.transform;
             rt.sizeDelta = new Vector2(1200, 760);
             rt.localScale = Vector3.one * 0.00155f;
@@ -181,6 +184,7 @@ namespace Kaliv.VR
                 ankh.raycastTarget = false;
                 ankh.rectTransform.sizeDelta = new Vector2(78, 78);
                 ankh.rectTransform.anchoredPosition = new Vector2(-545, 315);
+                _brand.Add(ankhGo);
             }
 
             var brand = AddText(_canvas.transform, "KALIV", 18, Accent, TextAnchor.MiddleLeft,
@@ -194,6 +198,12 @@ namespace Kaliv.VR
             _chrome.Add(brand.gameObject);
             _chrome.Add(vr.gameObject);
             _chrome.Add(_status.gameObject);
+            // The header steps aside for the media browser, whose own top row (title, RIG/STASH)
+            // sits exactly where KALIV/VR and the status line are — the first headset look
+            // showed them drawn over each other.
+            _brand.Add(brand.gameObject);
+            _brand.Add(vr.gameObject);
+            _brand.Add(_status.gameObject);
 
             BuildPairGroup();
             BuildChatGroup();
@@ -650,8 +660,19 @@ namespace Kaliv.VR
             _mediaGroup = Group("MediaBrowser", _canvas.transform);
             // Transparent: the panel's own design-v2.1 backdrop shows through.
             AddImage(_mediaGroup.transform, "Backdrop", new Vector2(1200, 760), Vector2.zero, new Color(0f, 0f, 0f, 0f));
-            AddText(_mediaGroup.transform, "MEDIER", 18, Accent, TextAnchor.MiddleLeft,
-                new Vector2(500, 40), new Vector2(-290, 330), FontStyle.Bold);
+            AddText(_mediaGroup.transform, "KALIV VR  ·  MEDIER", 18, Accent, TextAnchor.MiddleLeft,
+                new Vector2(480, 40), new Vector2(-280, 330), FontStyle.Bold);
+            var mAnkhTex = Resources.Load<Texture2D>("Branding/ankh");
+            if (mAnkhTex != null)
+            {
+                var ma = new GameObject("Ankh", typeof(RawImage));
+                ma.transform.SetParent(_mediaGroup.transform, false);
+                var mar = ma.GetComponent<RawImage>();
+                mar.texture = mAnkhTex;
+                mar.raycastTarget = false;
+                mar.rectTransform.sizeDelta = new Vector2(46, 46);
+                mar.rectTransform.anchoredPosition = new Vector2(-560, 330);
+            }
 
             // Two sources on two different machines: the RIG's own generated media, and the
             // STASH server's library through the SkyPlayer companion.
@@ -831,6 +852,8 @@ namespace Kaliv.VR
             // (and a confirmation card, which must never wait unseen) is shown.
             bool play = _playback;
             foreach (var c in _chrome) if (c != null) c.SetActive(!play || _confirmOpen);
+            bool mediaTop = _mediaOpen && !_rigOpen && !_confirmOpen && !kb;
+            foreach (var b in _brand) if (b != null) b.SetActive((!play || _confirmOpen) && !mediaTop);
             _keyboardGroup?.SetActive(kb);
             // MEDIER opens without a rig too: Stash is a different server and needs no pairing.
             _pairGroup?.SetActive(!_paired && !_mediaOpen && !kb && !play);
@@ -1419,6 +1442,7 @@ namespace Kaliv.VR
         }
 
         private readonly List<GameObject> _chrome = new List<GameObject>();
+        private readonly List<GameObject> _brand = new List<GameObject>();
         private bool _playback;
         private bool _controlsVisible = true;
         private float _controlsIdle;
@@ -1663,42 +1687,63 @@ namespace Kaliv.VR
         /// </summary>
         private static void DecorateBackground(Image bg)
         {
+            // First headset look (15 Nov): the splash art behind the controls was too busy —
+            // the figure and the big wordmark competed with every button. The art belongs to the
+            // splash; the panel gets SkyPlayer's treatment instead: a quiet vertical gradient
+            // with one soft glow, here in design v2.1's blues.
             Round(bg, 22);
-            var tex = Resources.Load<Texture2D>("Branding/menu_bg");
-            if (tex == null) return;
             var mask = bg.gameObject.AddComponent<Mask>();
             mask.showMaskGraphic = true;
-
             var size = bg.rectTransform.sizeDelta;
-            var artGo = new GameObject("MenuArt", typeof(RawImage));
-            artGo.transform.SetParent(bg.transform, false);
-            var art = artGo.GetComponent<RawImage>();
-            art.texture = tex;
-            art.raycastTarget = false;
-            art.rectTransform.sizeDelta = size;
-            float panelAspect = size.x / size.y;
-            float texAspect = tex.width / (float)tex.height;
-            if (texAspect > panelAspect)
-            {
-                float w = panelAspect / texAspect;
-                art.uvRect = new Rect((1f - w) * 0.5f, 0f, w, 1f);
-            }
-            else
-            {
-                float h = texAspect / panelAspect;
-                art.uvRect = new Rect(0f, (1f - h) * 0.5f, 1f, h);
-            }
 
-            var veilGo = new GameObject("Veil", typeof(Image));
-            veilGo.transform.SetParent(bg.transform, false);
-            var veil = veilGo.GetComponent<Image>();
-            veil.color = new Color(CanvasBg.r, CanvasBg.g, CanvasBg.b, 0.80f);
-            veil.raycastTarget = false;
-            veil.rectTransform.sizeDelta = size;
+            var grad = new GameObject("Gradient", typeof(RawImage));
+            grad.transform.SetParent(bg.transform, false);
+            var g = grad.GetComponent<RawImage>();
+            g.texture = VerticalGradient(Surface, CanvasBg);
+            g.raycastTarget = false;
+            g.rectTransform.sizeDelta = size;
+
+            var glowGo = new GameObject("Glow", typeof(RawImage));
+            glowGo.transform.SetParent(bg.transform, false);
+            var glow = glowGo.GetComponent<RawImage>();
+            glow.texture = RadialGlow(new Color(Glow.r, Glow.g, Glow.b, 0.16f));
+            glow.raycastTarget = false;
+            glow.rectTransform.sizeDelta = new Vector2(size.x * 1.1f, size.y * 0.9f);
+            glow.rectTransform.anchoredPosition = new Vector2(0, size.y * 0.42f);
 
             var rim = bg.gameObject.AddComponent<Outline>();
             rim.effectColor = new Color(Glow.r, Glow.g, Glow.b, 0.55f);
             rim.effectDistance = new Vector2(2f, -2f);
+        }
+
+        private static Texture2D VerticalGradient(Color top, Color bottom)
+        {
+            const int h = 64;
+            var t = new Texture2D(2, h, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear };
+            for (int y = 0; y < h; y++)
+            {
+                var c = Color.Lerp(bottom, top, y / (float)(h - 1));
+                t.SetPixel(0, y, c);
+                t.SetPixel(1, y, c);
+            }
+            t.Apply(false, true);
+            return t;
+        }
+
+        private static Texture2D RadialGlow(Color centre)
+        {
+            const int n = 128;
+            var t = new Texture2D(n, n, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear };
+            for (int y = 0; y < n; y++)
+            for (int x = 0; x < n; x++)
+            {
+                float dx = (x + 0.5f) / n * 2f - 1f, dy = (y + 0.5f) / n * 2f - 1f;
+                float f = Mathf.Clamp01(1f - Mathf.Sqrt(dx * dx + dy * dy));
+                f = f * f * (3f - 2f * f);   // smoothstep: no visible edge
+                t.SetPixel(x, y, new Color(centre.r, centre.g, centre.b, centre.a * f));
+            }
+            t.Apply(false, true);
+            return t;
         }
 
         /// <summary>

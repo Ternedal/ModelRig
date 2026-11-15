@@ -28,6 +28,7 @@ namespace Kaliv.VR.EditorTools
                 ValidatePlayerSettingsAuthority();
                 string[] scenes = CreateTemporaryBootScene();
                 ApplyLauncherIcon();
+                ApplySplashSettings();
 
                 string root = Directory.GetParent(Application.dataPath)!.FullName;
                 string outDir = Path.Combine(root, OutputDirectory);
@@ -332,6 +333,19 @@ namespace Kaliv.VR.EditorTools
             }
             PlayerSettings.SetIcons(UnityEditor.Build.NamedBuildTarget.Unknown, new[] { icon }, IconKind.Any);
             Debug.Log("[KalivVR] Launcher icon: design v2.1 ankh.");
+        }
+
+        /// <summary>
+        /// No Unity logo at startup — Kaliv VR's own splash (KalivSplash) is the first thing
+        /// seen. SkyPlayer ships with the Unity logo off for the same reason. Per build, like the
+        /// icon, because ProjectSettings is restored after batch builds.
+        /// </summary>
+        private static void ApplySplashSettings()
+        {
+            PlayerSettings.SplashScreen.showUnityLogo = false;
+            PlayerSettings.SplashScreen.show = false;   // honoured on licences that allow it
+            PlayerSettings.SplashScreen.backgroundColor = new Color(6 / 255f, 19 / 255f, 38 / 255f, 1f);
+            Debug.Log($"[KalivVR] Unity splash: show={PlayerSettings.SplashScreen.show}, logo={PlayerSettings.SplashScreen.showUnityLogo}.");
         }
 
         private static string[] CreateTemporaryBootScene()
