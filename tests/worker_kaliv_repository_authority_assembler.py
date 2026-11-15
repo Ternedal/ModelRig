@@ -537,22 +537,48 @@ class _FailingLink:
         self.real(source, target)
 
 
-def _failing_publication(c: Case, *, link: Any = None, create: Any = None, replace: Any = None, **arguments: Any) -> str:
-    saved = (assembler.os.link, assembler._create_exclusively, assembler.os.replace)
+_REAL_RENAME = os.rename
+
+
+def _no_replace_rename(source: Any, target: Any) -> None:
+    """What Windows' os.rename does: refuse an existing target, else move."""
+    if os.path.lexists(target):
+        raise FileExistsError(17, "File exists", str(target))
+    _REAL_RENAME(source, target)
+
+
+def _no_links(*_args: Any) -> None:
+    raise OSError(1, "Operation not permitted")
+
+
+@contextlib.contextmanager
+def _platform(*, link: Any = None, rename: Any = None, windows: bool | None = None, replace: Any = None):
+    saved = (assembler.os.link, assembler.os.rename, assembler._rename_refuses_existing, assembler.os.replace)
     try:
         if link is not None:
             assembler.os.link = link
-        if create is not None:
-            assembler._create_exclusively = create
+        if rename is not None:
+            assembler.os.rename = rename
+        elif windows:
+            assembler.os.rename = _no_replace_rename
+        if windows is not None:
+            assembler._rename_refuses_existing = lambda: windows
         if replace is not None:
             assembler.os.replace = replace
+        yield
+    finally:
+        (assembler.os.link, assembler.os.rename, assembler._rename_refuses_existing, assembler.os.replace) = saved
+
+
+def _failing_publication(
+    c: Case, *, link: Any = None, rename: Any = None, windows: bool | None = None, replace: Any = None, **arguments: Any
+) -> str:
+    with _platform(link=link, rename=rename, windows=windows, replace=replace):
         try:
             c.assemble(**arguments)
         except assembler.AssemblerError as exc:
             return str(exc)
         raise AssertionError("the failing publication was not reported")
-    finally:
-        assembler.os.link, assembler._create_exclusively, assembler.os.replace = saved
 
 
 def _disk_full(*_args: Any, **_kwargs: Any) -> None:
@@ -561,7 +587,7 @@ def _disk_full(*_args: Any, **_kwargs: Any) -> None:
 
 def a_failure_before_the_first_file_publishes_nothing(c: Case) -> None:
     before = _names(c)
-    message = _failing_publication(c, link=_FailingLink(1, OSError(1, "no links")), create=_disk_full)
+    message = _failing_publication(c, link=_FailingLink(1, OSError(1, "no links")), windows=True, rename=_disk_full)
     check("nothing was published" in message, f"says nothing was published: {message}")
     check("No space left" in message, "and names the cause")
     check(_names(c) == before, "the directory is as it was")
@@ -569,7 +595,7 @@ def a_failure_before_the_first_file_publishes_nothing(c: Case) -> None:
 
 
 def a_failure_after_the_evidence_leaves_valid_evidence(c: Case) -> None:
-    message = _failing_publication(c, link=_FailingLink(2, OSError(1, "no links")), create=_disk_full)
+    message = _failing_publication(c, link=_FailingLink(2, OSError(1, "no links")), windows=True, rename=_disk_full)
     check(c.output.name in message, f"names the published evidence file: {message}")
     check("Run the same command again" in message, "and says how to complete the set")
     check("nothing was published" not in message, "and does not claim nothing was written")
@@ -635,13 +661,8 @@ def the_qualifiers_command_line_decides_before_anything_is_published(c: Case) ->
     check(_names(c) == before, "an I/O error in the command line publishes nothing")
 
 
-def without_hard_links_publication_is_still_exclusive(c: Case) -> None:
-    def no_links(*_args: Any) -> None:
-        raise OSError(1, "Operation not permitted")
-
-    saved = assembler.os.link
-    assembler.os.link = no_links
-    try:
+def without_hard_links_windows_publishes_by_atomic_rename(c: Case) -> None:
+    with _platform(link=_no_links, windows=True):
         assembly = c.assemble()
         check(json.loads(c.record.read_bytes()) == assembly, "published without hard links")
         check(qualifier_cli(c.output)[0] == 0, "and the evidence qualifies")
@@ -649,13 +670,94 @@ def without_hard_links_publication_is_still_exclusive(c: Case) -> None:
         kept = c.output.read_bytes()
         c.assemble()
         check(c.output.read_bytes() == kept, "the same content again is not a change")
+        _no_staged_files(c, "the same content again")
         c.record.unlink()
         c.output.write_bytes(kept + b" ")
         changed = c.output.read_bytes()
         c.refused("already exists with other content", "other evidence, no hard links")
         check(c.output.read_bytes() == changed, "the other evidence file is not replaced")
-    finally:
-        assembler.os.link = saved
+        check(not c.record.exists(), "and no record is written for it")
+        _no_staged_files(c, "other evidence, no hard links")
+
+
+def without_hard_links_a_file_appearing_before_the_rename_is_kept(c: Case) -> None:
+    intruder = b"{}\n"
+
+    def racing_rename(source: Any, target: Any) -> None:
+        if Path(target) == c.record:
+            c.record.write_bytes(intruder)
+        _no_replace_rename(source, target)
+
+    message = _failing_publication(c, link=_no_links, windows=True, rename=racing_rename)
+    check("already exists with other content" in message, message)
+    check(c.record.read_bytes() == intruder, "the other run's record is left alone")
+    check(c.output.name in message and qualifier_cli(c.output)[0] == 0, "the evidence this run published is complete")
+    _no_staged_files(c, "lost the race for the record, no hard links")
+
+
+def without_hard_links_elsewhere_publication_is_refused(c: Case) -> None:
+    check(
+        assembler._rename_refuses_existing() is (os.name == "nt"),
+        "only Windows counts as a rename that refuses an existing target",
+    )
+    # POSIX rename replaces silently, and create-then-write is not atomic.
+    renamed: list[Any] = []
+    before = _names(c)
+    message = _failing_publication(c, link=_no_links, windows=False, rename=lambda *a: renamed.append(a))
+    check("no hard links" in message and "Operation not permitted" in message, f"names the cause: {message}")
+    check("Nothing was written to that path" in message, f"and that nothing was written: {message}")
+    check(not renamed, "rename is never used where it would replace")
+    check(_names(c) == before, "nothing reaches the output paths")
+    _no_staged_files(c, "refused without hard links")
+    c.assemble()
+    check(qualifier_cli(c.output)[0] == 0, "a run where hard links work then completes the set")
+
+    # Hard links stop working after the evidence: the record is refused, the
+    # evidence stays complete, and the same command completes the set.
+    for path in (c.output, c.record):
+        path.unlink()
+    message = _failing_publication(c, link=_FailingLink(2, OSError(1, "no links")), windows=False)
+    check(c.output.name in message and "Run the same command again" in message, message)
+    check(qualifier_cli(c.output)[0] == 0 and not c.record.exists(), "complete evidence, no record")
+    c.assemble()
+    check(c.record.is_file(), "the same command completes the set")
+    _no_staged_files(c, "completed after a refused record")
+
+
+_KILLED_LAUNCHER = (
+    "import os, runpy, signal, sys\n"
+    "sys.argv = sys.argv[1:]\n"
+    "module = runpy.run_path(sys.argv[0], run_name='kaliv_assembler_under_test')\n"
+    "def no_links(*args):\n"
+    "    raise OSError(1, 'Operation not permitted')\n"
+    "def killed(*args):\n"
+    "    os.kill(os.getpid(), signal.SIGKILL)\n"
+    "os.link = no_links\n"
+    "os.rename = killed\n"
+    "module['_rename_refuses_existing'].__globals__['_rename_refuses_existing'] = lambda: True\n"
+    "sys.exit(module['main'](sys.argv[1:]))\n"
+)
+
+
+def a_run_killed_while_publishing_without_hard_links_leaves_no_final_file(c: Case) -> None:
+    # Codex P2 on #2400: killed between creating the final file and writing it,
+    # the old fallback left an empty evidence file that every retry refused.
+    if not hasattr(os, "kill") or not hasattr(__import__("signal"), "SIGKILL"):
+        return
+    command = [sys.executable, "-c", _KILLED_LAUNCHER, str(SCRIPT)]
+    for slot in SLOTS:
+        command += [f"--{slot}", str(c.files[slot]), f"--pin-{slot}", c.pins[slot]]
+    command += ["--output", str(c.output)]
+    done = subprocess.run(command, capture_output=True, text=True, timeout=120)
+    check(done.returncode == -9, f"the run was killed at publication: {done.returncode} {done.stderr[-300:]}")
+    check(not c.output.exists() and not c.record.exists(), "no final file, empty or otherwise")
+    leftovers = [path for path in c.dir.iterdir() if path.name.endswith(".staged")]
+    check(len(leftovers) >= 1, "only the disposable .staged file is left")
+    assembly = c.assemble()
+    check(json.loads(c.record.read_bytes()) == assembly, "the same command then completes the set")
+    check(qualifier_cli(c.output)[0] == 0, "with qualifying evidence")
+    for path in leftovers:
+        path.unlink()
 
 
 def a_file_appearing_during_the_run_is_not_replaced(c: Case) -> None:
@@ -674,36 +776,6 @@ def a_file_appearing_during_the_run_is_not_replaced(c: Case) -> None:
     check(c.output.name in message, "and the message names what this run published")
     check(qualifier_cli(c.output)[0] == 0, "which is complete evidence")
     _no_staged_files(c, "lost the race for the record")
-
-
-def a_partial_exclusive_write_is_removed(c: Case) -> None:
-    target = c.dir / "partial.json"
-
-    real_fsync = assembler.os.fsync
-
-    def failing_fsync(descriptor: int) -> None:
-        raise OSError(5, "Input/output error")
-
-    assembler.os.fsync = failing_fsync
-    try:
-        try:
-            assembler._create_exclusively(target, b"half")
-        except OSError as exc:
-            check("Input/output" in str(exc), "the cause is passed on")
-        else:
-            raise AssertionError("the failing write was not reported")
-    finally:
-        assembler.os.fsync = real_fsync
-    check(not target.exists(), "the file this call created is removed again")
-
-    target.write_bytes(b"someone else's")
-    try:
-        assembler._create_exclusively(target, b"mine")
-    except FileExistsError:
-        pass
-    else:
-        raise AssertionError("an existing file was overwritten")
-    check(target.read_bytes() == b"someone else's", "an existing file is never touched")
 
 
 class _Truncating:
@@ -741,20 +813,6 @@ def a_staged_file_that_reads_back_wrong_is_never_published(c: Case) -> None:
     finally:
         assembler.os.fdopen = real
     check(_names(c) == before, "the directory is as it was, the damaged staged file included")
-
-    # The same on the path without hard links.
-    target = c.dir / "exclusive.json"
-    assembler.open = lambda path, mode: _Truncating(open(path, mode))
-    try:
-        try:
-            assembler._create_exclusively(target, b"complete")
-        except OSError as exc:
-            check("does not read back as written" in str(exc), "exclusive write: names the cause")
-        else:
-            raise AssertionError("a damaged exclusive write was kept")
-    finally:
-        del assembler.open
-    check(not target.exists(), "exclusive write: the damaged file is removed")
 
 
 def no_fixed_temporary_name(c: Case) -> None:
@@ -930,9 +988,11 @@ def main() -> None:
         a_failure_after_the_evidence_leaves_valid_evidence,
         a_failure_on_the_report_leaves_evidence_and_record,
         the_qualifiers_command_line_decides_before_anything_is_published,
-        without_hard_links_publication_is_still_exclusive,
+        without_hard_links_windows_publishes_by_atomic_rename,
+        without_hard_links_a_file_appearing_before_the_rename_is_kept,
+        without_hard_links_elsewhere_publication_is_refused,
+        a_run_killed_while_publishing_without_hard_links_leaves_no_final_file,
         a_file_appearing_during_the_run_is_not_replaced,
-        a_partial_exclusive_write_is_removed,
         a_staged_file_that_reads_back_wrong_is_never_published,
         no_fixed_temporary_name,
         concurrent_runs_never_mix_two_results,

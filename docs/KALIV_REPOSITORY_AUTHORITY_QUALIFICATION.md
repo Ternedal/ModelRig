@@ -149,9 +149,10 @@ other content. Assembling the same verdicts again changes nothing.
   replacing anything. If the two runs differ, one is refused.
 - A run that is killed can leave a `.staged` file. Nothing reads it; delete it.
 
-On a file system without hard links, publication is still exclusive, but a
-second run started in the same instant can see a half-written file and be
-refused. Run it again.
+On a file system without hard links, Windows publishes with a rename that is
+atomic and refuses an existing file, so the promise above holds. Elsewhere the
+run is refused before anything reaches the output path: write to a directory
+on a file system with hard links (NTFS, ext4, APFS).
 
 **Keep the four verdict files.** Each evidence reference is the SHA-256 of one
 of them:

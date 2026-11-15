@@ -258,36 +258,48 @@ def _stage(target: Path, data: bytes) -> Path:
     return path
 
 
-def _create_exclusively(target: Path, data: bytes) -> None:
-    handle = open(target, "xb")  # FileExistsError if the target exists
-    try:
-        with handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        if not _holds(target, data):
-            raise OSError(f"{target.name} does not read back as written")
-    except BaseException:
-        # This call created the file, so it may remove its own partial write.
-        with contextlib.suppress(OSError):
-            target.unlink()
-        raise
+def _rename_refuses_existing() -> bool:
+    """Whether ``os.rename`` is one step that refuses an existing target.
+
+    On Windows it is ``MoveFileExW`` without ``MOVEFILE_REPLACE_EXISTING``: it
+    fails with ``FileExistsError`` and moves nothing if the target exists. On
+    POSIX ``rename`` silently replaces the target, so it is not usable here.
+    """
+    return os.name == "nt"
+
+
+def _publish_without_hard_links(staged: Path, target: Path, label: str, cause: OSError) -> None:
+    """Publish on a file system without hard links, or refuse.
+
+    Only an atomic rename that refuses an existing target keeps the promise
+    that each published file is complete or absent. Creating the target and
+    then writing it is not: a run killed in between leaves an empty or
+    truncated final file that every later run refuses as other content.
+    """
+    if not _rename_refuses_existing():
+        raise AssemblerError(
+            f"{label} {target.name}: this file system has no hard links ({cause}), "
+            "and without them publication can be either atomic or refuse an "
+            "existing file, not both. Nothing was written to that path; use a "
+            "directory on a file system with hard links (NTFS, ext4, APFS)"
+        )
+    os.rename(staged, target)  # FileExistsError if the target exists
 
 
 def _publish_new(staged: Path, target: Path, data: bytes, label: str) -> None:
     """Give ``target`` the staged bytes; never replace a file with other content.
 
     A hard link is atomic and refuses an existing target, so two runs cannot
-    overwrite each other and no reader sees a half-written file.
+    overwrite each other and no reader sees a half-written file. Without hard
+    links the only fallback is a rename with the same two properties.
     """
     try:
         try:
             os.link(staged, target)
         except FileExistsError:
             raise
-        except OSError:
-            # No hard links on this file system. Still exclusive, not atomic.
-            _create_exclusively(target, data)
+        except OSError as cause:
+            _publish_without_hard_links(staged, target, label, cause)
     except FileExistsError:
         if not _holds(target, data):
             raise _other_content(target, label) from None
