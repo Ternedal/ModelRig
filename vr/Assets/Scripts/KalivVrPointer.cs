@@ -18,6 +18,17 @@ namespace Kaliv.VR
         private int _interactionMask;
         private InputAction _rightPos, _rightRot, _leftPos, _leftRot;
 
+        /// <summary>
+        /// Who handles a click on a text field. The panel sets this to open its own keyboard:
+        /// ActivateInputField only asks Android for an IME, and Quest shows none for an app
+        /// without the Meta overlay-keyboard feature — the field would focus invisibly.
+        /// </summary>
+        public static System.Func<InputField, bool> InputFieldHandler;
+
+        /// <summary>Where the ray hits, and what it is on — the timeline needs the point, not just the button.</summary>
+        public static Vector3 HitPoint { get; private set; }
+        public static GameObject Hovered { get; private set; }
+
         public void Initialize(Camera camera)
         {
             _camera = camera;
@@ -49,7 +60,8 @@ namespace Kaliv.VR
                 return;
             }
             _laser.material = new Material(shader);
-            ColorUtility.TryParseHtmlString("#D4AB52", out Color gold);
+            // Design v2.1: the ray glows electric blue.
+            ColorUtility.TryParseHtmlString("#20B9FF", out Color gold);
             _laser.startColor = new Color(gold.r, gold.g, gold.b, 0.95f);
             _laser.endColor = new Color(gold.r, gold.g, gold.b, 0.25f);
         }
@@ -107,6 +119,8 @@ namespace Kaliv.VR
 
             _laser.SetPosition(0, origin);
             _laser.SetPosition(1, point);
+            HitPoint = point;
+            Hovered = target;
 
             var eventData = new PointerEventData(EventSystem.current);
             if (target != _current)
@@ -127,6 +141,7 @@ namespace Kaliv.VR
             var input = _current.GetComponent<InputField>() ?? _current.GetComponentInParent<InputField>();
             if (input != null && input.interactable)
             {
+                if (InputFieldHandler != null && InputFieldHandler(input)) return;
                 EventSystem.current.SetSelectedGameObject(input.gameObject);
                 input.ActivateInputField();
                 return;

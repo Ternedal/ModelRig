@@ -5,6 +5,11 @@ Logs/
 UserSettings/
 Build/
 release/output/
+# Headless build/test logs and results (see README "Build")
+release/*.log
+release/testresults.xml
+# Unity's batch-mode scratch
+.utmp/
 *.csproj
 *.sln
 .vs/

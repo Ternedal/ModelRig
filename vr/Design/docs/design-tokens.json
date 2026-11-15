@@ -1,0 +1,29 @@
+{
+  "name": "Kaliv VR",
+  "version": "2.0",
+  "status": "visual reference / derived assets",
+  "colors": {
+    "background": "#061326",
+    "surface": "#0A2038",
+    "electric_blue": "#20B9FF",
+    "cyan_highlight": "#65E5FF",
+    "gold": "#F4B544",
+    "text": "#F4F8FF",
+    "muted": "#A8C5D8"
+  },
+  "radii_px": {
+    "button": 14,
+    "panel": 22
+  },
+  "spacing_px": [
+    8,
+    12,
+    16,
+    24,
+    32,
+    48
+  ],
+  "font_recommendation": "Inter or system sans-serif; verify font licensing",
+  "minimum_ui_contrast": "4.5:1 for ordinary text where feasible",
+  "asset_notes": "Large renders are Lanczos upscales from 1670x942 source, not native 4K; 2:1 backgrounds are center crops; separate avatar/logo layers are not included."
+}
