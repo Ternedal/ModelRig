@@ -21,8 +21,9 @@
 #      supervisor is looping from its heartbeat, as the updater does after an update.
 # If any step after the lock fails, including step 6, it rolls back to the v2.0.20 executables and
 # the original journal, verifies both, starts the task again and requires the same health and
-# looping proof for v2.0.20. Whenever any part of that rollback cannot be verified, it keeps
-# updater.lock and says what to check by hand (see "mutate" below).
+# looping proof for v2.0.20. updater.lock is released only in a verified state; whenever a rollback
+# cannot be verified, or the run is stopped (Ctrl+C) after the rig was touched, the lock is kept
+# and the script says what to check by hand (see "mutate" below).
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File Restore-StageBSource2012.ps1
 #   powershell -NoProfile -ExecutionPolicy Bypass -File Restore-StageBSource2012.ps1 -Apply
@@ -263,11 +264,16 @@ function Start-Supervisor {
 
 $serverBefore = $serverVersion
 $workerBefore = $workerVersion
-$guard = [IO.File]::Open($lockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+try { $guard = [IO.File]::Open($lockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read) }
+catch { throw "Could not take updater.lock ($($_.Exception.Message)); another updater may have started. Nothing on the rig was changed." }
 $swapped = @()
 $archived = @()
 $taskRunning = $false
-$keepLock = $false
+# updater.lock is released only in a verified state: before anything on the rig changed, after a
+# verified restore, or after a verified rollback (files and runtime). Every other ending - a
+# rollback that does not verify, or the run being stopped (Ctrl+C runs only `finally`, never
+# `catch`) once the journal or an executable has been touched - keeps the lock.
+$release = $true
 try {
     $lockBytes = [Text.Encoding]::UTF8.GetBytes("pid $PID started $([DateTime]::UtcNow.ToString('o'))")
     $guard.Write($lockBytes, 0, $lockBytes.Length)
@@ -282,6 +288,7 @@ try {
             Copy-Item -LiteralPath $live -Destination $copy
             if ((Get-SHA256 $copy) -cne $Assets[$row.Name].Target) { throw "Backup of $($row.Name) does not verify." }
         }
+        $release = $false
         foreach ($path in $journals) {
             $entry = [pscustomobject]@{ Path = $path; Archive = (Join-Path $work (Split-Path -Leaf $path)); Sha = (Get-SHA256 $path) }
             Move-Item -LiteralPath $entry.Path -Destination $entry.Archive
@@ -309,6 +316,7 @@ try {
         foreach ($name in @('update-transaction.json', 'update-transaction.json.tmp')) {
             if (Test-Path -LiteralPath (Join-Path $RigRoot $name)) { throw "$name exists after the restore" }
         }
+        $release = $true
     } catch {
         $failure = [string]$_
         Write-Host "restore failed ($failure); rolling back to v$TargetVersion and the original journal"
@@ -324,7 +332,6 @@ try {
                 if ((Get-SHA256 $entry.Path) -cne $entry.Sha) { throw "$($entry.Path) does not match the original after the rollback" }
             }
         } catch {
-            $keepLock = $true
             throw "ROLLBACK DID NOT VERIFY: $_. This script will not start the supervisor task, and updater.lock is KEPT. Both executable sets and the original journal are in $work. Restore by hand from there before removing the lock. Cause of the failed restore: $failure"
         }
         Write-Host "rolled back: v$TargetVersion executables and the original journal are in place; starting supervisor task"
@@ -337,23 +344,24 @@ try {
         $manual = "Check logs\server.log and logs\worker.log. When healthz reports backend '$serverBefore' and worker '$workerBefore' again and logs\supervisor-heartbeat advances, delete updater.lock. Copies of both executable sets and the original journal are in $work."
         try { $rolledBackAt = Start-Supervisor }
         catch {
-            $keepLock = $true
             throw "ROLLBACK NOT VERIFIED: the v$TargetVersion executables and the original journal are back and verified, but the supervisor task could not be started ($_). updater.lock is KEPT. $manual Cause of the failed restore: $failure"
         }
         $healthBack = Wait-Health $serverBefore $workerBefore
         $loopingBack = $healthBack -and (Test-SupervisorLooping $rolledBackAt)
         if (-not $loopingBack) {
-            $keepLock = $true
             $what = if (-not $healthBack) { "backend '$serverVersion' and worker '$workerVersion' are not back to the versions before the restore" } else { 'the supervisor is not proven looping' }
             throw "ROLLBACK NOT VERIFIED: the v$TargetVersion executables and the original journal are back and verified and the supervisor task was started, but $what. updater.lock is KEPT. $manual Cause of the failed restore: $failure"
         }
+        $release = $true
         throw "Restore aborted and rolled back to v$TargetVersion with the original journal (backend '$serverVersion', worker '$workerVersion', supervisor looping). Downloads and copies are in $work. Cause: $failure"
     }
 } finally {
     $guard.Dispose()
-    if (-not $keepLock) {
+    if ($release) {
         Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
         if (-not $taskRunning) { Start-ScheduledTask -TaskName $SupervisorTask -ErrorAction SilentlyContinue }
+    } else {
+        Write-Host "updater.lock is KEPT at ${lockPath}: the rig's state after this run is not verified. Both executable sets and the original journal are in $work. Check the supervisor task, logs\server.log, logs\worker.log and both healthz by hand before deleting the lock."
     }
 }
 

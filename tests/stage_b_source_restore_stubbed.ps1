@@ -305,6 +305,49 @@ Check (($global:Calls -join ',') -ceq 'stop-task') 'supervisor not started'
 $bk = @(Get-ChildItem (Join-Path $r 'backups') -Directory)[0].FullName
 Check ((Test-Path (Join-Path (Join-Path $bk 'v2.0.20') 'modelrig-server-windows-x64.exe')) -and (Test-Path (Join-Path $bk 'update-transaction.json'))) 'backups and journal still in the restore folder'
 
+# Ctrl+C runs only `finally`, never `catch`. A child pwsh is stopped mid-run with the same
+# PipelineStoppedException, so the suite itself keeps running.
+function Run-Interrupted([string]$root, [string]$destinationLike) {
+    $calls = Join-Path $root 'task-calls.txt'
+    $wrapper = Join-Path $here ('interrupt-' + [Guid]::NewGuid().ToString('N').Substring(0, 6) + '.ps1')
+    $text = @"
+`$ErrorActionPreference = 'Stop'
+`$global:Prov = @()
+function global:Get-CimInstance { @() }
+function global:Stop-ScheduledTask { param(`$TaskName) Add-Content -LiteralPath '$calls' 'stop' }
+function global:Start-ScheduledTask { param(`$TaskName) Add-Content -LiteralPath '$calls' 'start' }
+function global:Invoke-RestMethod { param(`$Method, `$Uri, `$Headers, `$TimeoutSec, [switch]`$UseBasicParsing) [pscustomobject]@{ version = '2.0.20' } }
+function global:Invoke-WebRequest { param([switch]`$UseBasicParsing, `$Uri, `$OutFile, `$TimeoutSec) `$n = Split-Path -Leaf `$Uri; [IO.File]::WriteAllText(`$OutFile, "`$n 2.0.12") }
+function global:Copy-Item {
+    param([string]`$LiteralPath, [string]`$Destination, [switch]`$Force)
+    if (`$Destination -like '$destinationLike') { throw [System.Management.Automation.PipelineStoppedException]::new() }
+    Microsoft.PowerShell.Management\Copy-Item -LiteralPath `$LiteralPath -Destination `$Destination -Force:`$Force
+}
+& '$copy' -RigRoot '$root' -Apply -SupervisorIntervalSeconds 1 -HeartbeatSettleSeconds 3
+"@
+    Set-Content -LiteralPath $wrapper -Value $text -Encoding ascii
+    $out = & (Join-Path $PSHOME 'pwsh') -NoProfile -File $wrapper 2>&1 | Out-String
+    $taskCalls = ''
+    if (Test-Path $calls) { $taskCalls = ((Get-Content $calls) -join ',') }
+    Remove-Item -LiteralPath $calls -Force -ErrorAction SilentlyContinue
+    return @{ Out = $out; Calls = $taskCalls }
+}
+
+Write-Host 'stopped mid-swap: the lock is kept and the task is not started'
+Reset '2.0.20'; $r = New-JournalRig
+$res = Run-Interrupted $r '*worker*modelrig-worker-windows-x64.exe'
+Check ($res.Out -match 'updater.lock is KEPT') 'says the lock is kept'
+Check (Test-Path (Join-Path $r 'updater.lock')) 'lock kept'
+Check ($res.Calls -ceq 'stop') "task only stopped (got '$($res.Calls)')"
+Check ($res.Out -notmatch 'Stage B source ready') 'does not claim success'
+
+Write-Host 'stopped before anything on the rig changed: lock released and the task started again'
+Reset '2.0.20'; $r = New-JournalRig
+$res = Run-Interrupted $r '*v2.0.20*modelrig-server-windows-x64.exe'
+Check (-not (Test-Path (Join-Path $r 'updater.lock'))) 'lock released'
+Check ($res.Calls -ceq 'stop,start') "task stopped and started (got '$($res.Calls)')"
+Check ((LiveIs $r '2.0.20') -and (JournalBack $r)) 'executables and journal untouched'
+
 Write-Host 'a rig that is down is refused before any change'
 Reset $null; $r = New-JournalRig
 $e = RunErr $r @{ Apply = $true }
