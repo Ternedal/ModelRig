@@ -55,6 +55,7 @@ namespace Kaliv.VR.Rendering
             if (_player == null)
                 throw new InvalidOperationException("Kaliv VR media renderer is not initialized.");
 
+            _player.enabled = true;   // see Stop()
             _player.SetDefaultZoom(Mathf.Clamp01(StartZoom));
             SetDisplayVisible(true);
             _player.Open(
@@ -74,7 +75,14 @@ namespace Kaliv.VR.Rendering
         /// </summary>
         public void Stop()
         {
-            _player?.Stop();
+            if (_player == null) return;
+            _player.Stop();
+            // The real reason the picture came back after LUK: the engine's Stop destroys the
+            // display and the texture wrapper, but the native decoder texture lives on, and the
+            // engine's next LateUpdate sees "no wrapper yet" for that live texture id, rebinds
+            // it and rebuilds the sphere — with the paused last frame. Disabling the player
+            // stops that LateUpdate until the next Open. (Engine bug; to fix upstream too.)
+            _player.enabled = false;
             SetDisplayVisible(false);
         }
 

@@ -1012,21 +1012,61 @@ namespace Kaliv.VR
         /// </summary>
         public void PlaceInFront()
         {
+            // SkyPlayer's FaceCamera: along the ACTUAL gaze and oriented to the head's up, so the
+            // panel is readable sitting, looking up, or lying down (Anders: it stayed fixed and
+            // was hard to reach lying down). The earlier yaw-only rule existed because the panel
+            // was placed before tracking arrived — that is handled by waiting for tracking.
             if (_camera == null || _canvas == null) return;
             var head = _camera.transform;
-            Vector3 fwd = head.forward;
-            fwd.y = 0f;
-            // Looking straight down, the top of the head points the way the user faces;
-            // looking straight up, it points behind them.
-            if (fwd.sqrMagnitude < 0.001f) fwd = head.forward.y < 0 ? head.up : -head.up;
-            fwd.y = 0f;
-            if (fwd.sqrMagnitude < 0.001f) fwd = Vector3.forward;
-            fwd.Normalize();
+            Vector3 gaze = head.forward;
+            if (gaze.sqrMagnitude < 0.0001f) gaze = Vector3.forward;
+            gaze.Normalize();
+            Vector3 up = head.up;
 
             var rt = (RectTransform)_canvas.transform;
-            rt.position = head.position + fwd * PanelDistance + Vector3.down * 0.12f;
-            rt.rotation = Quaternion.LookRotation(fwd, Vector3.up);
+            rt.position = head.position + gaze * PanelDistance + up * PanelHeightOffset;
+            rt.rotation = Quaternion.LookRotation(gaze, up);
             _placed = true;
+            _following = false;
+        }
+
+        private const float PanelHeightOffset = -0.12f;
+        private bool _following;
+
+        /// <summary>
+        /// SkyPlayer's lazy follow: the panel stays put while you look around it, and glides
+        /// back in front once you look far enough away (22°; 45° for the transport strip during
+        /// playback, so it never chases your eyes while you watch).
+        /// </summary>
+        private void LazyFollow()
+        {
+            if (_camera == null || _canvas == null || !_canvas.gameObject.activeSelf) return;
+            float enterAng = _playback ? 45f : 22f;
+            float settleAng = _playback ? 10f : 4f;
+            float ease = _playback ? 9f : 6f;
+
+            var head = _camera.transform;
+            Vector3 gaze = head.forward;
+            if (gaze.sqrMagnitude < 1e-6f) return;
+            gaze.Normalize();
+            Vector3 up = head.up;
+
+            // Measured from the panel centre also during playback: the strip hangs a fixed ~17°
+            // below it, so centre-in-view means strip-in-view, and the settle test still ends.
+            var rt = (RectTransform)_canvas.transform;
+            Vector3 toPanel = rt.position - head.position;
+            if (toPanel.sqrMagnitude < 1e-6f) return;
+
+            float ang = Vector3.Angle(toPanel.normalized, gaze);
+            if (ang > enterAng) _following = true;
+            if (!_following) return;
+
+            Vector3 targetPos = head.position + gaze * PanelDistance + up * PanelHeightOffset;
+            Quaternion targetRot = Quaternion.LookRotation(gaze, up);
+            float k = 1f - Mathf.Exp(-ease * Time.unscaledDeltaTime);
+            rt.position = Vector3.Lerp(rt.position, targetPos, k);
+            rt.rotation = Quaternion.Slerp(rt.rotation, targetRot, k);
+            if (ang < settleAng) _following = false;
         }
 
         /// <summary>
@@ -1049,6 +1089,8 @@ namespace Kaliv.VR
                            SecondaryButton(UnityEngine.XR.XRNode.LeftHand);
             if (pressed && !_prevRecenterButton) PlaceInFront();
             _prevRecenterButton = pressed;
+            // Hidden controls during playback have nothing to follow.
+            if (!_playback || _controlsVisible) LazyFollow();
         }
 
         private static bool SecondaryButton(UnityEngine.XR.XRNode node)
