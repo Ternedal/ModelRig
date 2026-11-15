@@ -38,8 +38,10 @@ namespace Kaliv.VR.Rendering
             _player.DisplayChanged += OnPlayerDisplayChanged;
             _player.Ended += OnPlayerEnded;
             _player.Initialize(camera);
-            // SkyPlayer's default start zoom (its Settings.defaultZoom), not the engine's 0.5.
-            _player.SetDefaultZoom(0.4f);
+            // Start fully zoomed out — the widest span, most pixels per degree. Anders' own
+            // SkyPlayer setting on the headset is defaultZoom 0 (read 15 Nov); Kaliv VR started
+            // at 0.4, i.e. magnified, which is why the same video looked grainier here.
+            _player.SetDefaultZoom(0f);
         }
 
         public void Open(string url, string formatHint = "FLAT", double resumeSeconds = 0)
