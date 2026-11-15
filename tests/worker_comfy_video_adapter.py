@@ -248,13 +248,13 @@ class AdapterTests(unittest.TestCase):
                                            limits={"max_prompt_chars": 200, "sizes": [[832, 480]],
                                                    "max_steps": 30, "max_frames": 81}))
 
-    def adapter(self, fake=None, profile=None, volume=None, comfy_root=None, **kwargs) -> ComfyVideoAdapter:
+    def adapter(self, fake=None, profile=None, work_area=None, comfy_root=None, **kwargs) -> ComfyVideoAdapter:
         main_py = str(Path(comfy_root, "main.py")) if comfy_root else str(FAKE_MAIN)
         launch = ComfyLaunch(python_executable=sys.executable, main_py=main_py, port=self.port,
                              input_directory=self.dirs["input"], output_directory=self.dirs["output"],
                              temp_directory=self.dirs["temp"], user_directory=self.dirs["user"])
         env = {"FAKE_COMFY_STATE_DIR": self.state, **(fake or {})}
-        sup = FakeSupervisor(fake_env=env, media_volume=volume, gpu_uuid=GPU, lease_dir=self.lease_dir, launch=launch,
+        sup = FakeSupervisor(fake_env=env, work_area=work_area, gpu_uuid=GPU, lease_dir=self.lease_dir, launch=launch,
                              reserve_gib=2, min_usable_gib=8, ready_timeout_s=15, stop_timeout_s=5, poll_s=0.05,
                              base_env={"PATH": os.environ.get("PATH", "")})
         values = dict(supervisor=sup, template_dir=self.templates, output_directory=self.dirs["output"], poll_s=0.05,
@@ -359,36 +359,36 @@ class AdapterTests(unittest.TestCase):
         with adapter.supervisor.job_slot():
             pass  # acquirable: the failed job did not leak it
 
-    def test_comfyui_media_directories_must_be_on_the_verified_volume_before_start(self):
+    def test_comfyui_directories_must_be_in_the_private_work_area_before_start(self):
         for lost in ("input", "output", "temp", "user"):
             with self.subTest(lost=lost):
-                volume = AnyExistingDirectory()
-                volume.lost.add(self.dirs[lost])
+                work_area = AnyExistingDirectory()
+                work_area.lost.add(self.dirs[lost])
                 self.port = free_port()
                 with self.assertRaises(ArtifactSinkUnavailable):
-                    self.adapter(volume=volume).load()
-                self.assertFalse(Path(self.state, "pid").exists(), "no ComfyUI on an unverified disk")
+                    self.adapter(work_area=work_area).load()
+                self.assertFalse(Path(self.state, "pid").exists(), "no ComfyUI outside the verified work area")
                 self.assertTrue(self.lease_is_free())
 
-    def test_losing_the_volume_before_submit_is_fatal_and_submits_nothing(self):
-        volume = AnyExistingDirectory()
-        adapter = self.adapter(volume=volume)
+    def test_losing_the_work_area_before_submit_is_fatal_and_submits_nothing(self):
+        work_area = AnyExistingDirectory()
+        adapter = self.adapter(work_area=work_area)
         adapter.load()
-        volume.lost.add("*")  # unplugged, or replaced by another disk
+        work_area.lost.add("*")  # replaced, or no longer private
         with self.assertRaises(ArtifactSinkUnavailable):
             adapter.render_to(request(), io.BytesIO())
         self.assertEqual(self.submissions(), 0)
 
-    def test_losing_the_volume_during_the_render_hands_nothing_to_the_sink(self):
-        volume = AnyExistingDirectory()
-        adapter = self.adapter(volume=volume, fake={"FAKE_COMFY_RENDER_SECONDS": "0.5"})
+    def test_losing_the_work_area_during_the_render_hands_nothing_to_the_sink(self):
+        work_area = AnyExistingDirectory()
+        adapter = self.adapter(work_area=work_area, fake={"FAKE_COMFY_RENDER_SECONDS": "0.5"})
         adapter.load()
         real_history = adapter.supervisor.history
 
         def history_then_unplug(prompt_id):
             record = real_history(prompt_id)
             if record is not None:
-                volume.lost.add("*")  # the render finished, then the disk went away
+                work_area.lost.add("*")  # the render finished, then the work area failed its check
             return record
 
         adapter.supervisor.history = history_then_unplug
@@ -397,7 +397,7 @@ class AdapterTests(unittest.TestCase):
             adapter.render_to(request(), sink)
         self.assertEqual(sink.getvalue(), b"")
 
-    # --- #2316 review 4415046066: failed jobs must not fill the volume ---------------------------
+    # --- #2316 review 4415046066: failed jobs must not fill the work area-----------------------
     def test_rejected_outputs_do_not_accumulate(self):
         """Codex's scenario: three renders rejected by the size cap must leave nothing behind."""
         adapter = self.adapter(fake={"FAKE_COMFY_MP4_PAD": "4096"}, profile=self.profile(max_output_bytes=1024))
@@ -418,6 +418,379 @@ class AdapterTests(unittest.TestCase):
             adapter.render_to(request(), BrokenSink())
         self.assertEqual(os.listdir(self.dirs["output"]), [])
 
+    # --- Anders, 6 Nov (#2275 6686905826): the work-area copy goes only once the staged copy is durable ---
+    def test_the_staged_copy_is_synced_before_the_work_area_copy_is_removed(self):
+        from unittest.mock import patch
+        adapter = self.adapter()
+        adapter.load()
+        events = []
+        real_remove = adapter._remove_job_outputs
+
+        def remove(*args):
+            events.append(("remove", sorted(os.listdir(self.dirs["output"]))))
+            return real_remove(*args)
+
+        adapter._remove_job_outputs = remove
+        real_fsync = os.fsync
+        staged = Path(self.tmp, "staged.mp4")
+        with open(staged, "wb") as sink, \
+                patch("app.comfy_video_adapter.os.fsync",
+                      side_effect=lambda fd: (events.append(("fsync", fd)), real_fsync(fd))[1]):
+            self.assertEqual(adapter.render_to(request(), sink), "video/mp4")
+            fileno = sink.fileno()
+        self.assertEqual([e[0] for e in events], ["fsync", "remove"], "durable on the volume, then removed here")
+        self.assertEqual(events[0][1], fileno, "the sink's own descriptor is synced")
+        self.assertEqual(len(events[1][1]), 1, "the render's output was still there when the copy was synced")
+        self.assertEqual(os.listdir(self.dirs["output"]), [])
+        self.assertEqual(staged.read_bytes()[4:8], b"ftyp")
+
+    def test_a_staged_handle_is_synced_through_its_own_sync_before_the_removal(self):
+        """The staged sink's handle (#2347) has sync() and no fileno: that is what is called."""
+        adapter = self.adapter()
+        adapter.load()
+        events = []
+        real_remove = adapter._remove_job_outputs
+        adapter._remove_job_outputs = lambda *a: (events.append("remove"), real_remove(*a))[1]
+
+        class StagedHandle:
+            def __init__(self):
+                self.data = bytearray()
+
+            def write(self, chunk):
+                self.data += chunk
+                return len(chunk)
+
+            def flush(self):
+                pass
+
+            def sync(self):
+                events.append(("sync", len(self.data)))
+
+        handle = StagedHandle()
+        self.assertEqual(adapter.render_to(request(), handle), "video/mp4")
+        self.assertEqual(events, [("sync", len(handle.data)), "remove"], "the whole copy is synced, then removed")
+        self.assertEqual(bytes(handle.data[4:8]), b"ftyp")
+
+    def test_a_staged_handle_whose_sync_fails_fails_the_job(self):
+        from app.media_generation_contract import ArtifactSinkUnavailable
+        adapter = self.adapter()
+        adapter.load()
+
+        class FullDisk(io.BytesIO):
+            def sync(self):
+                raise ArtifactSinkUnavailable("staged_video_unavailable")
+
+        with self.assertRaises(ArtifactSinkUnavailable):
+            adapter.render_to(request(), FullDisk())
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "a failed job's output is cleaned up, as for any failure")
+
+    def test_holding_keeps_the_copy_until_the_block_ends_then_removes_it(self):
+        adapter = self.adapter()
+        adapter.load()
+        with adapter.holding_outputs():
+            self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
+            self.assertEqual(len(os.listdir(self.dirs["output"])), 1, "still on C: until published")
+        self.assertEqual(os.listdir(self.dirs["output"]), [])
+        self.assertIsNone(adapter._holding)
+
+    def test_a_failure_after_the_hand_over_keeps_the_copy_for_recovery(self):
+        from app.media_generation_contract import ArtifactSinkUnavailable
+        adapter = self.adapter()
+        adapter.load()
+        with self.assertLogs("kaliv.media.comfy", level="WARNING"), self.assertRaises(ArtifactSinkUnavailable):
+            with adapter.holding_outputs():
+                adapter.render_to(request(), io.BytesIO())
+                raise ArtifactSinkUnavailable("publication failed")
+        kept = os.listdir(self.dirs["output"])
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(adapter.last_cleanup["kept_for_recovery"], kept)
+
+    def test_a_cancel_after_the_hand_over_removes_the_copy(self):
+        from app.media_generation_contract import GenerationCancelled
+        adapter = self.adapter()
+        adapter.load()
+        with self.assertRaises(GenerationCancelled):
+            with adapter.holding_outputs():
+                adapter.render_to(request(), io.BytesIO())
+                raise GenerationCancelled("the owner cancelled before publication")
+        self.assertEqual(os.listdir(self.dirs["output"]), [])
+
+    def test_a_render_that_fails_inside_the_hold_is_cleaned_at_once(self):
+        adapter = self.adapter(fake={"FAKE_COMFY_OUTPUT_MODE": "notmp4"})
+        adapter.load()
+        with self.assertRaises(GenerationError), adapter.holding_outputs():
+            try:
+                adapter.render_to(request(), io.BytesIO())
+            finally:
+                self.assertEqual(os.listdir(self.dirs["output"]), [], "removed before the hold even ends")
+        self.assertNotIn("kept_for_recovery", adapter.last_cleanup)
+
+    def test_the_holder_gets_a_receipt_before_the_copy_and_one_after_the_sync(self):
+        adapter = self.adapter()
+        adapter.load()
+        sink = io.BytesIO()
+        receipts = []
+
+        def record(receipt):
+            receipts.append((receipt, len(sink.getvalue())))
+        with adapter.holding_outputs(on_handoff=record):
+            adapter.render_to(request(), sink)
+            name = os.listdir(self.dirs["output"])[0]
+            info = os.stat(Path(self.dirs["output"], name))
+        output = {"name": name, "dev": info.st_dev, "ino": info.st_ino, "size": info.st_size}
+        self.assertEqual(receipts[0], ({"stage": "copying", "output": output}, 0), "before a byte reached the sink")
+        copied, written = receipts[1]
+        self.assertEqual(copied, {"stage": "copied", "output": output, "sha256": hashlib.sha256(sink.getvalue()).hexdigest(),
+                                  "size": len(sink.getvalue())})
+        self.assertEqual(written, len(sink.getvalue()))
+        self.assertEqual(len(receipts), 2)
+
+    def test_an_unrecorded_hand_off_fails_before_anything_is_copied(self):
+        adapter = self.adapter()
+        adapter.load()
+        sink = io.BytesIO()
+
+        def refuse(receipt):
+            raise GenerationError("the hand-off could not be recorded for this job")
+        with self.assertRaises(GenerationError), adapter.holding_outputs(on_handoff=refuse):
+            adapter.render_to(request(), sink)
+        self.assertEqual(sink.getvalue(), b"", "nothing reached the volume")
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "a job that never handed over is cleaned at once")
+
+    def test_a_volume_lost_while_the_receipt_is_recorded_keeps_the_finished_file(self):
+        """Codex #2357 4503161825: the receipt callback can hit the lost volume (the store's guard,
+        or the volume's stat). That is not the render's fault: the finished copy must be kept for
+        recovery, as when the volume cannot take the copy, never deleted."""
+        from app.media_generation_contract import ArtifactSinkUnavailable
+        for stage in ("copying", "copied"):
+            with self.subTest(stage=stage):
+                adapter = self.adapter()
+                adapter.load()
+
+                def lost(receipt, stage=stage):
+                    if receipt["stage"] == stage:
+                        raise ArtifactSinkUnavailable("media_volume_lost")
+                with self.assertRaisesRegex(ArtifactSinkUnavailable, "media_volume_lost"), \
+                        adapter.holding_outputs(on_handoff=lost):
+                    adapter.render_to(request(), io.BytesIO())
+                self.assertEqual(len(os.listdir(self.dirs["output"])), 1, "the finished render is kept")
+                for name in os.listdir(self.dirs["output"]):
+                    os.unlink(Path(self.dirs["output"], name))
+                adapter.close()  # release ComfyUI and the GPU lease before the next stage's adapter
+
+    def test_a_receipt_store_that_fails_keeps_the_finished_file(self):
+        """Codex #2357 4503721455: the receipt database can be full, locked or unreadable
+        (sqlite3.OperationalError / DatabaseError), or the disk can fail (OSError). None of these
+        is the render's fault: at either receipt the finished copy is kept for recovery."""
+        import errno
+        import sqlite3
+        failures = (sqlite3.OperationalError("database or disk is full"),
+                    sqlite3.OperationalError("database is locked"),
+                    sqlite3.DatabaseError("database disk image is malformed"),
+                    OSError(errno.EIO, "I/O error"))
+        for stage in ("copying", "copied"):
+            for failure in failures:
+                with self.subTest(stage=stage, failure=str(failure)):
+                    adapter = self.adapter()
+                    adapter.load()
+
+                    def broken(receipt, stage=stage, failure=failure):
+                        if receipt["stage"] == stage:
+                            raise failure
+                    with self.assertLogs("kaliv.media.comfy", level="WARNING"), \
+                            self.assertRaises(type(failure)), adapter.holding_outputs(on_handoff=broken):
+                        adapter.render_to(request(), io.BytesIO())
+                    kept = os.listdir(self.dirs["output"])
+                    self.assertEqual(len(kept), 1, "the finished render is kept")
+                    self.assertEqual(adapter.last_cleanup["kept_for_recovery"], kept)
+                    os.unlink(Path(self.dirs["output"], kept[0]))
+                    adapter.close()
+
+    def test_a_refused_receipt_still_cleans_the_render_at_once(self):
+        """The other side of 4503721455: an explicit refusal (a receipt that does not validate,
+        ImageJobError; a job that is not this executor's, GenerationError) is not an
+        infrastructure failure. At either receipt the job fails and nothing is kept."""
+        from app.image_job_store import ImageJobError
+        refusals = (ImageJobError("hand-off record is invalid"),
+                    GenerationError("the hand-off could not be recorded for this job"))
+        for stage in ("copying", "copied"):
+            for refusal in refusals:
+                with self.subTest(stage=stage, refusal=type(refusal).__name__):
+                    adapter = self.adapter()
+                    adapter.load()
+
+                    def refuse(receipt, stage=stage, refusal=refusal):
+                        if receipt["stage"] == stage:
+                            raise refusal
+                    with self.assertRaises(type(refusal)), adapter.holding_outputs(on_handoff=refuse):
+                        adapter.render_to(request(), io.BytesIO())
+                    self.assertEqual(os.listdir(self.dirs["output"]), [], "a refused hand-off is cleaned at once")
+                    self.assertNotIn("kept_for_recovery", adapter.last_cleanup)
+                    adapter.close()
+
+    def test_every_output_name_the_adapter_accepts_a_receipt_accepts_too(self):
+        """Codex #2357 4504060850: a name the adapter accepted but the receipt refused failed the
+        hand-off as an explicit refusal and deleted a valid render. The two use one rule now."""
+        from app.image_job_store import ImageJobError, check_handoff_record
+        adapter = self.adapter()  # never loaded: _single_output only reads the output directory
+        names = ["kaliv_00001_.mp4", "rød drage.mp4", "  spaces  .mp4", "_x.mp4", ".x.mp4", "日本語.mp4",
+                 "emoji 🐉.mp4", "a" * 251 + ".mp4", "a" * 252 + ".mp4", "a\nb.mp4", "a\x00b.mp4", "a\x85b.mp4",
+                 "a\udcffb.mp4", "a\\b.mp4", "c:b.mp4", "a/b.mp4", "../b.mp4", ".mp4", "x.MP4",
+                 # Windows (ChatGPT #2357 6716735710): device names, characters Win32 refuses, and
+                 # names that are not devices. Each dragon is two UTF-16 code units.
+                 "CON.mp4", "nul.mp4", "Com1.mp4", "lpt¹.mp4", "aux .mp4", "CONOUT$.mp4", "con.tar.mp4",
+                 'a"b.mp4', "a<b.mp4", "a|b.mp4", "a?b.mp4", "a*b.mp4", "🐉" * 62 + ".mp4",
+                 "console.mp4", "com10.mp4", "lpt.mp4", "nul_x.mp4"]
+        for name in names:  # every name is a real file there, as it is after a render
+            if "/" in name:
+                continue
+            try:
+                Path(self.dirs["output"], name).write_bytes(b"x")
+            except (OSError, ValueError):
+                pass  # not creatable on this system: refused by the rule before the directory matters
+        accepted = []
+        for name in names:
+            with self.subTest(name=name):
+                outputs = {"9": {"videos": [{"filename": name, "subfolder": "", "type": "output"}]}}
+                try:
+                    adapter._single_output(outputs, set())
+                except GenerationError:
+                    continue
+                accepted.append(name)
+                try:
+                    check_handoff_record({"stage": "copying", "output": {"name": name, "dev": 1, "ino": 2, "size": 3}})
+                except ImageJobError:
+                    self.fail(f"the adapter accepts {name!r} but its receipt is refused")
+        self.assertEqual(accepted, ["kaliv_00001_.mp4", "rød drage.mp4", "  spaces  .mp4", "_x.mp4", ".x.mp4",
+                                    "日本語.mp4", "emoji 🐉.mp4", "a" * 251 + ".mp4", ".mp4", "🐉" * 62 + ".mp4",
+                                    "console.mp4", "com10.mp4", "lpt.mp4", "nul_x.mp4"])
+
+    def test_an_output_name_the_directory_does_not_list_is_refused(self):
+        """ChatGPT #2357 6716735710: on Windows a name can reach a file it does not spell, such as
+        another case of an older file's name or its 8.3 alias. The adapter takes only a name the
+        output directory itself lists, so it never adopts an older file."""
+        adapter = self.adapter()
+        Path(self.dirs["output"], "kaliv_old.mp4").write_bytes(b"older")
+        for name in ("KALIV_OLD.mp4", "Kaliv_old.mp4", "never_written.mp4"):
+            with self.subTest(name=name), self.assertRaises(GenerationError):
+                adapter._single_output({"9": {"videos": [{"filename": name, "subfolder": "", "type": "output"}]}},
+                                       {"kaliv_old.mp4"})
+
+    def test_cleanup_never_deletes_through_a_name_the_directory_does_not_list(self):
+        """ChatGPT #2357 6716735710: a history naming an 8.3 alias of an older file
+        ("KALIV_~1.MP4") must not make cleanup delete that older file. Windows' alias lookup is
+        simulated here: stat resolves the alias to the older file, as NTFS would."""
+        from unittest.mock import patch
+        import app.comfy_video_adapter as module
+        adapter = self.adapter()
+        older = Path(self.dirs["output"], "kaliv_older_job.mp4")
+        older.write_bytes(b"another job's finished render")
+        real_stat = os.stat
+
+        def windows_stat(path, *args, **kwargs):
+            if Path(path).name in ("KALIV_~1.MP4", "Kaliv_Older_Job.mp4"):
+                path = older
+            return real_stat(path, *args, **kwargs)
+
+        outputs = {"9": {"videos": [{"filename": "KALIV_~1.MP4", "subfolder": "", "type": "output"},
+                                    {"filename": "Kaliv_Older_Job.mp4", "subfolder": "", "type": "output"}]}}
+        with patch.object(module.os, "stat", windows_stat):
+            self.assertEqual(adapter._attested_outputs(outputs, {"kaliv_older_job.mp4"}), [])
+        self.assertEqual(older.read_bytes(), b"another job's finished render")
+
+    def test_cleanup_skips_a_device_name_even_when_such_a_file_exists(self):
+        """On Linux "CON.mp4" is a file; on Windows the same name opens the console. Cleanup never
+        stats or deletes by such a name, so the file is kept."""
+        adapter = self.adapter()
+        Path(self.dirs["output"], "CON.mp4").write_bytes(b"x")
+        outputs = {"9": {"videos": [{"filename": "CON.mp4", "subfolder": "", "type": "output"}]}}
+        self.assertEqual(adapter._attested_outputs(outputs, set()), [])
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "needs a FIFO (POSIX)")
+    def test_cleanup_keeps_a_node_that_is_neither_a_file_nor_a_link(self):
+        """ChatGPT #2357 6718447424: ComfyUI writes its output as a file. A FIFO (or socket or
+        device node) that a history names is not provably the render, so cleanup keeps it and
+        reports it as untracked. A file and a link the job made are still removed; removing a link
+        never touches what it points to."""
+        adapter = self.adapter()
+        out = Path(self.dirs["output"])
+        os.mkfifo(out / "pipe.mp4")
+        (out / "render.mp4").write_bytes(b"x")
+        target = Path(self.state, "elsewhere.mp4")
+        target.write_bytes(b"not the job's")
+        os.symlink(target, out / "link.mp4")
+        outputs = {"9": {"videos": [{"filename": n, "subfolder": "", "type": "output"}
+                                    for n in ("pipe.mp4", "render.mp4", "link.mp4")]}}
+        owned = adapter._attested_outputs(outputs, set())
+        self.assertEqual([name for name, _, _ in owned], ["render.mp4", "link.mp4"])
+        adapter._remove_job_outputs(set(), owned)
+        self.assertEqual(sorted(os.listdir(out)), ["pipe.mp4"])
+        self.assertEqual(adapter.last_cleanup["removed"], ["render.mp4", "link.mp4"])
+        self.assertEqual(adapter.last_cleanup["untracked"], ["pipe.mp4"])
+        self.assertEqual(target.read_bytes(), b"not the job's")
+
+    def test_receipts_go_only_to_the_current_holder(self):
+        adapter = self.adapter()
+        adapter.load()
+        receipts = []
+        with adapter.holding_outputs(on_handoff=receipts.append):
+            adapter.render_to(request(), io.BytesIO())
+        adapter.render_to(request(), io.BytesIO())  # no holder: no receipts, as before
+        self.assertEqual([r["stage"] for r in receipts], ["copying", "copied"])
+
+    def test_a_copy_the_volume_could_not_take_keeps_the_finished_file(self):
+        import errno
+        from app.media_generation_contract import ArtifactSinkUnavailable
+        adapter = self.adapter()
+        adapter.load()
+
+        class FullVolume(io.BytesIO):
+            def write(self, data):
+                if self.tell() > 0:
+                    raise ArtifactSinkUnavailable("staged_video_unavailable")
+                return super().write(data)
+
+        class SyncFails(io.BytesIO):
+            def sync(self):
+                raise OSError(errno.EIO, "I/O error")
+
+        for sink in (FullVolume(), SyncFails()):
+            with self.subTest(sink=type(sink).__name__):
+                with self.assertLogs("kaliv.media.comfy", level="WARNING"), self.assertRaises((ArtifactSinkUnavailable, OSError)):
+                    with adapter.holding_outputs():
+                        adapter.render_to(request(), sink)
+                kept = os.listdir(self.dirs["output"])
+                self.assertEqual(len(kept), 1, "the finished render was never deleted before it was published")
+                self.assertEqual(adapter.last_cleanup["kept_for_recovery"], kept)
+                os.unlink(os.path.join(self.dirs["output"], kept[0]))
+
+    def test_a_bad_render_found_while_copying_is_still_cleaned_at_once(self):
+        adapter = self.adapter(fake={"FAKE_COMFY_MP4_PAD": "4096"}, profile=self.profile(max_output_bytes=1024))
+        adapter.load()
+        with self.assertRaisesRegex(GenerationError, "size cap"), adapter.holding_outputs():
+            adapter.render_to(request(), io.BytesIO())
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "not a finished file: nothing to keep")
+
+    def test_holding_does_not_nest(self):
+        adapter = self.adapter()
+        with adapter.holding_outputs():
+            with self.assertRaises(RuntimeError):
+                with adapter.holding_outputs():
+                    pass
+
+    def test_a_sync_failure_is_a_failed_job_never_a_silent_success(self):
+        import errno
+        from unittest.mock import patch
+        adapter = self.adapter()
+        adapter.load()
+        with open(Path(self.tmp, "staged.mp4"), "wb") as sink, \
+                patch("app.comfy_video_adapter.os.fsync", side_effect=OSError(errno.ENOSPC, "No space left on device")):
+            with self.assertRaises(OSError) as caught:
+                adapter.render_to(request(), sink)
+        self.assertEqual(caught.exception.errno, errno.ENOSPC)
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "the failed job's output is cleaned up, as for any failure")
+        self.assertEqual(adapter.last_cleanup["failed"], [])
+
     def test_cleanup_never_touches_what_existed_before_the_job(self):
         Path(self.dirs["output"], "operator-note.txt").write_text("keep me")
         os.mkdir(os.path.join(self.dirs["output"], "keep-dir"))
@@ -426,16 +799,16 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
         self.assertEqual(sorted(os.listdir(self.dirs["output"])), ["keep-dir", "operator-note.txt"])
 
-    def test_cleanup_touches_nothing_when_the_volume_is_no_longer_verified(self):
-        volume = AnyExistingDirectory()
-        adapter = self.adapter(volume=volume, fake={"FAKE_COMFY_RENDER_SECONDS": "0.3"})
+    def test_cleanup_touches_nothing_when_the_work_area_is_no_longer_verified(self):
+        work_area = AnyExistingDirectory()
+        adapter = self.adapter(work_area=work_area, fake={"FAKE_COMFY_RENDER_SECONDS": "0.3"})
         adapter.load()
         real_history = adapter.supervisor.history
 
         def history_then_unplug(prompt_id):
             record = real_history(prompt_id)
             if record is not None:
-                volume.lost.add("*")
+                work_area.lost.add("*")
             return record
 
         adapter.supervisor.history = history_then_unplug
@@ -810,17 +1183,17 @@ class AdapterTests(unittest.TestCase):
         with self.assertLogs("kaliv.media.comfy", level="WARNING"):
             self.assertEqual(good.render_to(request(), io.BytesIO()), "video/mp4", "a successful hand-off stays a success")
 
-    def test_production_supervisor_has_no_internal_disk_default(self):
+    def test_production_supervisor_has_no_default_work_area(self):
         from app.comfy_supervisor import ComfyLaunch, ComfySupervisor, ComfySupervisorError
         launch = ComfyLaunch(python_executable=sys.executable, main_py=str(FAKE_MAIN), port=self.port,
                              input_directory=self.dirs["input"], output_directory=self.dirs["output"],
                              temp_directory=self.dirs["temp"], user_directory=self.dirs["user"])
         common = dict(gpu_uuid=GPU, lease_dir=self.lease_dir, launch=launch, reserve_gib=2, min_usable_gib=8)
         with self.assertRaises(TypeError):
-            ComfySupervisor(**common)  # media_volume is required
+            ComfySupervisor(**common)  # work_area is required
         for bogus in (None, "/mnt/media", object()):
-            with self.subTest(volume=bogus), self.assertRaises(ComfySupervisorError):
-                ComfySupervisor(media_volume=bogus, **common)
+            with self.subTest(work_area=bogus), self.assertRaises(ComfySupervisorError):
+                ComfySupervisor(work_area=bogus, **common)
 
     def test_template_problems_stop_load_before_comfyui_starts(self):
         link_dir = tempfile.mkdtemp(dir=self.tmp)

@@ -1,6 +1,6 @@
-# Physical validation campaign — 2.0.19
+# Physical validation campaign — 2.0.20
 
-Denne runbook samler de fysiske Prove-opgaver for ModelRig 2.0.19. Stage A
+Denne runbook samler de fysiske Prove-opgaver for ModelRig 2.0.20. Stage A
 starter i `STAGED_PHYSICAL_PROMOTION.md`. Releasefasens
 updater- og lifecycle-operationer styres af `STAGE_B_UPDATER_EVIDENCE.md`.
 
@@ -13,7 +13,7 @@ kampagnerapport med `production_activation=false`.
 
 Alle rapporter skal binde til samme:
 
-- version `2.0.19`;
+- version `2.0.20`;
 - eksakte 40-tegns kandidat-/release-SHA;
 - worker `code_sha256`, hvor runtime-koden måles;
 - rene checkout og konsistente versionsstempler;
@@ -124,7 +124,7 @@ Pausens bevis skal være en konkret `released` occurrence bundet til et
 `cancelled` job; aggregate tællere er ikke tilstrækkelige.
 
 To launchere kører `scheduler_pilot_report.py` for dig. Begge er pinnet til
-`physical-proof/2.0.19` og skriver `kaliv-scheduler-pilot/v4` til
+`physical-proof/2.0.20` og skriver `kaliv-scheduler-pilot/v4` til
 `validation\scheduler-pilot-latest.json`:
 
 - `RUN_STAGE_A_SCHEDULER_PILOT.cmd` → `scripts/run-stage-a-scheduler-pilot.ps1`
@@ -139,26 +139,26 @@ at skrive til kampagnens sti.
 
 ## Stage B — publiceret release og T-006
 
-Stage B starter først efter, at `v2.0.19` er tagget og publiceret som komplet
-signeret release (D3, #2275). Kildereleasen er 2.0.12; målreleasen er 2.0.19.
+Stage B starter først efter, at `v2.0.20` er tagget og publiceret som komplet
+signeret release (D3, #2275). Kildereleasen er 2.0.12; målreleasen er 2.0.20.
 
-Følg `STAGE_B_UPDATER_EVIDENCE.md`. Updateren fra `v2.0.19` verificeres én gang
+Følg `STAGE_B_UPDATER_EVIDENCE.md`. Updateren fra `v2.0.20` verificeres én gang
 som bootstrap-grænse (checksum + provenance). Server, supervisor og worker må
 kun flyttes gennem updateren.
 
 Gennemfør og dokumentér:
 
-1. god appliance-update 2.0.12 → 2.0.19;
-2. reboot til ready på 2.0.19;
+1. god appliance-update 2.0.12 → 2.0.20;
+2. reboot til ready på 2.0.20;
 3. backend supervisor-restart;
 4. worker supervisor-restart;
-5. ugyldig update afvist før swap eller fuld rollback til 2.0.19;
+5. ugyldig update afvist før swap eller fuld rollback til 2.0.20;
 6. interruption/recovery omkring swap og Windows replacement;
 7. bevarede data, credentials og schedules.
 
 Det automatiske signed-release-to-signed-release self-update-bevis er deferred
 til issue #401. Forudsætningen (signeret source med self-update og en nyere
-signeret target) er til stede med 2.0.12 → 2.0.19, men beviset er separat og er
+signeret target) er til stede med 2.0.12 → 2.0.20, men beviset er separat og er
 ikke en blocker for denne release.
 
 ### Lifecycle-observationer
@@ -194,10 +194,10 @@ python scripts\appliance_lifecycle_updater_chain.py `
 
 Den gode log skal bevise download af server/supervisor/worker, tre checksums,
 tre provenance-attestationer, process-stop før swap, backend og worker på
-2.0.19 samt avanceret supervisor-heartbeat.
+2.0.20 samt avanceret supervisor-heartbeat.
 
 Den ugyldige log accepteres kun som pre-swap refusal eller sund rollback til
-2.0.19.
+2.0.20.
 
 Disse bypasses blokerer altid:
 

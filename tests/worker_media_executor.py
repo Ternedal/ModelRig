@@ -303,7 +303,7 @@ class ExecutorTests(unittest.TestCase):
         self.crash(ex)
         restarted = self.executor([self.image()], start=False)
         self.assertEqual(restarted.start(), 1)
-        self.assertEqual((self.state(job)["state"], self.state(job)["error"]), ("failed", "interrupted during publication"),
+        self.assertEqual((self.state(job)["state"], self.state(job)["error"]), ("failed", "interrupted_during_publication"),
                          "an asset may exist: flagged for reconciliation, not silently failed")
 
     # --- several executors (dual GPU) ----------------------------------------------------------------
@@ -348,7 +348,7 @@ class ExecutorTests(unittest.TestCase):
             child.wait()
             child.stdout.close()
         after = self.executor([self.image()])  # the holder is dead: now recovery is safe
-        self.assertEqual((self.state(job)["state"], self.state(job)["error"]), ("failed", "interrupted by restart"))
+        self.assertEqual((self.state(job)["state"], self.state(job)["error"]), ("failed", "interrupted_by_restart"))
         self.assertEqual(after.step(), "idle")
 
     # --- #2296 6511335742 P1: cancellation vs publication ------------------------------------------------
@@ -440,7 +440,8 @@ class ExecutorTests(unittest.TestCase):
         self.assertEqual(ex.step(), "failed")
         self.assertEqual(self.state(job)["error"], "generation_failed")
         self.assertTrue(lease_free(GPU_A, self.lease_dir), "close() released what load() took")
-        self.assertEqual(ex.events[-1], "failed_load:sdxl-a:True")
+        self.assertEqual(ex.events[-2], "failed_load:sdxl-a:True")
+        self.assertTrue(ex.events[-1].startswith("job:") and ":sdxl-a:failed:" in ex.events[-1])
 
     def test_a_failed_load_without_proven_release_is_fatal_and_nothing_more_is_claimed(self):
         for close_ok in (False, "raise"):
@@ -491,7 +492,7 @@ class ExecutorTests(unittest.TestCase):
                 self.crash(ex)
                 restarted = self.executor([self.image()], image_sink=keyed)
                 self.assertEqual((self.state(job)["state"], self.state(job)["error"]),
-                                 ("failed", "interrupted during publication"))
+                                 ("failed", "interrupted_during_publication"))
                 restarted.release_lock()
                 restarted._lock = None
 
@@ -561,6 +562,161 @@ assert job['id'] == sys.argv[6]
 print('READY', flush=True)
 time.sleep(60)
 """
+
+
+class DiagnosticsTests(unittest.TestCase):
+    """Track 3: restart and recovery are observable, and the record never grows without bound."""
+    setUp, tearDown = ExecutorTests.setUp, ExecutorTests.tearDown
+    image, submit, executor = ExecutorTests.image, ExecutorTests.submit, ExecutorTests.executor
+
+    def test_each_lifecycle_step_is_one_structured_event_without_prompt_text(self):
+        seen = []
+        ex = self.executor([self.image()], start=False)
+        ex.events.sink = seen.append
+        job = self.submit("sdxl-a")
+        self.assertEqual(ex.run(max_steps=2, idle_sleep=lambda: None), 0)
+        kinds = [e["event"] for e in seen]
+        for kind in ("recovered", "purged", "loaded", "job", "closed", "exit"):
+            self.assertIn(kind, kinds)
+        done = next(e for e in seen if e["event"] == "job")
+        self.assertTrue(done["detail"].startswith(f"{job}:sdxl-a:completed:"))
+        self.assertEqual(seen[-1], {"event": "exit", "detail": "0"})
+        self.assertNotIn("a red bicycle", json.dumps(seen))
+
+    def test_a_failing_sink_never_stops_the_work(self):
+        ex = self.executor([self.image()])
+        ex.events.sink = lambda event: 1 / 0
+        self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "completed")
+
+    def test_a_sink_failure_event_carries_its_code_never_a_path_or_account(self):
+        """ChatGPT 6694053328 P4: the work area's refusal can carry an OS error with a path (a
+        Windows user name) or SIDs. The event, which goes to the supervisor's log, keeps the code."""
+        from app.media_generation_contract import ArtifactSinkUnavailable
+        cases = {
+            "media_work_area_not_private: security descriptor could not be verified: "
+            "[WinError 5] Access is denied: 'C:\\Users\\anders\\kaliv'": "media_work_area_not_private",
+            "media_work_area_not_private: S-1-5-21-111-222-333-1001 has write access": "media_work_area_not_private",
+            "external_media_unavailable": "external_media_unavailable",
+            "sink returned no asset id": "ArtifactSinkUnavailable",
+            "/home/anders/kaliv/z is gone": "ArtifactSinkUnavailable",
+        }
+        for message, code in cases.items():
+            with self.subTest(message=message):
+                seen = []
+                ex = self.executor([self.image()], start=False)
+                ex.events.sink = seen.append
+                with patch.object(ex, "step", side_effect=ArtifactSinkUnavailable(message)):
+                    self.assertEqual(ex.run(max_steps=1, idle_sleep=lambda: None), EXIT_SINK_UNAVAILABLE)
+                self.assertIn({"event": "sink_unavailable", "detail": code}, seen)
+                text = json.dumps(seen) + "\n".join(ex.events)
+                for secret in ("anders", "Users", "S-1-5-21", "/home"):
+                    self.assertNotIn(secret, text)
+
+    def test_every_event_is_bounded_in_length(self):
+        from app.media_executor import EVENT_MAX_CHARS
+        seen = []
+        ex = self.executor([self.image()])
+        ex.events.sink = seen.append
+        ex.events.append("tick:" + "x" * 10_000)
+        self.assertEqual(len(ex.events[-1]), EVENT_MAX_CHARS)
+        self.assertLessEqual(len(seen[-1]["event"]) + len(seen[-1]["detail"]) + 1, EVENT_MAX_CHARS)
+
+    def test_events_after_a_crash_come_in_restart_order(self):
+        """A dead executor's job is recovered before anything else, then the new job runs, then exit."""
+        dead = self.executor([self.image()])
+        stuck = self.submit("sdxl-a")
+        self.assertEqual(self.store.claim_for(["sdxl-a"], dead.instance)["id"], stuck)
+        dead.release_lock()  # the process dies with the job claimed; the OS drops its lock
+        seen = []
+        ex = self.executor([self.image()], start=False)
+        ex.events.sink = seen.append
+        job = self.submit("sdxl-a")
+        self.assertEqual(ex.run(max_steps=1, idle_sleep=lambda: None), 0)
+        kinds = [e["event"] for e in seen]
+        self.assertEqual(seen[0], {"event": "recovered", "detail": "1"}, "recovery is the first thing")
+        self.assertLess(kinds.index("purged"), kinds.index("loaded"))
+        self.assertLess(kinds.index("loaded"), kinds.index("job"))
+        self.assertEqual(seen[-1], {"event": "exit", "detail": "0"})
+        self.assertEqual(kinds.count("recovered"), 1)
+        self.assertEqual(self.store.get(stuck, "anders")["error"], "interrupted_by_restart")
+        self.assertTrue(next(e for e in seen if e["event"] == "job")["detail"].startswith(f"{job}:"))
+
+    def test_the_record_keeps_only_the_last_entries(self):
+        from app.media_executor import EVENTS_KEPT
+        ex = self.executor([self.image()])
+        for i in range(EVENTS_KEPT + 500):
+            ex.events.append(f"tick:{i}")
+        self.assertEqual(len(ex.events), EVENTS_KEPT)
+        self.assertEqual(ex.events[0], "tick:500")
+
+
+class QueuedExpiryExecutorTests(unittest.TestCase):
+    """Anders, 6 Nov 2026: queued jobs nobody claimed for 24 hours expire; the executor enforces it."""
+    setUp, tearDown = ExecutorTests.setUp, ExecutorTests.tearDown
+    image, executor = ExecutorTests.image, ExecutorTests.executor
+
+    def stale_job(self, age_s=25 * 3600):
+        with patch("app.image_job_store.time.time", return_value=__import__("time").time() - age_s):
+            return self.store.submit("anders", "a red bicycle", profile_id="sdxl-a",
+                                     params={"width": 1024, "height": 1024, "steps": 20})["job_id"]
+
+    def stored_state(self, job):
+        import sqlite3
+        with sqlite3.connect(self.store.path) as db:
+            return db.execute("SELECT state, error FROM image_jobs WHERE id=?", (job,)).fetchone()
+
+    def test_an_executor_starting_after_a_long_pause_expires_instead_of_rendering(self):
+        job = self.stale_job()
+        ex = self.executor([self.image()], start=False)
+        ex.start()
+        self.assertIn("expired:1", ex.events)
+        self.assertEqual(self.stored_state(job), ("expired", "expired_unclaimed"))
+        self.assertEqual(ex.step(), "idle", "nothing to render")
+        self.assertIsNone(ex.adapter, "no model was loaded for it")
+
+    def test_a_job_that_ages_out_while_the_executor_waits_for_vram_expires(self):
+        ex = self.executor([self.image()])
+        job = self.stale_job(age_s=23 * 3600)
+        ex._claim_not_before = self.clock.now + 10 ** 6  # waiting for VRAM: no claims (G4)
+        later = __import__("time").time() + 2 * 3600
+        with patch("app.image_job_store.time.time", return_value=later):
+            self.assertEqual(ex.step(), "idle")
+            self.assertEqual(self.stored_state(job)[0], "queued", "no claim, so nothing expired it yet")
+            ex.idle_housekeeping()
+            self.assertEqual(self.stored_state(job)[0], "queued", "not due again within a minute")
+            self.clock.now += 60
+            ex.idle_housekeeping()
+        self.assertEqual(self.stored_state(job), ("expired", "expired_unclaimed"))
+        self.assertIn("expired:1", ex.events)
+
+    def test_fresh_jobs_are_rendered_as_before(self):
+        ex = self.executor([self.image()])
+        job = self.stale_job(age_s=23 * 3600)
+        self.assertEqual(ex.step(), "completed")
+        self.assertEqual(self.stored_state(job)[0], "completed")
+
+    def test_a_failing_expiry_never_stops_the_work(self):
+        ex = self.executor([self.image()], start=False)
+        with patch.object(self.store, "expire_queued", side_effect=sqlite3_error()):
+            ex.start()
+        self.assertTrue(any(e.startswith("expire_failed:") for e in ex.events))
+
+    def test_a_lost_volume_during_housekeeping_stops_the_executor(self):
+        """Best effort covers a locked database, not the store's volume guard: a lost volume or work
+        area found by expiry or purge is exit 75 at once, never logged as expire_failed/purge_failed."""
+        for call in ("expire_queued", "purge_prompts"):
+            with self.subTest(call=call):
+                ex = self.executor([self.image()], start=False)
+                with patch.object(self.store, call, side_effect=ArtifactSinkUnavailable("media_work_area_missing")):
+                    self.assertEqual(ex.run(max_steps=1, idle_sleep=lambda: None), 75)
+                self.assertIn("sink_unavailable:media_work_area_missing", ex.events)
+                self.assertFalse(any(e.startswith(("expire_failed", "purge_failed")) for e in ex.events))
+
+
+def sqlite3_error():
+    import sqlite3
+    return sqlite3.OperationalError("database is locked")
 
 
 class VramWaitTests(unittest.TestCase):
@@ -765,7 +921,7 @@ class VideoExecutorTests(unittest.TestCase):
                                  temp_directory=self.dirs["temp"], user_directory=self.dirs["user"])
             sup = FakeSupervisor(fake_env={"FAKE_COMFY_STATE_DIR": self.dirs["state"], "FAKE_COMFY_RENDER_SECONDS": render_seconds,
                                            **(extra_fake or {})},
-                                 media_volume=AnyExistingDirectory(), gpu_uuid=GPU_A, lease_dir=self.lease_dir, launch=launch,
+                                 work_area=AnyExistingDirectory(), gpu_uuid=GPU_A, lease_dir=self.lease_dir, launch=launch,
                                  reserve_gib=2, min_usable_gib=8, ready_timeout_s=15, stop_timeout_s=5, poll_s=0.05,
                                  base_env={"PATH": os.environ.get("PATH", "")})
             adapter = HookedComfyVideoAdapter(profile, supervisor=sup, template_dir=self.dirs["templates"],
@@ -894,6 +1050,143 @@ class VideoExecutorTests(unittest.TestCase):
         self.assertEqual(self.store.get(job, "anders")["state"], "cancelled")
         self.assertEqual(self.sink.registry, set(), "adopt() never called")
         self.assertEqual(os.listdir(self.sink.staging), [], "staged file removed")
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "the owner cancelled: the work-area copy goes too")
+
+    # -- Anders, 6 Nov 2026: publish on the volume, THEN remove the copy in the work area -------------
+    def test_the_work_area_copy_is_still_there_when_the_file_is_published_and_removed_after(self):
+        output = self.dirs["output"]
+
+        class Recording(ReferenceSink):
+            seen = []
+
+            def adopt(self, handle, mime_type):
+                Recording.seen.append(sorted(os.listdir(output)))
+                return super().adopt(handle, mime_type)
+        os.mkdir(os.path.join(self.tmp, "recording-sink"))
+        self.sink = Recording(os.path.join(self.tmp, "recording-sink"), max_bytes=64 * 1024 * 1024)
+        ex = self.executor()
+        job = self.submit()
+        self.assertEqual(ex.step(), "completed")
+        self.assertEqual(len(Recording.seen), 1)
+        self.assertEqual(len(Recording.seen[0]), 1, "the finished render is still on C: while it is published")
+        self.assertEqual(os.listdir(output), [], "and removed once publication succeeded")
+        self.assertIn(self.store.get(job, "anders")["asset_id"], self.sink.registry)
+
+    def test_a_failed_publication_keeps_the_work_area_copy_for_recovery(self):
+        from app.media_generation_contract import ArtifactSinkUnavailable
+
+        class Unplugged(ReferenceSink):
+            def adopt(self, handle, mime_type):
+                raise ArtifactSinkUnavailable("test: the volume went away during publication")
+        os.mkdir(os.path.join(self.tmp, "unplugged-sink"))
+        self.sink = Unplugged(os.path.join(self.tmp, "unplugged-sink"), max_bytes=64 * 1024 * 1024)
+        ex = self.executor()
+        job = self.submit()
+        with self.assertRaises(ArtifactSinkUnavailable):
+            ex.step()
+        kept = os.listdir(self.dirs["output"])
+        self.assertEqual(len(kept), 1, "the finished file was never deleted before it was published")
+        self.assertEqual(ex.adapter.last_cleanup["kept_for_recovery"], kept)
+        self.assertEqual(self.store.get(job, "anders")["state"], "publishing", "left for recovery")
+
+    def test_the_hand_off_receipt_is_stored_and_matches_the_published_file(self):
+        import hashlib
+        import sqlite3
+        ex = self.executor()
+        ex.volume_root = self.tmp
+        job = self.submit()
+        self.assertEqual(ex.step(), "completed")
+        with sqlite3.connect(os.path.join(self.tmp, "jobs.sqlite3")) as db:
+            receipt = json.loads(db.execute("SELECT record FROM image_jobs_handoff WHERE job_id=?", (job,)).fetchone()[0])
+        asset = self.store.get(job, "anders")["asset_id"]
+        published = (self.sink.store / f"{asset}.mp4").read_bytes()
+        self.assertEqual(receipt["stage"], "copied")
+        root = os.stat(self.tmp)
+        self.assertEqual(receipt["volume"], {"dev": root.st_dev, "ino": root.st_ino})
+        self.assertEqual((receipt["sha256"], receipt["size"]), (hashlib.sha256(published).hexdigest(), len(published)))
+        self.assertNotIn("a red kite", json.dumps(receipt), "never the prompt")
+
+    def test_a_volume_gone_while_the_receipt_is_recorded_stops_and_keeps_the_render(self):
+        """Codex #2357 4503161825: the receipt stats the volume root. A volume gone at that moment is
+        fatal (75) and the finished render stays in the work area for recovery, never a failed job
+        with its output deleted."""
+        ex = self.executor()
+        ex.volume_root = os.path.join(self.tmp, "gone")  # stat() fails: the volume is not there
+        job = self.submit()
+        with self.assertRaisesRegex(ArtifactSinkUnavailable, "^media_volume_missing$"):
+            ex.step()
+        self.assertEqual(len(os.listdir(self.dirs["output"])), 1, "the finished render is kept")
+        self.assertEqual(self.sink.registry, set(), "nothing published")
+        self.assertEqual(self.store.get(job, "anders")["state"], "running", "left for recovery at the next start")
+
+    def test_a_receipt_database_that_fails_keeps_the_finished_render(self):
+        """Codex #2357 4503721455: the receipt write itself fails (work disk full, database locked
+        past its busy timeout). The job fails, nothing is published, and the finished render stays
+        in the work area for recovery -- never deleted with the staged copy."""
+        real = self.store.record_handoff
+
+        def full_after_the_copy(job_id, instance, record):
+            if record["stage"] == "copied":
+                raise sqlite3.OperationalError("database or disk is full")
+            return real(job_id, instance, record)
+        ex = self.executor()
+        job = self.submit()
+        with patch.object(self.store, "record_handoff", side_effect=full_after_the_copy), \
+                self.assertLogs("kaliv.media.comfy", level="WARNING"):
+            self.assertEqual(ex.step(), "failed")
+        kept = os.listdir(self.dirs["output"])
+        self.assertEqual(len(kept), 1, "the finished render is kept")
+        self.assertEqual(ex.adapter.last_cleanup["kept_for_recovery"], kept)
+        self.assertEqual(self.sink.registry, set(), "nothing published")
+        self.assertEqual(os.listdir(self.sink.staging), [], "the staged copy is gone")
+        self.assertEqual(self.store.get(job, "anders")["state"], "failed")
+        with sqlite3.connect(os.path.join(self.tmp, "jobs.sqlite3")) as db:
+            receipt = json.loads(db.execute("SELECT record FROM image_jobs_handoff WHERE job_id=?", (job,)).fetchone()[0])
+        self.assertEqual((receipt["stage"], receipt["output"]["name"]), ("copying", kept[0]),
+                         "the earlier receipt names the kept file, so C6 can correlate it")
+
+    def test_an_output_named_with_spaces_and_unicode_is_published(self):
+        """Codex #2357 4504060850: "rød drage.mp4" passed the adapter but not the receipt, so the
+        job failed and the render was deleted. Now it is recorded under its exact name and published."""
+        ex = self.executor_with_fake({"FAKE_COMFY_OUTPUT_PREFIX": "rød drage "})
+        ex.volume_root = self.tmp
+        job = self.submit()
+        self.assertEqual(ex.step(), "completed")
+        with sqlite3.connect(os.path.join(self.tmp, "jobs.sqlite3")) as db:
+            receipt = json.loads(db.execute("SELECT record FROM image_jobs_handoff WHERE job_id=?", (job,)).fetchone()[0])
+        self.assertEqual(receipt["stage"], "copied")
+        self.assertRegex(receipt["output"]["name"], r"^rød drage [0-9a-f]{8}\.mp4$")
+        self.assertIn(self.store.get(job, "anders")["asset_id"], self.sink.registry)
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "removed once published")
+
+    def test_an_invalid_receipt_still_cleans_the_render_at_once(self):
+        """The other side of 4503721455: a receipt the store refuses as invalid (ImageJobError) is
+        not an infrastructure failure. The job fails and nothing is kept."""
+        ex = self.executor()
+        job = self.submit()
+        with patch.object(self.store, "record_handoff", side_effect=ImageJobError("hand-off record is invalid")):
+            self.assertEqual(ex.step(), "failed")
+        self.assertEqual(self.store.get(job, "anders")["state"], "failed")
+        self.assertEqual(self.sink.registry, set(), "nothing published")
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "refused: cleaned at once")
+
+    def test_a_hand_off_that_cannot_be_recorded_fails_the_job_before_any_copy(self):
+        ex = self.executor()
+        job = self.submit()
+        with patch.object(self.store, "record_handoff", return_value=False):
+            self.assertEqual(ex.step(), "failed")
+        self.assertEqual(self.store.get(job, "anders")["state"], "failed")
+        self.assertEqual(self.sink.registry, set(), "nothing published")
+        self.assertEqual(os.listdir(self.sink.staging), [], "nothing staged")
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "never handed over: cleaned at once")
+
+    def test_a_render_that_fails_is_cleaned_at_once_even_while_held(self):
+        ex = self.executor_with_fake({"FAKE_COMFY_OUTPUT_MODE": "notmp4"})
+        job = self.submit()
+        self.assertEqual(ex.step(), "failed")
+        self.assertEqual(self.store.get(job, "anders")["state"], "failed")
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "no finished file: nothing to keep")
+        self.assertNotIn("kept_for_recovery", ex.adapter.last_cleanup if ex.adapter else {})
 
 
 if __name__ == "__main__":

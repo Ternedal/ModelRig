@@ -22,10 +22,36 @@ Additional clients/renderers may be pinned as extra repository entries. Mutable
 names such as `main`, tags or branch names are never accepted as release
 identity.
 
+## Release scopes
+
+ADR-SYS-001 (`docs/system/ADR-SYS-001_V1_AND_EMBODIED_RELEASES.md`) defines two
+named releases over the same ten gates. The manifest names its scope in
+`release_scope`; a manifest without it, or with any other value, is invalid.
+
+| `release_scope` | Release | Gates that must be `PASS` |
+|---|---|---|
+| `v1` | Kaliv V1 | the seven gates that are not body gates |
+| `embodied` | Kaliv Embodied | all ten |
+
+The body gates are `bodyrig_photoreal_likeness`, `bodyrig_digital_twin_m6` and
+`bodyrig_android_live_body`. Their evidence requirements are the same in both
+scopes. A V1 manifest still lists them, and the verdict reports every body gate
+that is not `PASS` in `deferred_gates`. A body gate marked `PASS` in a V1
+manifest is held to its normal evidence rules. BodyRig stays in the pin set for
+both scopes.
+
+For Kaliv V1 the `end_to_end_latency` evidence is measured to the first spoken
+response (`outward_kind` = `voice`). Kaliv Embodied measures `voice+body`. The
+release gate sees only the evidence ref and cannot check this; it is a
+requirement on the qualification run.
+
+A Kaliv V1 release makes no claim about a body. Its release notes must say that
+the photoreal body is not accepted.
+
 ## Required gates
 
-All ten gates must be `PASS`, and every PASS must carry at least one explicit
-evidence reference:
+Every gate in the release scope must be `PASS`, and every PASS must carry at
+least one explicit evidence reference:
 
 1. `software_exact_green` — exact pinned repository revisions qualified by their
    software checks. A PASS must contain exactly one canonical
@@ -168,8 +194,8 @@ The gate intentionally cannot activate production. The manifest must contain:
 "production_activation": false
 ```
 
-and the emitted verdict also keeps `production_activation=false` even when all
-ten gates qualify. Final activation remains owned by the existing explicit
+and the emitted verdict also keeps `production_activation=false` even when
+every gate in the release scope qualifies. Final activation remains owned by the existing explicit
 release/physical authorities.
 
 This is deliberate: neither this script nor CI may synthesize Photoreal,
@@ -179,8 +205,9 @@ human-review, physical-rig, soak or production-activation evidence.
 
 ```json
 {
-  "schema": "kaliv-system-release-manifest/v1",
+  "schema": "kaliv-system-release-manifest/v2",
   "release_id": "kaliv-rc-1",
+  "release_scope": "embodied",
   "repositories": [
     {"repository": "Ternedal/ModelRig", "git_sha": "<40-hex>"},
     {"repository": "Ternedal/BodyRig", "git_sha": "<40-hex>"},
@@ -205,18 +232,21 @@ human-review, physical-rig, soak or production-activation evidence.
 
 ## Assemble a fully-qualified manifest
 
-When all ten canonical evidence refs already exist, do not hand-edit the JSON
+When all canonical evidence refs for the release scope already exist, do not hand-edit the JSON
 shape. `scripts/kaliv_release_manifest_assembler.py` creates the manifest and
 immediately submits the in-memory result to the same
 `kaliv_system_release_gate.evaluate_manifest(...)` authority before writing it.
 
 The assembler **does not create evidence**, downgrade a missing gate to pending,
-or activate production. All ten refs and all four immutable repository SHAs are
-required.
+or activate production. `--release-scope` is required. Every ref for that scope
+and all four immutable repository SHAs are required: ten refs for `embodied`,
+seven for `v1`. Under `v1` the three body gates are written as `PENDING` and a
+body ref is refused, so a body claim can only be made through `embodied`.
 
 ```powershell
 python scripts/kaliv_release_manifest_assembler.py `
   --release-id kaliv-rc-1 `
+  --release-scope embodied `
   --modelrig-sha <40-hex> `
   --bodyrig-sha <40-hex> `
   --visionrig-sha <40-hex> `
@@ -245,7 +275,7 @@ Both the manifest and verdict retain `production_activation=false`.
 python scripts/kaliv_system_release_gate.py .\path\to\kaliv-release-manifest.json
 ```
 
-Exit code 0 means all ten evidence gates qualify. Exit code 1 means a valid
+Exit code 0 means every gate in the release scope qualifies. Exit code 1 means a valid
 manifest is still blocked. Exit code 2 means the manifest itself is invalid.
 
 ## Binding qualified Consciousness evidence

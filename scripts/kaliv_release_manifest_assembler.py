@@ -55,13 +55,21 @@ def _ref(value: str, name: str) -> str:
 def assemble(
     *,
     release_id: str,
+    release_scope: str,
     modelrig_sha: str,
     bodyrig_sha: str,
     visionrig_sha: str,
     voicerig_sha: str,
     evidence_refs: Mapping[str, str],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    expected_gates = set(release_gate.REQUIRED_GATES)
+    if release_scope not in release_gate.RELEASE_SCOPE_GATES:
+        raise ReleaseManifestAssemblyError(
+            "release scope must be one of: "
+            + ", ".join(sorted(release_gate.RELEASE_SCOPE_GATES))
+        )
+    # A scope's manifest is assembled from exactly that scope's evidence. A
+    # gate outside the scope is written as PENDING and is never claimed here.
+    expected_gates = set(release_gate.RELEASE_SCOPE_GATES[release_scope])
     if set(evidence_refs) != expected_gates:
         missing = sorted(expected_gates - set(evidence_refs))
         extra = sorted(set(evidence_refs) - expected_gates)
@@ -81,15 +89,20 @@ def assemble(
         {"repository": "Ternedal/VoiceRig", "git_sha": _sha(voicerig_sha, "VoiceRig SHA")},
     ]
     gates = {
-        gate: {
-            "status": "PASS",
-            "evidence_refs": [_ref(evidence_refs[gate], f"{gate} evidence ref")],
-        }
+        gate: (
+            {
+                "status": "PASS",
+                "evidence_refs": [_ref(evidence_refs[gate], f"{gate} evidence ref")],
+            }
+            if gate in expected_gates
+            else {"status": "PENDING", "evidence_refs": []}
+        )
         for gate in release_gate.REQUIRED_GATES
     }
     manifest: dict[str, Any] = {
         "schema": release_gate.SCHEMA,
         "release_id": release_id,
+        "release_scope": release_scope,
         "repositories": repositories,
         "gates": gates,
         "production_activation": False,
@@ -125,12 +138,17 @@ def _write_json(path: Path, value: Mapping[str, Any]) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--release-id", required=True)
+    parser.add_argument(
+        "--release-scope",
+        required=True,
+        choices=sorted(release_gate.RELEASE_SCOPE_GATES),
+    )
     parser.add_argument("--modelrig-sha", required=True)
     parser.add_argument("--bodyrig-sha", required=True)
     parser.add_argument("--visionrig-sha", required=True)
     parser.add_argument("--voicerig-sha", required=True)
     for _gate, arg in GATE_ARGUMENTS:
-        parser.add_argument(f"--{arg}", required=True)
+        parser.add_argument(f"--{arg}")
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--verdict", type=Path)
     args = parser.parse_args(argv)
@@ -138,10 +156,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     evidence_refs = {
         gate: getattr(args, arg.replace("-", "_"))
         for gate, arg in GATE_ARGUMENTS
+        if getattr(args, arg.replace("-", "_")) is not None
     }
     try:
         manifest, verdict = assemble(
             release_id=args.release_id,
+            release_scope=args.release_scope,
             modelrig_sha=args.modelrig_sha,
             bodyrig_sha=args.bodyrig_sha,
             visionrig_sha=args.visionrig_sha,

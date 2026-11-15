@@ -1,11 +1,23 @@
 """Default-off real-event voice qualification for #2063.
 
-This route is intentionally separate from normal voice chat. It proves one
+These routes are intentionally separate from normal voice chat. They prove one
 causal chain:
 ASR perception -> canonical reported user-turn -> exact cognition RUN ->
-C23 response_intent -> TTS utterance -> phone playback-start receipt.
+C23 response_intent -> TTS utterance -> playback-start receipt.
 
-It does not claim physical PASS until the phone actually calls /started.
+Two measurements, chosen by the request's ``outward_kind``:
+
+``voice+body`` (the default, unchanged)
+    Needs an active body. The playback-start receipt is written by the body
+    session when the client reports ``/body/speech/{utterance_id}/started``.
+``voice``
+    Kaliv V1 (ADR-SYS-001 D5 and D6): the measurement ends at the first spoken
+    answer and claims no body. No body session is created, read or required.
+    Whoever plays the reply reports
+    ``/experimental/e2e-latency/voice/{utterance_id}/started`` on the worker's
+    loopback, and the receipt names no body runtime.
+
+Neither claims a physical PASS until playback start has actually been reported.
 """
 from __future__ import annotations
 
@@ -14,9 +26,11 @@ import base64
 import json
 import os
 import re
+import threading
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -30,13 +44,31 @@ FLAG = "KALIV_E2E_LATENCY_QUALIFICATION_ENABLED"
 SHA_ENV = "KALIV_E2E_LATENCY_CANDIDATE_GIT_SHA"
 ROOT_ENV = "KALIV_E2E_LATENCY_EVIDENCE_ROOT"
 _MOUNTED = "e2e_latency_voice_mounted"
+_VOICE_OUTWARD = "e2e_latency_voice_outward"
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
+_UTTERANCE = re.compile(r"^e2e-[0-9a-f]{32}-0$")
+_MAX_PENDING_VOICE_OUTWARD = 8
+VOICE_SCOPE_SCHEMA = "kaliv-system/end-to-end-latency-voice-scope/v1"
+# What the voice measurement leaves out. The driver repeats this list.
+VOICE_NOT_MEASURED = (
+    "microphone capture and upload of the utterance",
+    "the network between a phone and the rig",
+    "playback on a phone",
+    "output latency of the playback device",
+    "when the reply became audible: the stamp is the client's report that "
+    "playback was dispatched",
+    "whether the utterance was spoken live: the route receives audio bytes "
+    "and cannot tell",
+)
+# Set by the observer on every receipt of every turn on this route.
+ASSERTED_RECEIPT_FIELDS = ("real_event", "simulated", "replay")
 
 
 class QualificationBody(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     audio_base64: str = Field(min_length=1, max_length=32 * 1024 * 1024)
     language: str = Field(default="da", min_length=1, max_length=16)
+    outward_kind: Literal["voice", "voice+body"] = "voice+body"
 
 
 def enabled() -> bool:
@@ -48,6 +80,82 @@ def _atomic_json(path: Path, value: dict[str, Any]) -> None:
     tmp = path.with_name(path.name + ".tmp-" + uuid.uuid4().hex)
     tmp.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(tmp, path)
+
+
+@dataclass(frozen=True)
+class _PendingVoiceOutward:
+    observer: EndToEndLatencyObserver
+    qualification_id: str
+    receipt_path: Path
+    scope_path: Path
+
+
+class VoiceOutwardRegistry:
+    """Replies waiting for their playback start, for the voice-only measurement.
+
+    One reply, one start: the binding is consumed by the first report, so a
+    second report cannot move the timestamp. Nothing here is reachable unless
+    the qualification flag mounted the routes.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._pending: dict[str, _PendingVoiceOutward] = {}
+
+    def bind(self, utterance_id: str, pending: _PendingVoiceOutward) -> None:
+        with self._lock:
+            if utterance_id in self._pending:
+                raise ValueError("utterance already bound")
+            while len(self._pending) >= _MAX_PENDING_VOICE_OUTWARD:
+                self._pending.pop(next(iter(self._pending)))
+            self._pending[utterance_id] = pending
+
+    def start(self, utterance_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            pending = self._pending.pop(utterance_id, None)
+        if pending is None:
+            return None
+        # The clock is sampled before any file is written.
+        receipt = pending.observer.voice_outward_started(utterance_id=utterance_id)
+        _atomic_json(pending.receipt_path, receipt)
+        _atomic_json(
+            pending.scope_path,
+            {
+                "schema": VOICE_SCOPE_SCHEMA,
+                "qualification_id": pending.qualification_id,
+                "event_id": receipt["event_id"],
+                "utterance_id": utterance_id,
+                "outward_kind": "voice",
+                "playback_start_reported_on": "worker-loopback",
+                # The route stamps the moment a client says playback started.
+                # It hears nothing itself, so the stamp is a dispatch report
+                # and not the moment the reply became audible.
+                "outward_event": "client-reported-playback-dispatch",
+                "audible_onset_measured": False,
+                "measured": (
+                    "from the worker accepting the audio to the client's report "
+                    "that it had dispatched playback of the reply"
+                ),
+                # The route receives audio bytes. It cannot tell an utterance
+                # spoken now from a recording, so these receipt fields are what
+                # the route asserts for every turn, not findings about the audio.
+                "live_utterance_verified": False,
+                "receipt_fields_asserted_not_measured": list(ASSERTED_RECEIPT_FIELDS),
+                # The receipt's schema has no field for this, so it is stated
+                # beside it: the number is not what a phone user experiences.
+                "not_measured": list(VOICE_NOT_MEASURED),
+                "production_activation": False,
+            },
+        )
+        return receipt
+
+
+def _voice_outward(app: FastAPI) -> VoiceOutwardRegistry:
+    registry = getattr(app.state, _VOICE_OUTWARD, None)
+    if not isinstance(registry, VoiceOutwardRegistry):
+        registry = VoiceOutwardRegistry()
+        setattr(app.state, _VOICE_OUTWARD, registry)
+    return registry
 
 
 def build_router() -> APIRouter:
@@ -69,7 +177,8 @@ def build_router() -> APIRouter:
         loaded = load_cognitive_profile()
         if loaded is None:
             raise HTTPException(status_code=503, detail="qualification cognitive profile unavailable")
-        if body_session.current_session(create=True) is None:
+        voice_only = body.outward_kind == "voice"
+        if not voice_only and body_session.current_session(create=True) is None:
             raise HTTPException(status_code=503, detail="qualification body session unavailable")
 
         try:
@@ -147,24 +256,39 @@ def build_router() -> APIRouter:
         except Exception as exc:
             raise HTTPException(status_code=503, detail="qualification TTS failed") from exc
         utterance_id = qid + "-0"
-        body_session.note_speech(
-            utterance_id=utterance_id,
-            wav_path=str(wav_path),
-            headers=tts if isinstance(tts, dict) else None,
-            sentence=guidance.text,
-        )
-        body_runtime = body_session.current_session(create=False)
-        if body_runtime is None:
-            raise HTTPException(status_code=503, detail="qualification body session unavailable")
-
         outward_path = evidence_dir / "outward_started.json"
-        if not body_runtime.bind_e2e_outward(
-            utterance_id=utterance_id,
-            outward_receipt_path=str(outward_path),
-            outward_clock_sample=cognitive.trusted_clock.sample,
-            **observer.outward_binding(),
-        ):
-            raise HTTPException(status_code=503, detail="qualification outward binding unavailable")
+        if voice_only:
+            # No body session is created, read or bound: a V1 measurement must
+            # not claim a body, whether or not one happens to be active.
+            _voice_outward(request.app).bind(
+                utterance_id,
+                _PendingVoiceOutward(
+                    observer=observer,
+                    qualification_id=qid,
+                    receipt_path=outward_path,
+                    scope_path=evidence_dir / "voice_outward_scope.json",
+                ),
+            )
+            started_path = f"/experimental/e2e-latency/voice/{utterance_id}/started"
+        else:
+            body_session.note_speech(
+                utterance_id=utterance_id,
+                wav_path=str(wav_path),
+                headers=tts if isinstance(tts, dict) else None,
+                sentence=guidance.text,
+            )
+            body_runtime = body_session.current_session(create=False)
+            if body_runtime is None:
+                raise HTTPException(status_code=503, detail="qualification body session unavailable")
+
+            if not body_runtime.bind_e2e_outward(
+                utterance_id=utterance_id,
+                outward_receipt_path=str(outward_path),
+                outward_clock_sample=cognitive.trusted_clock.sample,
+                **observer.outward_binding(),
+            ):
+                raise HTTPException(status_code=503, detail="qualification outward binding unavailable")
+            started_path = f"/body/speech/{utterance_id}/started"
 
         perception_path = evidence_dir / "perception_received.json"
         cognition_path = evidence_dir / "cognition_completed.json"
@@ -178,6 +302,8 @@ def build_router() -> APIRouter:
             "runtime_epoch": observer.runtime_epoch,
             "observer_id": observer.observer_id,
             "utterance_id": utterance_id,
+            "outward_kind": body.outward_kind,
+            "playback_started_path": started_path,
             "audio_base64": base64.b64encode(wav_path.read_bytes()).decode("ascii"),
             "source_receipts": {
                 "perception": str(perception_path),
@@ -185,6 +311,23 @@ def build_router() -> APIRouter:
                 "outward": str(outward_path),
             },
             "outward_started": False,
+            "release_gate_satisfied": False,
+            "production_activation": False,
+        }
+
+    @router.post("/voice/{utterance_id}/started")
+    def voice_playback_started(utterance_id: str, request: Request) -> dict[str, Any]:
+        # Playback truth for the voice-only measurement. The caller supplies
+        # nothing but the utterance; candidate, event and observer identity are
+        # the worker's own, bound when the reply was synthesized.
+        if _UTTERANCE.fullmatch(utterance_id) is None:
+            raise HTTPException(status_code=404, detail="unknown qualification utterance")
+        receipt = _voice_outward(request.app).start(utterance_id)
+        if receipt is None:
+            raise HTTPException(status_code=404, detail="unknown qualification utterance")
+        return {
+            "ok": True,
+            "qualification_outward_receipt": receipt,
             "release_gate_satisfied": False,
             "production_activation": False,
         }

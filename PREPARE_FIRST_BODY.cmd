@@ -1,6 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+set "PYTHONDONTWRITEBYTECODE=1"
 title Kaliv -- foerste krop
 if "%~1"=="" (
   echo Brug: PREPARE_FIRST_BODY.cmd ^<sti til .vrm^> [navn]
