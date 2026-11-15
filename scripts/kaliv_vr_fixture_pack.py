@@ -7,14 +7,13 @@ the regular ModelRig body store and API; no VR-client bypass is needed.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
 import hashlib
-import json
 from pathlib import Path
-import stat
 import sys
 import zipfile
 from io import BytesIO
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from bodyrig.mrbody import (
     MRBODY_BUILDER_VERSION, REQUIRED_PATHS, _canonical_json_bytes,
