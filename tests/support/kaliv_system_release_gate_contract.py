@@ -58,6 +58,7 @@ def _manifest() -> dict:
     return {
         "schema": gate.SCHEMA,
         "release_id": "kaliv-rc-contract",
+        "release_scope": "embodied",
         "repositories": [
             {"repository": repo, "git_sha": ch * 40}
             for repo, ch in (
@@ -501,6 +502,108 @@ def run_contract() -> None:
     assert set(verdict.pending_gates) == set(gate.REQUIRED_GATES) - {
         "software_exact_green"
     }
+
+    _test_release_scope(valid)
+
+
+def _test_release_scope(valid: dict) -> None:
+    """ADR-SYS-001 contract tests 1-7."""
+    body = set(gate.BODY_GATES)
+    assert len(gate.V1_GATES) == 7 and len(body) == 3
+    assert set(gate.V1_GATES) | body == set(gate.REQUIRED_GATES)
+    assert set(gate.RELEASE_SCOPE_GATES) == {"v1", "embodied"}
+    assert gate.RELEASE_SCOPE_GATES["embodied"] == gate.REQUIRED_GATES
+    assert gate.evaluate_manifest(valid).deferred_gates == ()
+
+    def with_body(status: str, scope: str) -> dict:
+        manifest = copy.deepcopy(valid)
+        manifest["release_scope"] = scope
+        for name in body:
+            manifest["gates"][name] = {
+                "status": status,
+                "evidence_refs": [] if status == "PENDING" else ["evidence:x:1"],
+            }
+        return manifest
+
+    # 1. Seven PASS, three body gates PENDING: V1 is qualified, and the body
+    #    gates are reported as deferred rather than silently dropped.
+    verdict = gate.evaluate_manifest(with_body("PENDING", "v1"))
+    assert verdict.state == "QUALIFIED" and verdict.release_ready is True
+    assert verdict.release_scope == "v1"
+    assert set(verdict.deferred_gates) == body
+    assert verdict.pending_gates == () and verdict.failed_gates == ()
+    assert verdict.as_dict()["release_scope"] == "v1"
+    assert set(verdict.as_dict()["deferred_gates"]) == body
+
+    # A failed body gate does not block V1 either, and is still reported.
+    verdict = gate.evaluate_manifest(with_body("FAIL", "v1"))
+    assert verdict.release_ready is True and set(verdict.deferred_gates) == body
+
+    # 2. The same manifest is blocked as Embodied.
+    verdict = gate.evaluate_manifest(with_body("PENDING", "embodied"))
+    assert verdict.state == "BLOCKED" and verdict.release_ready is False
+    assert set(verdict.pending_gates) == body and verdict.deferred_gates == ()
+
+    # 3. No scope, or an unknown one, is rejected.
+    missing_scope = copy.deepcopy(valid)
+    del missing_scope["release_scope"]
+    _must_reject(missing_scope, "missing release_scope")
+    for bad in ("core", "V1", "", None, ["v1"]):
+        unknown = copy.deepcopy(valid)
+        unknown["release_scope"] = bad
+        _must_reject(unknown, "release_scope must be one of")
+
+    # 4. BodyRig stays in the V1 pin set.
+    unpinned = with_body("PENDING", "v1")
+    unpinned["repositories"] = [
+        pin for pin in unpinned["repositories"]
+        if pin["repository"] != "Ternedal/BodyRig"
+    ]
+    _must_reject(unpinned, "missing required repository pins: Ternedal/BodyRig")
+
+    # 5 and 7. Every one of the seven blocks V1 on its own. Iterating the
+    #    literal list here, not gate.V1_GATES, is what makes dropping a gate
+    #    from the source turn this red.
+    for name in (
+        "software_exact_green",
+        "consciousness_live_lifecycle",
+        "visionrig_physical_perception",
+        "voicerig_physical_acceptance",
+        "end_to_end_latency",
+        "recovery_soak",
+        "repository_authority",
+    ):
+        for status in ("PENDING", "FAIL"):
+            blocked = with_body("PENDING", "v1")
+            blocked["gates"][name] = {
+                "status": status,
+                "evidence_refs": [] if status == "PENDING" else ["evidence:x:1"],
+            }
+            verdict = gate.evaluate_manifest(blocked)
+            assert verdict.release_ready is False and verdict.state == "BLOCKED", name
+            listed = verdict.pending_gates if status == "PENDING" else verdict.failed_gates
+            assert listed == (name,), (name, status, listed)
+
+    # 6. Every one of the ten blocks Embodied on its own.
+    for name in gate.REQUIRED_GATES:
+        blocked = copy.deepcopy(valid)
+        blocked["gates"][name] = {"status": "PENDING", "evidence_refs": []}
+        verdict = gate.evaluate_manifest(blocked)
+        assert verdict.release_ready is False and verdict.pending_gates == (name,), name
+
+    # A body gate claimed PASS inside a V1 manifest is still held to its
+    # evidence rules: V1 cannot carry an unbacked body claim.
+    claimed = with_body("PENDING", "v1")
+    claimed["gates"]["bodyrig_digital_twin_m6"] = {
+        "status": "PASS",
+        "evidence_refs": ["operator-says-m6-passed"],
+    }
+    try:
+        gate.evaluate_manifest(claimed)
+    except gate.SystemReleaseManifestError:
+        pass
+    else:
+        raise AssertionError("unbacked body PASS accepted in a V1 manifest")
 
 
 if __name__ == "__main__":

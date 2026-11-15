@@ -57,7 +57,14 @@ func main() {
 	// needs its own long-timeout client, not just the Android app.
 	workerSlowClient := proxy.New(cfg.WorkerBaseURL, 10*time.Minute).WithHealthPath("/healthz")
 
+	// The gallery is served through the worker, which alone reads the media volume: it checks
+	// the Z: marker and identity and lists only the installation's completed jobs' assets.
+	// Off (nil, so every gallery route is 503) unless KALIV_MEDIA_JOBS_API=1 with a usable
+	// KALIV_MEDIA_INTERNAL_SECRET and a loopback worker.
+	mediaCatalog := httpapi.MediaCatalogFromEnv(cfg.WorkerBaseURL)
+
 	handler := httpapi.New(httpapi.Deps{
+		Media:      mediaCatalog,
 		Cfg:        cfg,
 		Store:      st,
 		Ollama:     ollamaClient,

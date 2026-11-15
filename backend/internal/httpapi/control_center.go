@@ -16,10 +16,17 @@ import (
 	"modelrig/internal/config"
 )
 
+// The metadata PATCH answers are v1 (before VisionRig 999a649, 26 Sep 2026) and v2 (which adds
+// state_revision). Both carry the same metadata.source_id and metadata.enabled, which are what
+// this route checks. Any other schema is still refused.
+var visionRigSensorMetadataSchemas = map[string]bool{
+	"visionrig/sensor-metadata/v1": true,
+	"visionrig/sensor-metadata/v2": true,
+}
+
 const (
 	controlCenterStatusSchema          = "kaliv-control-center-status/v1"
 	controlCenterScheduleHistorySchema = "kaliv-control-center-schedule-history/v1"
-	visionRigSensorMetadataSchema      = "visionrig/sensor-metadata/v1"
 	maxControlCenterStatusBytes        = 1 << 20
 	controlCenterStatusTimeout         = 5 * time.Second
 )
@@ -252,7 +259,7 @@ func (s *server) handleControlCenterVisionSensorEnabled(w http.ResponseWriter, r
 	}
 	var result map[string]any
 	if err := json.Unmarshal(responseBody, &result); err != nil ||
-		result["schema"] != visionRigSensorMetadataSchema {
+		!knownVisionRigSensorMetadataSchema(result["schema"]) {
 		writeErr(w, http.StatusBadGateway, "VisionRig control unavailable")
 		return
 	}
@@ -268,4 +275,9 @@ func (s *server) handleControlCenterVisionSensorEnabled(w http.ResponseWriter, r
 		"source_id": sourceID,
 		"enabled":   *input.Enabled,
 	})
+}
+
+func knownVisionRigSensorMetadataSchema(value any) bool {
+	schema, ok := value.(string)
+	return ok && visionRigSensorMetadataSchemas[schema]
 }
