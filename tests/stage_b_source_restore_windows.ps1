@@ -24,9 +24,24 @@ $hUpdater = Hash (Join-Path $AssetRoot "v2.0.20\$updaterName")
 $global:Calls = New-Object System.Collections.ArrayList
 $global:Health = $null
 $global:HealthQueue = New-Object System.Collections.Queue
-function global:Stop-ScheduledTask { param($TaskName) [void]$global:Calls.Add("stop:$TaskName") }
+$global:Writers = New-Object System.Collections.ArrayList
+$global:CurrentRig = $null
+# A started supervisor is a real separate process writing Unix ms to logs\supervisor-heartbeat
+# every 500 ms, as the supervisor does each tick; stopping the task kills it.
+function global:Stop-Writers {
+    foreach ($writer in @($global:Writers)) { try { if (-not $writer.HasExited) { $writer.Kill(); $writer.WaitForExit(10000) | Out-Null } } catch { } }
+    $global:Writers.Clear()
+}
+function global:Stop-ScheduledTask { param($TaskName) [void]$global:Calls.Add("stop:$TaskName"); Stop-Writers }
 # Each start of the task makes health report the next queued value ($null = down).
-function global:Start-ScheduledTask { param($TaskName) [void]$global:Calls.Add("start:$TaskName"); $global:Health = $global:HealthQueue.Dequeue() }
+function global:Start-ScheduledTask {
+    param($TaskName)
+    [void]$global:Calls.Add("start:$TaskName")
+    $global:Health = $global:HealthQueue.Dequeue()
+    $beat = (Join-Path (Join-Path $global:CurrentRig 'logs') 'supervisor-heartbeat').Replace("'", "''")
+    $loop = "while (`$true) { try { [IO.File]::WriteAllText('$beat', [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString()) } catch { }; Start-Sleep -Milliseconds 500 }"
+    [void]$global:Writers.Add((Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-NonInteractive', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($loop))) -PassThru -WindowStyle Hidden))
+}
 function global:Invoke-RestMethod {
     param($Method, $Uri, $Headers, $TimeoutSec, [switch]$UseBasicParsing)
     if ([string]$Uri -like 'http://127.0.0.1:*/healthz') {
@@ -36,19 +51,30 @@ function global:Invoke-RestMethod {
     Microsoft.PowerShell.Utility\Invoke-RestMethod -Method $Method -Uri $Uri -Headers $Headers -TimeoutSec $TimeoutSec -UseBasicParsing
 }
 
+# The updater installs the worker in worker\, everything else in the rig root.
+function Live([string]$Root, [string]$Name) {
+    if ($Name -eq 'modelrig-worker-windows-x64.exe') { return Join-Path (Join-Path $Root 'worker') $Name }
+    return Join-Path $Root $Name
+}
 function New-Rig([string]$Case) {
     $root = Join-Path $suite $Case
     [IO.Directory]::CreateDirectory((Join-Path $root 'logs')) | Out-Null
     Copy-Item -LiteralPath (Join-Path $AssetRoot "v2.0.20\$updaterName") -Destination (Join-Path $root $updaterName)
-    foreach ($n in $names) { Copy-Item -LiteralPath (Join-Path $AssetRoot "v2.0.20\$n") -Destination (Join-Path $root $n) }
+    [IO.Directory]::CreateDirectory((Join-Path $root 'worker')) | Out-Null
+    foreach ($n in $names) { Copy-Item -LiteralPath (Join-Path $AssetRoot "v2.0.20\$n") -Destination (Live $root $n) }
     [IO.File]::WriteAllText((Join-Path $root 'update-transaction.json'), '{"state":"committed"}')
+    $global:CurrentRig = $root
     return $root
 }
 function Snapshot([string]$Root) {
     return (@(Get-ChildItem -LiteralPath $Root -Recurse -File | Sort-Object FullName | ForEach-Object { $_.FullName + '=' + (Hash $_.FullName) }) -join '|')
 }
 function Invoke-Restore([string]$Root, [hashtable]$Extra) {
+    Stop-Writers
     $global:Calls.Clear()
+    $all = @{ SupervisorIntervalSeconds = 2; HeartbeatSettleSeconds = 30 }
+    foreach ($key in $Extra.Keys) { $all[$key] = $Extra[$key] }
+    $Extra = $all
     & $script -RigRoot $Root @Extra
 }
 function Assert-Refused([string]$Root, [string]$Expected, [string]$What) {
@@ -98,7 +124,8 @@ $holderProcess.WaitForExit(60000) | Out-Null
 Assert ($out -match 'Stage B source ready') 'Apply did not report ready'
 Assert (Test-Path -LiteralPath (Join-Path $suite 'held.txt')) 'The handle holder never opened the live server'
 Assert ($out -match ('waiting for another process to release .*' + [regex]::Escape($names[0]))) 'The swap did not meet the held handle (no sharing-violation wait)'
-foreach ($n in $names) { Assert ((Hash (Join-Path $rig $n)) -ceq $h12[$n]) "$n is not the signed v2.0.12 bytes" }
+foreach ($n in $names) { Assert ((Hash (Live $rig $n)) -ceq $h12[$n]) "$n is not the signed v2.0.12 bytes" }
+Assert (-not (Test-Path -LiteralPath (Join-Path $rig $names[2]))) 'A worker was written to the rig root'
 Assert ((Hash (Join-Path $rig $updaterName)) -ceq $hUpdater) 'The live updater changed'
 Assert (-not (Test-Path -LiteralPath (Join-Path $rig 'update-transaction.json'))) 'The journal was not archived'
 Assert (-not (Test-Path -LiteralPath (Join-Path $rig 'updater.lock'))) 'The lock was left behind'
@@ -107,7 +134,7 @@ Assert ($work.Count -eq 1) 'Expected exactly one restore folder'
 Assert (Test-Path -LiteralPath (Join-Path $work[0].FullName 'update-transaction.json')) 'The archived journal is missing'
 foreach ($n in $names) { Assert ((Hash (Join-Path $work[0].FullName "v2.0.20\$n")) -ceq $h20[$n]) "The v2.0.20 backup of $n is wrong" }
 Assert (($global:Calls -join ',') -ceq 'stop:KalivSupervisor,start:KalivSupervisor') "Unexpected task calls: $($global:Calls -join ',')"
-Write-Host 'ok: apply installs signed v2.0.12, keeps the v2.0.20 updater and backups, archives the journal'
+Write-Host 'ok: apply installs signed v2.0.12, proves the supervisor loops, keeps the v2.0.20 updater and backups, archives the journal'
 
 # 3. A second run is a no-op.
 $global:Health = '2.0.12'
@@ -127,8 +154,8 @@ $global:HealthQueue.Clear(); $global:HealthQueue.Enqueue($null); $global:HealthQ
 $message = ''
 try { Invoke-Restore $rig @{ Apply = $true; HealthTimeoutSeconds = 6 } | Out-Null } catch { $message = [string]$_ }
 Assert ($message -match 'did not both report 2\.0\.12') "Rollback case did not name the health failure: '$message'"
-Assert ($message -match 'rolled back to v2\.0\.20 with the original journal' -and $message -notmatch 'NOT yet back') "Rollback was not reported complete: '$message'"
-foreach ($n in $names) { Assert ((Hash (Join-Path $rig $n)) -ceq $h20[$n]) "$n is not the v2.0.20 bytes after the rollback" }
+Assert ($message -match 'rolled back to v2\.0\.20 with the original journal' -and $message -match ', supervisor looping\)') "Rollback was not reported complete with a looping supervisor: '$message'"
+foreach ($n in $names) { Assert ((Hash (Live $rig $n)) -ceq $h20[$n]) "$n is not the v2.0.20 bytes after the rollback" }
 Assert ((Hash (Join-Path $rig $updaterName)) -ceq $hUpdater) 'The live updater changed in the rollback case'
 Assert ((Hash (Join-Path $rig 'update-transaction.json')) -ceq $journalBefore) 'The journal was not put back byte for byte'
 Assert ((Hash (Join-Path $rig 'update-transaction.json.tmp')) -ceq $tmpBefore) 'The journal .tmp was not put back byte for byte'
@@ -145,8 +172,9 @@ $rig = New-Rig 'journal'; [IO.File]::WriteAllText((Join-Path $rig 'update-transa
 Assert-Refused $rig 'Unfinished appliance transaction' 'an unfinished journal'
 $rig = New-Rig 'updater'; Copy-Item -LiteralPath (Join-Path $AssetRoot "v2.0.12\$($names[0])") -Destination (Join-Path $rig $updaterName) -Force
 Assert-Refused $rig 'not the signed v2.0.20 updater' 'a live updater other than v2.0.20'
-$rig = New-Rig 'unknown'; [IO.File]::WriteAllText((Join-Path $rig $names[2]), 'not a release')
+$rig = New-Rig 'unknown'; [IO.File]::WriteAllText((Live $rig $names[2]), 'not a release')
 Assert-Refused $rig 'neither signed' 'an unknown worker'
 
+Stop-Writers
 Remove-Item -LiteralPath $suite -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host 'All Stage B source-restore checks passed.'

@@ -17,7 +17,8 @@
 #   3. stops the supervisor task and the running set, the same way the updater does;
 #   4. copies the current v2.0.20 executables to a backup folder and archives the journal files;
 #   5. replaces the three executables and verifies their hashes;
-#   6. starts the supervisor task and waits until backend and worker report 2.0.12.
+#   6. starts the supervisor task, waits until backend and worker report 2.0.12, and proves the
+#      supervisor is looping from its heartbeat, as the updater does after an update.
 # If any step after the lock fails, including step 6, it rolls back to the v2.0.20 executables and
 # the original journal, verifies both, and starts the task again (see "mutate" below).
 #
@@ -28,7 +29,11 @@ param(
     [string]$RigRoot = 'C:\Rig\ModelRig',
     [switch]$Apply,
     [string]$SupervisorTask = 'KalivSupervisor',
-    [int]$HealthTimeoutSeconds = 300
+    [int]$HealthTimeoutSeconds = 300,
+    # The supervisor's tick (modelrig-updater -supervisor-interval) and how long a restarted
+    # supervisor gets to write its first heartbeat (the updater's ProveLooping settle).
+    [int]$SupervisorIntervalSeconds = 10,
+    [int]$HeartbeatSettleSeconds = 45
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -46,8 +51,16 @@ $Assets = [ordered]@{
 }
 $UpdaterName = 'modelrig-updater-windows-x64.exe'
 $UpdaterSha = '26e131ccfaa9e551311c5e897d1e8c3b964e7bc0b519e2b2f015458c3b0237ed'
+# Where each executable lives, as the updater installs them: the worker in its own subdirectory,
+# everything else in the rig root (modelrig-updater main.go; Get-UpdaterState.ps1).
+$InstalledAt = @{ 'modelrig-worker-windows-x64.exe' = 'worker' }
 $ServerHealth = 'http://127.0.0.1:8080/healthz'
 $WorkerHealth = 'http://127.0.0.1:8099/healthz'
+
+function Get-LivePath([string]$Name) {
+    if ($InstalledAt.ContainsKey($Name)) { return Join-Path (Join-Path $RigRoot $InstalledAt[$Name]) $Name }
+    return Join-Path $RigRoot $Name
+}
 
 function Get-SHA256([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -149,7 +162,7 @@ foreach ($name in @('update-transaction.json', 'update-transaction.json.tmp')) {
 
 $plan = @()
 foreach ($name in $Assets.Keys) {
-    $path = Join-Path $RigRoot $name
+    $path = Get-LivePath $name
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Live executable missing: $path. Nothing changed." }
     $hash = Get-SHA256 $path
     if ($hash -ceq $Assets[$name].Source) { $plan += [pscustomobject]@{ Name = $name; Live = $SourceVersion; Action = 'keep' } }
@@ -211,6 +224,41 @@ function Wait-Health([string]$Server, [string]$Worker) {
     }
 }
 
+# The updater's liveness proof (internal/heartbeat ProveLooping): the supervisor writes Unix
+# milliseconds to logs\supervisor-heartbeat every tick; a value at or after the restart must appear
+# within the settle time and then advance within two ticks.
+function Read-Heartbeat {
+    try {
+        $text = [IO.File]::ReadAllText((Join-Path (Join-Path $RigRoot 'logs') 'supervisor-heartbeat')).Trim()
+        return [long]::Parse($text, [Globalization.CultureInfo]::InvariantCulture)
+    } catch { return $null }
+}
+function Test-SupervisorLooping([long]$AfterMs) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($HeartbeatSettleSeconds)
+    $first = $null
+    while ($null -eq $first) {
+        $beat = Read-Heartbeat
+        if ($null -ne $beat -and $beat -ge $AfterMs) { $first = $beat; break }
+        if ([DateTime]::UtcNow -ge $deadline) { return $false }
+        Start-Sleep -Milliseconds 250
+    }
+    $deadline = [DateTime]::UtcNow.AddSeconds(2 * $SupervisorIntervalSeconds + 2)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $beat = Read-Heartbeat
+        if ($null -ne $beat -and $beat -gt $first) { return $true }
+        Start-Sleep -Milliseconds 250
+    }
+    return $false
+}
+function Start-Supervisor {
+    $heartbeat = Join-Path (Join-Path $RigRoot 'logs') 'supervisor-heartbeat'
+    if (Test-Path -LiteralPath $heartbeat) { Remove-Item -LiteralPath $heartbeat -Force }
+    $at = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $script:taskRunning = $true
+    Start-ScheduledTask -TaskName $SupervisorTask
+    return $at
+}
+
 $serverBefore = $serverVersion
 $workerBefore = $workerVersion
 $guard = [IO.File]::Open($lockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
@@ -227,7 +275,7 @@ try {
     Stop-RunningSet
     try {
         foreach ($row in $replace) {
-            $live = Join-Path $RigRoot $row.Name
+            $live = Get-LivePath $row.Name
             $copy = Join-Path $previous $row.Name
             Copy-Item -LiteralPath $live -Destination $copy
             if ((Get-SHA256 $copy) -cne $Assets[$row.Name].Target) { throw "Backup of $($row.Name) does not verify." }
@@ -238,22 +286,22 @@ try {
             $archived += $entry
         }
         foreach ($row in $replace) {
-            $live = Join-Path $RigRoot $row.Name
+            $live = Get-LivePath $row.Name
             $swapped += $row.Name
             Set-Executable (Join-Path $staged $row.Name) $live
             if ((Get-SHA256 $live) -cne $Assets[$row.Name].Source) { throw "Installed $($row.Name) does not verify as v$SourceVersion." }
             Write-Host "installed v$SourceVersion $($row.Name)"
         }
-        $heartbeat = Join-Path (Join-Path $RigRoot 'logs') 'supervisor-heartbeat'
-        if (Test-Path -LiteralPath $heartbeat) { Remove-Item -LiteralPath $heartbeat -Force }
         Write-Host "starting supervisor task"
-        $taskRunning = $true
-        Start-ScheduledTask -TaskName $SupervisorTask
+        $startedAt = Start-Supervisor
         if (-not (Wait-Health $SourceVersion $SourceVersion)) {
             throw "backend '$serverVersion' and worker '$workerVersion' did not both report $SourceVersion within $HealthTimeoutSeconds s"
         }
+        if (-not (Test-SupervisorLooping $startedAt)) {
+            throw "the v$SourceVersion supervisor did not prove it is looping (no advancing heartbeat after the restart)"
+        }
         foreach ($name in $Assets.Keys) {
-            if ((Get-SHA256 (Join-Path $RigRoot $name)) -cne $Assets[$name].Source) { throw "$name is not v$SourceVersion after the restore" }
+            if ((Get-SHA256 (Get-LivePath $name)) -cne $Assets[$name].Source) { throw "$name is not v$SourceVersion after the restore" }
         }
         if ((Get-SHA256 $updater) -cne $UpdaterSha) { throw "the live updater changed during the restore" }
         foreach ($name in @('update-transaction.json', 'update-transaction.json.tmp')) {
@@ -264,9 +312,9 @@ try {
         Write-Host "restore failed ($failure); rolling back to v$TargetVersion and the original journal"
         try {
             if ($taskRunning) { Stop-RunningSet; $taskRunning = $false }
-            foreach ($name in $swapped) { Set-Executable (Join-Path $previous $name) (Join-Path $RigRoot $name) }
+            foreach ($name in $swapped) { Set-Executable (Join-Path $previous $name) (Get-LivePath $name) }
             foreach ($name in $swapped) {
-                if ((Get-SHA256 (Join-Path $RigRoot $name)) -cne $Assets[$name].Target) { throw "$name is not v$TargetVersion after the rollback" }
+                if ((Get-SHA256 (Get-LivePath $name)) -cne $Assets[$name].Target) { throw "$name is not v$TargetVersion after the rollback" }
             }
             foreach ($entry in $archived) {
                 if (Test-Path -LiteralPath $entry.Path) { throw "$($entry.Path) reappeared during the restore" }
@@ -278,10 +326,11 @@ try {
             throw "ROLLBACK DID NOT VERIFY: $_. This script will not start the supervisor task, and updater.lock is KEPT. Both executable sets and the original journal are in $work. Restore by hand from there before removing the lock. Cause of the failed restore: $failure"
         }
         Write-Host "rolled back: v$TargetVersion executables and the original journal are in place; starting supervisor task"
-        $taskRunning = $true
-        Start-ScheduledTask -TaskName $SupervisorTask
-        $back = Wait-Health $serverBefore $workerBefore
-        throw "Restore aborted and rolled back to v$TargetVersion with the original journal (backend '$serverVersion', worker '$workerVersion'$(if (-not $back) { ', NOT yet back to the versions before the restore' })). Downloads and copies are in $work. Cause: $failure"
+        $rolledBackAt = Start-Supervisor
+        $healthBack = Wait-Health $serverBefore $workerBefore
+        $loopingBack = $healthBack -and (Test-SupervisorLooping $rolledBackAt)
+        $state = if (-not $healthBack) { ', NOT yet back to the versions before the restore' } elseif (-not $loopingBack) { ', supervisor NOT proven looping' } else { ', supervisor looping' }
+        throw "Restore aborted and rolled back to v$TargetVersion with the original journal (backend '$serverVersion', worker '$workerVersion'$state). Downloads and copies are in $work. Cause: $failure"
     }
 } finally {
     $guard.Dispose()

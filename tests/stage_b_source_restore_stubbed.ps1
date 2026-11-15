@@ -38,7 +38,13 @@ $copy = Join-Path $here 'under-test.ps1'
 Set-Content -LiteralPath $copy -Value $src -Encoding ascii
 
 function global:Get-CimInstance { param($ClassName, $Filter) @($global:Procs) }
-function global:Stop-ScheduledTask { param($TaskName) $global:Calls += "stop-task" }
+# A started, healthy supervisor writes its heartbeat (Unix ms) every 300 ms until it is stopped.
+$global:Writers = @()
+function global:Stop-Writers {
+    foreach ($job in $global:Writers) { Stop-Job $job -ErrorAction SilentlyContinue; Remove-Job $job -Force -ErrorAction SilentlyContinue }
+    $global:Writers = @()
+}
+function global:Stop-ScheduledTask { param($TaskName) $global:Calls += "stop-task"; Stop-Writers }
 # Health follows what is actually installed: starting the task makes backend and worker report the
 # version of the live server file, unless 2.0.12 is set to fail on 2.0.20's data (or always).
 function global:Start-ScheduledTask {
@@ -48,6 +54,21 @@ function global:Start-ScheduledTask {
     $live = ([IO.File]::ReadAllText((Join-Path $global:CurrentRig 'modelrig-server-windows-x64.exe')) -split ' ')[-1]
     $global:Health = $live
     if ($global:BrokenAlways -or ($global:BrokenOn2012 -and $live -ceq '2.0.12')) { $global:Health = $null }
+    $on2012 = $live -ceq '2.0.12'
+    if (-not ($global:SupervisorDead -or ($global:SupervisorDeadOn2012 -and $on2012))) {
+        $beat = Join-Path (Join-Path $global:CurrentRig 'logs') 'supervisor-heartbeat'
+        # once: writes one heartbeat and hangs. offset: every beat is a minute in the past.
+        $once = [bool]($global:SupervisorStuckOn2012 -and $on2012)
+        $offset = 0; if ($global:StaleHeartbeatOn2012 -and $on2012) { $offset = 60000 }
+        $global:Writers += Start-ThreadJob -ArgumentList $beat, $once, $offset -ScriptBlock {
+            param($path, $once, $offset)
+            while ($true) {
+                try { [IO.File]::WriteAllText($path, ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $offset).ToString()) } catch { }
+                if ($once) { break }
+                Start-Sleep -Milliseconds 300
+            }
+        }
+    }
 }
 function global:Invoke-RestMethod {
     param($Method, $Uri, $Headers, $TimeoutSec, [switch]$UseBasicParsing)
@@ -74,12 +95,18 @@ function global:Copy-Item {
     Microsoft.PowerShell.Management\Copy-Item -LiteralPath $LiteralPath -Destination $Destination -Force:$Force
 }
 
+# The updater installs the worker in worker\, everything else in the rig root.
+function Live([string]$root, [string]$n) {
+    if ($n -eq 'modelrig-worker-windows-x64.exe') { return Join-Path (Join-Path $root 'worker') $n }
+    return Join-Path $root $n
+}
 function New-Rig([hashtable]$liveVersion) {
     $root = Join-Path $here ('rig-' + [Guid]::NewGuid().ToString('N').Substring(0, 6))
     New-Item -ItemType Directory -Path (Join-Path $root 'logs') -Force | Out-Null
     $u = Join-Path $root 'modelrig-updater-windows-x64.exe'
     [IO.File]::WriteAllText($u, $updaterText); chmod +x $u
-    foreach ($n in $names) { [IO.File]::WriteAllText((Join-Path $root $n), "$n $($liveVersion[$n])") }
+    New-Item -ItemType Directory -Path (Join-Path $root 'worker') -Force | Out-Null
+    foreach ($n in $names) { [IO.File]::WriteAllText((Live $root $n), "$n $($liveVersion[$n])") }
     $global:CurrentRig = $root
     return $root
 }
@@ -87,16 +114,26 @@ function Reset([string]$health) {
     $global:Procs = @(); $global:Calls = @(); $global:Downloads = @(); $global:Prov = @()
     $global:Health = $health; $global:BadDownload = $null; $global:FailCopyTo = $null; $global:FailRollbackTo = $null; $global:AttReply = $null
     $global:ShareFailures = 0; $global:StartFailures = 0; $global:BrokenOn2012 = $false; $global:BrokenAlways = $false
+    $global:SupervisorDead = $false; $global:SupervisorDeadOn2012 = $false; $global:SupervisorStuckOn2012 = $false; $global:StaleHeartbeatOn2012 = $false
+    Stop-Writers
+}
+# Short supervisor timings, so a missing heartbeat fails in seconds rather than the rig's 45 s.
+function Fast([hashtable]$extra) {
+    $all = @{ SupervisorIntervalSeconds = 1; HeartbeatSettleSeconds = 3 }
+    foreach ($key in $extra.Keys) { $all[$key] = $extra[$key] }
+    return $all
 }
 function Run([string]$root, [hashtable]$extra) {
+    $extra = Fast $extra
     $out = & $copy -RigRoot $root @extra *>&1 | Out-String
     return $out
 }
 function RunErr([string]$root, [hashtable]$extra) {
+    $extra = Fast $extra
     try { $null = & $copy -RigRoot $root @extra *>&1; return '' } catch { return [string]$_ }
 }
 function LiveIs([string]$root, [string]$v) {
-    foreach ($n in $names) { if ([IO.File]::ReadAllText((Join-Path $root $n)) -cne "$n $v") { return $false } }
+    foreach ($n in $names) { if ([IO.File]::ReadAllText((Live $root $n)) -cne "$n $v") { return $false } }
     return $true
 }
 $all2020 = @{}; $all2012 = @{}; foreach ($n in $names) { $all2020[$n] = '2.0.20'; $all2012[$n] = '2.0.12' }
@@ -139,7 +176,8 @@ foreach ($case in @(
     @{ What = 'pending updater'; Prep = { param($r) [IO.File]::WriteAllText((Join-Path $r 'modelrig-updater-windows-x64.exe.pending'), 'x') }; Expect = 'pending exists' },
     @{ What = 'unfinished journal'; Prep = { param($r) [IO.File]::WriteAllText((Join-Path $r 'update-transaction.json'), '{"state":"swapping"}') }; Expect = 'Unfinished appliance transaction' },
     @{ What = 'unreadable journal'; Prep = { param($r) [IO.File]::WriteAllText((Join-Path $r 'update-transaction.json.tmp'), 'not json') }; Expect = 'Unfinished appliance transaction' },
-    @{ What = 'unknown binary'; Prep = { param($r) [IO.File]::WriteAllText((Join-Path $r 'modelrig-worker-windows-x64.exe'), 'other') }; Expect = 'neither signed' },
+    @{ What = 'worker only in the root'; Prep = { param($r) Move-Item (Live $r 'modelrig-worker-windows-x64.exe') (Join-Path $r 'modelrig-worker-windows-x64.exe') }; Expect = 'Live executable missing' },
+    @{ What = 'unknown binary'; Prep = { param($r) [IO.File]::WriteAllText((Live $r 'modelrig-worker-windows-x64.exe'), 'other') }; Expect = 'neither signed' },
     @{ What = 'wrong updater'; Prep = { param($r) [IO.File]::WriteAllText((Join-Path $r 'modelrig-updater-windows-x64.exe'), "#!/bin/sh`necho 2.0.18`n") }; Expect = 'not the signed v2.0.20 updater' },
     @{ What = 'running updater'; Prep = { param($r) $global:Procs = @([pscustomobject]@{ ProcessId = 99999; Name = 'modelrig-updater-windows-x64.exe'; CommandLine = '' }) }; Expect = 'An updater is running' },
     @{ What = 'running helper'; Prep = { param($r) $global:Procs = @([pscustomobject]@{ ProcessId = 99998; Name = 'powershell.exe'; CommandLine = "powershell -Command x modelrig-updater-windows-x64.exe.pending" }) }; Expect = 'replacement helper is running' },
@@ -180,7 +218,7 @@ Reset '2.0.20'; $r = New-JournalRig
 $global:FailCopyTo = 'modelrig-worker-windows-x64.exe'
 $e = RunErr $r @{ Apply = $true }
 Check ($e -match 'rolled back to v2.0.20 with the original journal') 'reports rollback'
-Check ($e -notmatch 'NOT yet back') 'health back to the versions before'
+Check ($e -notmatch 'NOT yet back' -and $e -match ', supervisor looping') 'health and supervisor back as before'
 Check (LiveIs $r '2.0.20') 'live set back on 2.0.20'
 Check (JournalBack $r) 'journal and tmp back, byte for byte'
 Check (-not (Test-Path (Join-Path $r 'updater.lock'))) 'lock released'
@@ -207,6 +245,33 @@ Check ($e -match 'simulated task start failure' -and $e -match 'rolled back to v
 Check ((LiveIs $r '2.0.20') -and (JournalBack $r)) 'executables and journal back'
 Check (($global:Calls -join ',') -ceq 'stop-task,start-task,stop-task,start-task') 'stopped, then started again'
 Check (-not (Test-Path (Join-Path $r 'updater.lock'))) 'lock released'
+
+Write-Host 'a 2.0.12 supervisor that does not loop rolls back'
+Reset '2.0.20'; $r = New-JournalRig
+$global:SupervisorDeadOn2012 = $true
+$e = RunErr $r @{ Apply = $true; HealthTimeoutSeconds = 4 }
+Check ($e -match 'did not prove it is looping') 'names the missing heartbeat'
+Check ($e -match 'rolled back to v2.0.20 with the original journal' -and $e -match ', supervisor looping') 'reports a complete rollback'
+Check ((LiveIs $r '2.0.20') -and (JournalBack $r)) 'executables and journal back'
+Check (($global:Calls -join ',') -ceq 'stop-task,start-task,stop-task,start-task') 'stopped, then started again'
+Check (-not (Test-Path (Join-Path $r 'updater.lock'))) 'lock released'
+
+foreach ($case in @(@{ What = 'one heartbeat and then nothing'; Flag = 'SupervisorStuckOn2012' }, @{ What = 'heartbeats older than the restart'; Flag = 'StaleHeartbeatOn2012' })) {
+    Write-Host "a 2.0.12 supervisor with $($case.What) does not count as looping"
+    Reset '2.0.20'; $r = New-JournalRig
+    Set-Variable -Scope Global -Name $case.Flag -Value $true
+    $e = RunErr $r @{ Apply = $true; HealthTimeoutSeconds = 4 }
+    Check ($e -match 'did not prove it is looping') 'names the missing heartbeat'
+    Check ((LiveIs $r '2.0.20') -and (JournalBack $r)) 'executables and journal back'
+}
+
+Write-Host 'a rollback whose supervisor does not loop says so'
+Reset '2.0.20'; $r = New-JournalRig
+$global:SupervisorDead = $true
+$global:FailCopyTo = 'modelrig-worker-windows-x64.exe'
+$e = RunErr $r @{ Apply = $true; HealthTimeoutSeconds = 4 }
+Check ($e -match 'supervisor NOT proven looping') 'says the supervisor is not proven'
+Check ((LiveIs $r '2.0.20') -and (JournalBack $r)) 'executables and journal back'
 
 Write-Host 'a rollback that is up but not healthy says so'
 Reset '2.0.20'; $r = New-JournalRig
@@ -250,6 +315,7 @@ Check $ok 'v2.0.12 worker accepted (one attestation covers all release assets)'
 $ok = $false; try { Assert-ReleaseProvenance-Real '7a255a2dcdfb5b73ba3eaede75b6a182e5e360a1b59cd731f5250b25d853a9ab' } catch { $ok = $true }
 Check $ok 'digest outside the attestation subjects refused'
 
+Stop-Writers
 Remove-Item -LiteralPath $here -Recurse -Force
 Write-Host "failures: $fails"
 exit $fails
