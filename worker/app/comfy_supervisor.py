@@ -57,7 +57,7 @@ from pathlib import Path
 from typing import Mapping
 
 from .gpu_lease import GpuLease, acquire_gpu_lease, normalize_gpu_uuid, resident_is_held, resident_lock_path
-from .media_generation_contract import VerifiedMediaVolume
+from .media_generation_contract import MediaWorkArea
 
 RESIDENT_LAUNCHER = Path(__file__).resolve().with_name("comfy_resident_launcher.py")
 
@@ -80,9 +80,9 @@ _DIRECTORY_FLAGS = ("--input-directory", "--output-directory", "--temp-directory
 # Variables the child gets from the caller's environment; everything else is
 # dropped so no CUDA_*/proxy/token variable leaks in by accident.
 # TEMP/TMP/TMPDIR are NOT passed through: they are pointed at ComfyUI's own temp
-# directory on the verified media volume (child_env), so no library inside
-# ComfyUI can stage frames or partial media in the caller's temp folder, which
-# on the rig is on the internal disk.
+# directory in the private work area (child_env), so no library inside ComfyUI
+# can stage frames or partial media in the caller's temp folder, which other
+# users of the machine may be able to read.
 _PASSTHROUGH_ENV = ("PATH", "SYSTEMROOT", "HOME", "USERPROFILE", "LANG", "LC_ALL")
 _TEMP_ENV = ("TEMP", "TMP", "TMPDIR")
 
@@ -208,7 +208,7 @@ def _bounded(value: object, low: float, high: float, name: str) -> float:
 
 
 class ComfySupervisor:
-    def __init__(self, *, gpu_uuid: str, lease_dir: str, launch: ComfyLaunch, media_volume: VerifiedMediaVolume,
+    def __init__(self, *, gpu_uuid: str, lease_dir: str, launch: ComfyLaunch, work_area: MediaWorkArea,
                  reserve_gib: float, min_usable_gib: float, ready_timeout_s: float = 180.0,
                  stop_timeout_s: float = 30.0, poll_s: float = 0.5, log_path: str | None = None,
                  base_env: Mapping[str, str] | None = None, host_memory_gib: float = 48.0):
@@ -223,9 +223,9 @@ class ComfySupervisor:
         self.host_memory_gib = _bounded(host_memory_gib, 1, 64, "host_memory_gib")
         self.log_path = log_path
         self.base_env = dict(os.environ if base_env is None else base_env)
-        if not isinstance(media_volume, VerifiedMediaVolume):
-            raise ComfySupervisorError("a verified external media volume is required (no internal-disk default)")
-        self.media_volume = media_volume
+        if not isinstance(work_area, MediaWorkArea):
+            raise ComfySupervisorError("a verified private work area is required (no default folder)")
+        self.work_area = work_area
         self._lease: GpuLease | None = None
         self._proc: subprocess.Popen | None = None
         self._token = secrets.token_hex(16)
@@ -256,11 +256,11 @@ class ComfySupervisor:
         return (isinstance(token, str) and hmac.compare_digest(token, self._token)
                 and type(pid) is int and self._proc is not None and pid == self._proc.pid)
 
-    def require_media_volume(self) -> None:
-        """Every ComfyUI media directory must be on the verified external volume, now."""
+    def require_work_area(self) -> None:
+        """Every ComfyUI directory must be in the verified private work area, now (Anders, 6 Nov)."""
         for directory in (self.launch.input_directory, self.launch.output_directory,
                           self.launch.temp_directory, self.launch.user_directory):
-            self.media_volume.require(directory)  # raises ArtifactSinkUnavailable
+            self.work_area.require(directory)  # raises ArtifactSinkUnavailable
 
     @contextlib.contextmanager
     def job_slot(self):
@@ -285,7 +285,7 @@ class ComfySupervisor:
             "PYTHONUNBUFFERED": "1",
             "KALIV_RESIDENT_TOKEN": self._token,
         })
-        env.update({key: str(self.launch.temp_directory) for key in _TEMP_ENV})  # on the verified volume
+        env.update({key: str(self.launch.temp_directory) for key in _TEMP_ENV})  # in the private work area
         return env
 
     def start(self) -> VramBudget:
@@ -293,7 +293,7 @@ class ComfySupervisor:
             raise ComfySupervisorError("supervisor already started")
         resident = resident_lock_path(self.gpu_uuid, lease_dir=self.lease_dir)
         argv = self.launch.argv(str(resident))
-        self.require_media_volume()  # before the lease: no ComfyUI on an internal or missing disk
+        self.require_work_area()  # before the lease: no ComfyUI outside the private work area
         self._token = secrets.token_hex(16)  # fresh per start
         self._proof = Path(str(resident) + ".proof")
         lease = acquire_gpu_lease(self.gpu_uuid, lease_dir=self.lease_dir)

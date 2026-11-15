@@ -14,6 +14,7 @@ Run: python3 tests/workflow_current_state.py
 """
 from __future__ import annotations
 
+import difflib
 import subprocess
 import sys
 from pathlib import Path
@@ -41,6 +42,18 @@ check(doc.exists(), "CURRENT_STATE.md is committed")
 
 r = subprocess.run([sys.executable, str(gen), "--check"], capture_output=True,
                    text=True, cwd=str(ROOT), timeout=120)
+if r.returncode != 0:
+    # Keep the generator as the single authority; expose its exact delta
+    # instead of making CI's drift error an opaque regeneration instruction.
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import current_state as _current_state
+    expected = _current_state.render().splitlines(keepends=True)
+    actual = doc.read_text(encoding="utf-8").splitlines(keepends=True)
+    print("".join(difflib.unified_diff(
+        actual, expected, fromfile="CURRENT_STATE.md",
+        tofile="generated CURRENT_STATE.md", n=2,
+    )), flush=True)
+
 check(r.returncode == 0,
       "CURRENT_STATE.md matches the code"
       if r.returncode == 0

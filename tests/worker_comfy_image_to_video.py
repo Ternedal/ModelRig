@@ -137,7 +137,7 @@ class ImageToVideoAdapterTests(unittest.TestCase):
                                                    "max_steps": 30, "max_frames": 81}))
 
     def loaded(self, fake=None, volume=None):
-        adapter = self.adapter(fake=fake, profile=self.i2v_profile(), volume=volume)
+        adapter = self.adapter(fake=fake, profile=self.i2v_profile(), work_area=volume)
         adapter.load()
         return adapter
 
@@ -160,7 +160,7 @@ class ImageToVideoAdapterTests(unittest.TestCase):
         self.assertEqual(adapter.render_to(i2v_request(seed=8), io.BytesIO(), source_png=source), "video/mp4")
         self.assertNotEqual(json.loads(Path(self.state, "loadimage.json").read_text())[0]["name"], seen[0]["name"])
 
-    def test_the_staged_file_is_exclusive_private_and_on_the_verified_volume(self):
+    def test_the_staged_file_is_exclusive_private_and_in_the_verified_work_area(self):
         volume = AnyExistingDirectory()
         adapter = self.loaded(volume=volume)
         created = []
@@ -178,7 +178,7 @@ class ImageToVideoAdapterTests(unittest.TestCase):
         self.assertEqual(mode, 0o600)
         self.assertEqual(checked_before[-1], self.dirs["input"], "the input dir is verified right before the write")
 
-    def test_a_volume_lost_just_before_staging_writes_nothing(self):
+    def test_a_work_area_lost_just_before_staging_writes_nothing(self):
         class LosesInputOnSecondCheck(AnyExistingDirectory):
             def require(inner, path):
                 if path == self.dirs["input"] and inner.checked.count(path) >= 1:
@@ -190,7 +190,7 @@ class ImageToVideoAdapterTests(unittest.TestCase):
         self.assertEqual(os.listdir(self.dirs["input"]), [])
         self.assertFalse(self.submitted())
 
-    def test_a_volume_lost_before_the_source_cleanup_touches_nothing(self):
+    def test_a_work_area_lost_before_the_source_cleanup_touches_nothing(self):
         class LosesInputAtCleanup(AnyExistingDirectory):
             # The input dir is checked: at job start, before staging, after the render, by the
             # output cleanup, and by the source cleanup (the 5th check) -- lost only there.

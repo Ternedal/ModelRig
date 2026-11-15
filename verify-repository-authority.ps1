@@ -34,9 +34,11 @@ function Invoke-GhJson {
 function Write-TempJson {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)]$Value
+        [Parameter(Mandatory = $true)][AllowNull()][AllowEmptyCollection()]$Value
     )
-    $Value | ConvertTo-Json -Depth 60 | Set-Content -LiteralPath $Path -Encoding UTF8
+    # -InputObject, not the pipeline. A pipeline unrolls arrays: an empty list
+    # wrote no file at all, and a list of one became a bare object.
+    ConvertTo-Json -InputObject $Value -Depth 60 | Set-Content -LiteralPath $Path -Encoding UTF8
 }
 
 if ($PSVersionTable.PSVersion.Major -lt 7) { throw "PowerShell 7+ (pwsh) is required." }

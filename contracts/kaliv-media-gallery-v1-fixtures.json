@@ -1,0 +1,444 @@
+{
+  "schema": "kaliv-media-gallery-fixtures/v1",
+  "contract": "kaliv-media-gallery/v1",
+  "description": "Shared by the Python catalog (worker/app/media_gallery_catalog.py), the Android parser (MediaGalleryContract.kt) and any server catalog (Go #2365). `index` is a producer gallery-index.json; `page` is exactly what list_gallery(limit=100) returns for it; every server must emit `page.items` for this index, and Android must parse all of them. `invalid_index` entries must be refused by a catalog (Python codes given). `invalid_items` must never be emitted and Android must skip each one.",
+  "index": [
+    {
+      "id": "img_png_1024",
+      "kind": "image",
+      "mime_type": "image/png",
+      "size_bytes": 1048576,
+      "created_at": "2026-11-01T10:00:00Z",
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "id": "img_jpeg_fraction",
+      "kind": "image",
+      "mime_type": "image/jpeg",
+      "size_bytes": 20480,
+      "created_at": "2026-11-01T10:01:00.250Z"
+    },
+    {
+      "id": "img_webp_writer_shape",
+      "kind": "image",
+      "mime_type": "image/webp",
+      "size_bytes": 4096,
+      "created_at": "2026-11-01T10:02:00Z"
+    },
+    {
+      "id": "vid_vr180_lr",
+      "kind": "video",
+      "mime_type": "video/mp4",
+      "size_bytes": 52428800,
+      "created_at": "2026-11-01T10:03:00Z",
+      "width": 3840,
+      "height": 1920,
+      "duration_seconds": 12.5,
+      "projection": "equirectangular_180",
+      "stereo": "left_right",
+      "thumbnail_id": "img_png_1024",
+      "supports_range": true
+    },
+    {
+      "id": "vid_flat_writer_shape",
+      "kind": "video",
+      "mime_type": "video/mp4",
+      "size_bytes": 3145728,
+      "created_at": "2026-11-01T10:04:00Z"
+    }
+  ],
+  "page": {
+    "schema": "kaliv-media-gallery/v1",
+    "items": [
+      {
+        "id": "img_png_1024",
+        "kind": "image",
+        "mime_type": "image/png",
+        "created_at": "2026-11-01T10:00:00Z",
+        "size_bytes": 1048576,
+        "width": 1024,
+        "height": 1024,
+        "duration_seconds": null,
+        "projection": "flat",
+        "stereo": "mono",
+        "thumbnail_id": null,
+        "thumbnail_url": null,
+        "url": "/api/v1/media/img_png_1024",
+        "playback": {
+          "supports_range": false
+        }
+      },
+      {
+        "id": "img_jpeg_fraction",
+        "kind": "image",
+        "mime_type": "image/jpeg",
+        "created_at": "2026-11-01T10:01:00.250Z",
+        "size_bytes": 20480,
+        "width": null,
+        "height": null,
+        "duration_seconds": null,
+        "projection": "flat",
+        "stereo": "mono",
+        "thumbnail_id": null,
+        "thumbnail_url": null,
+        "url": "/api/v1/media/img_jpeg_fraction",
+        "playback": {
+          "supports_range": false
+        }
+      },
+      {
+        "id": "img_webp_writer_shape",
+        "kind": "image",
+        "mime_type": "image/webp",
+        "created_at": "2026-11-01T10:02:00Z",
+        "size_bytes": 4096,
+        "width": null,
+        "height": null,
+        "duration_seconds": null,
+        "projection": "flat",
+        "stereo": "mono",
+        "thumbnail_id": null,
+        "thumbnail_url": null,
+        "url": "/api/v1/media/img_webp_writer_shape",
+        "playback": {
+          "supports_range": false
+        }
+      },
+      {
+        "id": "vid_vr180_lr",
+        "kind": "video",
+        "mime_type": "video/mp4",
+        "created_at": "2026-11-01T10:03:00Z",
+        "size_bytes": 52428800,
+        "width": 3840,
+        "height": 1920,
+        "duration_seconds": 12.5,
+        "projection": "equirectangular_180",
+        "stereo": "left_right",
+        "thumbnail_id": "img_png_1024",
+        "thumbnail_url": "/api/v1/media/img_png_1024",
+        "url": "/api/v1/media/vid_vr180_lr",
+        "playback": {
+          "supports_range": true
+        }
+      },
+      {
+        "id": "vid_flat_writer_shape",
+        "kind": "video",
+        "mime_type": "video/mp4",
+        "created_at": "2026-11-01T10:04:00Z",
+        "size_bytes": 3145728,
+        "width": null,
+        "height": null,
+        "duration_seconds": null,
+        "projection": "flat",
+        "stereo": "mono",
+        "thumbnail_id": null,
+        "thumbnail_url": null,
+        "url": "/api/v1/media/vid_flat_writer_shape",
+        "playback": {
+          "supports_range": true
+        }
+      }
+    ],
+    "next_cursor": null
+  },
+  "invalid_index": [
+    {
+      "name": "producer_url",
+      "entry": {
+        "id": "bad_url",
+        "kind": "image",
+        "mime_type": "image/webp",
+        "size_bytes": 4096,
+        "created_at": "2026-11-01T10:02:00Z",
+        "url": "/elsewhere"
+      },
+      "python_error": "untrusted_media_location"
+    },
+    {
+      "name": "producer_path",
+      "entry": {
+        "id": "bad_path",
+        "kind": "image",
+        "mime_type": "image/webp",
+        "size_bytes": 4096,
+        "created_at": "2026-11-01T10:02:00Z",
+        "path": "C:\\\\x.png"
+      },
+      "python_error": "untrusted_media_location"
+    },
+    {
+      "name": "kind_mime_mismatch",
+      "entry": {
+        "id": "bad_kind",
+        "kind": "video",
+        "mime_type": "image/webp",
+        "size_bytes": 4096,
+        "created_at": "2026-11-01T10:02:00Z"
+      },
+      "python_error": "media_kind_mismatch"
+    },
+    {
+      "name": "unknown_mime",
+      "entry": {
+        "id": "bad_mime",
+        "kind": "image",
+        "mime_type": "image/gif",
+        "size_bytes": 4096,
+        "created_at": "2026-11-01T10:02:00Z"
+      },
+      "python_error": "invalid_media_type"
+    },
+    {
+      "name": "offset_timestamp",
+      "entry": {
+        "id": "bad_time",
+        "kind": "image",
+        "mime_type": "image/webp",
+        "size_bytes": 4096,
+        "created_at": "2026-11-01T11:02:00+01:00"
+      },
+      "python_error": "invalid_created_at"
+    },
+    {
+      "name": "unsafe_id",
+      "entry": {
+        "id": "../escape",
+        "kind": "image",
+        "mime_type": "image/webp",
+        "size_bytes": 4096,
+        "created_at": "2026-11-01T10:02:00Z"
+      },
+      "python_error": "invalid_index_id"
+    },
+    {
+      "name": "image_with_duration",
+      "entry": {
+        "id": "bad_duration",
+        "kind": "image",
+        "mime_type": "image/webp",
+        "size_bytes": 4096,
+        "created_at": "2026-11-01T10:02:00Z",
+        "duration_seconds": 1.0
+      },
+      "python_error": "invalid_duration"
+    },
+    {
+      "name": "unknown_projection",
+      "entry": {
+        "id": "bad_layout",
+        "kind": "video",
+        "mime_type": "video/mp4",
+        "size_bytes": 52428800,
+        "created_at": "2026-11-01T10:03:00Z",
+        "width": 3840,
+        "height": 1920,
+        "duration_seconds": 12.5,
+        "projection": "cubemap",
+        "stereo": "left_right",
+        "thumbnail_id": "img_png_1024",
+        "supports_range": true
+      },
+      "python_error": "invalid_layout"
+    },
+    {
+      "name": "bool_size",
+      "entry": {
+        "id": "bad_size",
+        "kind": "image",
+        "mime_type": "image/webp",
+        "size_bytes": true,
+        "created_at": "2026-11-01T10:02:00Z"
+      },
+      "python_error": "invalid_media_size"
+    },
+    {
+      "name": "unsafe_thumbnail",
+      "entry": {
+        "id": "bad_thumb",
+        "kind": "video",
+        "mime_type": "video/mp4",
+        "size_bytes": 52428800,
+        "created_at": "2026-11-01T10:03:00Z",
+        "width": 3840,
+        "height": 1920,
+        "duration_seconds": 12.5,
+        "projection": "equirectangular_180",
+        "stereo": "left_right",
+        "thumbnail_id": "a/b",
+        "supports_range": true
+      },
+      "python_error": "invalid_thumbnail"
+    }
+  ],
+  "invalid_items": [
+    {
+      "name": "missing_projection_and_stereo",
+      "item": {
+        "id": "img_webp_writer_shape",
+        "kind": "image",
+        "mime_type": "image/webp",
+        "created_at": "2026-11-01T10:02:00Z",
+        "size_bytes": 4096,
+        "url": "/api/v1/media/img_webp_writer_shape",
+        "playback": {
+          "supports_range": false
+        }
+      },
+      "why": "the shape #2365 LocalMediaCatalog emitted at 745308e8 (6808439108 P1-1)"
+    },
+    {
+      "name": "url_not_derived_from_id",
+      "item": {
+        "id": "img_webp_writer_shape",
+        "kind": "image",
+        "mime_type": "image/webp",
+        "created_at": "2026-11-01T10:02:00Z",
+        "size_bytes": 4096,
+        "width": null,
+        "height": null,
+        "duration_seconds": null,
+        "projection": "flat",
+        "stereo": "mono",
+        "thumbnail_id": null,
+        "thumbnail_url": null,
+        "url": "/api/v1/media/other",
+        "playback": {
+          "supports_range": false
+        }
+      },
+      "why": "url must equal /api/v1/media/{id}"
+    },
+    {
+      "name": "thumbnail_url_mismatch",
+      "item": {
+        "id": "vid_vr180_lr",
+        "kind": "video",
+        "mime_type": "video/mp4",
+        "created_at": "2026-11-01T10:03:00Z",
+        "size_bytes": 52428800,
+        "width": 3840,
+        "height": 1920,
+        "duration_seconds": 12.5,
+        "projection": "equirectangular_180",
+        "stereo": "left_right",
+        "thumbnail_id": "img_png_1024",
+        "thumbnail_url": "/api/v1/media/other",
+        "url": "/api/v1/media/vid_vr180_lr",
+        "playback": {
+          "supports_range": true
+        }
+      },
+      "why": "thumbnail_url must equal /api/v1/media/{thumbnail_id}"
+    },
+    {
+      "name": "offset_timestamp",
+      "item": {
+        "id": "img_webp_writer_shape",
+        "kind": "image",
+        "mime_type": "image/webp",
+        "created_at": "2026-11-01T11:02:00+01:00",
+        "size_bytes": 4096,
+        "width": null,
+        "height": null,
+        "duration_seconds": null,
+        "projection": "flat",
+        "stereo": "mono",
+        "thumbnail_id": null,
+        "thumbnail_url": null,
+        "url": "/api/v1/media/img_webp_writer_shape",
+        "playback": {
+          "supports_range": false
+        }
+      },
+      "why": "UTC with Z only"
+    },
+    {
+      "name": "image_with_duration",
+      "item": {
+        "id": "img_webp_writer_shape",
+        "kind": "image",
+        "mime_type": "image/webp",
+        "created_at": "2026-11-01T10:02:00Z",
+        "size_bytes": 4096,
+        "width": null,
+        "height": null,
+        "duration_seconds": 1.0,
+        "projection": "flat",
+        "stereo": "mono",
+        "thumbnail_id": null,
+        "thumbnail_url": null,
+        "url": "/api/v1/media/img_webp_writer_shape",
+        "playback": {
+          "supports_range": false
+        }
+      },
+      "why": "images have no duration"
+    },
+    {
+      "name": "unknown_stereo",
+      "item": {
+        "id": "vid_vr180_lr",
+        "kind": "video",
+        "mime_type": "video/mp4",
+        "created_at": "2026-11-01T10:03:00Z",
+        "size_bytes": 52428800,
+        "width": 3840,
+        "height": 1920,
+        "duration_seconds": 12.5,
+        "projection": "equirectangular_180",
+        "stereo": "anaglyph",
+        "thumbnail_id": "img_png_1024",
+        "thumbnail_url": "/api/v1/media/img_png_1024",
+        "url": "/api/v1/media/vid_vr180_lr",
+        "playback": {
+          "supports_range": true
+        }
+      },
+      "why": "stereo enum"
+    },
+    {
+      "name": "missing_playback",
+      "item": {
+        "id": "img_webp_writer_shape",
+        "kind": "image",
+        "mime_type": "image/webp",
+        "created_at": "2026-11-01T10:02:00Z",
+        "size_bytes": 4096,
+        "width": null,
+        "height": null,
+        "duration_seconds": null,
+        "projection": "flat",
+        "stereo": "mono",
+        "thumbnail_id": null,
+        "thumbnail_url": null,
+        "url": "/api/v1/media/img_webp_writer_shape"
+      },
+      "why": "playback.supports_range required"
+    },
+    {
+      "name": "negative_size",
+      "item": {
+        "id": "img_webp_writer_shape",
+        "kind": "image",
+        "mime_type": "image/webp",
+        "created_at": "2026-11-01T10:02:00Z",
+        "size_bytes": -1,
+        "width": null,
+        "height": null,
+        "duration_seconds": null,
+        "projection": "flat",
+        "stereo": "mono",
+        "thumbnail_id": null,
+        "thumbnail_url": null,
+        "url": "/api/v1/media/img_webp_writer_shape",
+        "playback": {
+          "supports_range": false
+        }
+      },
+      "why": "size_bytes >= 0"
+    }
+  ]
+}

@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -35,6 +36,7 @@ def _checkout_candidate(**overrides) -> dict:
         "version": "2.0.14",
         "git_sha": "a" * 40,
         "code_sha256": "c" * 64,
+        "identity_source": "git",
         "working_tree_clean": True,
         "version_stamps_consistent": True,
     }
@@ -371,8 +373,10 @@ def run_contract() -> None:
     missing["recovery_events"] = missing["recovery_events"][:-1]
     _reject(missing, "missing required recovery events")
 
+    # A fifth event that repeats the reboot exactly. Relabelling another event
+    # would trip the evidence_ref check first and never reach this rule.
     duplicate = copy.deepcopy(valid)
-    duplicate["recovery_events"][-1]["kind"] = "reboot"
+    duplicate["recovery_events"].append(copy.deepcopy(duplicate["recovery_events"][0]))
     _reject(duplicate, "duplicate recovery event kind")
 
     failed = copy.deepcopy(valid)
@@ -456,7 +460,18 @@ def run_contract() -> None:
 
     dirty_candidate = _stage_b()
     dirty_candidate["candidate"]["working_tree_clean"] = False
-    _reject(valid, "checkout is not clean", stage_b=dirty_candidate)
+    # The report says dirty and the checkout says clean: they disagree.
+    _reject(
+        valid,
+        "candidate working_tree_clean does not match repository checkout",
+        stage_b=dirty_candidate,
+    )
+    # Both say dirty: they agree, and the candidate is refused for being dirty.
+    gate._candidate_identity_from_checkout = lambda _root: _checkout_candidate(
+        working_tree_clean=False
+    )
+    _reject(valid, "source checkout is not clean", stage_b=dirty_candidate)
+    gate._candidate_identity_from_checkout = lambda _root: _checkout_candidate()
 
     blocked_stage_b = _stage_b()
     blocked_stage_b["status"] = "blocked"
@@ -584,20 +599,78 @@ def run_contract() -> None:
         def candidate_identity(self, _root: Path) -> dict:
             return dict(self._candidate)
 
-    for candidate, fragment in (
-        (_checkout_candidate(working_tree_clean=False), "working tree is not clean"),
-        (
-            _checkout_candidate(version_stamps_consistent=False),
-            "version stamps are inconsistent",
-        ),
-    ):
-        gate._load_stage_b_validator = lambda _name, candidate=candidate: _CandidateModule(candidate)
+    def _loader_for(candidate: dict):
+        # Only the candidate identity is faked. freeze_check.py is the real
+        # one, because its status splitter is the rule under test.
+        def load(name: str):
+            if name == "physical_validation_campaign.py":
+                return _CandidateModule(candidate)
+            return _ORIGINAL_LOADER(name)
+
+        return load
+
+    def _identity(root: Path, candidate: dict, fragment: str | None) -> None:
+        gate._load_stage_b_validator = _loader_for(candidate)
         try:
-            gate._candidate_identity_from_checkout(COMPONENT_ROOT)
+            gate._candidate_identity_from_checkout(root)
         except gate.RecoverySoakError as exc:
+            assert fragment is not None, str(exc)
             assert fragment in str(exc), (fragment, str(exc))
         else:
-            raise AssertionError(f"invalid checkout candidate accepted: {candidate!r}")
+            assert fragment is None, f"invalid checkout candidate accepted: {candidate!r}"
+
+    def _git(root: Path, *args: str) -> None:
+        subprocess.run(
+            [
+                "git",
+                "-c", "user.name=contract",
+                "-c", "user.email=contract@example.invalid",
+                "-c", "commit.gpgsign=false",
+                *args,
+            ],
+            cwd=str(root),
+            check=True,
+            capture_output=True,
+        )
+
+    checkout = Path(tempfile.mkdtemp(prefix="kaliv-recovery-checkout-contract-"))
+    try:
+        _git(checkout, "init", "--quiet")
+        (checkout / "tracked.txt").write_text("one\n", encoding="utf-8")
+        _git(checkout, "add", "tracked.txt")
+        _git(checkout, "commit", "--quiet", "-m", "contract fixture")
+
+        _identity(checkout, _checkout_candidate(), None)
+        # Untracked files below validation/ are evidence the gates write.
+        (checkout / "validation").mkdir()
+        (checkout / "validation" / "evidence.json").write_text("{}\n", encoding="utf-8")
+        _identity(checkout, _checkout_candidate(), None)
+        _identity(
+            checkout,
+            _checkout_candidate(version_stamps_consistent=False),
+            "version stamps are inconsistent",
+        )
+        _identity(
+            checkout,
+            _checkout_candidate(identity_source="guess"),
+            "identity source is invalid",
+        )
+        # An untracked file anywhere else is source drift.
+        (checkout / "stray.txt").write_text("x\n", encoding="utf-8")
+        _identity(checkout, _checkout_candidate(), "unsanctioned source changes")
+        (checkout / "stray.txt").unlink()
+        _identity(checkout, _checkout_candidate(), None)
+        # So is a modified tracked file.
+        (checkout / "tracked.txt").write_text("two\n", encoding="utf-8")
+        _identity(checkout, _checkout_candidate(), "unsanctioned source changes")
+    finally:
+        shutil.rmtree(checkout, ignore_errors=True)
+    # Not a Git checkout at all: cleanliness cannot be shown, so it is refused.
+    not_a_checkout = Path(tempfile.mkdtemp(prefix="kaliv-recovery-no-git-contract-"))
+    try:
+        _identity(not_a_checkout, _checkout_candidate(), "cleanliness cannot be verified")
+    finally:
+        shutil.rmtree(not_a_checkout, ignore_errors=True)
     gate._load_stage_b_validator = _ORIGINAL_LOADER
 
     gate._revalidate_stage_b_component = _ORIGINAL_REVALIDATE

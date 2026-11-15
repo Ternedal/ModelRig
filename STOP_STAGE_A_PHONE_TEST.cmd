@@ -1,6 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+set "PYTHONDONTWRITEBYTECODE=1"
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stage-a-phone-test.ps1" -Stop
 set "EXIT_CODE=%ERRORLEVEL%"

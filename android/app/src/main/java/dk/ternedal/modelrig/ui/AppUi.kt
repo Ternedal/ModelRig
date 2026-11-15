@@ -1945,6 +1945,12 @@ private fun ChatScreen(
                                 i.putExtra(dk.ternedal.modelrig.MainActivity.EXTRA_PERSONS, true)
                                 context.startActivity(i)
                             })
+                            // Billeder og video (#2275 C6 G1): generer-skærmen, derfra galleriet.
+                            // Den siger selv "ikke tilgængelig", hvis riggen ikke har det slået til.
+                            DropdownMenuItem(text = { Text(MediaEntry.LABEL) }, onClick = {
+                                overflow = false
+                                context.startActivity(MediaEntry.intent(context))
+                            })
                             // Kroppen (slice D): Kaliv Body er en separat Unity-app.
                             // Kaliv giver den riggen og sit token som intent-extras,
                             // saa den ikke skal parres igen -- kun til DEN pakke.

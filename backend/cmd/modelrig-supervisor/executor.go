@@ -137,7 +137,7 @@ type executorDecision struct {
 //	75  media volume unavailable: 30 s, doubling to 5 min; the executor
 //	    re-verifies the volume on every start and exits 75 again at once
 //	76  a publication was not recorded: 5 s; recovery marks the job
-//	    "interrupted during publication" for reconciliation
+//	    interrupted_during_publication for reconciliation
 //	78  configuration refused: never (restarting cannot fix it)
 //	any other code, or killed: 5 s, doubling to 5 min
 //
@@ -156,7 +156,7 @@ func executorRestartPolicy(code, consecutive int) executorDecision {
 	case executorExitGPURetained:
 		base, why = 5*time.Second, "exit 70: GPU memory was not proven free"
 	case executorExitSinkUnavailable:
-		base, why = 30*time.Second, "exit 75: the external media volume is not available"
+		base, why = 30*time.Second, "exit 75: the external media volume or the private work area is not available (the executor log names which)"
 	case executorExitUnrecorded:
 		base, why = 5*time.Second, "exit 76: a publication was not recorded"
 	default:
