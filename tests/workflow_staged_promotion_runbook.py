@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the retained staged-promotion contract plus live 2.0.19 authority checks."""
+"""Run the retained staged-promotion contract plus live 2.0.20 authority checks."""
 import sys
 from pathlib import Path
 
@@ -12,16 +12,16 @@ _source = _source_path.read_text(encoding="utf-8")
 for _old, _new in (
     # Codex #2364 4508274860: under D3 the Stage A candidate is the published RC SHA, checked out
     # on the branch the Stage A operator requires, not the release-prep branch.
-    ("agent/unified-candidate-1.58.143", "physical-proof/2.0.19"),
-    ("1.58.143", "2.0.19"),
+    ("agent/unified-candidate-1.58.143", "physical-proof/2.0.20"),
+    ("1.58.143", "2.0.20"),
     ("1.58.142", "2.0.12"),
-    ("draft-PR #150", "origin/physical-proof/2.0.19"),
+    ("draft-PR #150", "origin/physical-proof/2.0.20"),
 ):
     _source = _source.replace(_old, _new)
 exec(compile(_source, str(_source_path), "exec"), globals(), globals())
 
 # The retained contract proves the historical promotion shape. These checks pin
-# the live 2.0.19 authority so a future mechanical version rewrite cannot
+# the live 2.0.20 authority so a future mechanical version rewrite cannot
 # reintroduce a historical PR/SHA placeholder or an ambiguous freeze sentence.
 rigdag = code_of(ROOT / "RIGDAG_SIMPEL.md")
 staged = code_of(ROOT / "STAGED_PHYSICAL_PROMOTION.md")
@@ -33,8 +33,8 @@ _live_contracts = (
         "staged runbook contains no mechanically rewritten freeze placeholder",
     ),
     (
-        "$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.19).Trim()" in rigdag
-        and "$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.19).Trim()" in staged,
+        "$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.20).Trim()" in rigdag
+        and "$RemoteCandidateSha = (git rev-parse origin/physical-proof/2.0.20).Trim()" in staged,
         "both operator runbooks resolve the fetched remote candidate SHA",
     ),
     (
@@ -48,8 +48,8 @@ _live_contracts = (
         "both operator runbooks run the exact-SHA candidate freeze gate",
     ),
     (
-        "origin/physical-proof/2.0.19" in rigdag
-        and "origin/physical-proof/2.0.19" in staged,
+        "origin/physical-proof/2.0.20" in rigdag
+        and "origin/physical-proof/2.0.20" in staged,
         "both operator runbooks name the active remote candidate authority",
     ),
     # ChatGPT #2364 6727590513: Anders' D3 (#2275 6726564262) releases 2.0.19 on green RC CI plus
@@ -57,12 +57,12 @@ _live_contracts = (
     # still keep production off and the release behind his go.
     (
         all(
-            "v2.0.19: Anders' release-beslutning (D3" in doc
-            and "**ikke** en forudsætning for tagget `v2.0.19`" in doc
+            "v2.0.20 følger D3-rækkefølgen fra 2.0.19" in doc
+            and "**ikke** en forudsætning for tagget `v2.0.20`" in doc
             and "**efter** publicering" in doc
             and "Anders' særskilte release-go" in doc
             and "production_activation=false" in doc
-            and doc.index("v2.0.19: Anders' release-beslutning (D3") < doc.index("## ")
+            and doc.index("v2.0.20 følger D3-rækkefølgen fra 2.0.19") < doc.index("## ")
             for doc in (rigdag, staged)
         ),
         "both operator runbooks state D3 before any procedure: physical validation after publication, release only on Anders' go",
@@ -85,7 +85,7 @@ import tempfile as _tempfile
 
 
 def _block0(doc: str) -> str:
-    start = doc.index("```powershell", doc.index("git fetch --force origin tag v2.0.19") - 200)
+    start = doc.index("```powershell", doc.index("git fetch --force origin tag v2.0.20") - 200)
     return doc[start : doc.index("```", start + 3)]
 
 
@@ -100,8 +100,8 @@ _operator_branch = _const("scripts/stage_a_physical_operator.py", "EXPECTED_BRAN
 _wizard_branch = _const("scripts/stage_a_one_click.py", "BRANCH")
 _d3_contracts = [
     (
-        _operator_branch == _wizard_branch == "physical-proof/2.0.19",
-        "Stage A operator and wizard require the same physical-proof/2.0.19 checkout",
+        _operator_branch == _wizard_branch == "physical-proof/2.0.20",
+        "Stage A operator and wizard require the same physical-proof/2.0.20 checkout",
     ),
 ]
 for _name, _doc in (("RIGDAG_SIMPEL.md", rigdag), ("STAGED_PHYSICAL_PROMOTION.md", staged)):
@@ -117,12 +117,12 @@ for _name, _doc in (("RIGDAG_SIMPEL.md", rigdag), ("STAGED_PHYSICAL_PROMOTION.md
             f"{_name}: the release-prep branch is never checked out as the candidate",
         ),
         (
-            '$RcSha = (git rev-parse "v2.0.19^{commit}").Trim()' in _block
+            '$RcSha = (git rev-parse "v2.0.20^{commit}").Trim()' in _block
             and "if ($RcSha.Length -ne 40)" in _block
             and "if ($CandidateSha -ne $RcSha)" in _block
             and _block.index("if ($CandidateSha -ne $RcSha)")
             < _block.index("python scripts/candidate_freeze_check.py"),
-            f"{_name}: block 0 binds the candidate to the published v2.0.19 tag before the freeze",
+            f"{_name}: block 0 binds the candidate to the published v2.0.20 tag before the freeze",
         ),
         (
             # Anders lifted the freeze window on 12 Nov 2026 (#2275 comment

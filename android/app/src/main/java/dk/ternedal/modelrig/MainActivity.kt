@@ -18,6 +18,7 @@ import dk.ternedal.modelrig.ui.PersonsScreen
 import dk.ternedal.modelrig.ui.Agent3ValidationScreen
 import dk.ternedal.modelrig.ui.AppEntryUi
 import dk.ternedal.modelrig.ui.MediaGalleryScreen
+import dk.ternedal.modelrig.ui.MediaGenerateScreen
 import dk.ternedal.modelrig.ui.ScheduleScreen
 import dk.ternedal.modelrig.ui.theme.ModelRigTheme
 
@@ -53,6 +54,9 @@ class MainActivity : ComponentActivity() {
         // Developer-only ADB entry while kaliv-media-gallery/v1 has no backend
         // on main (ModelRig #2275). Deliberately no kaliv:// link or shortcut.
         val openMediaGallery = intent?.getBooleanExtra(EXTRA_MEDIA_GALLERY, false) == true
+        // Same developer-only ADB entry for the generate screen (#2275 A1); the job API is
+        // default-off on the rig and not on main yet.
+        val openMediaGenerate = intent?.getBooleanExtra(EXTRA_MEDIA_GENERATE, false) == true
         // kaliv://pair?url=...&code=... — parseren er fail-closed; et ugyldigt
         // link giver null og dermed helt almindelig opstart.
         val pairingLink = dk.ternedal.modelrig.net.PairingLink.parse(intent?.data?.toString())
@@ -96,6 +100,18 @@ class MainActivity : ComponentActivity() {
                     val store = remember { TokenStore(this) }
                     ModelRigTheme(dark = store.darkMode) {
                         MediaGalleryScreen(store = store, onClose = { finish() })
+                    }
+                }
+                openMediaGenerate -> {
+                    val store = remember { TokenStore(this) }
+                    ModelRigTheme(dark = store.darkMode) {
+                        MediaGenerateScreen(
+                            store = store,
+                            onOpenGallery = {
+                                startActivity(Intent(this, MainActivity::class.java).putExtra(EXTRA_MEDIA_GALLERY, true))
+                            },
+                            onClose = { finish() },
+                        )
                     }
                 }
                 openAgent3Task -> {
@@ -177,5 +193,6 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_AGENT3_REPLAN = "dk.ternedal.modelrig.extra.AGENT3_REPLAN"
         const val EXTRA_AGENT3_REVIEW = "dk.ternedal.modelrig.extra.AGENT3_REVIEW"
         const val EXTRA_MEDIA_GALLERY = "dk.ternedal.modelrig.extra.MEDIA_GALLERY"
+        const val EXTRA_MEDIA_GENERATE = "dk.ternedal.modelrig.extra.MEDIA_GENERATE"
     }
 }
