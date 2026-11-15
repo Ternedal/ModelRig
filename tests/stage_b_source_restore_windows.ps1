@@ -37,7 +37,9 @@ function global:Stop-ScheduledTask { param($TaskName) [void]$global:Calls.Add("s
 function global:Start-ScheduledTask {
     param($TaskName)
     [void]$global:Calls.Add("start:$TaskName")
-    $global:Health = $global:HealthQueue.Dequeue()
+    $next = $global:HealthQueue.Dequeue()
+    if ($next -ceq 'throw') { throw 'simulated task start failure' }
+    $global:Health = $next
     $beat = (Join-Path (Join-Path $global:CurrentRig 'logs') 'supervisor-heartbeat').Replace("'", "''")
     $loop = "while (`$true) { try { [IO.File]::WriteAllText('$beat', [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString()) } catch { }; Start-Sleep -Milliseconds 500 }"
     [void]$global:Writers.Add((Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-NonInteractive', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($loop))) -PassThru -WindowStyle Hidden))
@@ -164,7 +166,29 @@ Assert (($global:Calls -join ',') -ceq 'stop:KalivSupervisor,start:KalivSupervis
 Assert ($global:Health -ceq '2.0.20') 'Health is not back on 2.0.20 after the rollback'
 Write-Host 'ok: 2.0.12 that never comes up is rolled back to the v2.0.20 bytes and the original journal'
 
-# 5. Refusals before any change.
+# 5. A rollback whose runtime cannot be verified keeps updater.lock, with the files still put back:
+#    once when backend and worker stay down after the rollback, once when the task will not start.
+foreach ($case in @(
+    @{ What = 'rollback that stays down'; Queue = @($null, $null); Expect = 'are not back to the versions before the restore' },
+    @{ What = 'rollback whose task will not start'; Queue = @($null, 'throw'); Expect = 'could not be started' }
+)) {
+    $rig = New-Rig ('unverified-' + $case.Queue[1])
+    [IO.File]::WriteAllText((Join-Path $rig 'update-transaction.json.tmp'), '{"state":"rolled_back"}')
+    $journalBefore = Hash (Join-Path $rig 'update-transaction.json')
+    $tmpBefore = Hash (Join-Path $rig 'update-transaction.json.tmp')
+    $global:Health = '2.0.20'
+    $global:HealthQueue.Clear(); foreach ($value in $case.Queue) { $global:HealthQueue.Enqueue($value) }
+    $message = ''
+    try { Invoke-Restore $rig @{ Apply = $true; HealthTimeoutSeconds = 4 } | Out-Null } catch { $message = [string]$_ }
+    Assert ($message -match 'ROLLBACK NOT VERIFIED' -and $message -match [regex]::Escape($case.Expect) -and $message -match 'updater\.lock is KEPT') "$($case.What): unexpected message '$message'"
+    Assert (Test-Path -LiteralPath (Join-Path $rig 'updater.lock')) "$($case.What): updater.lock was released"
+    foreach ($n in $names) { Assert ((Hash (Live $rig $n)) -ceq $h20[$n]) "$($case.What): $n is not the v2.0.20 bytes" }
+    Assert ((Hash (Join-Path $rig 'update-transaction.json')) -ceq $journalBefore -and (Hash (Join-Path $rig 'update-transaction.json.tmp')) -ceq $tmpBefore) "$($case.What): journal not back byte for byte"
+    Assert (($global:Calls -join ',') -ceq 'stop:KalivSupervisor,start:KalivSupervisor,stop:KalivSupervisor,start:KalivSupervisor') "$($case.What): unexpected task calls $($global:Calls -join ',')"
+    Write-Host "ok: a $($case.What) keeps updater.lock with the v2.0.20 bytes and the journal back"
+}
+
+# 6. Refusals before any change.
 $global:Health = '2.0.20'
 $rig = New-Rig 'lock'; [IO.File]::WriteAllText((Join-Path $rig 'updater.lock'), 'pid 1 started 2026-11-15T00:00:00Z')
 Assert-Refused $rig 'updater.lock exists' 'an existing updater.lock'

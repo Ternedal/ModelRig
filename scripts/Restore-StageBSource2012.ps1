@@ -20,7 +20,9 @@
 #   6. starts the supervisor task, waits until backend and worker report 2.0.12, and proves the
 #      supervisor is looping from its heartbeat, as the updater does after an update.
 # If any step after the lock fails, including step 6, it rolls back to the v2.0.20 executables and
-# the original journal, verifies both, and starts the task again (see "mutate" below).
+# the original journal, verifies both, starts the task again and requires the same health and
+# looping proof for v2.0.20. Whenever any part of that rollback cannot be verified, it keeps
+# updater.lock and says what to check by hand (see "mutate" below).
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File Restore-StageBSource2012.ps1
 #   powershell -NoProfile -ExecutionPolicy Bypass -File Restore-StageBSource2012.ps1 -Apply
@@ -326,11 +328,26 @@ try {
             throw "ROLLBACK DID NOT VERIFY: $_. This script will not start the supervisor task, and updater.lock is KEPT. Both executable sets and the original journal are in $work. Restore by hand from there before removing the lock. Cause of the failed restore: $failure"
         }
         Write-Host "rolled back: v$TargetVersion executables and the original journal are in place; starting supervisor task"
-        $rolledBackAt = Start-Supervisor
+        # The files are verified; the runtime must be too. If the task cannot start, or backend and
+        # worker do not return to the versions before the restore, or the supervisor is not proven
+        # looping, the rollback is NOT verified: updater.lock is kept so no updater run (including
+        # KalivBootstrap's recovery at logon) acts on the rig until a person has looked. The task is
+        # left as it is - running, if it started - so the supervisor's own crash recovery can still
+        # bring v$TargetVersion up while nobody is watching.
+        $manual = "Check logs\server.log and logs\worker.log. When healthz reports backend '$serverBefore' and worker '$workerBefore' again and logs\supervisor-heartbeat advances, delete updater.lock. Copies of both executable sets and the original journal are in $work."
+        try { $rolledBackAt = Start-Supervisor }
+        catch {
+            $keepLock = $true
+            throw "ROLLBACK NOT VERIFIED: the v$TargetVersion executables and the original journal are back and verified, but the supervisor task could not be started ($_). updater.lock is KEPT. $manual Cause of the failed restore: $failure"
+        }
         $healthBack = Wait-Health $serverBefore $workerBefore
         $loopingBack = $healthBack -and (Test-SupervisorLooping $rolledBackAt)
-        $state = if (-not $healthBack) { ', NOT yet back to the versions before the restore' } elseif (-not $loopingBack) { ', supervisor NOT proven looping' } else { ', supervisor looping' }
-        throw "Restore aborted and rolled back to v$TargetVersion with the original journal (backend '$serverVersion', worker '$workerVersion'$state). Downloads and copies are in $work. Cause: $failure"
+        if (-not $loopingBack) {
+            $keepLock = $true
+            $what = if (-not $healthBack) { "backend '$serverVersion' and worker '$workerVersion' are not back to the versions before the restore" } else { 'the supervisor is not proven looping' }
+            throw "ROLLBACK NOT VERIFIED: the v$TargetVersion executables and the original journal are back and verified and the supervisor task was started, but $what. updater.lock is KEPT. $manual Cause of the failed restore: $failure"
+        }
+        throw "Restore aborted and rolled back to v$TargetVersion with the original journal (backend '$serverVersion', worker '$workerVersion', supervisor looping). Downloads and copies are in $work. Cause: $failure"
     }
 } finally {
     $guard.Dispose()

@@ -218,7 +218,7 @@ Reset '2.0.20'; $r = New-JournalRig
 $global:FailCopyTo = 'modelrig-worker-windows-x64.exe'
 $e = RunErr $r @{ Apply = $true }
 Check ($e -match 'rolled back to v2.0.20 with the original journal') 'reports rollback'
-Check ($e -notmatch 'NOT yet back' -and $e -match ', supervisor looping') 'health and supervisor back as before'
+Check ($e -notmatch 'NOT VERIFIED' -and $e -match ', supervisor looping') 'health and supervisor back as before'
 Check (LiveIs $r '2.0.20') 'live set back on 2.0.20'
 Check (JournalBack $r) 'journal and tmp back, byte for byte'
 Check (-not (Test-Path (Join-Path $r 'updater.lock'))) 'lock released'
@@ -230,7 +230,7 @@ Reset '2.0.20'; $r = New-JournalRig
 $global:BrokenOn2012 = $true
 $e = RunErr $r @{ Apply = $true; HealthTimeoutSeconds = 4 }
 Check ($e -match 'did not both report 2.0.12') 'names the health failure'
-Check ($e -match 'rolled back to v2.0.20 with the original journal' -and $e -notmatch 'NOT yet back') 'reports a complete rollback'
+Check ($e -match 'rolled back to v2.0.20 with the original journal' -and $e -notmatch 'NOT VERIFIED') 'reports a complete rollback'
 Check (LiveIs $r '2.0.20') 'live set back on 2.0.20'
 Check (JournalBack $r) 'journal and tmp back, byte for byte'
 Check (-not (Test-Path (Join-Path $r 'updater.lock'))) 'lock released'
@@ -265,21 +265,34 @@ foreach ($case in @(@{ What = 'one heartbeat and then nothing'; Flag = 'Supervis
     Check ((LiveIs $r '2.0.20') -and (JournalBack $r)) 'executables and journal back'
 }
 
-Write-Host 'a rollback whose supervisor does not loop says so'
+function Assert-UnverifiedRollback([string]$root, [string]$e, [string]$what, [string]$calls) {
+    Check ($e -match 'ROLLBACK NOT VERIFIED' -and $e -match 'updater.lock is KEPT' -and $e -match 'delete updater.lock') "$($what): says so, with the manual step"
+    Check (Test-Path (Join-Path $root 'updater.lock')) "$($what): lock kept"
+    Check ((LiveIs $root '2.0.20') -and (JournalBack $root)) "$($what): executables and journal back"
+    Check (($global:Calls -join ',') -ceq $calls) "$($what): task calls $calls (got $($global:Calls -join ','))"
+}
+
+Write-Host 'a rollback whose supervisor does not loop keeps the lock'
 Reset '2.0.20'; $r = New-JournalRig
 $global:SupervisorDead = $true
 $global:FailCopyTo = 'modelrig-worker-windows-x64.exe'
 $e = RunErr $r @{ Apply = $true; HealthTimeoutSeconds = 4 }
-Check ($e -match 'supervisor NOT proven looping') 'says the supervisor is not proven'
-Check ((LiveIs $r '2.0.20') -and (JournalBack $r)) 'executables and journal back'
+Check ($e -match 'the supervisor is not proven looping') 'names the supervisor'
+Assert-UnverifiedRollback $r $e 'non-looping rollback' 'stop-task,start-task'
 
-Write-Host 'a rollback that is up but not healthy says so'
+Write-Host 'a rollback that is up but not healthy keeps the lock'
 Reset '2.0.20'; $r = New-JournalRig
 $global:BrokenAlways = $true
 $e = RunErr $r @{ Apply = $true; HealthTimeoutSeconds = 4 }
-Check ($e -match 'NOT yet back to the versions before the restore') 'says health is not back'
-Check ((LiveIs $r '2.0.20') -and (JournalBack $r)) 'executables and journal back'
-Check (-not (Test-Path (Join-Path $r 'updater.lock'))) 'lock released'
+Check ($e -match 'are not back to the versions before the restore') 'names the health'
+Assert-UnverifiedRollback $r $e 'unhealthy rollback' 'stop-task,start-task,stop-task,start-task'
+
+Write-Host 'a rollback whose task will not start keeps the lock'
+Reset '2.0.20'; $r = New-JournalRig
+$global:StartFailures = 2
+$e = RunErr $r @{ Apply = $true; HealthTimeoutSeconds = 4 }
+Check ($e -match 'could not be started') 'names the task start'
+Assert-UnverifiedRollback $r $e 'failed rollback restart' 'stop-task,start-task,stop-task,start-task'
 
 Write-Host 'a rollback that cannot be verified stops fail-closed'
 Reset '2.0.20'; $r = New-JournalRig
