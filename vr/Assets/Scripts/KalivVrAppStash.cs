@@ -144,6 +144,9 @@ namespace Kaliv.VR
             foreach (var facet in _facetList)
             {
                 var f = facet;
+                // A studio or category with no scenes (within the other filter) can only lead to
+                // an empty list — third headset look: "Adult Prime · 0 scener".
+                if (f.SceneCount <= 0) continue;
                 rows.Add(new KalivVrPanel.MediaRowData
                 {
                     Label = $"{f.Name}  ·  {f.SceneCount} scener",

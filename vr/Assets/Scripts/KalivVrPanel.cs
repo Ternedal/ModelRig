@@ -85,6 +85,7 @@ namespace Kaliv.VR
         private Text _mediaStatus;
         private readonly List<MediaRow> _mediaRows = new();
         private Text _mediaPosition;
+        private Text _mediaEmpty;
         private Button _mediaMore;
         private GameObject _transportGroup;
         private Text _transportInfo;
@@ -676,32 +677,37 @@ namespace Kaliv.VR
 
             // Two sources on two different machines: the RIG's own generated media, and the
             // STASH server's library through the SkyPlayer companion.
-            var srcRig = AddButton(_mediaGroup.transform, "RIG", new Vector2(160, 46), new Vector2(270, 330),
+            // A grid, not eyeballed positions (third headset look: uneven gaps, buttons touching).
+            // The list is 1080 wide (-540..540); the control row is six equal 170 px buttons
+            // with 12 px gaps that span exactly that width, and the source tabs end at its edge.
+            var srcRig = AddButton(_mediaGroup.transform, "RIG", new Vector2(140, 46), new Vector2(320, 330),
                 Elevated, () => _app.MediaShowRig());
             _srcRigImage = srcRig.GetComponent<Image>();
             AddIcon(srcRig, "gallery");
-            var srcStash = AddButton(_mediaGroup.transform, "STASH", new Vector2(160, 46), new Vector2(440, 330),
+            var srcStash = AddButton(_mediaGroup.transform, "STASH", new Vector2(140, 46), new Vector2(470, 330),
                 Elevated, () => _app.MediaShowStash());
             _srcStashImage = srcStash.GetComponent<Image>();
             AddIcon(srcStash, "library");
 
             // SkyPlayer's library controls, in SkyPlayer's words.
             _stashControls = Group("StashControls", _mediaGroup.transform);
-            AddButton(_stashControls.transform, "FIND STASH", new Vector2(180, 46), new Vector2(-445, 275),
+            var ctl = new Vector2(170, 46);
+            float Col(int i) => -455f + i * 182f;
+            AddButton(_stashControls.transform, "FIND STASH", ctl, new Vector2(Col(0), 275),
                 Elevated, () => _app.StashFind());
-            var q = AddButton(_stashControls.transform, "SØG", new Vector2(150, 46), new Vector2(-280, 275),
+            var q = AddButton(_stashControls.transform, "SØG", ctl, new Vector2(Col(1), 275),
                 Elevated, () => _app.StashSearch());
             _stashQueryLabel = q.GetComponentInChildren<Text>();
-            var st = AddButton(_stashControls.transform, "STUDIE", new Vector2(170, 46), new Vector2(-115, 275),
+            var st = AddButton(_stashControls.transform, "STUDIE", ctl, new Vector2(Col(2), 275),
                 Elevated, () => _app.StashPickFacet(true));
             _stashStudioLabel = st.GetComponentInChildren<Text>();
-            var tg = AddButton(_stashControls.transform, "KATEGORI", new Vector2(170, 46), new Vector2(65, 275),
+            var tg = AddButton(_stashControls.transform, "KATEGORI", ctl, new Vector2(Col(3), 275),
                 Elevated, () => _app.StashPickFacet(false));
             _stashTagLabel = tg.GetComponentInChildren<Text>();
-            var ord = AddButton(_stashControls.transform, "SENESTE", new Vector2(170, 46), new Vector2(245, 275),
+            var ord = AddButton(_stashControls.transform, "SENESTE", ctl, new Vector2(Col(4), 275),
                 Elevated, () => _app.StashCycleOrder());
             _stashOrderLabel = ord.GetComponentInChildren<Text>();
-            AddButton(_stashControls.transform, "ROULETTE", new Vector2(170, 46), new Vector2(430, 275),
+            AddButton(_stashControls.transform, "ROULETTE", ctl, new Vector2(Col(5), 275),
                 Accent, () => _app.StashRoulette());
             foreach (var t in _stashControls.GetComponentsInChildren<Text>()) t.fontSize = 13;
             _stashControls.SetActive(false);
@@ -709,6 +715,10 @@ namespace Kaliv.VR
             _mediaStatus = AddText(_mediaGroup.transform, "", 15, Muted, TextAnchor.MiddleLeft,
                 new Vector2(1080, 36), new Vector2(0, 228));
             _mediaStatus.horizontalOverflow = HorizontalWrapMode.Wrap;
+            // An empty list says so in the middle, instead of leaving a blank panel.
+            _mediaEmpty = AddText(_mediaGroup.transform, "", 20, Muted, TextAnchor.MiddleCenter,
+                new Vector2(900, 120), new Vector2(0, -20));
+            _mediaEmpty.horizontalOverflow = HorizontalWrapMode.Wrap;
 
             for (int i = 0; i < 6; i++)
             {
@@ -1165,6 +1175,19 @@ namespace Kaliv.VR
             if (_mediaStatus == null) return;
             _mediaStatus.text = text ?? "";
             _mediaStatus.color = error ? Danger : Muted;
+            UpdateEmpty();
+        }
+
+        /// <summary>With no rows, the status message moves to the middle of the list, larger.</summary>
+        private void UpdateEmpty()
+        {
+            if (_mediaEmpty == null || _mediaStatus == null) return;
+            bool empty = _listRows.Count == 0 && !string.IsNullOrEmpty(_mediaStatus.text);
+            _mediaEmpty.gameObject.SetActive(empty);
+            _mediaStatus.enabled = !empty;
+            if (!empty) return;
+            _mediaEmpty.text = _mediaStatus.text;
+            _mediaEmpty.color = _mediaStatus.color;
         }
 
         /// <summary>Rig gallery items as rows; a click plays the item.</summary>
@@ -1244,6 +1267,11 @@ namespace Kaliv.VR
                 if (row.Data == null) continue;
                 row.Label.text = row.Data.Label;
                 row.Thumb.gameObject.SetActive(row.Data.Key != null);
+                // Rows without a picture (studios, categories) start at the left edge instead
+                // of leaving an empty thumbnail gap.
+                bool pic = row.Data.Key != null;
+                row.Label.rectTransform.anchoredPosition = new Vector2(pic ? 70 : 0, 0);
+                row.Label.rectTransform.sizeDelta = new Vector2(pic ? 920 : 1030, 64);
                 if (row.Data.Key != null && _listThumbs.TryGetValue(row.Data.Key, out var tex) && tex != null)
                 {
                     row.Thumb.texture = tex;
@@ -1260,6 +1288,7 @@ namespace Kaliv.VR
             bool more = _listScroll ? (_listTop + visible < _listRows.Count || _listHasMore) : _pagedMore;
             if (_mediaPrev != null) _mediaPrev.gameObject.SetActive(prev);
             if (_mediaMore != null) _mediaMore.gameObject.SetActive(more);
+            UpdateEmpty();
             if (_listScroll && _listRows.Count > 0 && _mediaPosition != null)
                 _mediaPosition.text = $"{_listTop + 1}–{Math.Min(_listRows.Count, _listTop + visible)} af {_listRows.Count}{(_listHasMore ? "+" : "")}";
             else if (_mediaPosition != null)
