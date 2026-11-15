@@ -60,7 +60,8 @@ namespace Kaliv.VR
                 return;
             }
             _laser.material = new Material(shader);
-            ColorUtility.TryParseHtmlString("#D4AB52", out Color gold);
+            // Design v2.1: the ray glows electric blue.
+            ColorUtility.TryParseHtmlString("#20B9FF", out Color gold);
             _laser.startColor = new Color(gold.r, gold.g, gold.b, 0.95f);
             _laser.endColor = new Color(gold.r, gold.g, gold.b, 0.25f);
         }

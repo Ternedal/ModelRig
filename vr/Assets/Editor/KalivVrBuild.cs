@@ -27,6 +27,7 @@ namespace Kaliv.VR.EditorTools
                 ValidatePackageLockAuthority();
                 ValidatePlayerSettingsAuthority();
                 string[] scenes = CreateTemporaryBootScene();
+                ApplyLauncherIcon();
 
                 string root = Directory.GetParent(Application.dataPath)!.FullName;
                 string outDir = Path.Combine(root, OutputDirectory);
@@ -313,6 +314,24 @@ namespace Kaliv.VR.EditorTools
             Debug.Log(
                 $"[KalivVR] Committed player authority verified " +
                 $"(IL2CPP/ARM64/GLES3/Linear/API29/4xMSAA, quality={activeQuality}).");
+        }
+
+        /// <summary>
+        /// Design v2.1's gold ankh as the launcher icon, set for this build only. It is applied
+        /// in memory rather than committed to ProjectSettings, which the build tooling restores
+        /// after every batch build (XR Management rewrites it).
+        /// </summary>
+        private static void ApplyLauncherIcon()
+        {
+            const string iconPath = "Assets/Branding/kaliv_icon.png";
+            var icon = AssetDatabase.LoadAssetAtPath<Texture2D>(iconPath);
+            if (icon == null)
+            {
+                Debug.LogWarning("[KalivVR] Launcher icon missing at " + iconPath + " — default icon used.");
+                return;
+            }
+            PlayerSettings.SetIcons(UnityEditor.Build.NamedBuildTarget.Unknown, new[] { icon }, IconKind.Any);
+            Debug.Log("[KalivVR] Launcher icon: design v2.1 ankh.");
         }
 
         private static string[] CreateTemporaryBootScene()

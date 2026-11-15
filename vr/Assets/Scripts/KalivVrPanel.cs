@@ -17,21 +17,25 @@ namespace Kaliv.VR
     /// </summary>
     public sealed class KalivVrPanel : MonoBehaviour
     {
-        private static readonly Color CanvasBg = Hex("#0B0A09");
-        private static readonly Color Surface = Hex("#171411");
-        private static readonly Color Elevated = Hex("#211B16");
-        private static readonly Color Border = Hex("#2A2521");
-        private static readonly Color TextMain = Hex("#F3EFE6");
-        private static readonly Color Muted = Hex("#A89D90");
-        private static readonly Color Accent = Hex("#D4AB52");
-        private static readonly Color Danger = Hex("#C96B5D");
-        private static readonly Color Ok = Hex("#77836D");
-        private static readonly Color OnAccent = Hex("#2B1C05");
+        // Kaliv VR design package v2.1 (vr/Design/docs/design-tokens.json): deep night blue,
+        // electric-blue glow, gold ankh. Elevated/Border are steps between the token surfaces.
+        private static readonly Color CanvasBg = Hex("#061326");     // background
+        private static readonly Color Surface = Hex("#0A2038");      // surface
+        private static readonly Color Elevated = Hex("#0F2C4C");
+        private static readonly Color Border = Hex("#1B4A72");
+        private static readonly Color TextMain = Hex("#F4F8FF");     // text
+        private static readonly Color Muted = Hex("#A8C5D8");        // muted
+        private static readonly Color Accent = Hex("#F4B544");       // gold
+        private static readonly Color Glow = Hex("#20B9FF");         // electric blue
+        private static readonly Color Highlight = Hex("#65E5FF");    // cyan highlight
+        private static readonly Color Danger = Hex("#D9665A");
+        private static readonly Color Ok = Hex("#65E5FF");
+        private static readonly Color OnAccent = Hex("#1A1204");
 
-        private const string AccentHex = "#D4AB52";
-        private const string MutedHex = "#A89D90";
-        private const string DangerHex = "#C96B5D";
-        private const string OkHex = "#9DAA91";
+        private const string AccentHex = "#F4B544";
+        private const string MutedHex = "#A8C5D8";
+        private const string DangerHex = "#D9665A";
+        private const string OkHex = "#65E5FF";
 
         /// <summary>Characters of transcript kept in the Text component. Older text scrolls off the top.</summary>
         private const int TranscriptWindow = 3200;
@@ -162,12 +166,27 @@ namespace Kaliv.VR
             _placeAfter = Time.realtimeSinceStartup + PlaceFallbackSeconds;
 
             var bg = AddImage(_canvas.transform, "Background", new Vector2(1200, 760), Vector2.zero, CanvasBg);
+            bg.sprite = Rounded(22);
             bg.transform.SetAsFirstSibling();
+            DecorateBackground(bg);
+
+            // Header: the gold ankh, then KALIV / VR — design v2.1's brand mark.
+            var ankhTex = Resources.Load<Texture2D>("Branding/ankh");
+            if (ankhTex != null)
+            {
+                var ankhGo = new GameObject("Ankh", typeof(RawImage));
+                ankhGo.transform.SetParent(bg.transform, false);
+                var ankh = ankhGo.GetComponent<RawImage>();
+                ankh.texture = ankhTex;
+                ankh.raycastTarget = false;
+                ankh.rectTransform.sizeDelta = new Vector2(78, 78);
+                ankh.rectTransform.anchoredPosition = new Vector2(-545, 315);
+            }
 
             var brand = AddText(_canvas.transform, "KALIV", 18, Accent, TextAnchor.MiddleLeft,
-                new Vector2(1020, 42), new Vector2(-20, 337), FontStyle.Bold);
+                new Vector2(1020, 42), new Vector2(60, 337), FontStyle.Bold);
             var vr = AddText(_canvas.transform, "VR", 38, TextMain, TextAnchor.MiddleLeft,
-                new Vector2(1020, 52), new Vector2(-20, 292));
+                new Vector2(1020, 52), new Vector2(60, 292));
             _status = AddText(_canvas.transform, "Ikke forbundet", 17, Muted, TextAnchor.MiddleRight,
                 new Vector2(640, 42), new Vector2(250, 337));
             // The panel's frame: hidden while a video plays, so nothing stands between you and it.
@@ -510,10 +529,10 @@ namespace Kaliv.VR
                 15, Muted, TextAnchor.MiddleLeft, new Vector2(600, 54), new Vector2(-180, -60));
             hint.horizontalOverflow = HorizontalWrapMode.Wrap;
             // Stash lives on its own server: reachable before (and without) pairing a rig.
-            AddButton(_pairGroup.transform, "STASH",
-                new Vector2(300, 62), new Vector2(315, -60), Elevated, () => _app.OpenStash());
-            AddButton(_pairGroup.transform, "AFSLUT", new Vector2(140, 40), new Vector2(480, 250),
-                Danger, () => _app.QuitApp());
+            AddIcon(AddButton(_pairGroup.transform, "STASH",
+                new Vector2(300, 62), new Vector2(315, -60), Elevated, () => _app.OpenStash()), "library");
+            AddIcon(AddButton(_pairGroup.transform, "AFSLUT", new Vector2(150, 40), new Vector2(475, 250),
+                Danger, () => _app.QuitApp()), "close");
         }
 
         private void BuildChatGroup()
@@ -525,8 +544,8 @@ namespace Kaliv.VR
                 new Vector2(520, 36), new Vector2(-280, 250), FontStyle.Bold);
             _bodyStatus = AddText(_chatGroup.transform, "KROP · initialiserer", 13, Muted, TextAnchor.MiddleRight,
                 new Vector2(380, 36), new Vector2(210, 250));
-            AddButton(_chatGroup.transform, "AFSLUT", new Vector2(140, 40), new Vector2(480, 250),
-                Danger, () => _app.QuitApp());
+            AddIcon(AddButton(_chatGroup.transform, "AFSLUT", new Vector2(150, 40), new Vector2(475, 250),
+                Danger, () => _app.QuitApp()), "close");
 
             // Mode row: the two switches that decide the turn's route, then model + media.
             // Same two toggles as Android's composer, so the same turn routes the same way.
@@ -538,12 +557,12 @@ namespace Kaliv.VR
                 Elevated, () => _app.ToggleTools());
             // Which documents VIDEN searches, and which tools exist and are allowed — the
             // rig's own switches, so the headset can pull the brake without a phone.
-            AddButton(_chatGroup.transform, "RIG", new Vector2(110, 44), new Vector2(-25, 205),
-                Elevated, () => _app.OpenRig());
+            AddIcon(AddButton(_chatGroup.transform, "RIG", new Vector2(110, 44), new Vector2(-25, 205),
+                Elevated, () => _app.OpenRig()), "settings");
             _toolsLabel = tools.GetComponentInChildren<Text>();
             _toolsImage = tools.GetComponent<Image>();
             AddButton(_chatGroup.transform, "SKIFT MODEL", new Vector2(190, 44), new Vector2(255, 205), Elevated, CycleModel);
-            AddButton(_chatGroup.transform, "MEDIER", new Vector2(150, 44), new Vector2(440, 205), Elevated, () => _app.OpenMediaBrowser());
+            AddIcon(AddButton(_chatGroup.transform, "MEDIER", new Vector2(150, 44), new Vector2(440, 205), Elevated, () => _app.OpenMediaBrowser()), "gallery");
 
             // Transcript. Bottom-anchored inside a mask: the NEWEST line is always visible and
             // older text scrolls off the top. The first VR slice was top-anchored with
@@ -629,7 +648,8 @@ namespace Kaliv.VR
         private void BuildMediaBrowser()
         {
             _mediaGroup = Group("MediaBrowser", _canvas.transform);
-            AddImage(_mediaGroup.transform, "Backdrop", new Vector2(1200, 760), Vector2.zero, CanvasBg);
+            // Transparent: the panel's own design-v2.1 backdrop shows through.
+            AddImage(_mediaGroup.transform, "Backdrop", new Vector2(1200, 760), Vector2.zero, new Color(0f, 0f, 0f, 0f));
             AddText(_mediaGroup.transform, "MEDIER", 18, Accent, TextAnchor.MiddleLeft,
                 new Vector2(500, 40), new Vector2(-290, 330), FontStyle.Bold);
 
@@ -638,9 +658,11 @@ namespace Kaliv.VR
             var srcRig = AddButton(_mediaGroup.transform, "RIG", new Vector2(160, 46), new Vector2(270, 330),
                 Elevated, () => _app.MediaShowRig());
             _srcRigImage = srcRig.GetComponent<Image>();
+            AddIcon(srcRig, "gallery");
             var srcStash = AddButton(_mediaGroup.transform, "STASH", new Vector2(160, 46), new Vector2(440, 330),
                 Elevated, () => _app.MediaShowStash());
             _srcStashImage = srcStash.GetComponent<Image>();
+            AddIcon(srcStash, "library");
 
             // SkyPlayer's library controls, in SkyPlayer's words.
             _stashControls = Group("StashControls", _mediaGroup.transform);
@@ -695,10 +717,10 @@ namespace Kaliv.VR
                 Elevated, () => { if (!ScrollListPage(-1)) _app.MediaPrevPage(); });
             _mediaMore = AddButton(_mediaGroup.transform, "NED", new Vector2(200, 52), new Vector2(0, -300),
                 Elevated, () => { if (!ScrollListPage(1)) _app.MediaNextPage(); });
-            AddButton(_mediaGroup.transform, "AFSLUT", new Vector2(140, 52), new Vector2(460, -300),
-                Danger, () => _app.QuitApp());
-            AddButton(_mediaGroup.transform, "LUK", new Vector2(200, 52), new Vector2(250, -300),
-                Elevated, () => ShowMediaBrowser(false));
+            AddIcon(AddButton(_mediaGroup.transform, "AFSLUT", new Vector2(150, 52), new Vector2(455, -300),
+                Danger, () => _app.QuitApp()), "close");
+            AddIcon(AddButton(_mediaGroup.transform, "TILBAGE", new Vector2(200, 52), new Vector2(250, -300),
+                Elevated, () => ShowMediaBrowser(false)), "back");
             _mediaGroup.SetActive(false);
         }
 
@@ -741,7 +763,7 @@ namespace Kaliv.VR
             var rum = AddButton(_transportGroup.transform, "RUM", new Vector2(120, 52), new Vector2(310, -440), Elevated, () => _app.KeyToggle());
             _rumLabel = rum.GetComponentInChildren<Text>();
             _rumImage = rum.GetComponent<Image>();
-            AddButton(_transportGroup.transform, "LUK", new Vector2(110, 52), new Vector2(440, -440), Danger, () => _app.CloseMediaToBrowser());
+            AddIcon(AddButton(_transportGroup.transform, "LUK", new Vector2(110, 52), new Vector2(440, -440), Danger, () => _app.CloseMediaToBrowser()), "close");
 
             // The key row, only while RUM is on — as in SkyPlayer.
             _keyGroup = Group("KeyRow", _transportGroup.transform);
@@ -1489,6 +1511,7 @@ namespace Kaliv.VR
             go.transform.SetParent(parent, false);
             var image = go.GetComponent<Image>();
             image.color = color;
+            Round(image, 14);
             var rt = image.rectTransform;
             rt.sizeDelta = size;
             rt.anchoredPosition = pos;
@@ -1522,6 +1545,7 @@ namespace Kaliv.VR
             root.transform.SetParent(parent, false);
             var image = root.GetComponent<Image>();
             image.color = Elevated;
+            Round(image, 14);
             var rt = image.rectTransform;
             rt.sizeDelta = size;
             rt.anchoredPosition = pos;
@@ -1553,6 +1577,7 @@ namespace Kaliv.VR
             root.transform.SetParent(parent, false);
             var image = root.GetComponent<Image>();
             image.color = color;
+            Round(image, 14);
             var rt = image.rectTransform;
             rt.sizeDelta = size;
             rt.anchoredPosition = pos;
@@ -1562,11 +1587,148 @@ namespace Kaliv.VR
 
             var button = root.GetComponent<Button>();
             button.targetGraphic = image;
+            // Hover in design v2.1's electric blue: the button lights up under the ray.
+            var colors = button.colors;
+            colors.normalColor = Color.white;
+            colors.highlightedColor = new Color(0.80f, 0.93f, 1f, 1f);
+            colors.pressedColor = new Color(0.62f, 0.86f, 1f, 1f);
+            colors.selectedColor = Color.white;
+            colors.fadeDuration = 0.08f;
+            button.colors = colors;
+            if (color == Elevated || color == Surface)
+            {
+                var edge = root.AddComponent<Outline>();
+                edge.effectColor = new Color(Glow.r, Glow.g, Glow.b, 0.30f);
+                edge.effectDistance = new Vector2(1.2f, -1.2f);
+            }
             button.onClick.AddListener(click);
 
             var collider = root.GetComponent<BoxCollider>();
             collider.size = new Vector3(size.x, size.y, 60f);
             return button;
+        }
+
+        // =====================================================================================
+        // Design v2.1 helpers: rounded corners, the menu backdrop, icons
+        // =====================================================================================
+
+        private static readonly Dictionary<int, Sprite> RoundedCache = new Dictionary<int, Sprite>();
+
+        /// <summary>
+        /// A white rounded-rectangle sprite, 9-sliced so any size keeps the same corner radius
+        /// (design tokens: 14 px buttons, 22 px panels). Generated once per radius — no asset.
+        /// </summary>
+        private static Sprite Rounded(int radius)
+        {
+            if (RoundedCache.TryGetValue(radius, out var cached) && cached != null) return cached;
+            int size = radius * 2 + 4;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            {
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+                name = "Rounded" + radius,
+            };
+            var px = new Color32[size * size];
+            float r = radius;
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                // Distance to the nearest corner centre, only inside the corner squares.
+                float cx = x < radius ? radius : (x >= size - radius ? size - radius - 1 : x);
+                float cy = y < radius ? radius : (y >= size - radius ? size - radius - 1 : y);
+                float d = Mathf.Sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+                float a = Mathf.Clamp01(r - d + 0.5f);   // one pixel of anti-aliasing
+                px[y * size + x] = new Color32(255, 255, 255, (byte)(a * 255));
+            }
+            tex.SetPixels32(px);
+            tex.Apply(false, true);
+            var border = new Vector4(radius + 1, radius + 1, radius + 1, radius + 1);
+            var sprite = Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f), 100f, 0,
+                SpriteMeshType.FullRect, border);
+            RoundedCache[radius] = sprite;
+            return sprite;
+        }
+
+        private static void Round(Image image, int radius)
+        {
+            if (image == null) return;
+            image.sprite = Rounded(radius);
+            image.type = Image.Type.Sliced;
+        }
+
+        /// <summary>
+        /// The panel's backdrop: design v2.1's menu art (a flat 2:1 crop of the approved splash),
+        /// cropped to the panel's shape, under a deep-blue veil so text stays readable.
+        /// Rounded by masking with the panel's own rounded background.
+        /// </summary>
+        private static void DecorateBackground(Image bg)
+        {
+            Round(bg, 22);
+            var tex = Resources.Load<Texture2D>("Branding/menu_bg");
+            if (tex == null) return;
+            var mask = bg.gameObject.AddComponent<Mask>();
+            mask.showMaskGraphic = true;
+
+            var size = bg.rectTransform.sizeDelta;
+            var artGo = new GameObject("MenuArt", typeof(RawImage));
+            artGo.transform.SetParent(bg.transform, false);
+            var art = artGo.GetComponent<RawImage>();
+            art.texture = tex;
+            art.raycastTarget = false;
+            art.rectTransform.sizeDelta = size;
+            float panelAspect = size.x / size.y;
+            float texAspect = tex.width / (float)tex.height;
+            if (texAspect > panelAspect)
+            {
+                float w = panelAspect / texAspect;
+                art.uvRect = new Rect((1f - w) * 0.5f, 0f, w, 1f);
+            }
+            else
+            {
+                float h = texAspect / panelAspect;
+                art.uvRect = new Rect(0f, (1f - h) * 0.5f, 1f, h);
+            }
+
+            var veilGo = new GameObject("Veil", typeof(Image));
+            veilGo.transform.SetParent(bg.transform, false);
+            var veil = veilGo.GetComponent<Image>();
+            veil.color = new Color(CanvasBg.r, CanvasBg.g, CanvasBg.b, 0.80f);
+            veil.raycastTarget = false;
+            veil.rectTransform.sizeDelta = size;
+
+            var rim = bg.gameObject.AddComponent<Outline>();
+            rim.effectColor = new Color(Glow.r, Glow.g, Glow.b, 0.55f);
+            rim.effectDistance = new Vector2(2f, -2f);
+        }
+
+        /// <summary>
+        /// Put one of design v2.1's line icons at the left of a button and nudge its label
+        /// right. Missing icon → the button simply stays text-only.
+        /// </summary>
+        private static void AddIcon(Button button, string icon)
+        {
+            if (button == null) return;
+            var tex = Resources.Load<Texture2D>("Branding/Icons/" + icon);
+            if (tex == null) return;
+            var rt = (RectTransform)button.transform;
+            float h = rt.sizeDelta.y;
+            float s = Mathf.Round(h * 0.55f);
+            var go = new GameObject("Icon", typeof(RawImage));
+            go.transform.SetParent(button.transform, false);
+            var img = go.GetComponent<RawImage>();
+            img.texture = tex;
+            img.raycastTarget = false;
+            bool onGold = button.targetGraphic is Image bi && bi.color == Accent;
+            img.color = onGold ? OnAccent : Color.white;
+            img.rectTransform.sizeDelta = new Vector2(s, s);
+            var label = button.GetComponentInChildren<Text>();
+            bool iconOnly = label == null || string.IsNullOrEmpty(label.text);
+            img.rectTransform.anchoredPosition = iconOnly ? Vector2.zero : new Vector2(-rt.sizeDelta.x * 0.5f + s * 0.5f + 12f, 0);
+            if (!iconOnly)
+            {
+                label.rectTransform.anchoredPosition = new Vector2(s * 0.5f + 4f, 0);
+                label.rectTransform.sizeDelta = new Vector2(rt.sizeDelta.x - s - 20f, h);
+            }
         }
 
         private static Color Hex(string value)
