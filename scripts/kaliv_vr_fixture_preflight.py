@@ -21,9 +21,13 @@ def inspect(path: Path) -> dict:
     if chunk_type != b"JSON" or 20 + chunk_length > len(data):
         raise ValueError("Missing/invalid GLB JSON chunk")
     doc = json.loads(data[20:20 + chunk_length].decode("utf-8"))
+    if "VRMC_vrm" not in doc.get("extensionsUsed", []):
+        raise ValueError("VRMC_vrm must be declared in extensionsUsed")
     vrm = doc.get("extensions", {}).get("VRMC_vrm")
     if not isinstance(vrm, dict):
         raise ValueError("Missing VRMC_vrm extension (VRM 1.0 required)")
+    if vrm.get("specVersion") != "1.0":
+        raise ValueError("VRM 1.0 specVersion required")
     human = vrm.get("humanoid", {}).get("humanBones", {})
     required = ("hips", "spine", "head", "leftUpperArm", "leftLowerArm",
                 "leftHand", "rightUpperArm", "rightLowerArm", "rightHand",
