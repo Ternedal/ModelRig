@@ -23,9 +23,10 @@ $hUpdater = Hash (Join-Path $AssetRoot "v2.0.20\$updaterName")
 
 $global:Calls = New-Object System.Collections.ArrayList
 $global:Health = $null
-$global:HealthAfterStart = $null
+$global:HealthQueue = New-Object System.Collections.Queue
 function global:Stop-ScheduledTask { param($TaskName) [void]$global:Calls.Add("stop:$TaskName") }
-function global:Start-ScheduledTask { param($TaskName) [void]$global:Calls.Add("start:$TaskName"); $global:Health = $global:HealthAfterStart }
+# Each start of the task makes health report the next queued value ($null = down).
+function global:Start-ScheduledTask { param($TaskName) [void]$global:Calls.Add("start:$TaskName"); $global:Health = $global:HealthQueue.Dequeue() }
 function global:Invoke-RestMethod {
     param($Method, $Uri, $Headers, $TimeoutSec, [switch]$UseBasicParsing)
     if ([string]$Uri -like 'http://127.0.0.1:*/healthz') {
@@ -77,7 +78,7 @@ Write-Host 'ok: check mode changes nothing'
 #    violation, say so, and wait for the handle.
 $rig = New-Rig 'apply'
 $global:Health = '2.0.20'
-$global:HealthAfterStart = '2.0.12'
+$global:HealthQueue.Clear(); $global:HealthQueue.Enqueue('2.0.12')
 $holder = @"
 `$f = [IO.File]::Open('$((Join-Path $rig $names[0]).Replace("'", "''"))', 'Open', 'Read', 'Read')
 [IO.File]::WriteAllText('$((Join-Path $suite 'held.txt').Replace("'", "''"))', 'held')
@@ -115,7 +116,28 @@ Assert ($out -match 'Already on signed v2.0.12') 'Second run was not a no-op'
 Assert ($global:Calls.Count -eq 0) 'Second run touched the scheduled task'
 Write-Host 'ok: second run is a no-op'
 
-# 4. Refusals before any change.
+# 4. 2.0.12 that never comes up: the rollback restores the v2.0.20 bytes and the original journal
+#    files, stops 2.0.12 before swapping back, starts the task once more and sees 2.0.20 again.
+$rig = New-Rig 'rollback'
+[IO.File]::WriteAllText((Join-Path $rig 'update-transaction.json.tmp'), '{"state":"rolled_back"}')
+$journalBefore = Hash (Join-Path $rig 'update-transaction.json')
+$tmpBefore = Hash (Join-Path $rig 'update-transaction.json.tmp')
+$global:Health = '2.0.20'
+$global:HealthQueue.Clear(); $global:HealthQueue.Enqueue($null); $global:HealthQueue.Enqueue('2.0.20')
+$message = ''
+try { Invoke-Restore $rig @{ Apply = $true; HealthTimeoutSeconds = 6 } | Out-Null } catch { $message = [string]$_ }
+Assert ($message -match 'did not both report 2\.0\.12') "Rollback case did not name the health failure: '$message'"
+Assert ($message -match 'rolled back to v2\.0\.20 with the original journal' -and $message -notmatch 'NOT yet back') "Rollback was not reported complete: '$message'"
+foreach ($n in $names) { Assert ((Hash (Join-Path $rig $n)) -ceq $h20[$n]) "$n is not the v2.0.20 bytes after the rollback" }
+Assert ((Hash (Join-Path $rig $updaterName)) -ceq $hUpdater) 'The live updater changed in the rollback case'
+Assert ((Hash (Join-Path $rig 'update-transaction.json')) -ceq $journalBefore) 'The journal was not put back byte for byte'
+Assert ((Hash (Join-Path $rig 'update-transaction.json.tmp')) -ceq $tmpBefore) 'The journal .tmp was not put back byte for byte'
+Assert (-not (Test-Path -LiteralPath (Join-Path $rig 'updater.lock'))) 'The lock was left behind after the rollback'
+Assert (($global:Calls -join ',') -ceq 'stop:KalivSupervisor,start:KalivSupervisor,stop:KalivSupervisor,start:KalivSupervisor') "Unexpected task calls in the rollback: $($global:Calls -join ',')"
+Assert ($global:Health -ceq '2.0.20') 'Health is not back on 2.0.20 after the rollback'
+Write-Host 'ok: 2.0.12 that never comes up is rolled back to the v2.0.20 bytes and the original journal'
+
+# 5. Refusals before any change.
 $global:Health = '2.0.20'
 $rig = New-Rig 'lock'; [IO.File]::WriteAllText((Join-Path $rig 'updater.lock'), 'pid 1 started 2026-11-15T00:00:00Z')
 Assert-Refused $rig 'updater.lock exists' 'an existing updater.lock'

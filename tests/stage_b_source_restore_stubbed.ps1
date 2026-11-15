@@ -39,7 +39,16 @@ Set-Content -LiteralPath $copy -Value $src -Encoding ascii
 
 function global:Get-CimInstance { param($ClassName, $Filter) @($global:Procs) }
 function global:Stop-ScheduledTask { param($TaskName) $global:Calls += "stop-task" }
-function global:Start-ScheduledTask { param($TaskName) $global:Calls += "start-task"; if ($global:HealthAfterStart) { $global:Health = $global:HealthAfterStart } }
+# Health follows what is actually installed: starting the task makes backend and worker report the
+# version of the live server file, unless 2.0.12 is set to fail on 2.0.20's data (or always).
+function global:Start-ScheduledTask {
+    param($TaskName)
+    $global:Calls += "start-task"
+    if ($global:StartFailures -gt 0) { $global:StartFailures--; throw 'simulated task start failure' }
+    $live = ([IO.File]::ReadAllText((Join-Path $global:CurrentRig 'modelrig-server-windows-x64.exe')) -split ' ')[-1]
+    $global:Health = $live
+    if ($global:BrokenAlways -or ($global:BrokenOn2012 -and $live -ceq '2.0.12')) { $global:Health = $null }
+}
 function global:Invoke-RestMethod {
     param($Method, $Uri, $Headers, $TimeoutSec, [switch]$UseBasicParsing)
     if ($Uri -like '*healthz') { if ($null -eq $global:Health) { throw 'down' }; return [pscustomobject]@{ version = $global:Health } }
@@ -57,6 +66,7 @@ function global:Invoke-WebRequest {
 function global:Copy-Item {
     param([string]$LiteralPath, [string]$Destination, [switch]$Force)
     if ($global:FailCopyTo -and $Destination -like "*$($global:FailCopyTo)" -and $LiteralPath -like '*v2.0.12*') { throw 'simulated copy failure' }
+    if ($global:FailRollbackTo -and $Destination -like "*$($global:FailRollbackTo)" -and $LiteralPath -like '*v2.0.20*' -and $Destination -notlike '*v2.0.20*') { throw 'simulated rollback copy failure' }
     if ($global:ShareFailures -gt 0 -and $Destination -like '*modelrig-server-windows-x64.exe' -and $LiteralPath -like '*v2.0.12*') {
         $global:ShareFailures--
         throw [IO.IOException]::new('simulated sharing violation', -2147024864)
@@ -70,11 +80,13 @@ function New-Rig([hashtable]$liveVersion) {
     $u = Join-Path $root 'modelrig-updater-windows-x64.exe'
     [IO.File]::WriteAllText($u, $updaterText); chmod +x $u
     foreach ($n in $names) { [IO.File]::WriteAllText((Join-Path $root $n), "$n $($liveVersion[$n])") }
+    $global:CurrentRig = $root
     return $root
 }
 function Reset([string]$health) {
     $global:Procs = @(); $global:Calls = @(); $global:Downloads = @(); $global:Prov = @()
-    $global:Health = $health; $global:HealthAfterStart = '2.0.12'; $global:BadDownload = $null; $global:FailCopyTo = $null; $global:AttReply = $null; $global:ShareFailures = 0
+    $global:Health = $health; $global:BadDownload = $null; $global:FailCopyTo = $null; $global:FailRollbackTo = $null; $global:AttReply = $null
+    $global:ShareFailures = 0; $global:StartFailures = 0; $global:BrokenOn2012 = $false; $global:BrokenAlways = $false
 }
 function Run([string]$root, [hashtable]$extra) {
     $out = & $copy -RigRoot $root @extra *>&1 | Out-String
@@ -152,23 +164,74 @@ Check (([regex]::Matches($o, 'waiting for another process')).Count -eq 1) 'says 
 Check ($o -match 'Stage B source ready' -and (LiveIs $r '2.0.12')) 'then completes'
 Check ($global:ShareFailures -eq 0) 'both violations were met'
 
-Write-Host 'a failed swap puts 2.0.20 back and restarts'
-Reset '2.0.20'; $r = New-Rig $all2020
+function JournalBack([string]$root) {
+    return ([IO.File]::ReadAllText((Join-Path $root 'update-transaction.json')) -ceq '{"state":"committed"}') -and
+           ([IO.File]::ReadAllText((Join-Path $root 'update-transaction.json.tmp')) -ceq '{"state":"rolled_back"}')
+}
+function New-JournalRig {
+    $r = New-Rig $all2020
+    [IO.File]::WriteAllText((Join-Path $r 'update-transaction.json'), '{"state":"committed"}')
+    [IO.File]::WriteAllText((Join-Path $r 'update-transaction.json.tmp'), '{"state":"rolled_back"}')
+    return $r
+}
+
+Write-Host 'a failed swap rolls back the executables and the journal'
+Reset '2.0.20'; $r = New-JournalRig
 $global:FailCopyTo = 'modelrig-worker-windows-x64.exe'
-[IO.File]::WriteAllText((Join-Path $r 'update-transaction.json'), '{"state":"committed"}')
 $e = RunErr $r @{ Apply = $true }
-Check ($e -match 'rolled back to v2.0.20') 'reports rollback'
+Check ($e -match 'rolled back to v2.0.20 with the original journal') 'reports rollback'
+Check ($e -notmatch 'NOT yet back') 'health back to the versions before'
 Check (LiveIs $r '2.0.20') 'live set back on 2.0.20'
+Check (JournalBack $r) 'journal and tmp back, byte for byte'
 Check (-not (Test-Path (Join-Path $r 'updater.lock'))) 'lock released'
 Check (($global:Calls -join ',') -ceq 'stop-task,start-task') 'supervisor restarted once'
+Check ($global:Health -ceq '2.0.20') 'health reports 2.0.20'
 
-Write-Host 'health that never reaches 2.0.12 fails loudly'
-Reset '2.0.20'; $r = New-Rig $all2020
-$global:HealthAfterStart = '2.0.20'
+Write-Host '2.0.12 that never comes up rolls back the executables and the journal'
+Reset '2.0.20'; $r = New-JournalRig
+$global:BrokenOn2012 = $true
 $e = RunErr $r @{ Apply = $true; HealthTimeoutSeconds = 4 }
-Check ($e -match 'did not both report 2.0.12') 'reports health failure'
+Check ($e -match 'did not both report 2.0.12') 'names the health failure'
+Check ($e -match 'rolled back to v2.0.20 with the original journal' -and $e -notmatch 'NOT yet back') 'reports a complete rollback'
+Check (LiveIs $r '2.0.20') 'live set back on 2.0.20'
+Check (JournalBack $r) 'journal and tmp back, byte for byte'
 Check (-not (Test-Path (Join-Path $r 'updater.lock'))) 'lock released'
-Check (($global:Calls -join ',') -ceq 'stop-task,start-task') 'supervisor started exactly once'
+Check (($global:Calls -join ',') -ceq 'stop-task,start-task,stop-task,start-task') '2.0.12 stopped before the swap back, then started once'
+Check ($global:Health -ceq '2.0.20') 'health reports 2.0.20'
+
+Write-Host 'a task that will not start rolls back'
+Reset '2.0.20'; $r = New-JournalRig
+$global:StartFailures = 1
+$e = RunErr $r @{ Apply = $true; HealthTimeoutSeconds = 4 }
+Check ($e -match 'simulated task start failure' -and $e -match 'rolled back to v2.0.20 with the original journal') 'reports cause and rollback'
+Check ((LiveIs $r '2.0.20') -and (JournalBack $r)) 'executables and journal back'
+Check (($global:Calls -join ',') -ceq 'stop-task,start-task,stop-task,start-task') 'stopped, then started again'
+Check (-not (Test-Path (Join-Path $r 'updater.lock'))) 'lock released'
+
+Write-Host 'a rollback that is up but not healthy says so'
+Reset '2.0.20'; $r = New-JournalRig
+$global:BrokenAlways = $true
+$e = RunErr $r @{ Apply = $true; HealthTimeoutSeconds = 4 }
+Check ($e -match 'NOT yet back to the versions before the restore') 'says health is not back'
+Check ((LiveIs $r '2.0.20') -and (JournalBack $r)) 'executables and journal back'
+Check (-not (Test-Path (Join-Path $r 'updater.lock'))) 'lock released'
+
+Write-Host 'a rollback that cannot be verified stops fail-closed'
+Reset '2.0.20'; $r = New-JournalRig
+$global:FailCopyTo = 'modelrig-worker-windows-x64.exe'
+$global:FailRollbackTo = 'modelrig-server-windows-x64.exe'
+$e = RunErr $r @{ Apply = $true }
+Check ($e -match 'ROLLBACK DID NOT VERIFY' -and $e -match 'updater.lock is KEPT') 'says so'
+Check (Test-Path (Join-Path $r 'updater.lock')) 'lock kept'
+Check (($global:Calls -join ',') -ceq 'stop-task') 'supervisor not started'
+$bk = @(Get-ChildItem (Join-Path $r 'backups') -Directory)[0].FullName
+Check ((Test-Path (Join-Path (Join-Path $bk 'v2.0.20') 'modelrig-server-windows-x64.exe')) -and (Test-Path (Join-Path $bk 'update-transaction.json'))) 'backups and journal still in the restore folder'
+
+Write-Host 'a rig that is down is refused before any change'
+Reset $null; $r = New-JournalRig
+$e = RunErr $r @{ Apply = $true }
+Check ($e -match 'must both answer healthz') 'refused'
+Check ((LiveIs $r '2.0.20') -and (JournalBack $r) -and $global:Calls.Count -eq 0 -and -not (Test-Path (Join-Path $r 'backups'))) 'nothing touched'
 
 Write-Host 'provenance check against the real GitHub attestations'
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($copy, [ref]$null, [ref]$null)

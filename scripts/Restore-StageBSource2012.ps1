@@ -16,8 +16,10 @@
 #   2. takes updater.lock, so no updater run can start meanwhile;
 #   3. stops the supervisor task and the running set, the same way the updater does;
 #   4. copies the current v2.0.20 executables to a backup folder and archives the journal files;
-#   5. replaces the three executables, verifies their hashes, and puts the backup back if any step fails;
+#   5. replaces the three executables and verifies their hashes;
 #   6. starts the supervisor task and waits until backend and worker report 2.0.12.
+# If any step after the lock fails, including step 6, it rolls back to the v2.0.20 executables and
+# the original journal, verifies both, and starts the task again (see "mutate" below).
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File Restore-StageBSource2012.ps1
 #   powershell -NoProfile -ExecutionPolicy Bypass -File Restore-StageBSource2012.ps1 -Apply
@@ -166,6 +168,9 @@ if ($replace.Count -eq 0 -and $journals.Count -eq 0 -and $serverVersion -ceq $So
     Write-Host "Already on signed v$SourceVersion with no journal. Stage B source is ready."
     exit 0
 }
+if ([string]::IsNullOrEmpty($serverVersion) -or [string]::IsNullOrEmpty($workerVersion)) {
+    throw "Backend and worker must both answer healthz before a restore, so a rollback has a known state to return to. Nothing changed."
+}
 if (-not $Apply) {
     Write-Host "Check only. Nothing was changed. Run again with -Apply to restore v$SourceVersion."
     exit 0
@@ -189,9 +194,30 @@ foreach ($row in $replace) {
 }
 
 # ---------------------------------------------------------------- mutate, under the updater lock
+# Any failure from here on - a backup, the journal archive, a swap, a hash, starting the task, or
+# backend and worker not reporting 2.0.12 in time - rolls the rig back to exactly what it was:
+# the v2.0.20 executables (verified), the journal files at their original paths (verified), the
+# task started, and health waited for. Only if that rollback itself cannot be verified does the
+# script stop with the task NOT started and updater.lock KEPT, so no updater run can act on a
+# half-restored rig; the message names the folder that holds both sets and the journal.
+function Wait-Health([string]$Server, [string]$Worker) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($HealthTimeoutSeconds)
+    while ($true) {
+        $script:serverVersion = Get-HealthVersion $ServerHealth
+        $script:workerVersion = Get-HealthVersion $WorkerHealth
+        if ($script:serverVersion -ceq $Server -and $script:workerVersion -ceq $Worker) { return $true }
+        if ([DateTime]::UtcNow -ge $deadline) { return $false }
+        Start-Sleep -Seconds 3
+    }
+}
+
+$serverBefore = $serverVersion
+$workerBefore = $workerVersion
 $guard = [IO.File]::Open($lockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
 $swapped = @()
-$started = $false
+$archived = @()
+$taskRunning = $false
+$keepLock = $false
 try {
     $lockBytes = [Text.Encoding]::UTF8.GetBytes("pid $PID started $([DateTime]::UtcNow.ToString('o'))")
     $guard.Write($lockBytes, 0, $lockBytes.Length)
@@ -206,7 +232,11 @@ try {
             Copy-Item -LiteralPath $live -Destination $copy
             if ((Get-SHA256 $copy) -cne $Assets[$row.Name].Target) { throw "Backup of $($row.Name) does not verify." }
         }
-        foreach ($path in $journals) { Move-Item -LiteralPath $path -Destination (Join-Path $work (Split-Path -Leaf $path)) }
+        foreach ($path in $journals) {
+            $entry = [pscustomobject]@{ Path = $path; Archive = (Join-Path $work (Split-Path -Leaf $path)); Sha = (Get-SHA256 $path) }
+            Move-Item -LiteralPath $entry.Path -Destination $entry.Archive
+            $archived += $entry
+        }
         foreach ($row in $replace) {
             $live = Join-Path $RigRoot $row.Name
             $swapped += $row.Name
@@ -214,47 +244,54 @@ try {
             if ((Get-SHA256 $live) -cne $Assets[$row.Name].Source) { throw "Installed $($row.Name) does not verify as v$SourceVersion." }
             Write-Host "installed v$SourceVersion $($row.Name)"
         }
-    } catch {
-        $failure = $_
-        Write-Host "restore failed ($failure); putting the v$TargetVersion executables back"
-        foreach ($name in $swapped) { Set-Executable (Join-Path $previous $name) (Join-Path $RigRoot $name) }
-        foreach ($name in $swapped) {
-            if ((Get-SHA256 (Join-Path $RigRoot $name)) -cne $Assets[$name].Target) { throw "ROLLBACK DID NOT VERIFY for $name. Backup is in $previous. Supervisor NOT started." }
-        }
+        $heartbeat = Join-Path (Join-Path $RigRoot 'logs') 'supervisor-heartbeat'
+        if (Test-Path -LiteralPath $heartbeat) { Remove-Item -LiteralPath $heartbeat -Force }
+        Write-Host "starting supervisor task"
+        $taskRunning = $true
         Start-ScheduledTask -TaskName $SupervisorTask
-        $started = $true
-        throw "Restore aborted and rolled back to v$TargetVersion. Archived journals and backups are in $work. Cause: $failure"
-    }
-
-    $heartbeat = Join-Path (Join-Path $RigRoot 'logs') 'supervisor-heartbeat'
-    if (Test-Path -LiteralPath $heartbeat) { Remove-Item -LiteralPath $heartbeat -Force }
-    Write-Host "starting supervisor task"
-    Start-ScheduledTask -TaskName $SupervisorTask
-    $started = $true
-    $deadline = [DateTime]::UtcNow.AddSeconds($HealthTimeoutSeconds)
-    while ($true) {
-        $serverVersion = Get-HealthVersion $ServerHealth
-        $workerVersion = Get-HealthVersion $WorkerHealth
-        if ($serverVersion -ceq $SourceVersion -and $workerVersion -ceq $SourceVersion) { break }
-        if ([DateTime]::UtcNow -ge $deadline) {
-            throw "Backend '$serverVersion' and worker '$workerVersion' did not both report $SourceVersion within $HealthTimeoutSeconds s. The v$TargetVersion executables are in $previous; the normal updater (-dir $RigRoot) moves the rig forward to the latest signed release."
+        if (-not (Wait-Health $SourceVersion $SourceVersion)) {
+            throw "backend '$serverVersion' and worker '$workerVersion' did not both report $SourceVersion within $HealthTimeoutSeconds s"
         }
-        Start-Sleep -Seconds 3
+        foreach ($name in $Assets.Keys) {
+            if ((Get-SHA256 (Join-Path $RigRoot $name)) -cne $Assets[$name].Source) { throw "$name is not v$SourceVersion after the restore" }
+        }
+        if ((Get-SHA256 $updater) -cne $UpdaterSha) { throw "the live updater changed during the restore" }
+        foreach ($name in @('update-transaction.json', 'update-transaction.json.tmp')) {
+            if (Test-Path -LiteralPath (Join-Path $RigRoot $name)) { throw "$name exists after the restore" }
+        }
+    } catch {
+        $failure = [string]$_
+        Write-Host "restore failed ($failure); rolling back to v$TargetVersion and the original journal"
+        try {
+            if ($taskRunning) { Stop-RunningSet; $taskRunning = $false }
+            foreach ($name in $swapped) { Set-Executable (Join-Path $previous $name) (Join-Path $RigRoot $name) }
+            foreach ($name in $swapped) {
+                if ((Get-SHA256 (Join-Path $RigRoot $name)) -cne $Assets[$name].Target) { throw "$name is not v$TargetVersion after the rollback" }
+            }
+            foreach ($entry in $archived) {
+                if (Test-Path -LiteralPath $entry.Path) { throw "$($entry.Path) reappeared during the restore" }
+                Move-Item -LiteralPath $entry.Archive -Destination $entry.Path
+                if ((Get-SHA256 $entry.Path) -cne $entry.Sha) { throw "$($entry.Path) does not match the original after the rollback" }
+            }
+        } catch {
+            $keepLock = $true
+            throw "ROLLBACK DID NOT VERIFY: $_. This script will not start the supervisor task, and updater.lock is KEPT. Both executable sets and the original journal are in $work. Restore by hand from there before removing the lock. Cause of the failed restore: $failure"
+        }
+        Write-Host "rolled back: v$TargetVersion executables and the original journal are in place; starting supervisor task"
+        $taskRunning = $true
+        Start-ScheduledTask -TaskName $SupervisorTask
+        $back = Wait-Health $serverBefore $workerBefore
+        throw "Restore aborted and rolled back to v$TargetVersion with the original journal (backend '$serverVersion', worker '$workerVersion'$(if (-not $back) { ', NOT yet back to the versions before the restore' })). Downloads and copies are in $work. Cause: $failure"
     }
 } finally {
     $guard.Dispose()
-    Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
-    if (-not $started) { Start-ScheduledTask -TaskName $SupervisorTask -ErrorAction SilentlyContinue }
+    if (-not $keepLock) {
+        Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+        if (-not $taskRunning) { Start-ScheduledTask -TaskName $SupervisorTask -ErrorAction SilentlyContinue }
+    }
 }
 
 # ---------------------------------------------------------------- final state
-foreach ($name in $Assets.Keys) {
-    if ((Get-SHA256 (Join-Path $RigRoot $name)) -cne $Assets[$name].Source) { throw "$name is not v$SourceVersion after the restore." }
-}
-if ((Get-SHA256 $updater) -cne $UpdaterSha) { throw "The live updater changed during the restore." }
-foreach ($name in @('update-transaction.json', 'update-transaction.json.tmp')) {
-    if (Test-Path -LiteralPath (Join-Path $RigRoot $name)) { throw "$name exists after the restore." }
-}
 Write-Host "backend_version=$serverVersion"
 Write-Host "worker_version=$workerVersion"
 Write-Host "updater_version=$TargetVersion"
