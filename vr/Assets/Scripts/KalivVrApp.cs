@@ -108,6 +108,7 @@ namespace Kaliv.VR
             _voice.SpeechEvent += ReportBodySpeech;
 
             InitializeStash();
+            _renderEngine.MediaStartZoom = PlayerPrefs.GetFloat(ZoomKey, 0f);
 
             _panel.SetConnectionDefaults(BaseUrl, "");
             _panel.SetModes(RagMode, ToolsMode, RagSource);
@@ -842,6 +843,7 @@ namespace Kaliv.VR
             _cancelDownload?.Invoke();
             StashReportProgress(finished: false);   // remember where a Stash scene was left
             _stashPlaying = null;
+            RememberZoom();
             _renderEngine.StopMedia();
             _renderEngine.SetMediaScreenAsGazeTarget(false);
             _images?.Hide();
@@ -849,6 +851,22 @@ namespace Kaliv.VR
             _showingImage = false;
             _mediaOpen = false;
             _panel.ShowTransport(false);
+        }
+
+        private const string ZoomKey = "kaliv.vr.media.zoom";
+
+        /// <summary>
+        /// The zoom you leave a 180°/360° video at is where the next one starts (Anders: the
+        /// default felt too zoomed in). Only immersive video counts — a flat screen's distance
+        /// is a different thing.
+        /// </summary>
+        private void RememberZoom()
+        {
+            if (!_mediaOpen || _showingImage || !_renderEngine.MediaIsImmersive) return;
+            float z = Mathf.Clamp01(_renderEngine.MediaZoom01);
+            _renderEngine.MediaStartZoom = z;
+            PlayerPrefs.SetFloat(ZoomKey, z);
+            PlayerPrefs.Save();
         }
 
         /// <summary>

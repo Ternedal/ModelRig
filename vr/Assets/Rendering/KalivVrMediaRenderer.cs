@@ -44,11 +44,19 @@ namespace Kaliv.VR.Rendering
             _player.SetDefaultZoom(0f);
         }
 
+        /// <summary>Zoom each new video starts at (0 = widest). The app remembers the user's last one.</summary>
+        public float StartZoom { get; set; }
+
+        /// <summary>Current zoom of an immersive video, 0..1 (0 = widest).</summary>
+        public float Zoom01 => _player != null ? _player.Zoom01 : 0f;
+
         public void Open(string url, string formatHint = "FLAT", double resumeSeconds = 0)
         {
             if (_player == null)
                 throw new InvalidOperationException("Kaliv VR media renderer is not initialized.");
 
+            _player.SetDefaultZoom(Mathf.Clamp01(StartZoom));
+            SetDisplayVisible(true);
             _player.Open(
                 new MediaSource(url, resumeSeconds),
                 Projection.FromHint(formatHint));
@@ -58,7 +66,25 @@ namespace Kaliv.VR.Rendering
         public void TogglePlayPause() => _player?.TogglePlayPause();
         public void Play() => _player?.Play();
         public void Pause() => _player?.Pause();
-        public void Stop() => _player?.Stop();
+
+        /// <summary>
+        /// Stop AND take the picture away. The engine's Stop only pauses, leaving the last frame
+        /// on the sphere — behind the menu after LUK, which is what Anders saw. The next Open
+        /// builds a fresh display, so hiding the renderers here is enough.
+        /// </summary>
+        public void Stop()
+        {
+            _player?.Stop();
+            SetDisplayVisible(false);
+        }
+
+        private void SetDisplayVisible(bool visible)
+        {
+            foreach (var r in GetComponentsInChildren<Renderer>(true)) r.enabled = visible;
+            if (_player == null) return;
+            // The display may be parented elsewhere (the engine's presentation root).
+            foreach (var r in _player.GetComponentsInChildren<Renderer>(true)) r.enabled = visible;
+        }
         public void Seek(float fraction01) => _player?.Seek(fraction01);
         public void SeekRelative(double seconds) => _player?.SeekRelative(seconds);
         public void Recenter() => _player?.Recenter();

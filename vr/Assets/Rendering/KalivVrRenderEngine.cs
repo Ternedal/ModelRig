@@ -142,6 +142,15 @@ namespace Kaliv.VR.Rendering
             _mediaRenderer?.Open(url, formatHint, resumeSeconds);
 
         public void StopMedia() => _mediaRenderer?.Stop();
+
+        /// <summary>Zoom new videos start at (0 = widest) — set from the user's remembered zoom.</summary>
+        public float MediaStartZoom
+        {
+            get => _mediaRenderer != null ? _mediaRenderer.StartZoom : 0f;
+            set { if (_mediaRenderer != null) _mediaRenderer.StartZoom = value; }
+        }
+
+        public float MediaZoom01 => _mediaRenderer?.Zoom01 ?? 0f;
         public void ToggleMediaPlayback() => _mediaRenderer?.TogglePlayPause();
         public void SeekMedia(float fraction01) => _mediaRenderer?.Seek(fraction01);
         public void SeekMediaRelative(double seconds) => _mediaRenderer?.SeekRelative(seconds);

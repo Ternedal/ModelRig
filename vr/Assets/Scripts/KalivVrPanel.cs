@@ -86,6 +86,11 @@ namespace Kaliv.VR
         private readonly List<MediaRow> _mediaRows = new();
         private Text _mediaPosition;
         private Text _mediaEmpty;
+        private const int MediaRowCount = 4;
+        private const float ThumbW = 156f, ThumbH = 88f;                 // 16:9
+        // Label fills from just right of the thumbnail to the row's right edge (-540..540).
+        private const float LabelWithThumbX = (-540f + 8f + ThumbW + 20f + 530f) * 0.5f;
+        private const float LabelWithThumbW = 530f - (-540f + 8f + ThumbW + 20f);
         private Button _mediaMore;
         private GameObject _transportGroup;
         private Text _transportInfo;
@@ -720,24 +725,28 @@ namespace Kaliv.VR
                 new Vector2(900, 120), new Vector2(0, -20));
             _mediaEmpty.horizontalOverflow = HorizontalWrapMode.Wrap;
 
-            for (int i = 0; i < 6; i++)
+            // Four tall rows with 16:9 thumbnails (Anders: bigger thumbnails), instead of six
+            // thin rows with stamp-sized ones. Same 1080 px width and vertical band as before.
+            for (int i = 0; i < MediaRowCount; i++)
             {
                 int index = i;
-                float y = 170 - i * 74;
-                var root = AddButton(_mediaGroup.transform, "", new Vector2(1080, 66), new Vector2(0, y),
+                float y = 150 - i * 116;
+                var root = AddButton(_mediaGroup.transform, "", new Vector2(1080, 104), new Vector2(0, y),
                     Surface, () => OnMediaRow(index));
                 var thumbGo = new GameObject("Thumb", typeof(RawImage));
                 thumbGo.transform.SetParent(root.transform, false);
                 var thumb = thumbGo.GetComponent<RawImage>();
-                thumb.rectTransform.sizeDelta = new Vector2(104, 58);
-                thumb.rectTransform.anchoredPosition = new Vector2(-480, 0);
+                thumb.rectTransform.sizeDelta = new Vector2(ThumbW, ThumbH);
+                thumb.rectTransform.anchoredPosition = new Vector2(-540 + 8 + ThumbW * 0.5f, 0);
                 thumb.color = Border;
                 thumb.raycastTarget = false;
                 var label = root.GetComponentInChildren<Text>();
                 label.alignment = TextAnchor.MiddleLeft;
                 label.fontStyle = FontStyle.Normal;
-                label.rectTransform.sizeDelta = new Vector2(920, 64);
-                label.rectTransform.anchoredPosition = new Vector2(70, 0);
+                label.fontSize = 18;
+                label.horizontalOverflow = HorizontalWrapMode.Wrap;
+                label.rectTransform.sizeDelta = new Vector2(LabelWithThumbW, 100);
+                label.rectTransform.anchoredPosition = new Vector2(LabelWithThumbX, 0);
                 _mediaRows.Add(new MediaRow { Root = root.gameObject, Label = label, Thumb = thumb });
                 root.gameObject.SetActive(false);
             }
@@ -1270,8 +1279,8 @@ namespace Kaliv.VR
                 // Rows without a picture (studios, categories) start at the left edge instead
                 // of leaving an empty thumbnail gap.
                 bool pic = row.Data.Key != null;
-                row.Label.rectTransform.anchoredPosition = new Vector2(pic ? 70 : 0, 0);
-                row.Label.rectTransform.sizeDelta = new Vector2(pic ? 920 : 1030, 64);
+                row.Label.rectTransform.anchoredPosition = new Vector2(pic ? LabelWithThumbX : 0, 0);
+                row.Label.rectTransform.sizeDelta = new Vector2(pic ? LabelWithThumbW : 1030, 100);
                 if (row.Data.Key != null && _listThumbs.TryGetValue(row.Data.Key, out var tex) && tex != null)
                 {
                     row.Thumb.texture = tex;
