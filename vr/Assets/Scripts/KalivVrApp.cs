@@ -91,7 +91,10 @@ namespace Kaliv.VR
 
             _panel = KalivVrPanel.Create(camera, this, _renderEngine.UiRoot);
             // Splash on top, like SkyPlayer's: shown only once the art is bundled.
-            KalivSplash.Show(camera, transform);
+            // The panel waits behind it: first headset look had the panel and the splash
+            // fighting for the same space.
+            _panel.SetSuppressed(true);
+            KalivSplash.Show(camera, transform, () => { if (_panel != null) _panel.SetSuppressed(false); });
             _renderEngine.AttachUi(_panel.gameObject);
             _renderEngine.StatusChanged += (status, error) => _panel.SetBodyStatus(status, error);
             _renderEngine.MediaEnded += OnMediaEnded;

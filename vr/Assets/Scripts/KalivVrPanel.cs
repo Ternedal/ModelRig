@@ -749,29 +749,34 @@ namespace Kaliv.VR
         private void BuildTransport()
         {
             _transportGroup = Group("Transport", _canvas.transform);
-            AddImage(_transportGroup.transform, "Strip", new Vector2(1200, 90), new Vector2(0, -440), CanvasBg);
+            // One card for the whole transport (the first headset look had two strips).
+            var strip = AddImage(_transportGroup.transform, "Strip", new Vector2(1200, 156), new Vector2(0, -408), CanvasBg);
+            var stripRim = strip.gameObject.AddComponent<Outline>();
+            stripRim.effectColor = new Color(Glow.r, Glow.g, Glow.b, 0.45f);
+            stripRim.effectDistance = new Vector2(1.5f, -1.5f);
 
             // Timeline, as in SkyPlayer: point anywhere on it to see the time there, click to
-            // jump, hold the trigger and sweep to scrub.
-            AddImage(_transportGroup.transform, "TimelineStrip", new Vector2(1200, 64), new Vector2(0, -366), CanvasBg);
+            // jump, hold the trigger and sweep to scrub. Track and fill are plain siblings
+            // positioned explicitly — the first version nested an anchored fill inside the
+            // button and drew it below the track in the headset.
             _timelineTime = AddText(_transportGroup.transform, "", 15, TextMain, TextAnchor.MiddleLeft,
                 new Vector2(170, 40), new Vector2(-505, -366));
-            _timelineButton = AddButton(_transportGroup.transform, "", new Vector2(1000, 34), new Vector2(75, -366),
-                Surface, () => SeekAtPointer());
-            _timelineRect = (RectTransform)_timelineButton.transform;
-            var fillGo = new GameObject("Fill", typeof(RectTransform), typeof(Image));
-            fillGo.transform.SetParent(_timelineButton.transform, false);
-            _timelineFill = fillGo.GetComponent<Image>();
-            _timelineFill.color = Accent;
+            var track = AddImage(_transportGroup.transform, "Track", new Vector2(TimelineWidth, 12),
+                new Vector2(TimelineX, -366), Border);
+            Round(track, 6);
+            _timelineFill = AddImage(_transportGroup.transform, "Fill", new Vector2(0, 12),
+                new Vector2(TimelineX - TimelineWidth * 0.5f, -366), Accent);
+            Round(_timelineFill, 6);
+            _timelineFill.rectTransform.pivot = new Vector2(0f, 0.5f);
             _timelineFill.raycastTarget = false;
-            var frt = _timelineFill.rectTransform;
-            frt.anchorMin = new Vector2(0, 0);
-            frt.anchorMax = new Vector2(0, 1);
-            frt.pivot = new Vector2(0, 0.5f);
-            frt.anchoredPosition = Vector2.zero;
-            frt.sizeDelta = new Vector2(0, -12);
+            track.raycastTarget = false;
+            // The hit area: an invisible button, taller than the track so it is easy to point at.
+            _timelineButton = AddButton(_transportGroup.transform, "", new Vector2(TimelineWidth, 44),
+                new Vector2(TimelineX, -366), new Color(0f, 0f, 0f, 0f), () => SeekAtPointer());
+            foreach (var o in _timelineButton.GetComponents<Outline>()) Destroy(o);
+            _timelineRect = (RectTransform)_timelineButton.transform;
             _timelineHover = AddText(_transportGroup.transform, "", 14, Accent, TextAnchor.MiddleCenter,
-                new Vector2(120, 26), new Vector2(75, -326));
+                new Vector2(120, 26), new Vector2(TimelineX, -342));
             _transportInfo = AddText(_transportGroup.transform, "", 14, Muted, TextAnchor.MiddleLeft,
                 new Vector2(220, 60), new Vector2(-470, -440));
             AddButton(_transportGroup.transform, "−10s", new Vector2(100, 52), new Vector2(-300, -440), Elevated, () => _app.MediaSeek(-10));
@@ -1381,6 +1386,7 @@ namespace Kaliv.VR
         private double _timelineLength, _timelineNow;
         private float _scrubThrottle;
         private const float TimelineWidth = 1000f;
+        private const float TimelineX = 75f;
 
         /// <summary>Position and length, from the app's transport tick.</summary>
         public void SetTimeline(double now, double length)
@@ -1392,7 +1398,8 @@ namespace Kaliv.VR
             if (_timelineFill != null)
             {
                 float f = length > 0 ? Mathf.Clamp01((float)(now / length)) : 0f;
-                _timelineFill.rectTransform.sizeDelta = new Vector2(f * TimelineWidth, -12);
+                _timelineFill.rectTransform.sizeDelta = new Vector2(f * TimelineWidth, 12);
+                _timelineFill.enabled = f > 0.004f;   // a zero-width sliced image still draws its caps
             }
         }
 
@@ -1424,7 +1431,7 @@ namespace Kaliv.VR
             float f = PointerFraction();
             _timelineHover.text = Clock(f * _timelineLength);
             var hp = _timelineHover.rectTransform.anchoredPosition;
-            _timelineHover.rectTransform.anchoredPosition = new Vector2(75 - TimelineWidth * 0.5f + f * TimelineWidth, hp.y);
+            _timelineHover.rectTransform.anchoredPosition = new Vector2(TimelineX - TimelineWidth * 0.5f + f * TimelineWidth, hp.y);
             _controlsIdle = 0f;   // pointing at the timeline counts as using the controls
 
             bool held = Button(UnityEngine.XR.XRNode.RightHand, UnityEngine.XR.CommonUsages.triggerButton) ||
@@ -1433,6 +1440,17 @@ namespace Kaliv.VR
             if ((_scrubThrottle += Time.unscaledDeltaTime) < 0.2f) return;
             _scrubThrottle = 0f;
             SeekAtPointer();
+        }
+
+        /// <summary>
+        /// Hidden while the splash plays, so the splash is the first and only thing seen; on
+        /// release the panel appears in front of wherever the user now looks.
+        /// </summary>
+        public void SetSuppressed(bool suppressed)
+        {
+            if (_canvas == null) return;
+            _canvas.gameObject.SetActive(!suppressed);
+            if (!suppressed && _placed) PlaceInFront();
         }
 
         private static string Clock(double seconds)

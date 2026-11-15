@@ -31,18 +31,31 @@ namespace Kaliv.VR
         private Canvas _canvas;
         private Image _image;
 
-        /// <summary>Starts the splash if the art is bundled. Returns false when there is none.</summary>
-        public static bool Show(Camera camera, Transform parent)
+        private System.Action _done;
+
+        /// <summary>
+        /// Starts the splash if the art is bundled; <paramref name="done"/> runs when it has
+        /// faded (immediately when there is no art). Returns false when there is none.
+        /// </summary>
+        public static bool Show(Camera camera, Transform parent, System.Action done = null)
         {
             var tex = Resources.Load<Texture2D>(ResourcePath);
-            if (tex == null || camera == null) return false;
+            if (tex == null || camera == null) { done?.Invoke(); return false; }
             var go = new GameObject("KalivSplash");
             go.transform.SetParent(parent, false);
             var splash = go.AddComponent<KalivSplash>();
             splash._camera = camera;
             splash._texture = tex;
+            splash._done = done;
             splash.StartCoroutine(splash.Run());
             return true;
+        }
+
+        private void OnDestroy()
+        {
+            var d = _done;
+            _done = null;
+            d?.Invoke();
         }
 
         private IEnumerator Run()
