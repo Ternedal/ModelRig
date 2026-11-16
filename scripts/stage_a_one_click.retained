@@ -150,6 +150,37 @@ def archive_previous_evidence(sha: str, state: dict[str, Any]) -> None:
     save_state(state)
 
 
+# Where an operator goes when a launcher's pinned branch is gone (#2371 K1, #2275 item 22).
+# Only the message is decided here; whether to re-pin, remove or archive is K1's decision.
+_DEAD_PIN_HELP = (
+    ("agent/t023-", "Brug START_PROOF_CAMPAIGN.cmd; den kører T-023 på den aktuelle proof-gren."),
+    ("agent/t033-", "Brug START_PROOF_CAMPAIGN.cmd; den kører T-033 på den aktuelle proof-gren."),
+    ("agent/t022-", "T-022 har ingen aktuel wrapper endnu (#2371 K1). Kør den ikke fra denne launcher."),
+    ("agent/milestone3-", "Milestone 3-grenen blev aldrig merget (PR #250); launcheren er historik."),
+)
+
+
+def require_remote_branch(branch: str) -> None:
+    """Stop with an instruction, not a raw git error, when the pinned branch is gone.
+
+    Exit code 2 from ls-remote --exit-code means origin answered and has no such
+    branch. Any other failure (network, auth) is left to the fetch that follows,
+    which already stops the wizard; nothing here can make a run go further.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", "--exit-code", "--heads", "origin", branch],
+            cwd=ROOT, env=os.environ.copy(), text=True, capture_output=True, check=False, timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    if result.returncode != 2:
+        return
+    help_text = next((text for prefix, text in _DEAD_PIN_HELP if branch.startswith(prefix)),
+                     "Launcheren er forældet; spørg i #2371 hvilken gren der gælder nu.")
+    raise WizardError(f"Grenen {branch} findes ikke længere på GitHub. Intet er ændret. {help_text}")
+
+
 def ensure_candidate() -> str:
     heading("1/8  Hent og lås den rigtige kandidat")
     if os.name != "nt":
@@ -160,6 +191,7 @@ def ensure_candidate() -> str:
     dirty = git("status", "--porcelain")
     if dirty:
         raise WizardError(f"Working tree er ikke ren. Flyt eller stash lokale filer først:\n{dirty}")
+    require_remote_branch(BRANCH)
     git("fetch", "--quiet", "origin", "main", BRANCH)
     current = git("branch", "--show-current")
     if current != BRANCH:
