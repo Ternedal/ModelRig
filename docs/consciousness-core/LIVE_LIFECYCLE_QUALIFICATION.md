@@ -54,11 +54,27 @@ consciousness flags and `KALIV_CONSCIOUSNESS_QUALIFICATION_EVIDENCE_ENABLED=1`:
       --profile-file <the file KALIV_CONSCIOUSNESS_PROFILE_FILE points to> `
       --swap-profile <a copy where only the model calibration differs>
 
+**Which stack.** The candidate's validation stack, not the dev appliance:
+`start-dev-appliance.ps1` says itself that its runs are not evidence. Start
+the worker with the switch that writes every flag below into its cmd file:
+
+    .\scripts\start-stage-a-validation-stack.ps1 -PlannerModel qwen3:14b `
+      -ValidationReport <absolute path> -WorkerOnly `
+      -EnableScheduler -SchedulerDataDir <dir> -SchedulerApprovalSecret <32+ chars> `
+      -EnableConsciousnessLifecycle [-ConsciousnessProfileFile <file>]
+
+`-EnableConsciousnessLifecycle` needs `-EnableScheduler`. The autonomous
+scheduler, whose tick forms lived continuity after the restart, is mounted
+only with `KALIV_SCHEDULER=1`. Measured 16/11: without it the snapshot stays
+409. The profile defaults to `deploy\consciousness-dev-profile.json`; give
+that path to the operator's `--profile-file`. For the restart, close the
+worker window and run `validation\stage-a-runtime\worker.cmd` again.
+
 **What the worker needs first.** The operator's preflight names whatever is
 missing, from the worker's own status:
-- the twelve lifecycle flags. `START_DEV_APPLIANCE` sets them, but **not**
-  `KALIV_CONSCIOUSNESS_QUALIFICATION_EVIDENCE_ENABLED=1`; add it to the
-  worker's environment for this run.
+- the twelve lifecycle flags and `KALIV_CONSCIOUSNESS_QUALIFICATION_EVIDENCE_ENABLED=1`
+  (the switch above);
+- the autonomous scheduler mounted (`KALIV_SCHEDULER=1`);
 - a SelfState and a selected, approved Person Revision
   (`python -m app.consciousness_core.dev_bootstrap` from `worker/`);
 - the profile file at `KALIV_CONSCIOUSNESS_PROFILE_FILE`;

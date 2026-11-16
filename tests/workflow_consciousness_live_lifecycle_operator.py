@@ -290,6 +290,13 @@ def no_live_session_is_named(r: Run) -> None:
     check(code == 2 and "no live session is mounted" in r.text(), r.text())
 
 
+def no_autonomous_scheduler_is_named(r: Run) -> None:
+    r.worker.ready = READY.replace('"autonomous_scheduler":true}', '"autonomous_scheduler":false}')
+    code = r.go()
+    check(code == 2 and "KALIV_SCHEDULER=1" in r.text(), r.text())
+    check(not r.commands.calls, "nothing ran")
+
+
 def no_restart_is_refused(r: Run) -> None:
     r.prompt = lambda _text: None  # type: ignore[method-assign]
     code = r.go()
@@ -435,12 +442,31 @@ def the_runbook_points_at_the_operator(_r: Run) -> None:
           "run directories are ignored, so a second run's probe still sees a clean tree")
 
 
+def the_validation_stack_can_start_a_gate_2_worker(_r: Run) -> None:
+    import re
+    stack = code_of(ROOT / "scripts" / "start-stage-a-validation-stack.ps1")
+    check("[switch]$EnableConsciousnessLifecycle" in stack, "the stack has -EnableConsciousnessLifecycle")
+    block = re.search(r'^if \(\$EnableConsciousnessLifecycle\) \{(.*?)^\}', stack, re.S | re.M)
+    check(block is not None, "the switch writes a consciousness env block")
+    body = block.group(1) if block else ""
+    expected = [*op.REQUIRED_FLAGS.values(), "KALIV_CONSCIOUSNESS_QUALIFICATION_EVIDENCE_ENABLED"]
+    missing = [flag for flag in expected if f'set "{flag}=1"' not in body]
+    check(not missing, f"every flag the operator requires is set to 1: missing {missing}")
+    check('set "KALIV_CONSCIOUSNESS_PROFILE_FILE=$escapedProfile"' in body, "and the profile file")
+    worker_cmd = re.search(r'set "KALIV_AGENT3_VALIDATION_REPORT=.*?"@ \| Set-Content -LiteralPath \$workerCmd', stack, re.S)
+    check(worker_cmd is not None and "$consciousnessEnv" in worker_cmd.group(0),
+          "the worker cmd carries the block")
+    guard = re.search(r'if \(\$EnableConsciousnessLifecycle -and -not \$EnableScheduler\) \{\s*throw', stack)
+    check(guard is not None, "without -EnableScheduler the switch is refused (no autonomous scheduler)")
+
+
 def main() -> None:
     case(a_full_run_qualifies_and_saves_raw_bytes)
     case(the_qualifier_decides_the_exit_code)
     case(a_disabled_snapshot_stops_before_the_probe, snapshot_enabled=False)
     case(an_unready_worker_is_named_before_the_probe)
     case(no_live_session_is_named)
+    case(no_autonomous_scheduler_is_named)
     case(no_restart_is_refused)
     case(waiting_for_lived_continuity, continuity_after=3)
     case(continuity_that_never_forms_is_refused, continuity_after=10**9)
@@ -456,6 +482,7 @@ def main() -> None:
     case(command_lines_match_the_real_scripts)
     case(the_module_runs_without_bytecode)
     case(the_runbook_points_at_the_operator)
+    case(the_validation_stack_can_start_a_gate_2_worker)
     if FAILED:
         print(f"===== CONSCIOUSNESS LIFECYCLE OPERATOR: {CHECKS - len(FAILED)} passed, {len(FAILED)} failed =====")
         raise SystemExit(1)

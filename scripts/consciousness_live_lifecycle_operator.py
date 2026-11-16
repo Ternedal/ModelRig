@@ -178,6 +178,13 @@ def readiness_gaps(status: Mapping[str, Any]) -> list[str]:
     mounted = status.get("mounted") if isinstance(status.get("mounted"), Mapping) else {}
     if not gaps and mounted.get("live_session") is not True:
         gaps.append("no live session is mounted (see the worker log)")
+    if not gaps and mounted.get("autonomous_scheduler") is not True:
+        # Measured 16/11: without it no autonomous tick runs, so lived
+        # continuity never forms after the restart and the snapshot stays 409.
+        gaps.append(
+            "the autonomous scheduler is not mounted: the worker needs KALIV_SCHEDULER=1 "
+            "(validation stack: -EnableScheduler)"
+        )
     return gaps
 
 

@@ -29,7 +29,13 @@ param(
     [switch]$HeadlessWorker,
 
     [switch]$WorkerOnly,
-    [switch]$EnableTaskUi
+    [switch]$EnableTaskUi,
+
+    # V1 gate 2 (consciousness_live_lifecycle) only. Needs -EnableScheduler:
+    # the autonomous scheduler, whose tick forms lived continuity after the
+    # restart, is mounted only with KALIV_SCHEDULER=1.
+    [switch]$EnableConsciousnessLifecycle,
+    [string]$ConsciousnessProfileFile
 )
 
 $ErrorActionPreference = "Stop"
@@ -155,6 +161,9 @@ if (-not [Net.IPAddress]::TryParse($BackendHost, [ref]$parsedAddress)) {
 if ($EnableScheduler -and [string]::IsNullOrWhiteSpace($SchedulerDataDir)) {
     throw "SchedulerDataDir er påkrævet, når scheduleren aktiveres."
 }
+if ($EnableConsciousnessLifecycle -and -not $EnableScheduler) {
+    throw "-EnableConsciousnessLifecycle kræver -EnableScheduler: den autonome scheduler monteres kun med KALIV_SCHEDULER=1."
+}
 if (($EnableScheduler -or $EnableSchedulerApi) -and ([string]$SchedulerApprovalSecret).Length -lt 32) {
     throw "SchedulerApprovalSecret skal være mindst 32 tegn for scheduler-testen."
 }
@@ -174,6 +183,36 @@ $schedulerEnv = ""
 # which silently dropped KALIV_SCHEDULER, the DB paths and the approval
 # secret from the worker cmd whenever -EnableScheduler was set (#785).
 $taskUiEnv = if ($EnableTaskUi) { 'set "KALIV_AGENT3_TASK_UI=1"' } else { '' }
+# V1 gate 2: the lifecycle flags, the qualification snapshot and the profile
+# file, written into the worker cmd like the task-ui flag (no inheritance).
+$consciousnessEnv = ''
+if ($EnableConsciousnessLifecycle) {
+    $profilePath = if ([string]::IsNullOrWhiteSpace($ConsciousnessProfileFile)) {
+        Join-Path $repoRoot "deploy\consciousness-dev-profile.json"
+    } else {
+        [IO.Path]::GetFullPath($ConsciousnessProfileFile)
+    }
+    if (-not (Test-Path -LiteralPath $profilePath -PathType Leaf)) {
+        throw "ConsciousnessProfileFile findes ikke: $profilePath"
+    }
+    $escapedProfile = Escape-CmdValue $profilePath
+    $consciousnessEnv = @"
+set "KALIV_CONSCIOUSNESS_CORE_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_CHAT_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_TURN_COGNITION_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_SLEEP_LIFECYCLE_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_UNPLANNED_LIVENESS_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_POLICY_CHECKPOINT_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_AUTONOMOUS_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_AUTONOMOUS_SCHEDULER_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_AUTONOMOUS_CHECKPOINT_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_CONTINUOUS_LOOP_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_QUALIFICATION_EVIDENCE_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_PROFILE_FILE=$escapedProfile"
+"@
+}
 $workerCommand = 'python -u -m uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099'
 $resolvedWorkerLog = $null
 $resolvedSchedulerDir = $null
@@ -216,6 +255,7 @@ set "KALIV_TOOLS_ENABLED=1"
 set "KALIV_AGENT3_PLANNER_MODEL=$PlannerModel"
 set "KALIV_AGENT3_VALIDATION_REPORT=$escapedReport"
 $schedulerEnv
+$consciousnessEnv
 $workerCommand
 "@ | Set-Content -LiteralPath $workerCmd -Encoding ASCII
 
