@@ -27,6 +27,7 @@ GitHub Releases.
 - [KALIV_END_TO_END_LATENCY_QUALIFICATION.md](KALIV_END_TO_END_LATENCY_QUALIFICATION.md) — evidens for `end_to_end_latency`-gaten via `scripts/kaliv_end_to_end_latency_qualifier.py`.
 - [KALIV_RECOVERY_SOAK_QUALIFICATION.md](KALIV_RECOVERY_SOAK_QUALIFICATION.md) — evidens for `recovery_soak`-gaten: `scripts/kaliv_recovery_soak_collector.py` tager helbredsprøverne, `scripts/kaliv_recovery_soak_qualification.py` kvalificerer dem. *Runbook.*
 - [KALIV_V1_RIG_SMOKE.md](KALIV_V1_RIG_SMOKE.md) — read-only readiness-diagnostik for riggen (checkout, backend/worker, ASR/TTS); ikke fysisk accept. *Runbook.*
+- [RIG_SIMULATOR.md](RIG_SIMULATOR.md) — rig-simulatoren: operatørerne køres i CI på Windows PowerShell 5.1 mod en simuleret appliance (`scripts/rig_simulator/`, `.github/workflows/rig-simulator.yml`) før de må bruges på riggen; ingen evidens. *Runbook.*
 - [RELEASE_TEST_2.0.14.md](RELEASE_TEST_2.0.14.md) — operatørens testvej for den første integrerede 2.0.14-kandidat. *Historisk.*
 - [release/V1_EVIDENCE_TRUST_BOUNDARY.md](release/V1_EVIDENCE_TRUST_BOUNDARY.md) — operatørnote om hvad den eksisterende release-gate validerer, og hvad den ikke beviser.
 - [release/KALIV_RELEASE_ACCEPTANCE_MATRIX_2026-10-16.md](release/KALIV_RELEASE_ACCEPTANCE_MATRIX_2026-10-16.md) — planlægnings- og evidensskabelon for release-accept, baseline 16/10-2026. *Historisk.*

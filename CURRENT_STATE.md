@@ -610,6 +610,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_repository_authority.py`
 - `tests/workflow_repository_authority_wrapper.py`
 - `tests/workflow_rig_preflight.py`
+- `tests/workflow_rig_simulator.py`
 - `tests/workflow_route_inventory.py`
 - `tests/workflow_runner_offline.py`
 - `tests/workflow_scheduler_m2_composition.py`
