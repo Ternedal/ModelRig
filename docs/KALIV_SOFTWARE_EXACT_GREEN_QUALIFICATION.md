@@ -68,9 +68,16 @@ The required workflows per repository:
 | VoiceRig | `tests`, `CodeQL`, `windows-lifecycle`, `exact-head-qualification` |
 
 **VisionRig runs `exact-head-qualification` only on `workflow_dispatch`.**
-Dispatch it for the pin (`head_sha` input) before assembling; without it the
-assembler refuses. Measured 16/11 on VisionRig `main` `efe0c15c`: only `tests`
-ran.
+Dispatch it for the pin before assembling; without it the assembler refuses.
+Measured 16/11 on VisionRig `main` `efe0c15c`: only `tests` ran.
+
+**Dispatch while the pin is still the head of the branch you dispatch on.** A
+dispatched run, and its check runs, carry the branch head as `head_sha`, not
+the `head_sha` input. If VisionRig `main` has moved past the pin, the run is
+not visible on the pin, and the assembler refuses. In that case pin the new
+head, or dispatch from a branch whose head is the pin:
+
+    gh workflow run exact-head-qualification.yml -R Ternedal/VisionRig --ref main -f head_sha=<pin>
 
 It writes a new directory holding:
 - one capture file per repository, with the runs and check runs it judged;
