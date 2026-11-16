@@ -1494,6 +1494,16 @@ v2.0.10. Kandidat = `origin/physical-proof/2.0.11`, som SKAL være lig
 > bliver ikke Stage A-valideret, som den er. Koordinering sker i #2275. #731,
 > `v2.0.11` og rækkefølgen i punkt 3 nedenfor er 2.0.11-æraens.
 
+> **ADR-SYS-002 (vedtaget 16/11-2026, `docs/system/ADR-SYS-002_RELEASE_FINGERPRINT_EVIDENCE_BINDING.md`,
+> første anvendelse 2.0.21):** "intet lander på `main`" bliver til "intet
+> *uden for dokumentationsklassen* lander på `main`". Freeze og evidens binder
+> til et repo-bredt release-fingerprint (`scripts/release_fingerprint.py`),
+> ikke til den eksakte SHA; en docs-only landing (HANDOFF, ADR'er, `docs/**`)
+> flytter ikke fingerprintet og ugyldiggør ikke en freeze. Kampagne-runbooks
+> og generatorudgange er beskyttede dokumenter og tæller som kode. Tagget
+> sættes på den frosne kandidat, ikke på `main`s head (D5). Reglen nedenfor
+> gælder uændret for alt, der rører en beskyttet sti.
+
 Fra det øjeblik riggen har produceret et grønt `candidate_freeze_check.py`-
 receipt på en exact SHA (meldt som kommentar på #731 / #58), og indtil den SHA
 enten er promoveret (fast-forward + tag `v2.0.11` + release) eller eksplicit

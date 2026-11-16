@@ -89,33 +89,64 @@ def _must_reject(manifest: dict, fragment: str) -> None:
 
 
 def _test_modelrig_clean_merge_equivalence_helper() -> None:
-    original_run = gate.subprocess.run
-    original_git = gate._git
-
-    class _Result:
-        stdout = ""
-
+    """ADR-SYS-002 D4: the helper answers through release_fingerprint.equivalent()
+    and nothing else; unknown commits are non-equivalent, an unusable exclusion
+    list is an authority error."""
+    original_seam = gate._release_equivalent
+    original_load = gate.release_fingerprint.load_exclusions
     try:
-        gate.subprocess.run = lambda *args, **kwargs: _Result()
-        gate._git = lambda *args: "tree-" + "a" * 40
+        gate._release_equivalent = lambda a, b: (True, "ancestor with the same release fingerprint")
         assert gate._modelrig_evidence_matches_pin("a" * 40, "b" * 40) is True
 
-        def different_tree(*args):
-            joined = " ".join(args)
-            return "tree-evidence" if ("a" * 40) in joined else "tree-pinned"
-
-        gate._git = different_tree
+        gate._release_equivalent = lambda a, b: (False, "release fingerprint differs")
         assert gate._modelrig_evidence_matches_pin("a" * 40, "b" * 40) is False
 
-        def non_ancestor(*args, **kwargs):
-            raise gate.subprocess.CalledProcessError(1, args[0])
+        def unknown_commit(a, b):
+            raise gate.release_fingerprint.FingerprintError("not a commit")
 
-        gate.subprocess.run = non_ancestor
-        gate._git = original_git
+        gate._release_equivalent = unknown_commit
         assert gate._modelrig_evidence_matches_pin("a" * 40, "b" * 40) is False
+
+        # identical sha short-circuits before any lineage question
+        def must_not_be_called(a, b):
+            raise AssertionError("lineage asked for identical shas")
+
+        gate._release_equivalent = must_not_be_called
+        assert gate._modelrig_evidence_matches_pin("a" * 40, "a" * 40) is True
+
+        def git_missing(a, b):
+            raise OSError("git not found")
+
+        gate._release_equivalent = git_missing
+        try:
+            gate._modelrig_evidence_matches_pin("a" * 40, "b" * 40)
+        except gate.SystemReleaseManifestError:
+            pass
+        else:
+            raise AssertionError("missing git must be an authority error, not False")
+
+        def bad_list(_root):
+            raise gate.release_fingerprint.FingerprintError("glob would exclude protected path")
+
+        gate._release_equivalent = lambda a, b: (True, "would have passed")
+        gate.release_fingerprint.load_exclusions = bad_list
+        try:
+            gate._modelrig_evidence_matches_pin("a" * 40, "b" * 40)
+        except gate.SystemReleaseManifestError as exc:
+            assert "exclusion list" in str(exc)
+        else:
+            raise AssertionError("an unusable exclusion list must be an authority error")
     finally:
-        gate.subprocess.run = original_run
-        gate._git = original_git
+        gate._release_equivalent = original_seam
+        gate.release_fingerprint.load_exclusions = original_load
+
+    # The real seam, against real commits in this checkout: HEAD is equivalent
+    # to itself and to nothing that is not its ancestor.
+    import subprocess as _sp
+    head = _sp.run(["git", "rev-parse", "HEAD"], cwd=str(gate._REPO_ROOT), capture_output=True, text=True).stdout.strip()
+    if len(head) == 40:
+        assert gate._modelrig_evidence_matches_pin(head, head) is True
+        assert gate._modelrig_evidence_matches_pin("f" * 40, head) is False
 
 
 def run_contract() -> None:
@@ -239,7 +270,7 @@ def run_contract() -> None:
     ]
     _must_reject(
         recovery_wrong_head,
-        "not exact-tree-equivalent to the pinned ModelRig revision",
+        "not release-fingerprint-equivalent to the pinned ModelRig revision",
     )
 
     recovery_multiple_refs = copy.deepcopy(valid)
@@ -267,7 +298,7 @@ def run_contract() -> None:
     ]
     _must_reject(
         consciousness_wrong_head,
-        "not exact-tree-equivalent to the pinned ModelRig revision",
+        "not release-fingerprint-equivalent to the pinned ModelRig revision",
     )
 
     consciousness_multiple_refs = copy.deepcopy(valid)
@@ -388,7 +419,7 @@ def run_contract() -> None:
     ]
     _must_reject(
         android_wrong_head,
-        "not exact-tree-equivalent to the pinned ModelRig revision",
+        "not release-fingerprint-equivalent to the pinned ModelRig revision",
     )
 
     # A normal GitHub merge commit gets a new commit SHA even when it
@@ -435,7 +466,7 @@ def run_contract() -> None:
     ]
     _must_reject(
         latency_wrong_head,
-        "not exact-tree-equivalent to the pinned ModelRig revision",
+        "not release-fingerprint-equivalent to the pinned ModelRig revision",
     )
 
     latency_multiple_refs = copy.deepcopy(valid)
