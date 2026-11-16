@@ -475,6 +475,11 @@ def load_receipt(
     main_sha = main_anchor.get("git_sha")
     if not isinstance(main_sha, str) or _SHA40.fullmatch(main_sha) is None:
         raise CandidateFreezeError("candidate freeze main SHA is invalid")
+    anchor_fingerprint = main_anchor.get("release_fingerprint")
+    if not isinstance(anchor_fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", anchor_fingerprint):
+        raise CandidateFreezeError("candidate freeze main anchor release fingerprint is missing (re-freeze under ADR-SYS-002)")
+    if anchor_fingerprint != _release_fingerprint(root, main_sha):
+        raise CandidateFreezeError("candidate freeze main anchor release fingerprint no longer matches the anchor")
 
     recorded_fingerprint = recorded.get("release_fingerprint")
     if not isinstance(recorded_fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", recorded_fingerprint):

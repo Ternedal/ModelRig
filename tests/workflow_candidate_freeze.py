@@ -212,6 +212,25 @@ check(
 freeze.load_receipt(repo, now=now)
 check(True, "strict receipt reader accepts unchanged checkout and current main")
 
+import json as _json
+_unchanged_path = repo / freeze.DEFAULT_REPORT
+_unchanged = _json.loads(_unchanged_path.read_text(encoding="utf-8"))
+for mutate, fragment, label in (
+    (lambda a: dict(a, release_fingerprint="1" * 64), "anchor release fingerprint no longer matches", "forged anchor fingerprint on the unchanged-main path"),
+    (lambda a: {k: v for k, v in a.items() if k != "release_fingerprint"}, "anchor release fingerprint is missing", "missing anchor fingerprint on the unchanged-main path"),
+    (lambda a: dict(a, release_fingerprint="not-hex"), "anchor release fingerprint is missing", "non-canonical anchor fingerprint on the unchanged-main path"),
+):
+    bad = dict(_unchanged); bad["main_anchor"] = mutate(_unchanged["main_anchor"])
+    _unchanged_path.write_text(_json.dumps(bad), encoding="utf-8")
+    try:
+        freeze.load_receipt(repo, now=now)
+        check(False, f"{label} must be rejected")
+    except freeze.CandidateFreezeError as exc:
+        check(fragment in str(exc), f"{label} is rejected")
+_unchanged_path.write_text(_json.dumps(_unchanged), encoding="utf-8")
+freeze.load_receipt(repo, now=now)
+check(True, "the restored receipt is accepted again")
+
 try:
     freeze.create_receipt(
         "a" * 40,
@@ -291,8 +310,6 @@ except freeze.CandidateFreezeError as exc:
         "receipt consumption refetches main and names the required re-freeze",
     )
 
-import json as _json
-
 # ADR-SYS-002 D7: the receipt carries the release fingerprint of candidate and anchor.
 check(
     len(receipt["candidate"].get("release_fingerprint", "")) == 64
@@ -329,6 +346,27 @@ try:
     check(False, "a receipt with a foreign release fingerprint must be rejected")
 except freeze.CandidateFreezeError as exc:
     check("no longer matches the candidate" in str(exc), "a tampered release fingerprint is rejected")
+
+# the anchor's fingerprint is bound too (ChatGPT review on #2412): missing or forged -> rejected,
+# on the unchanged-main path as well as after a docs-only advance
+for label, repo_, sha_ in (("after docs-only advance", docs_repo, None),):
+    receipt_path_ = repo_ / freeze.DEFAULT_REPORT
+    good = _json.loads(receipt_path_.read_text(encoding="utf-8"))
+    forged = dict(good); forged["main_anchor"] = dict(good["main_anchor"], release_fingerprint="1" * 64)
+    receipt_path_.write_text(_json.dumps(forged), encoding="utf-8")
+    try:
+        freeze.load_receipt(repo_, now=now)
+        check(False, f"a forged anchor fingerprint must be rejected ({label})")
+    except freeze.CandidateFreezeError as exc:
+        check("anchor release fingerprint no longer matches" in str(exc), f"a forged anchor fingerprint is rejected ({label})")
+    missing = dict(good); missing["main_anchor"] = {k: v for k, v in good["main_anchor"].items() if k != "release_fingerprint"}
+    receipt_path_.write_text(_json.dumps(missing), encoding="utf-8")
+    try:
+        freeze.load_receipt(repo_, now=now)
+        check(False, f"a missing anchor fingerprint must be rejected ({label})")
+    except freeze.CandidateFreezeError as exc:
+        check("anchor release fingerprint is missing" in str(exc), f"a missing anchor fingerprint is rejected ({label})")
+    receipt_path_.write_text(_json.dumps(good), encoding="utf-8")
 
 # a receipt whose anchor the candidate does not contain is rejected even when main sits on that anchor
 advanced_main = git(docs_repo, "rev-parse", "origin/main")
