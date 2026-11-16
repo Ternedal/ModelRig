@@ -1,0 +1,10 @@
+# ADR-SYS-002 D2: the documentation class. One glob per line; '#' starts a comment.
+# Paths matching a glob here are left out of the release fingerprint.
+# Protected prefixes and protected documents (see scripts/release_fingerprint.py)
+# can never be excluded, whatever this file says; a glob that would match one
+# is rejected when the file is loaded.
+docs/**
+*.md
+.github/*.md
+.github/ISSUE_TEMPLATE/**
+LICENSE
