@@ -60,6 +60,8 @@ kaliv-tools-state.json.tmp
 # Physical campaign: rolling reports and manually completed lifecycle work stay
 # on the rig. Only manually reviewed, dated campaign evidence may be committed.
 /validation/rig-preflight-latest.json
+# V1 gate 2: one directory per consciousness_live_lifecycle_operator.py run.
+/validation/consciousness-lifecycle/
 /validation/rig-preflight-latest.json.tmp
 /validation/agent3-model-eval-latest.json
 /validation/agent3-model-eval-latest.json.tmp

@@ -31,6 +31,34 @@ source artifacts collected on that exact checkout, and the emitted evidence
 references SHA-256-bind the resulting payloads. Do not reinterpret the verdict
 as proof that an arbitrary copied receipt originated from the candidate SHA.
 
+## One operator (rig day)
+
+`scripts/consciousness_live_lifecycle_operator.py` runs every step below in
+order and stops at the first one that does not hold:
+
+1. preflight: worker on loopback, qualification snapshot enabled, the swap
+   profile differs from the current one;
+2. the live-cycle probe on the clean checkout;
+3. status before the restart, saved as the worker sent it;
+4. it asks you to restart the worker, then waits until `runtime_instance_ref`
+   has changed and the first lived-continuity snapshot is there (it restarts
+   nothing itself);
+5. pre-swap snapshot, profile swap, post-swap snapshot in the same runtime,
+   and the original profile file put back byte for byte, also on failure;
+6. `consciousness_live_lifecycle_from_snapshots.py` and the qualifier.
+
+Run it from the clean candidate checkout, with the worker running with the
+consciousness flags and `KALIV_CONSCIOUSNESS_QUALIFICATION_EVIDENCE_ENABLED=1`:
+
+    python scripts\consciousness_live_lifecycle_operator.py `
+      --profile-file <the file KALIV_CONSCIOUSNESS_PROFILE_FILE points to> `
+      --swap-profile <a copy where only the model calibration differs>
+
+Each run writes to a new `validation/consciousness-lifecycle/<UTC time>/`
+with an `operator-run.json` that binds every file by SHA-256. The exit code is
+the qualifier's: 0 QUALIFIED, 1 refused, 2 a step failed before it. The manual
+steps below remain the reference for what it does.
+
 ## Run
 
 Create an evidence JSON bundle and run:
