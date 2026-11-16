@@ -22,7 +22,7 @@ GitHub Releases.
 
 - [KALIV_SYSTEM_RELEASE_QUALIFICATION.md](KALIV_SYSTEM_RELEASE_QUALIFICATION.md) — Kaliv system release qualification: exact repository pins plus uafhængig fysisk evidens; manifest, gates og binding af Consciousness-evidens.
 - [system/ADR-SYS-001_V1_AND_EMBODIED_RELEASES.md](system/ADR-SYS-001_V1_AND_EMBODIED_RELEASES.md) — ADR-SYS-001: Kaliv V1 (syv gates) og Kaliv Embodied (alle ti) som to releases (vedtaget 12/11-2026). *Beslutning (ADR).*
-- [system/ADR-SYS-002_RELEASE_FINGERPRINT_EVIDENCE_BINDING.md](system/ADR-SYS-002_RELEASE_FINGERPRINT_EVIDENCE_BINDING.md) — ADR-SYS-002: evidens og freeze bundet til et repo-bredt release-fingerprint frem for eksakt SHA, så docs-only kan lande under en freeze. *Beslutning (ADR) — FORESLÅET, ikke vedtaget.*
+- [system/ADR-SYS-002_RELEASE_FINGERPRINT_EVIDENCE_BINDING.md](system/ADR-SYS-002_RELEASE_FINGERPRINT_EVIDENCE_BINDING.md) — ADR-SYS-002: evidens og freeze bundet til et repo-bredt release-fingerprint frem for eksakt SHA, så docs-only kan lande under en freeze. *Beslutning (ADR) — vedtaget 16/11-2026, landing afventer 2.0.20-freezen.*
 - [KALIV_SOFTWARE_EXACT_GREEN_QUALIFICATION.md](KALIV_SOFTWARE_EXACT_GREEN_QUALIFICATION.md) — evidens for `software_exact_green`-gaten via `scripts/kaliv_software_exact_green_qualifier.py`.
 - [KALIV_REPOSITORY_AUTHORITY_QUALIFICATION.md](KALIV_REPOSITORY_AUTHORITY_QUALIFICATION.md) — evidens for `repository_authority`-gaten via `scripts/kaliv_repository_authority_qualifier.py`; evidensfilen samles af `scripts/kaliv_repository_authority_assembler.py`.
 - [KALIV_END_TO_END_LATENCY_QUALIFICATION.md](KALIV_END_TO_END_LATENCY_QUALIFICATION.md) — evidens for `end_to_end_latency`-gaten via `scripts/kaliv_end_to_end_latency_qualifier.py`.

@@ -1,9 +1,9 @@
 # ADR-SYS-002: Evidens og freeze bundet til et release-fingerprint, ikke til den eksakte SHA
 
-**Status:** FORESLÅET — udkast. Ikke vedtaget. Anders disponerer dokumentet og dets PR alene.
-**Udkast:** skrevet af Claude 16-11-2026 efter Anders' "Kør" på fem procesforbedringer (#2275, kommentar 6915273202).
+**Status:** VEDTAGET af Anders 16-11-2026 kl. 14:14 CET ("Kør" på udkastets anbefalinger til Q1–Q3, efter ChatGPTs review af rev. 1). Landing på `main` afventer 2.0.20-freezen; indtil da er dokumentet kun på sin gren. Anders disponerer dokumentet og dets PR alene og kan rette ethvert valg i afsnit 7 med én kommentar.
+**Udkast:** rev. 1 skrevet af Claude 16-11-2026 efter Anders' "Kør" på fem procesforbedringer (#2275, kommentar 6915273202); rev. 2 samme dag indarbejder ChatGPTs fund (#2410) og Anders' valg.
 **Serie:** andet dokument i SYS-serien (efter ADR-SYS-001).
-**Stopreglen (A4-005):** ingen kode før vedtagelse. Dette dokument lander først; kontrakttestene i afsnit 5 skrives røde derefter.
+**Stopreglen (A4-005):** dokumentet lander først; kontrakttestene i afsnit 5 skrives røde derefter. Implementering forberedes på egen gren bag denne PR og lander ikke før den.
 
 ---
 
@@ -27,7 +27,7 @@ Svaret er koden. SHA'en er en bekvem, men for grov, nøgle til den.
 
 **D1. Et repo-bredt release-fingerprint.** `scripts/release_fingerprint.py` beregner SHA-256 over alle trackede stier i en commit **undtagen dokumentationsklassen** (D2), som `(sti, blob-sha256)` i kanonisk rækkefølge, læst fra Git-objekterne (`git ls-tree -r <sha>`), ikke fra arbejdstræet. Fingerprintet er en funktion af commit'en alene og kan beregnes for enhver SHA uden checkout. Workerens eksisterende `code_sha256` bevares uændret som sin egen, snævrere identitet.
 
-**D2. Dokumentationsklassen er en tracket liste, ikke en heuristik.** `release_fingerprint_exclusions.txt` i repo-roden, én glob pr. linje. Startindhold:
+**D2. Dokumentationsklassen er en tracket liste, ikke en heuristik — og beskyttede dokumenter kan ikke udelukkes.** `release_fingerprint_exclusions.txt` i repo-roden, én glob pr. linje. Startindhold:
 
 ```
 docs/**
@@ -37,7 +37,12 @@ docs/**
 LICENSE
 ```
 
-Følgende præfikser kan **aldrig** udelukkes, og kontrakttest 4 håndhæver det: `worker/`, `backend/`, `android/`, `desktop/`, `vr/`, `renderers/`, `bodyrig/`, `scripts/`, `tests/`, `deploy/`, `tools/`, `contracts/`, `.github/workflows/`, `VERSION`, `*.cmd`, `*.ps1`. Operatører og tests er det, rigdagen afprøver; de er kode i denne forstand.
+To ting kan **aldrig** udelukkes, uanset listens indhold, og `release_fingerprint.py` afviser en liste der prøver (kontrakttest 4):
+
+- *Beskyttede præfikser* — alt riggen kører eller rigdagen afprøver: `worker/`, `backend/`, `android/`, `desktop/`, `vr/`, `renderers/`, `bodyrig/`, `scripts/`, `tests/`, `deploy/`, `tools/`, `contracts/`, `.github/workflows/`, `VERSION`, `*.cmd`, `*.ps1`. Operatører og tests er kode i denne forstand.
+- *Beskyttede dokumenter* — de `.md`-filer, der **er** proceduren eller tilstanden, ikke beskrivelsen af den: de tre runbooks operatøren følger under en kampagne (`RIGDAG_SIMPEL.md`, `STAGED_PHYSICAL_PROMOTION.md`, `STAGE_B_UPDATER_EVIDENCE.md`) og de tre generatorudgange, som operatører og gates læser (`CURRENT_STATE.md`, `ACTIVATION_READINESS.md`, `ROUTE_INVENTORY.md`). En ændring i dem indgår i fingerprintet, selv om de matcher `*.md`. Listen står som en konstant i `release_fingerprint.py` og pinnes ordret af en test; en runbook, der senere får en operatør-læsende rolle, føjes til listen i samme PR.
+
+`HANDOFF.md` er bevidst **ikke** beskyttet. Den beskriver autoritet og status; håndhævelsen af autoriteten ligger i `scripts/` og `tests/`, som er beskyttede præfikser. En ændring, der kun rører HANDOFF-tekst, ændrer intet af det riggen kører eller gaterne måler; en ændring, der flytter en autoritetsgrænse i praksis, rører pr. definition en beskyttet sti. At beskytte HANDOFF ville genindføre freeze-presset for statuslinjer, som er præcis det problem dokumentet løser.
 
 **D3. En freeze overlever docs-only landinger på `main`.** `verify_receipt()` ændres fra "`origin/main` == frosset anker" til: `origin/main` er ankeret **eller** en efterkommer af ankeret, hvor `git diff --name-only <anker>..<main>` udelukkende rammer stier i dokumentationsklassen. Kravet om at kandidaten indeholder ankeret bevares; kravet om at kandidaten indeholder det *aktuelle* `main` erstattes af fingerprint-lighed: `release_fingerprint(kandidat) == release_fingerprint(main)`. Kandidatens eget træ-rollup (`tree.sha256`) bevares som i dag — kandidatgrenen flytter sig ikke.
 
@@ -64,7 +69,7 @@ Følgende præfikser kan **aldrig** udelukkes, og kontrakttest 4 håndhæver det
 - En freeze blokerer kun det, der ændrer det riggen kører. HANDOFF-status, ADR'er, runbook-stirettelser (jf. Blok 0-fejlen 15/11) og issue-skabeloner kan lande under en kampagne.
 - `main` kan være foran et release-tag med docs-only commits. Det er allerede tilstanden efter enhver promovering (HANDOFF 27/8: "main er foran, hvilket er korrekt").
 - Et nyt artefakt at vedligeholde: eksklusionslisten. Den er lille, tracket, og beskyttet af kontrakttest 4.
-- En docs-only PR, der ændrer en **procedure**, en operatør følger (fx `RIGDAG_SIMPEL.md`), kan lande midt i en kampagne. Det er en reel risiko, som D2's liste ikke løser; se spørgsmål Q1.
+- En docs-only PR kan ikke ændre en procedure, operatøren følger midt i en kampagne: de tre kampagne-runbooks er beskyttede dokumenter (D2), så en sådan ændring flytter fingerprintet og kræver re-anchor. Prisen er, at en ren stirettelse i `RIGDAG_SIMPEL.md` (som 15/11's) også kræver re-anchor; det er valgt med vilje — proceduren og evidensen følges ad. En glob-liste kan ikke se semantik; derfor er beskyttelsen en navngiven denylist og ikke en konvention.
 - Qualifiers, der i dag sammenligner `^{tree}`, får én fælles funktion; mutationstest skal vise, at hver af de fire faktisk kalder den (AST-sporbarhed beviser navne, ikke semantik — HANDOFF §8).
 
 ## 5. Kontrakttests (røde før implementeringen, grønne efter)
@@ -72,7 +77,7 @@ Følgende præfikser kan **aldrig** udelukkes, og kontrakttest 4 håndhæver det
 1. `release_fingerprint(sha)` er uændret af en commit, der kun rører stier i dokumentationsklassen, og ændret af en ét-bytes ændring i hver af: `worker/`, `backend/`, `android/`, `desktop/`, `scripts/`, `tests/`, `deploy/`, `.github/workflows/`, `VERSION`, en rod-`.cmd`.
 2. `verify_receipt()` accepterer, at `origin/main` er flyttet fra ankeret med docs-only commits (D3), og afviser både (a) en flytning, der rører en ikke-udelukket sti, og (b) en kandidat, der ikke længere indeholder ankeret.
 3. Systemgaten accepterer evidens på en forfader med samme fingerprint og **forskelligt** træ, og afviser evidens på en forfader med forskelligt fingerprint, selv når kun én byte i `worker/` adskiller dem (D4). Samme for hver af de fire qualifiers.
-4. En eksklusionsliste, der nævner et beskyttet præfiks (D2), afvises af `release_fingerprint.py` ved indlæsning, og en test, der lister præfikserne ordret, bliver rød, hvis listen i kilden forkortes.
+4. En eksklusionsliste, der nævner et beskyttet præfiks (D2), afvises af `release_fingerprint.py` ved indlæsning; et beskyttet dokument indgår i fingerprintet, selv om `*.md` står på listen (en ét-bytes ændring i `RIGDAG_SIMPEL.md` ændrer fingerprintet, en ét-bytes ændring i `HANDOFF.md` gør ikke); og en test, der lister præfikser og beskyttede dokumenter ordret, bliver rød, hvis en af listerne i kilden forkortes.
 5. `freeze_check.py` accepterer et tag, der peger på den frosne kandidat, mens `main` er foran med docs-only commits (D5), og afviser et tag på en commit, der ikke er kandidaten.
 6. Fingerprintet beregnes fra Git-objekterne: et snavset arbejdstræ ændrer ikke resultatet for en given SHA (D1).
 7. Mutation: fjernes fingerprint-sammenligningen i D3 eller D4 i kilden, bliver mindst én test rød; fjernes kaldet i én af de fire qualifiers, bliver dens test rød.
@@ -87,11 +92,14 @@ Følgende præfikser kan **aldrig** udelukkes, og kontrakttest 4 håndhæver det
 6. `RIGDAG_SIMPEL.md` Blok 0, `STAGED_PHYSICAL_PROMOTION.md`, HANDOFF §4 og §9: freeze-reglen og tag-placeringen (D3, D5). `tests/workflow_staged_promotion_runbook.py` opdateres til den nye kontrakt.
 7. Første anvendelse: tidligst 2.0.21-æraen. 2.0.20-kampagnen kører færdig under den nuværende regel.
 
-## 7. Spørgsmål til vedtagelsen
+## 7. Valg truffet ved vedtagelsen
 
-- **Q1 — Runbooks, operatørerne læser under en kampagne.** `RIGDAG_SIMPEL.md`, `STAGED_PHYSICAL_PROMOTION.md` og `STAGE_B_UPDATER_EVIDENCE.md` er `.md` og falder i dokumentationsklassen. Anbefaling: **tag dem ud af klassen** (negativ glob i listen, `!RIGDAG_SIMPEL.md` osv.), så en procedureændring stadig kræver ny freeze. Prisen er, at en stirettelse som 15/11's kræver en re-anchor; gevinsten er, at proceduren og evidensen følges ad.
-- **Q2 — Generatorernes output.** `CURRENT_STATE.md`, `ACTIVATION_READINESS.md` og `ROUTE_INVENTORY.md` er `.md`, men genereres fra kode og kan kun ændre sig sammen med den. Anbefaling: lad dem være i klassen; en ændring i dem uden kodeændring fælder allerede `workflow_current_state.py`.
-- **Q3 — Første anvendelse.** 2.0.21 (anbefalet) eller først efter V1-tagget. 2.0.21 er den første æra, hvor gevinsten tæller; risikoen er, at D3–D5 landes i samme æra som V1-kampagnen.
+Anders fik tre spørgsmål 16/11 og vedtog udkastet med dets anbefalinger ("Kør", kl. 14:14 CET), efter at ChatGPT i sit review af rev. 1 havde gjort Q1 til en forudsætning for vedtagelse.
+
+- **Q1 — Runbooks, operatøren læser under en kampagne.** `RIGDAG_SIMPEL.md`, `STAGED_PHYSICAL_PROMOTION.md` og `STAGE_B_UPDATER_EVIDENCE.md` er **beskyttede dokumenter** (D2): de indgår i fingerprintet, og en procedureændring kræver ny freeze. Beskyttelsen er en denylist i koden, ikke en konvention — ChatGPTs krav.
+- **Q2 — Generatorernes output.** `CURRENT_STATE.md`, `ACTIVATION_READINESS.md` og `ROUTE_INVENTORY.md` er ligeledes beskyttede dokumenter. Udkastets anbefaling var at lade dem blive i dokumentationsklassen; ved vedtagelsen er de taget med, fordi operatører (`T-023`, readiness-regenerering) læser dem, og fordi det ikke koster noget: de kan kun ændre sig sammen med kode.
+- **Q3 — Første anvendelse.** 2.0.21-æraen. 2.0.20-kampagnen kører færdig under den nuværende regel.
+- **HANDOFF.md** forbliver i dokumentationsklassen med begrundelsen i D2. ChatGPT bad om enten beskyttelse eller en eksplicit begrundelse; dette er begrundelsen.
 
 ## 8. Hvad dokumentet bevidst ikke gør
 
