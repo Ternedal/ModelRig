@@ -833,7 +833,24 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     tiende ikke dit arbejde. `git status --short` før `git add`, og vær
     særligt mistroisk efter en testkørsel — suiter skriver tilstand.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 14/11)
+## 9. Kø — hvem har bolden (16/7, opdateret 16/11)
+
+### 16/11: bumpet til 2.0.21 er klar, men lander først efter freezen
+
+**[16/11 — status. main = `884c294c` (`v2.0.20`, publiceret 14/11). Main står
+stille, mens Anders kører 2.0.20-kampagnen (Stage B og soak) på riggen, jf.
+hans beslutning 15/11. Klar til landing, når han løfter freezen: #2385,
+#2389, #2393 og #2400 (alle med ChatGPT's SHA-accept), derefter dette bump.]**
+
+- **Bumpet til 2.0.21** (`release/kaliv-v2.0.21-prep-20261116`, versionCode
+  301) følger opskriften fra 2.0.20 (§4 pkt. 11). Kandidaten er
+  `physical-proof/2.0.21`, når `v2.0.21` er publiceret. Stage B's kilde er
+  stadig den signerede 2.0.12.
+- **Bumpet lægges oven på de fire PR'er**, så RC-SHA'en bærer dem. Det synkes
+  med `main` efter den sidste af dem.
+- **Lige efter bump-mergen står `main` stille,** til Anders har kørt
+  `verify-repository-authority.ps1` (#2390, fund 5).
+- **Ingen tag, release eller signering** uden Anders' særskilte release-go.
 
 ### 13.–14/11: alt til 2.0.20 er landet; bumpet er åbnet
 
