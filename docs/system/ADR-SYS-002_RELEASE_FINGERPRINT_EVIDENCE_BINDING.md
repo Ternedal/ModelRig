@@ -1,7 +1,7 @@
 # ADR-SYS-002: Evidens og freeze bundet til et release-fingerprint, ikke til den eksakte SHA
 
 **Status:** VEDTAGET af Anders 16-11-2026 kl. 14:14 CET ("Kør" på udkastets anbefalinger til Q1–Q3, efter ChatGPTs review af rev. 1). Landing på `main` afventer 2.0.20-freezen; indtil da er dokumentet kun på sin gren. Anders disponerer dokumentet og dets PR alene og kan rette ethvert valg i afsnit 7 med én kommentar.
-**Udkast:** rev. 1 skrevet af Claude 16-11-2026 efter Anders' "Kør" på fem procesforbedringer (#2275, kommentar 6915273202); rev. 2 samme dag indarbejder ChatGPTs fund (#2410) og Anders' valg; rev. 3 (samme aften) præciserer D3–D5 ud fra implementeringen (#2411, slice 2) uden at ændre beslutningerne.
+**Udkast:** rev. 1 skrevet af Claude 16-11-2026 efter Anders' "Kør" på fem procesforbedringer (#2275, kommentar 6915273202); rev. 2 samme dag indarbejder ChatGPTs fund (#2410) og Anders' valg; rev. 3 (samme aften) præciserer D3–D5 ud fra implementeringen (#2411, slice 2) uden at ændre beslutningerne; rev. 4 (17/11) indsnævrer dokumentationsklassen og udvider fingerprintets identitet efter den uafhængige efterprøvning af #2411/#2412.
 **Serie:** andet dokument i SYS-serien (efter ADR-SYS-001).
 **Stopreglen (A4-005):** dokumentet lander først; kontrakttestene i afsnit 5 skrives røde derefter. Implementering forberedes på egen gren bag denne PR og lander ikke før den.
 
@@ -30,12 +30,13 @@ Svaret er koden. SHA'en er en bekvem, men for grov, nøgle til den.
 **D2. Dokumentationsklassen er en tracket liste, ikke en heuristik — og beskyttede dokumenter kan ikke udelukkes.** `release_fingerprint_exclusions.txt` i repo-roden, én glob pr. linje. Startindhold:
 
 ```
-docs/**
 *.md
-.github/*.md
+docs/**/*.png  docs/**/*.jpg  docs/**/*.jpeg  docs/**/*.gif  docs/**/*.svg
 .github/ISSUE_TEMPLATE/**
 LICENSE
 ```
+
+*Præcisering i rev. 4 (fra reviewet af #2411/#2412):* klassen er markdown overalt plus billeder under `docs/`, ikke `docs/**` som helhed — skemaer og fixtures under `docs/`, som tests og kontrakter læser, er ikke dokumentation i denne forstand og indgår i fingerprintet. Beskyttede suffikser sammenlignes uafhængigt af store/små bogstaver (Windows kører `run.PS1`) og omfatter `.cmd`, `.ps1`, `.psm1`, `.bat` og `.py`. Fingerprintet dækker også filmode og gitlinks (`mode\0sti\0objekt`), så et sat exec-bit, et symlink i stedet for en fil eller en flyttet submodule-pointer ændrer det — D3's `docs_only` så dem allerede, nu ser D4 dem også.
 
 To ting kan **aldrig** udelukkes, uanset listens indhold, og `release_fingerprint.py` afviser en liste der prøver (kontrakttest 4):
 
