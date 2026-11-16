@@ -57,6 +57,12 @@ def commit_all(repo: Path, message: str) -> str:
     return git(repo, "rev-parse", "HEAD")
 
 
+def commit_index(repo: Path, message: str) -> str:
+    """Commit the index as it stands (for entries that have no working-tree file, such as gitlinks)."""
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", message)
+    return git(repo, "rev-parse", "HEAD")
+
+
 def write(repo: Path, relative: str, text: str) -> None:
     path = repo / relative
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -134,6 +140,34 @@ with tempfile.TemporaryDirectory() as tmpdir:
     moved = commit_all(repo, "move code")
     check(rf.fingerprint(repo, moved) != rf.fingerprint(repo, f"{moved}~1"), "renaming a code file changes the fingerprint (paths are hashed, not only blobs)")
 
+    # mode and link type are identity too (review P2 on #2412): chmod +x and a
+    # symlink in place of a regular file with the same bytes both change it
+    import os as _os
+    if _os.name != "nt":
+        target = repo / "scripts" / "op.py"
+        target.chmod(target.stat().st_mode | 0o111)
+        git(repo, "update-index", "--chmod=+x", "scripts/op.py")
+        chmod_sha = commit_all(repo, "chmod +x")
+        check(rf.fingerprint(repo, chmod_sha) != rf.fingerprint(repo, f"{chmod_sha}~1"), "an executable bit changes the fingerprint (mode is hashed)")
+        (repo / "backend" / "main.go").unlink()
+        _os.symlink("../VERSION", repo / "backend" / "main.go")
+        link_sha = commit_all(repo, "symlink")
+        check(rf.fingerprint(repo, link_sha) != rf.fingerprint(repo, f"{link_sha}~1"), "a symlink in place of a file changes the fingerprint")
+        ok, _ = rf.equivalent(repo, f"{link_sha}~1", link_sha)
+        check(not ok, "a symlink swap is not equivalent evidence")
+        (repo / "backend" / "main.go").unlink()
+        write(repo, "backend/main.go", LAYOUT["backend/main.go"] + "x\n")
+        commit_all(repo, "restore file")
+    # a gitlink (submodule pointer) is part of the identity as well
+    git(repo, "update-index", "--add", "--cacheinfo", "160000," + "a" * 40 + ",worker/vendor-sub")
+    gitlink_sha = commit_index(repo, "gitlink")
+    check(rf.fingerprint(repo, gitlink_sha) != rf.fingerprint(repo, f"{gitlink_sha}~1"), "adding a gitlink changes the fingerprint")
+    git(repo, "update-index", "--add", "--cacheinfo", "160000," + "b" * 40 + ",worker/vendor-sub")
+    gitlink2_sha = commit_index(repo, "gitlink moved")
+    check(rf.fingerprint(repo, gitlink2_sha) != rf.fingerprint(repo, gitlink_sha), "moving a gitlink changes the fingerprint")
+    git(repo, "rm", "-q", "--cached", "worker/vendor-sub")
+    commit_index(repo, "gitlink removed")
+
     # --- contract test 6: a dirty working tree does not matter ---------------
     head = git(repo, "rev-parse", "HEAD")
     fp_head = rf.fingerprint(repo, head)
@@ -144,13 +178,13 @@ with tempfile.TemporaryDirectory() as tmpdir:
     (repo / "untracked.py").unlink()
 
     # --- contract test 4: protected prefixes and documents -------------------
-    for glob in ("worker/**", "scripts/*", "tests/**", "*.ps1", "*.cmd", "VERSION", ".github/**", "**", "*", "backend/main.go", "scripts/**/*.py"):
+    for glob in ("worker/**", "scripts/*", "tests/**", "*.ps1", "*.cmd", "*.py", "*.bat", "VERSION", ".github/**", "**", "*", "backend/main.go", "scripts/**/*.py"):
         try:
             rf.parse_exclusions(glob + "\n")
             check(False, f"exclusion glob {glob!r} must be rejected")
         except rf.FingerprintError:
             check(True, f"exclusion glob {glob!r} is rejected")
-    for glob in ("docs/**", "*.md", "LICENSE", ".github/ISSUE_TEMPLATE/**", "brand/**"):
+    for glob in ("docs/**/*.md", "docs/**/*.png", "*.md", "LICENSE", ".github/ISSUE_TEMPLATE/**", "brand/**"):
         try:
             rf.parse_exclusions(glob + "\n")
             check(True, f"exclusion glob {glob!r} is accepted")
@@ -167,6 +201,13 @@ with tempfile.TemporaryDirectory() as tmpdir:
         check(not ex.excludes(doc), f"protected document {doc} is never excluded")
     check(not ex.excludes("worker/app/README.md") and not ex.excludes("scripts/notes.md"), "a .md under a protected prefix is never excluded")
     check(not ex.excludes("START_STAGE_B_TEST.cmd") and not ex.excludes("verify-repository-authority.ps1"), "root .cmd and .ps1 are never excluded")
+    check(not ex.excludes("docs/run.PS1") and not ex.excludes("docs/run.Cmd") and not ex.excludes("docs/x.bat") and not ex.excludes("docs/tool.py"),
+          "runnable files under docs/ are never excluded, whatever the case of the suffix (review P3 on #2412)")
+    check(not ex.excludes("docs/bodyrig/schemas/render-frame.schema.json"), "a schema under docs/ that tests read is in the fingerprint")
+    wide = rf.parse_exclusions("docs/**\n")  # a broad glob is accepted; the suffix guard still wins inside it
+    check(wide.excludes("docs/notes.txt") and not wide.excludes("docs/run.PS1") and not wide.excludes("docs/Run.CMD") and not wide.excludes("docs/x.BAT") and not wide.excludes("docs/t.Py"),
+          "under a broad docs/** glob, runnable suffixes in any case are still protected")
+    check(ex.excludes("docs/design/mockup.png") and ex.excludes("docs/a/b/c.md"), "images and markdown under docs/ are the documentation class")
     loose = rf.parse_exclusions("L*\nv*\n")  # accepted: no protected sample starts with L or v
     check(loose.excludes("LICENSE") and not loose.excludes("LAUNCH.cmd") and not loose.excludes("verify-repository-authority.ps1"),
           "a glob that happens to match a root .cmd/.ps1 still cannot exclude it (suffix protection)")
@@ -178,7 +219,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
         "worker/", "backend/", "android/", "desktop/", "vr/", "renderers/", "bodyrig/", "scripts/", "tests/",
         "deploy/", "tools/", "contracts/", ".github/workflows/",
     ), "the protected prefixes are pinned verbatim (ADR-SYS-002 D2)")
-    check(rf.PROTECTED_FILES == ("VERSION",) and rf.PROTECTED_SUFFIXES == (".cmd", ".ps1"), "VERSION, .cmd and .ps1 are protected")
+    check(rf.PROTECTED_FILES == ("VERSION",) and rf.PROTECTED_SUFFIXES == (".cmd", ".ps1", ".psm1", ".bat", ".py"), "VERSION and the runnable suffixes are protected")
     for doc in rf.PROTECTED_DOCUMENTS:
         check((ROOT / doc).is_file(), f"protected document {doc} exists in this repository")
 
@@ -220,5 +261,5 @@ r = subprocess.run([sys.executable, "-B", str(ROOT / "scripts" / "release_finger
 check(r.returncode == 0, "the repository's exclusion list is valid")
 
 print(f"{passed} passed, {failed} failed")
-print("not covered here (later slices): contract tests 2 (freeze receipt), 3 (gate + qualifiers), 5 (tag on candidate), 7 (mutations in those scripts)")
+print("contract tests 2, 3, 5 live in workflow_candidate_freeze, the system-gate contract and workflow_freeze_check; 7 is the recorded mutation sweep")
 sys.exit(1 if failed else 0)

@@ -14,9 +14,10 @@ Three rules shape it:
 * **Protected prefixes can never be excluded** — everything the rig runs or a
   rig day exercises: ``worker/``, ``backend/``, ``android/``, ``desktop/``,
   ``vr/``, ``renderers/``, ``bodyrig/``, ``scripts/``, ``tests/``, ``deploy/``,
-  ``tools/``, ``contracts/``, ``.github/workflows/``, ``VERSION``, ``*.cmd``,
-  ``*.ps1``. An exclusion list whose glob would match one of them is rejected
-  at load time.
+  ``tools/``, ``contracts/``, ``.github/workflows/``, ``VERSION``, and any
+  runnable file by suffix (``.cmd``, ``.ps1``, ``.psm1``, ``.bat``, ``.py``,
+  compared case-insensitively, as Windows does). An exclusion list whose glob
+  would match one of them is rejected at load time.
 * **Protected documents are always in the fingerprint**, even though they
   match ``*.md``: the three campaign runbooks the operator follows and the
   three generated state documents operators and gates read. They *are* the
@@ -71,7 +72,7 @@ PROTECTED_PREFIXES: tuple[str, ...] = (
     ".github/workflows/",
 )
 PROTECTED_FILES: tuple[str, ...] = ("VERSION",)
-PROTECTED_SUFFIXES: tuple[str, ...] = (".cmd", ".ps1")
+PROTECTED_SUFFIXES: tuple[str, ...] = (".cmd", ".ps1", ".psm1", ".bat", ".py")
 
 # D2 / Q1 / Q2: documents that are the procedure or the state, not a description of it.
 PROTECTED_DOCUMENTS: tuple[str, ...] = (
@@ -129,7 +130,8 @@ def is_protected(path: str) -> bool:
         return True
     if any(path.startswith(prefix) for prefix in PROTECTED_PREFIXES):
         return True
-    return any(path.endswith(suffix) for suffix in PROTECTED_SUFFIXES)
+    lowered = path.lower()  # Windows is case-insensitive: run.PS1 runs
+    return any(lowered.endswith(suffix) for suffix in PROTECTED_SUFFIXES)
 
 
 def _protected_samples() -> list[str]:
@@ -196,12 +198,19 @@ def resolve_sha(repo_root: Path, rev: str) -> str:
     return sha
 
 
-def tracked_blobs(repo_root: Path, sha: str) -> list[tuple[str, str]]:
-    """(path, blob sha) for every blob in the commit's tree, from the objects."""
+def tracked_entries(repo_root: Path, sha: str) -> list[tuple[str, str, str]]:
+    """(path, mode, object sha) for every blob and gitlink in the commit's tree.
+
+    The mode is part of the identity: an executable bit, a symlink in place
+    of a regular file, or a submodule pointer moved to another commit all
+    change what a checkout runs, so they change the fingerprint (review
+    finding on #2412). Trees are not listed by ``ls-tree -r``; blobs and
+    ``commit`` entries (gitlinks) are.
+    """
     code, out = _git(repo_root, "ls-tree", "-r", "-z", sha)
     if code != 0:
         raise FingerprintError(f"git ls-tree failed for {sha}")
-    entries: list[tuple[str, str]] = []
+    entries: list[tuple[str, str, str]] = []
     for record in out.split("\0"):
         if not record:
             continue
@@ -209,13 +218,18 @@ def tracked_blobs(repo_root: Path, sha: str) -> list[tuple[str, str]]:
         parts = meta.split()
         if len(parts) != 3:
             raise FingerprintError(f"unexpected ls-tree record: {record!r}")
-        _mode, kind, blob = parts
-        if kind != "blob":
-            continue  # submodules (commit) are not release content here
-        entries.append((path, blob))
+        mode, kind, obj = parts
+        if kind not in ("blob", "commit"):
+            raise FingerprintError(f"unexpected ls-tree object kind {kind!r} for {path!r}")
+        entries.append((path, mode, obj))
     if not entries:
         raise FingerprintError(f"commit {sha} has no tracked files")
     return sorted(entries)
+
+
+def tracked_blobs(repo_root: Path, sha: str) -> list[tuple[str, str]]:
+    """(path, object sha) — kept for callers that only need the pairs."""
+    return [(path, obj) for path, _mode, obj in tracked_entries(repo_root, sha)]
 
 
 def is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
@@ -227,18 +241,20 @@ def is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
 def compute(repo_root: Path, rev: str = "HEAD", exclusions: Exclusions | None = None) -> dict:
     sha = resolve_sha(repo_root, rev)
     exclusions = exclusions or load_exclusions(repo_root)
-    included: list[tuple[str, str]] = []
+    included: list[tuple[str, str, str]] = []
     excluded: list[str] = []
-    for path, blob in tracked_blobs(repo_root, sha):
+    for path, mode, obj in tracked_entries(repo_root, sha):
         if exclusions.excludes(path):
             excluded.append(path)
         else:
-            included.append((path, blob))
+            included.append((path, mode, obj))
     digest = hashlib.sha256()
-    for path, blob in included:
+    for path, mode, obj in included:
+        digest.update(mode.encode("ascii"))
+        digest.update(b"\0")
         digest.update(path.encode("utf-8"))
         digest.update(b"\0")
-        digest.update(blob.encode("ascii"))
+        digest.update(obj.encode("ascii"))
         digest.update(b"\n")
     return {
         "schema": SCHEMA,

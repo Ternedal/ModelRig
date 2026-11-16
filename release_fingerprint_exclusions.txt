@@ -3,8 +3,15 @@
 # Protected prefixes and protected documents (see scripts/release_fingerprint.py)
 # can never be excluded, whatever this file says; a glob that would match one
 # is rejected when the file is loaded.
-docs/**
+# Markdown anywhere (docs/, root, .github/). Schemas, fixtures and other files
+# under docs/ that tests or contracts read are NOT documentation for this
+# purpose and stay in the fingerprint; only what is read by people is listed.
 *.md
+docs/**/*.png
+docs/**/*.jpg
+docs/**/*.jpeg
+docs/**/*.gif
+docs/**/*.svg
 .github/*.md
 .github/ISSUE_TEMPLATE/**
 LICENSE
