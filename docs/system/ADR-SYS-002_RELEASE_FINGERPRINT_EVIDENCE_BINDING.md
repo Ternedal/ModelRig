@@ -1,7 +1,7 @@
 # ADR-SYS-002: Evidens og freeze bundet til et release-fingerprint, ikke til den eksakte SHA
 
 **Status:** VEDTAGET af Anders 16-11-2026 kl. 14:14 CET ("Kør" på udkastets anbefalinger til Q1–Q3, efter ChatGPTs review af rev. 1). Landing på `main` afventer 2.0.20-freezen; indtil da er dokumentet kun på sin gren. Anders disponerer dokumentet og dets PR alene og kan rette ethvert valg i afsnit 7 med én kommentar.
-**Udkast:** rev. 1 skrevet af Claude 16-11-2026 efter Anders' "Kør" på fem procesforbedringer (#2275, kommentar 6915273202); rev. 2 samme dag indarbejder ChatGPTs fund (#2410) og Anders' valg.
+**Udkast:** rev. 1 skrevet af Claude 16-11-2026 efter Anders' "Kør" på fem procesforbedringer (#2275, kommentar 6915273202); rev. 2 samme dag indarbejder ChatGPTs fund (#2410) og Anders' valg; rev. 3 (samme aften) præciserer D3–D5 ud fra implementeringen (#2411, slice 2) uden at ændre beslutningerne.
 **Serie:** andet dokument i SYS-serien (efter ADR-SYS-001).
 **Stopreglen (A4-005):** dokumentet lander først; kontrakttestene i afsnit 5 skrives røde derefter. Implementering forberedes på egen gren bag denne PR og lander ikke før den.
 
@@ -44,11 +44,11 @@ To ting kan **aldrig** udelukkes, uanset listens indhold, og `release_fingerprin
 
 `HANDOFF.md` er bevidst **ikke** beskyttet. Den beskriver autoritet og status; håndhævelsen af autoriteten ligger i `scripts/` og `tests/`, som er beskyttede præfikser. En ændring, der kun rører HANDOFF-tekst, ændrer intet af det riggen kører eller gaterne måler; en ændring, der flytter en autoritetsgrænse i praksis, rører pr. definition en beskyttet sti. At beskytte HANDOFF ville genindføre freeze-presset for statuslinjer, som er præcis det problem dokumentet løser.
 
-**D3. En freeze overlever docs-only landinger på `main`.** `verify_receipt()` ændres fra "`origin/main` == frosset anker" til: `origin/main` er ankeret **eller** en efterkommer af ankeret, hvor `git diff --name-only <anker>..<main>` udelukkende rammer stier i dokumentationsklassen. Kravet om at kandidaten indeholder ankeret bevares; kravet om at kandidaten indeholder det *aktuelle* `main` erstattes af fingerprint-lighed: `release_fingerprint(kandidat) == release_fingerprint(main)`. Kandidatens eget træ-rollup (`tree.sha256`) bevares som i dag — kandidatgrenen flytter sig ikke.
+**D3. En freeze overlever docs-only landinger på `main`.** `verify_receipt()` ændres fra "`origin/main` == frosset anker" til: `origin/main` er ankeret **eller** en efterkommer af ankeret, hvor (a) ankeret er i `main`s historie, (b) `git diff --name-only <anker>..<main>` udelukkende rammer stier i dokumentationsklassen, og (c) `release_fingerprint(anker) == release_fingerprint(main)` — samme udsagn målt to veje. Kravet om at kandidaten indeholder **ankeret** bevares (det var invariant fra freeze-tidspunktet og beskytter mod en forfalsket kvittering); kravet om at kandidaten indeholder det *aktuelle* `main` bortfalder, for det er præcis det, en docs-only landing bryder. Kandidatens eget træ-rollup (`tree.sha256`) bevares som i dag — kandidatgrenen flytter sig ikke. *Præcisering i rev. 3:* rev. 2 skrev "fingerprint(kandidat) == fingerprint(main)"; det ville fælde en kandidat, der ved freeze lovligt var foran `main` med kode. Den implementerede regel binder til ankeret og er strengere på det punkt, der tæller (hvad `main`s kode var ved freeze er stadig `main`s kode).
 
-**D4. Evidens er gyldig for enhver commit med samme fingerprint i samme linje.** Systemgatens og qualifiers' regel "pin-SHA eller forfader med eksakt samme træ" bliver "pin-SHA eller forfader med samme release-fingerprint". Retningen bevares (evidens på en forfader af pinnen, aldrig omvendt). Reglen samles ét sted (`release_fingerprint.equivalent(evidence_sha, pinned_sha)`) og kaldes fra de fire qualifiers og gaten, så den ikke drifter.
+**D4. Evidens er gyldig for enhver commit med samme fingerprint i samme linje.** Systemgatens regel "pin-SHA eller forfader med eksakt samme træ" bliver "pin-SHA eller forfader med samme release-fingerprint". Retningen bevares (evidens på en forfader af pinnen, aldrig omvendt). Reglen bor ét sted, `release_fingerprint.equivalent(evidence_sha, pinned_sha)`, og kaldes fra `kaliv_system_release_gate._modelrig_evidence_matches_pin`, som er det ene sted de fire ModelRig-bundne gates (`recovery_soak`, `consciousness_live_lifecycle`, `end_to_end_latency`, `bodyrig_android_live_body`) sammenlignes med pinnen. *Præcisering i rev. 3:* qualifier-scripterne selv sammenligner kun deres egen evidens med den kandidat-SHA, de blev givet (intern konsistens), ikke med pinnen; de ændres derfor ikke. Ukendte commits er ikke-ækvivalent evidens (fail-closed uden autoritetsfejl); en ubrugelig eksklusionsliste eller manglende git **er** en autoritetsfejl.
 
-**D5. Tagget peger på den frosne kandidat, ikke på `main`s head.** Når `main` er foran kandidaten med docs-only commits, sættes `vX.Y.Z` på kandidat-SHA'en. Så er de publicerede artefakter bygget af præcis den commit, Stage A kørte på — inklusive `commit_identity`-stemplet (`scripts/stamp_build_identity.py`), som ellers ville afvige. `main` indeholder tagget (kandidaten er forfader), så invarianten "tagget er på `main`" holder. `candidate_freeze_check._version_tag_owner` og `freeze_check.py` accepterer et tag på kandidaten som post-promotion, som i dag.
+**D5. Tagget peger på den frosne kandidat, ikke på `main`s head.** Når `main` er foran kandidaten med docs-only commits, sættes `vX.Y.Z` på kandidat-SHA'en. Så er de publicerede artefakter bygget af præcis den commit, Stage A kørte på — inklusive `commit_identity`-stemplet (`scripts/stamp_build_identity.py`), som ellers ville afvige. `main` indeholder tagget (kandidaten er forfader), så invarianten "tagget er på `main`" holder. *Præcisering i rev. 3:* `freeze_check.py` accepterer allerede en kandidat, der er `identical` eller `behind` i forhold til `main` (API-sammenligning i gitless tilstand, `merge-base --is-ancestor` i git-tilstand) og kræver HEAD == den publicerede tags commit; `candidate_freeze_check._version_tag_owner` accepterer et tag på kandidaten som post-promotion. D5 kræver derfor **ingen kodeændring**, kun at runbooks og HANDOFF §4 siger, hvor tagget sættes.
 
 **D6. Stage B og updater-evidens er uændret.** De binder til publicerede bytes (`SHA256SUMS.txt`) og til den kørende appliance, ikke til en SHA på `main`. D5 gør, at de bytes er kandidatens.
 
@@ -74,23 +74,20 @@ To ting kan **aldrig** udelukkes, uanset listens indhold, og `release_fingerprin
 
 ## 5. Kontrakttests (røde før implementeringen, grønne efter)
 
-1. `release_fingerprint(sha)` er uændret af en commit, der kun rører stier i dokumentationsklassen, og ændret af en ét-bytes ændring i hver af: `worker/`, `backend/`, `android/`, `desktop/`, `scripts/`, `tests/`, `deploy/`, `.github/workflows/`, `VERSION`, en rod-`.cmd`.
-2. `verify_receipt()` accepterer, at `origin/main` er flyttet fra ankeret med docs-only commits (D3), og afviser både (a) en flytning, der rører en ikke-udelukket sti, og (b) en kandidat, der ikke længere indeholder ankeret.
-3. Systemgaten accepterer evidens på en forfader med samme fingerprint og **forskelligt** træ, og afviser evidens på en forfader med forskelligt fingerprint, selv når kun én byte i `worker/` adskiller dem (D4). Samme for hver af de fire qualifiers.
-4. En eksklusionsliste, der nævner et beskyttet præfiks (D2), afvises af `release_fingerprint.py` ved indlæsning; et beskyttet dokument indgår i fingerprintet, selv om `*.md` står på listen (en ét-bytes ændring i `RIGDAG_SIMPEL.md` ændrer fingerprintet, en ét-bytes ændring i `HANDOFF.md` gør ikke); og en test, der lister præfikser og beskyttede dokumenter ordret, bliver rød, hvis en af listerne i kilden forkortes.
-5. `freeze_check.py` accepterer et tag, der peger på den frosne kandidat, mens `main` er foran med docs-only commits (D5), og afviser et tag på en commit, der ikke er kandidaten.
-6. Fingerprintet beregnes fra Git-objekterne: et snavset arbejdstræ ændrer ikke resultatet for en given SHA (D1).
-7. Mutation: fjernes fingerprint-sammenligningen i D3 eller D4 i kilden, bliver mindst én test rød; fjernes kaldet i én af de fire qualifiers, bliver dens test rød.
+1. `release_fingerprint(sha)` er uændret af en commit, der kun rører stier i dokumentationsklassen, og ændret af en ét-bytes ændring i hver af: `worker/`, `backend/`, `android/`, `desktop/`, `scripts/`, `tests/`, `deploy/`, `.github/workflows/`, `VERSION`, en rod-`.cmd` — og af en omdøbning af en kodefil. *(`tests/workflow_release_fingerprint.py`, #2411)*
+2. `verify_receipt()` accepterer, at `origin/main` er flyttet fra ankeret med docs-only commits (D3), og afviser (a) en flytning, der rører en ikke-udelukket sti, navngivet, (b) en flytning, der rører et beskyttet dokument, (c) et omskrevet `main`, hvis historie ikke holder ankeret, (d) en kandidat, der ikke længere indeholder ankeret, (e) en kvittering uden eller med forfalsket fingerprint. *(`tests/workflow_candidate_freeze.py`, slice 2)*
+3. Systemgaten accepterer evidens på en forfader med samme fingerprint og **forskelligt** træ, og afviser evidens på en forfader med forskelligt fingerprint; ukendt commit = ikke-ækvivalent; ubrugelig eksklusionsliste = autoritetsfejl. *(`tests/support/kaliv_system_release_gate_contract.py` via `workflow_candidate_gate.py`, slice 2)*
+4. En eksklusionsliste, der nævner et beskyttet præfiks (D2), afvises ved indlæsning; et beskyttet dokument indgår i fingerprintet, selv om `*.md` står på listen (en ét-bytes ændring i `RIGDAG_SIMPEL.md` ændrer fingerprintet, en ét-bytes ændring i `HANDOFF.md` gør ikke); præfikser og beskyttede dokumenter pinnes ordret. *(#2411)*
+5. `freeze_check.py` accepterer et tag, der peger på den frosne kandidat, mens `main` er foran (`behind`-status / ancestor) — *dækket af den eksisterende `tests/workflow_freeze_check.py`, jf. D5-præciseringen.*
+6. Fingerprintet beregnes fra Git-objekterne: et snavset arbejdstræ ændrer ikke resultatet for en given SHA (D1). *(#2411)*
+7. Mutation: fjernes fingerprint-sammenligningen i D3 eller D4 i kilden, bliver mindst én test rød. *Målt i slice 1 og 2: 10/10 i biblioteket, 6/6 i `candidate_freeze_check`, 2/2 i gaten — sweepene står i PR-beskrivelserne, ikke i CI.*
 
 ## 6. Implementering (efter vedtagelse)
 
-1. Land dette dokument alene.
-2. Kontrakttests 1–7 som røde tests (`tests/workflow_release_fingerprint.py`).
-3. `scripts/release_fingerprint.py` + `release_fingerprint_exclusions.txt` (D1, D2, D7).
-4. `candidate_freeze_check.py` og `freeze_check.py` (D3, D5).
-5. `kaliv_system_release_gate.py` og de fire qualifiers (D4) gennem den fælles funktion.
-6. `RIGDAG_SIMPEL.md` Blok 0, `STAGED_PHYSICAL_PROMOTION.md`, HANDOFF §4 og §9: freeze-reglen og tag-placeringen (D3, D5). `tests/workflow_staged_promotion_runbook.py` opdateres til den nye kontrakt.
-7. Første anvendelse: tidligst 2.0.21-æraen. 2.0.20-kampagnen kører færdig under den nuværende regel.
+1. Land dette dokument alene (#2410).
+2. Slice 1 (#2411): `scripts/release_fingerprint.py` + `release_fingerprint_exclusions.txt` + kontrakttest 1, 4, 6, D4 (D1, D2, D7-bibliotek).
+3. Slice 2 (stacked på #2411): `candidate_freeze_check.py` (D3, D7 i kvitteringen), `kaliv_system_release_gate.py` (D4, D7 i verdiktet), kontrakttest 2 og 3, runbook-noter i `RIGDAG_SIMPEL.md`, `STAGED_PHYSICAL_PROMOTION.md` og HANDOFF §9.
+4. Første anvendelse: 2.0.21-æraen. 2.0.20-kampagnen kører færdig under den nuværende regel; en kvittering fra før slice 2 afvises med besked om re-freeze, så ingen gammel kvittering læses under den nye regel uden at nogen opdager det.
 
 ## 7. Valg truffet ved vedtagelsen
 
