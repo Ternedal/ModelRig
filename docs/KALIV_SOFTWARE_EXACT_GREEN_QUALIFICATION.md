@@ -40,6 +40,51 @@ It does not satisfy lifecycle, physical perception, Photoreal likeness, M6
 digital-twin, Android live-body, latency, soak, repository-authority, or final
 production activation.
 
+## Assemble it from GitHub Actions
+
+Do not type the input by hand. `scripts/kaliv_software_exact_green_assembler.py`
+reads it from GitHub for the four pins (read-only `gh api`, with the operator's
+`gh` login):
+
+```powershell
+python scripts/kaliv_software_exact_green_assembler.py `
+  --pin-modelrig <sha> --pin-bodyrig <sha> --pin-visionrig <sha> --pin-voicerig <sha> `
+  --out .\validation\software-exact-green\<date>
+```
+
+Per repository it requires:
+- the newest `exact-head-qualification` run on exactly that `head_sha`,
+  completed with success;
+- the newest run of each required workflow, completed with success;
+- every check run on the commit completed with success, skipped or neutral.
+
+The required workflows per repository:
+
+| Repository | Required workflows |
+|---|---|
+| ModelRig | `ci`, `codeql`, `agent3-full-diagnostics`, `exact-head-qualification` |
+| BodyRig | `ci`, `codeql`, `exact-head-qualification` |
+| VisionRig | `tests`, `exact-head-qualification` |
+| VoiceRig | `tests`, `CodeQL`, `windows-lifecycle`, `exact-head-qualification` |
+
+**VisionRig runs `exact-head-qualification` only on `workflow_dispatch`.**
+Dispatch it for the pin (`head_sha` input) before assembling; without it the
+assembler refuses. Measured 16/11 on VisionRig `main` `efe0c15c`: only `tests`
+ran.
+
+It writes a new directory holding:
+- one capture file per repository, with the runs and check runs it judged;
+- the evidence file;
+- an assembly record with the qualifier's verdict.
+
+Each `evidence_ref` names the exact-head run and binds the SHA-256 of its
+capture file. The qualifier runs before anything is written; a refusal writes
+nothing.
+
+**Limits:**
+- It sees GitHub's answer at assembly time.
+- The workflow list is the assembler's own, not read from branch protection.
+
 ## Input shape
 
 ```json
