@@ -51,11 +51,18 @@ def check(condition: bool, label: str) -> None:
         print(f"  FAIL: {label}")
 
 
-def status_bytes(ref: str) -> bytes:
+READY = (
+    '"enabled":{' + ",".join(f'"{k}":true' for k in op.REQUIRED_FLAGS) + '},'
+    '"mounted":{"supervisor":true,"live_session":true,"autonomous_scheduler":true},'
+    '"prerequisites":{"self_state_present":true,"active_person_available":true,"cognitive_profile_available":true},'
+)
+
+
+def status_bytes(ref: str, ready: str = READY) -> bytes:
     # Deliberately odd formatting and a +00:00 offset: saved files must keep it.
     return (
         '{ "schema" : "kaliv-consciousness-core/runtime-status/v1",\n'
-        f'  "runtime_instance_ref":"{ref}", "at": "2026-11-16T10:00:00+00:00" ,"production_activation":false}}'
+        f'  "runtime_instance_ref":"{ref}", {ready} "at": "2026-11-16T10:00:00+00:00" ,"production_activation":false}}'
     ).encode()
 
 
@@ -80,6 +87,7 @@ class FakeWorker:
         self.restart_during_swap = False
         self.ignore_profile = False
         self.restart_again = False      # a second restart while continuity forms
+        self.ready = READY
         self.served: dict[str, list[bytes]] = {"status": [], "snapshot": []}
         worker = self
 
@@ -105,7 +113,7 @@ class FakeWorker:
 
     def answer(self, path: str) -> tuple[int, bytes]:
         if path == op.STATUS_PATH:
-            body = status_bytes(self.ref)
+            body = status_bytes(self.ref, self.ready)
             self.served["status"].append(body)
             return 200, body
         if path == op.SNAPSHOT_PATH:
@@ -191,7 +199,7 @@ class Run:
             worker_url=self.worker.url, out_dir=self.out, profile_file=self.profile,
             swap_profile=self.swap, candidate_sha=SHA, command_fn=self.commands,
             prompt_fn=self.prompt, say=self.said.append, poll_interval=0.0,
-            restart_timeout=2.0, continuity_timeout=2.0,
+            restart_timeout=2.0, continuity_timeout=2.0, dirty_fn=lambda: [],
         )
         settings.update(options)
         return op.Operator(**settings)
@@ -263,6 +271,23 @@ def a_disabled_snapshot_stops_before_the_probe(r: Run) -> None:
     check("KALIV_CONSCIOUSNESS_QUALIFICATION_EVIDENCE_ENABLED=1" in r.text(), "names the missing flag")
     check(not r.commands.calls, "the probe never ran")
     check(not r.out.exists(), "no evidence directory is created")
+
+
+def an_unready_worker_is_named_before_the_probe(r: Run) -> None:
+    r.worker.ready = READY.replace('"continuous_loop":true', '"continuous_loop":false').replace(
+        '"self_state_present":true', '"self_state_present":false')
+    code = r.go()
+    check(code == 2, "exit 2")
+    check("KALIV_CONSCIOUSNESS_CONTINUOUS_LOOP_ENABLED" in r.text(), f"names the missing flag: {r.text()}")
+    check("no SelfState" in r.text() and "dev_bootstrap" in r.text(), "names the missing SelfState and how to make it")
+    check("KALIV_CONSCIOUSNESS_CORE_ENABLED" not in r.text(), "and only what is missing")
+    check(not r.commands.calls and not r.out.exists(), "nothing ran, nothing written")
+
+
+def no_live_session_is_named(r: Run) -> None:
+    r.worker.ready = READY.replace('"live_session":true', '"live_session":false')
+    code = r.go()
+    check(code == 2 and "no live session is mounted" in r.text(), r.text())
 
 
 def no_restart_is_refused(r: Run) -> None:
@@ -349,7 +374,7 @@ def refusals_before_anything_runs(tmp: Path) -> None:
     swap.write_bytes(PROFILE_B)
     bom = tmp / "bom.json"
     bom.write_bytes(b"\xef\xbb\xbf" + PROFILE_B)
-    base = dict(out_dir=tmp / "out", profile_file=profile, swap_profile=swap, candidate_sha=SHA,
+    base = dict(out_dir=tmp / "out", profile_file=profile, swap_profile=swap, candidate_sha=SHA, dirty_fn=lambda: [],
                 command_fn=lambda c: (_ for _ in ()).throw(AssertionError("ran")), say=lambda _s: None)
     for url in ("http://192.168.1.10:8099", "https://127.0.0.1:8099", "http://127.0.0.1:8099/x",
                 "http://user@127.0.0.1:8099", "http://example.com"):
@@ -373,6 +398,7 @@ def refusals_before_anything_runs(tmp: Path) -> None:
     refused("BOM swap profile", "byte-order mark", swap_profile=bom)
     refused("short SHA", "40 lowercase hex", candidate_sha="abc")
     refused("worker down", "did not answer HTTP 200")
+    refused("dirty checkout", "the checkout is not clean", dirty_fn=lambda: ["?? stray.txt"])
     (tmp / "exists").mkdir()
     refused("reused directory", "every run gets a new directory", out_dir=tmp / "exists")
     check(profile.read_bytes() == PROFILE_A, "a refused run never touches the profile")
@@ -413,6 +439,8 @@ def main() -> None:
     case(a_full_run_qualifies_and_saves_raw_bytes)
     case(the_qualifier_decides_the_exit_code)
     case(a_disabled_snapshot_stops_before_the_probe, snapshot_enabled=False)
+    case(an_unready_worker_is_named_before_the_probe)
+    case(no_live_session_is_named)
     case(no_restart_is_refused)
     case(waiting_for_lived_continuity, continuity_after=3)
     case(continuity_that_never_forms_is_refused, continuity_after=10**9)

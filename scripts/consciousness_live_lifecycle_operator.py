@@ -29,7 +29,11 @@ reformatting, no time-zone rewrite and no byte-order mark (#2390, F4).
 What it does not do
 -------------------
 It activates nothing and sets no flag. The worker must already run with the
-consciousness flags and ``KALIV_CONSCIOUSNESS_QUALIFICATION_EVIDENCE_ENABLED=1``.
+consciousness flags and ``KALIV_CONSCIOUSNESS_QUALIFICATION_EVIDENCE_ENABLED=1``
+(START_DEV_APPLIANCE sets the first but not the second), with a SelfState, a
+selected approved Person Revision, a profile file and a model in Ollama: lived
+continuity after the restart comes from an autonomous tick, which calls the
+model. The preflight names whatever of this the worker's status says is missing.
 It does not decide whether the gate passed: the qualifier does, and the exit
 code is the qualifier's verdict.
 
@@ -140,6 +144,43 @@ def parse_object(raw: bytes, name: str) -> dict[str, Any]:
     return value
 
 
+# status "enabled" key -> the flag that turns it on
+REQUIRED_FLAGS = {
+    "core": "KALIV_CONSCIOUSNESS_CORE_ENABLED",
+    "supervisor": "KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED",
+    "chat_admission": "KALIV_CONSCIOUSNESS_CHAT_ENABLED",
+    "turn_cognition": "KALIV_CONSCIOUSNESS_TURN_COGNITION_ENABLED",
+    "event_step": "KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED",
+    "sleep_lifecycle": "KALIV_CONSCIOUSNESS_SLEEP_LIFECYCLE_ENABLED",
+    "unplanned_liveness": "KALIV_CONSCIOUSNESS_UNPLANNED_LIVENESS_ENABLED",
+    "policy_checkpoint": "KALIV_CONSCIOUSNESS_POLICY_CHECKPOINT_ENABLED",
+    "autonomous_cognition": "KALIV_CONSCIOUSNESS_AUTONOMOUS_ENABLED",
+    "autonomous_scheduler": "KALIV_CONSCIOUSNESS_AUTONOMOUS_SCHEDULER_ENABLED",
+    "autonomous_checkpoint": "KALIV_CONSCIOUSNESS_AUTONOMOUS_CHECKPOINT_ENABLED",
+    "continuous_loop": "KALIV_CONSCIOUSNESS_CONTINUOUS_LOOP_ENABLED",
+}
+PREREQUISITES = {
+    "self_state_present": "no SelfState (run python -m app.consciousness_core.dev_bootstrap from worker/)",
+    "active_person_available": "no selected, approved active Person Revision",
+    "cognitive_profile_available": "no CognitiveProfile file at KALIV_CONSCIOUSNESS_PROFILE_FILE",
+}
+
+
+def readiness_gaps(status: Mapping[str, Any]) -> list[str]:
+    """What the worker's own status says is missing for this gate."""
+    gaps: list[str] = []
+    enabled = status.get("enabled") if isinstance(status.get("enabled"), Mapping) else {}
+    off = [flag for key, flag in REQUIRED_FLAGS.items() if enabled.get(key) is not True]
+    if off:
+        gaps.append("flags not set to 1: " + ", ".join(off))
+    prerequisites = status.get("prerequisites") if isinstance(status.get("prerequisites"), Mapping) else {}
+    gaps.extend(text for key, text in PREREQUISITES.items() if prerequisites.get(key) is not True)
+    mounted = status.get("mounted") if isinstance(status.get("mounted"), Mapping) else {}
+    if not gaps and mounted.get("live_session") is not True:
+        gaps.append("no live session is mounted (see the worker log)")
+    return gaps
+
+
 def runtime_ref(value: Mapping[str, Any], name: str) -> str:
     ref = value.get("runtime_instance_ref")
     if not isinstance(ref, str) or not ref.startswith("runtime-instance:"):
@@ -210,6 +251,13 @@ def git_head(root: Path) -> str:
     return sha
 
 
+def git_dirty(root: Path) -> list[str]:
+    proc = subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        raise OperatorError("the checkout's status could not be read")
+    return [line for line in proc.stdout.splitlines() if line.strip()]
+
+
 class Operator:
     def __init__(
         self,
@@ -230,6 +278,7 @@ class Operator:
         say: Callable[[str], None] = print,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
+        dirty_fn: Callable[[], list[str]] = lambda: git_dirty(ROOT),
     ) -> None:
         self.base = normalize_worker_url(worker_url)
         self.out = out_dir
@@ -247,6 +296,7 @@ class Operator:
         self.say = say
         self.clock = clock
         self.sleep = sleep
+        self.dirty = dirty_fn
         self.saved: dict[str, str] = {}
 
     def path(self, key: str) -> Path:
@@ -266,6 +316,12 @@ class Operator:
             raise OperatorError("candidate SHA must be 40 lowercase hex characters")
         if self.out.exists():
             raise OperatorError(f"{self.out} already exists; every run gets a new directory")
+        dirty = self.dirty()
+        if dirty:
+            raise OperatorError(
+                "the checkout is not clean, so the live-cycle probe would refuse it: "
+                + ", ".join(dirty[:5]) + (" ..." if len(dirty) > 5 else "")
+            )
         original = self._read_profile(self.profile_file, "the profile file")
         swap = self._read_profile(self.swap_profile, "the swap profile")
         if swap == original:
@@ -275,8 +331,14 @@ class Operator:
             raise OperatorError(
                 f"the worker's consciousness status did not answer HTTP 200 on {self.base} (got {status or 'no answer'})"
             )
-        if parse_object(raw, "status").get("schema") != STATUS_SCHEMA:
+        current = parse_object(raw, "status")
+        if current.get("schema") != STATUS_SCHEMA:
             raise OperatorError("status has another schema")
+        missing = readiness_gaps(current)
+        if missing:
+            raise OperatorError(
+                "the worker is not ready for the lifecycle gate: " + "; ".join(missing)
+            )
         status, _ = self.get(SNAPSHOT_PATH)
         if status == 404:
             raise OperatorError(
