@@ -87,6 +87,30 @@ Measured 16/11 in a sandbox, with a real worker, a real restart, the real
 assembler and the real qualifier, and a stand-in Ollama: `QUALIFIED`, and the
 profile file was restored byte for byte.
 
+**The profile file during a run (read before you start).** The operator swaps
+the file at `KALIV_CONSCIOUSNESS_PROFILE_FILE` and puts the original back. That
+is safe only under these conditions:
+1. **One intended writer.** During a gate 2 run nothing else should write the
+   profile file. The operator is its only intended writer.
+2. **Other writers must be atomic.** If another tool must write it, it has to
+   write a temporary file and rename it over the profile. A writer that changes
+   the file in place (most editors on save, `Set-Content`, `>`) is outside the
+   guarantee.
+3. **What the guarantee is.** The restore never replaces a file. It moves the
+   current file aside atomically, compares it with its own swap, and publishes
+   the original only where no new file has appeared. A completed atomic write
+   by someone else therefore always survives, and the run stops as `STOPPED`.
+4. **`NOT restored` means stop.** Inspect both the profile file and the
+   `.<name>.operator-restore-<pid>` beside it. Delete neither until you know
+   which one is right. Then put the right one in place yourself.
+5. **The path is briefly absent** between the capture and the publication. The
+   snapshots are taken by then, but any other reader in that moment sees no
+   profile.
+6. **Not physically tested.** The Windows fallback without hard links
+   (exclusive create) is tested neither on NTFS nor on the rig. On the rig the
+   profile normally lies on NTFS, which has hard links, so the fallback is
+   normally not used.
+
 Each run writes to a new `validation/consciousness-lifecycle/<UTC time>/`
 with an `operator-run.json` that binds every file by SHA-256. The exit code is
 the qualifier's: 0 QUALIFIED, 1 refused, 2 a step failed before it. The manual
