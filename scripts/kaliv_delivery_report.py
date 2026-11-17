@@ -108,7 +108,11 @@ def summarize_repo(client, owner, repo):
         output["status"] = "partial" if output["warnings"] else "collected"
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError,
             ValueError, KeyError, TypeError, OSError) as error:
-        output["warnings"].append("github_api_error:" + type(error).__name__)
+        # The status code tells the operator what to do (403 rate limit or scope, 404 no
+        # access, 5xx GitHub); it says nothing about the token. Other errors keep their type.
+        kind = ("HTTP%d" % error.code if isinstance(error, urllib.error.HTTPError)
+                else type(error).__name__)
+        output["warnings"].append("github_api_error:" + kind)
         output["status"] = "partial" if (output["open_issues"] is not None or output["open_prs"] is not None) else "unknown"
     return output
 
