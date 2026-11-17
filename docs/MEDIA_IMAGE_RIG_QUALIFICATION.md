@@ -159,7 +159,7 @@ Push-Location <checkout>\worker; & C:\Kaliv\media-venv\Scripts\python.exe -u -m 
 
 Exit 73 means another executor already holds that GPU's lock; one started from an elevated window is invisible to a non-elevated one, so stop it from a window of the same elevation. Exit 75 with `media_volume_marker_missing` means the volume marker (`docs/MEDIA_VOLUME.md`) was not written.
 
-**Prompt language [observed, rig]:** SDXL is trained on English. Danish prompts gave visibly worse and stranger results than the same subject in English. Until the worker translates locally (proposal on #2275), write prompts in English.
+**Prompt language [observed, rig]:** SDXL is trained on English. Danish prompts gave visibly worse and stranger results than the same subject in English. Set `KALIV_MEDIA_TRANSLATE_MODEL` to a local Ollama model and the executor translates every prompt first (`docs/MEDIA_PROMPT_TRANSLATION.md`); without it, write prompts in English.
 
 ## 5. What this does not do
 

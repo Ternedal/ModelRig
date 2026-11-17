@@ -139,7 +139,8 @@ class MediaExecutor:
                  idle_unload_s: float = 300.0, cancel_poll_s: float = 1.0,
                  source_reader: Callable[[str, str], bytes] | None = None,
                  clock: Callable[[], float] = time.monotonic, volume_root: str | None = None,
-                 diagnostics: Callable[[dict], None] | None = None):
+                 diagnostics: Callable[[dict], None] | None = None,
+                 prompt_rewriter: Callable[..., tuple[str, str]] | None = None):
         if not isinstance(store, ImageJobStore):
             raise ExecutorConfigError("store must be an ImageJobStore")
         if not profiles:
@@ -164,6 +165,11 @@ class MediaExecutor:
         # source_reader(owner, asset_id) -> PNG bytes. In production ChatGPT's read_owned_source_png:
         # it authorizes the owner before any gallery I/O (#2296 6651187815).
         self.source_reader = source_reader
+        # prompt_rewriter(prompt, max_chars=...) -> (prompt, outcome): the local translation step
+        # (media_prompt_translation). Fail-open by contract; only its outcome code is recorded.
+        if prompt_rewriter is not None and not callable(prompt_rewriter):
+            raise ExecutorConfigError("prompt_rewriter must be callable")
+        self.prompt_rewriter = prompt_rewriter
         self.idle_unload_s, self.cancel_poll_s, self.clock = float(idle_unload_s), float(cancel_poll_s), clock
         self.instance = f"{self.gpu_uuid}:{secrets.token_hex(8)}"
         self.adapter = None
@@ -270,8 +276,18 @@ class MediaExecutor:
         if not isinstance(params, dict) or set(params) - set(_REQUEST_PARAMS) - {"task"}:
             raise GenerationError("unknown job parameters")
         task = params.get("task", sorted(profile.tasks)[0])
+        prompt = job["prompt"]
+        if self.prompt_rewriter is not None:
+            started = self.clock()
+            try:
+                prompt, outcome = self.prompt_rewriter(prompt, max_chars=profile.limits.max_prompt_chars)
+            except Exception as exc:  # the rewriter promised not to raise; if it does, render the original
+                prompt, outcome = job["prompt"], f"fallback:{_event_code(exc)}"
+            if not isinstance(prompt, str) or not prompt:
+                prompt, outcome = job["prompt"], "fallback:bad_rewrite"
+            self.events.append(f"translate:{job['id']}:{outcome}:{self.clock() - started:.1f}")
         return validate_request(profile, GenerationRequest(
-            profile_id=profile.profile_id, task=task, prompt=job["prompt"],
+            profile_id=profile.profile_id, task=task, prompt=prompt,
             **{key: params[key] for key in _REQUEST_PARAMS if key in params}))
 
     def _cancel_check(self, job_id: str) -> Callable[[], bool]:
