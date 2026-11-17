@@ -136,6 +136,33 @@ with tempfile.TemporaryDirectory() as tmpdir:
     check(rf.fingerprint(repo, removed) != rf.fingerprint(repo, f"{removed}~1"), "removing a code file changes the fingerprint")
     check(rf.fingerprint(repo, removed) == rf.fingerprint(repo, f"{added}~1"), "the same tree content gives the same fingerprint again")
 
+    # renames across the class boundary (Codex P2 on #2411): both endpoints are
+    # classified, so a fingerprinted file cannot leave the tree disguised as a
+    # documentation change. git must see these as renames (R100) for the test
+    # to mean anything, so the content is identical and large enough to detect.
+    write(repo, "deploy/config.json", '{"keep": "' + "y" * 200 + '"}\n')
+    rename_base = commit_all(repo, "add config")
+    git(repo, "mv", "deploy/config.json", "docs/config.md")
+    code_to_doc = commit_all(repo, "rename code to doc")
+    check("R100" in git(repo, "diff", "--name-status", "-M", f"{code_to_doc}~1", code_to_doc),
+          "fixture: git detects the code→doc move as a 100% rename")
+    ok, offending = rf.docs_only(repo, rename_base, code_to_doc)
+    check(not ok and offending == ["deploy/config.json"],
+          "docs_only() names the removed code file when it is renamed into the documentation class")
+    check(rf.fingerprint(repo, code_to_doc) != rf.fingerprint(repo, rename_base),
+          "renaming a code file into the documentation class changes the fingerprint")
+    git(repo, "mv", "docs/config.md", "scripts/config.json")
+    doc_to_code = commit_all(repo, "rename doc to code")
+    ok, offending = rf.docs_only(repo, code_to_doc, doc_to_code)
+    check(not ok and offending == ["scripts/config.json"],
+          "docs_only() names the new code file when a doc is renamed out of the documentation class")
+    git(repo, "mv", "docs/GUIDE2.md", "docs/GUIDE3.md")
+    doc_to_doc = commit_all(repo, "rename doc to doc")
+    ok, offending = rf.docs_only(repo, doc_to_doc + "~1", doc_to_doc)
+    check(ok and offending == [], "docs_only() still says yes for a rename inside the documentation class")
+    (repo / "scripts/config.json").unlink()
+    commit_all(repo, "drop config")
+
     # moving a code file without changing its bytes is still a code change
     git(repo, "mv", "worker/app/main.py", "worker/app/entry.py")
     moved = commit_all(repo, "move code")

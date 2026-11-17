@@ -290,7 +290,11 @@ def equivalent(repo_root: Path, evidence_rev: str, pinned_rev: str, exclusions: 
 def changed_paths(repo_root: Path, from_rev: str, to_rev: str) -> list[str]:
     a = resolve_sha(repo_root, from_rev)
     b = resolve_sha(repo_root, to_rev)
-    code, out = _git(repo_root, "diff", "--name-only", "-z", f"{a}..{b}")
+    # --no-renames: a rename must list BOTH endpoints. With rename detection,
+    # ``--name-only`` prints only the destination, so ``config.json`` →
+    # ``config.md`` would look like a documentation-only change while a
+    # fingerprinted file disappeared (Codex P2 on #2411).
+    code, out = _git(repo_root, "diff", "--name-only", "--no-renames", "-z", f"{a}..{b}")
     if code != 0:
         raise FingerprintError(f"git diff failed for {a[:12]}..{b[:12]}")
     return sorted(p for p in out.split("\0") if p)
@@ -299,8 +303,9 @@ def changed_paths(repo_root: Path, from_rev: str, to_rev: str) -> list[str]:
 def docs_only(repo_root: Path, from_rev: str, to_rev: str, exclusions: Exclusions | None = None) -> tuple[bool, list[str]]:
     """D3: True when every path changed between the two commits is excluded (documentation class).
 
-    Returns the offending paths otherwise. Renames and deletions count by path
-    on both sides, which ``--name-only`` already lists.
+    Returns the offending paths otherwise. Renames count by path on both
+    sides: the listing is taken without rename detection, so the removed
+    source and the added destination are both classified.
     """
     exclusions = exclusions or load_exclusions(repo_root)
     offending = [p for p in changed_paths(repo_root, from_rev, to_rev) if not exclusions.excludes(p)]
