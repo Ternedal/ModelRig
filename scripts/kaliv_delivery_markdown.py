@@ -7,6 +7,12 @@ import argparse
 import json
 from pathlib import Path
 
+# Only these need no attention. Anything else -- failure, startup_failure (a broken
+# workflow file), action_required, stale, a state GitHub adds later -- is flagged:
+# an allowlist, so an unknown conclusion can never read as fine (#2275 item 24).
+WORKFLOW_FINE = ("success", "neutral", "skipped", "none")
+WORKFLOW_RUNNING = ("queued", "in_progress", "waiting", "pending", "requested")
+
 def cell(value):
     if value is None or value == "":
         return "unknown"
@@ -41,7 +47,7 @@ def render(payload):
     flagged = [repo for repo in repositories
                if repo.get("status") != "collected"
                or bool(repo.get("warnings"))
-               or repo.get("workflow") in ("failure", "cancelled", "timed_out", "unknown")
+               or repo.get("workflow") not in WORKFLOW_FINE
                or (isinstance(repo.get("stale_ready_prs"), int) and repo["stale_ready_prs"] > 0)]
     if not flagged:
         lines.append("No warning conditions detected in the fields collected. "
@@ -53,7 +59,9 @@ def render(payload):
                 reasons.append("incomplete or unavailable data")
             if repo.get("warnings"):
                 reasons.append("collector warnings: " + cell(", ".join(map(str, repo["warnings"]))))
-            if repo.get("workflow") in ("failure", "cancelled", "timed_out", "unknown"):
+            if repo.get("workflow") in WORKFLOW_RUNNING:
+                reasons.append("latest workflow not finished: " + cell(repo.get("workflow")))
+            elif repo.get("workflow") not in WORKFLOW_FINE:
                 reasons.append("latest workflow: " + cell(repo.get("workflow")))
             if isinstance(repo.get("stale_ready_prs"), int) and repo["stale_ready_prs"] > 0:
                 reasons.append(str(repo["stale_ready_prs"]) + " stale ready PR(s)")
@@ -67,6 +75,7 @@ def render(payload):
                   "- Open issues and PRs are counts, not completion or velocity metrics.",
                   "- Latest workflow is scoped to the repository default branch, not a rollup of all required checks.",
                   "- Workflow `none` means no Actions runs on the default branch; it is not a success.",
+                  "- Every workflow state other than success, neutral, skipped or none is flagged.",
                   "- No evidence of release readiness, user journeys, physical acceptance or blockers is inferred.",
                   "- Truncated pagination and API errors must remain visible as warnings.",
                   ""])
