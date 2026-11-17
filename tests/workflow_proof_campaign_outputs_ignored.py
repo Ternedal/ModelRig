@@ -40,6 +40,24 @@ DELEGATED = [
     ROOT / "scripts" / "physical_validation_termination_campaign.py",
     ROOT / "scripts" / "agent3_memory_protected_backup_physical.py",
     ROOT / "scripts" / "agent3_memory_protected_backup_physical_gate.py",
+    # Stage B, its verification and the recovery soak (rig night 16/11 on
+    # 2.0.20): four of their outputs were not ignored, and each one stopped
+    # the next step with "working tree is not clean" -- the soak journal
+    # stopped the Stage B preflight, the strict wrapper's own final report
+    # stopped the legacy preflight it then calls, and VERIFY's reports
+    # stopped its own updater-chain check.
+    ROOT / "scripts" / "stage_b_one_click.py",
+    ROOT / "scripts" / "stage_b_one_click_v2.py",
+    ROOT / "scripts" / "stage_b_one_click_v2.retained",
+    ROOT / "scripts" / "stage_b_strict_evidence.py",
+    ROOT / "scripts" / "stage_b_physical_gate.py",
+    ROOT / "scripts" / "stage_b_physical_gate_v2.py",
+    ROOT / "scripts" / "appliance_lifecycle_updater_chain.py",
+    ROOT / "scripts" / "freeze_check.py",
+    ROOT / "scripts" / "physical_validation_campaign.py",
+    ROOT / "scripts" / "physical_validation_campaign_core.py",
+    ROOT / "scripts" / "agent3_task_ui_validation.py",
+    ROOT / "scripts" / "kaliv_recovery_soak_collector.py",
 ]
 
 passed = 0

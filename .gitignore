@@ -196,3 +196,32 @@ renderers/bodyrig-unity/Assets/BodyRig/Scenes.meta
 /android/signing/*.p12
 /android/signing/*.pfx
 /android/signing/keystore.properties
+# Stage B, its verification, task_ui and the recovery soak (rig night 16/11 on
+# 2.0.20). Each of these, left untracked, stopped the NEXT step with "working
+# tree is not clean": the soak journal stopped the Stage B preflight, the strict
+# wrapper's final report stopped the legacy preflight it calls, and VERIFY's
+# reports stopped its own updater-chain check. Derived and enforced by
+# tests/workflow_proof_campaign_outputs_ignored.py.
+/validation/.stage-b-physical-base.json
+/validation/.stage-b-physical-base.json.tmp
+/validation/stage-b-easy-state.json.tmp
+/validation/stage-b-physical-final-latest.json
+/validation/stage-b-physical-final-latest.json.tmp
+/validation/stage-b-strict-evidence-latest.json
+/validation/stage-b-strict-evidence-latest.json.tmp
+/validation/appliance-lifecycle-observations.json.tmp
+/validation/appliance-lifecycle-updater-chain-latest.json
+/validation/appliance-lifecycle-updater-chain-latest.json.tmp
+/validation/frozen-candidate.json
+/validation/frozen-candidate.json.tmp
+/validation/agent3-task-ui-evidence/
+/validation/agent3-task-ui-observations.json
+/validation/agent3-task-ui-observations.json.tmp
+/validation/agent3-task-ui-validation-latest.json
+/validation/agent3-task-ui-validation-latest.json.tmp
+/validation/recovery-soak-journal.jsonl
+/validation/recovery-soak-journal.jsonl.tmp
+/validation/recovery-soak-assembly.json
+/validation/recovery-soak-assembly.json.tmp
+/validation/recovery-soak-observations.json
+/validation/recovery-soak-observations.json.tmp
