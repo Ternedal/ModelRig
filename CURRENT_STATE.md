@@ -556,6 +556,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_client_microcopy_parity.py`
 - `tests/workflow_client_path_segments.py`
 - `tests/workflow_consciousness_core_contract.py`
+- `tests/workflow_consciousness_live_lifecycle_operator.py`
 - `tests/workflow_contract_adapter.py`
 - `tests/workflow_current_state.py`
 - `tests/workflow_data_sharing_decision.py`
