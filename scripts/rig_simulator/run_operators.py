@@ -65,6 +65,20 @@ IS_WINDOWS = os.name == "nt"
 
 
 # ---------------------------------------------------------------- stack ---
+WORKER_ENTRYPOINT = "app.entrypoint:app"
+ISOLATED_PREFIXES = ("KALIV_", "MODELRIG_")
+
+
+def isolated_environment() -> dict[str, str]:
+    """The host environment without any Kaliv/ModelRig configuration.
+
+    Per-file persistence overrides (KALIV_AUDIT_DB, KALIV_TOOLS_STATE,
+    KALIV_SCHEDULES_DB, ...) and installation settings must not reach the
+    simulated processes; the simulator sets the few it needs explicitly.
+    """
+    return {k: v for k, v in os.environ.items() if not k.startswith(ISOLATED_PREFIXES)}
+
+
 def free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -162,15 +176,26 @@ class Stack:
 
         worker_port = free_port()
         self.worker_url = f"http://127.0.0.1:{worker_port}"
+        data_dir = self.work_dir / "kaliv-data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        # Isolation (review on #2409): nothing the host machine has configured
+        # for a real Kaliv installation may leak into the simulated worker. Every
+        # inherited KALIV_* / MODELRIG_* override is dropped and the data root is
+        # pinned inside the simulator directory, so the tool audit database,
+        # kill-switch state, schedules and media stores are all simulator-local.
         worker_env = dict(
-            os.environ,
+            isolated_environment(),
             PYTHONPATH=str(self.repo_root / "worker"),
             PYTHONDONTWRITEBYTECODE="1",
             MODELRIG_OLLAMA_URL=self.ollama_url,
             MODELRIG_DB=str(self.work_dir / "worker.db"),
+            KALIV_DATA_DIR=str(data_dir),
         )
+        # The production entrypoint (deploy/run-windows.ps1 and the Stage A
+        # stack both launch app.entrypoint:app): operator APIs, lifecycles and
+        # the hardening wrapper are part of what must start on the rig.
         self.worker = _popen(
-            [sys.executable, "-B", "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(worker_port)],
+            [sys.executable, "-B", "-m", "uvicorn", WORKER_ENTRYPOINT, "--host", "127.0.0.1", "--port", str(worker_port)],
             cwd=self.repo_root / "worker", env=worker_env, log=self.work_dir / "worker.log",
         )
 
@@ -180,7 +205,7 @@ class Stack:
             backend_port = free_port()
             self.backend_url = f"http://127.0.0.1:{backend_port}"
             backend_env = dict(
-                os.environ,
+                isolated_environment(),
                 MODELRIG_HOST="127.0.0.1",
                 MODELRIG_PORT=str(backend_port),
                 MODELRIG_OLLAMA_URL=self.ollama_url,
@@ -429,7 +454,7 @@ def main(argv: list[str] | None = None) -> int:
             "WORK_DIR": str(work_dir),
             "PYTHON": sys.executable,
         }
-        env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+        env = dict(isolated_environment(), PYTHONDONTWRITEBYTECODE="1", KALIV_DATA_DIR=str(work_dir / "kaliv-data"))
         env.update({f"RIG_SIM_{k}": v for k, v in variables.items()})
 
         for op in operators:

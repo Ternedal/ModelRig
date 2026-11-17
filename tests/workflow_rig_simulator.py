@@ -35,8 +35,10 @@ WORKFLOW = ROOT / ".github" / "workflows" / "rig-simulator.yml"
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(SIM))
+sys.path.insert(0, str(ROOT / "tests"))
 import manifest as manifest_mod  # noqa: E402
 import run_operators as runner  # noqa: E402
+from support.source_code import code_of  # noqa: E402
 
 passed = failed = 0
 
@@ -143,6 +145,30 @@ with tempfile.TemporaryDirectory() as tmpdir:
                                   expect=manifest_mod.Expect(exit_codes=(0, 1)))
     result = runner.run_operator(probe, repo_root=tmp, variables={}, env={"PYTHONDONTWRITEBYTECODE": "1", "PATH": "/usr/bin:/bin"})
     check(result["status"] == "fail" and any("traceback" in f.lower() for f in result["failures"]), "a raising script is a fail, not a pass on exit code")
+
+# the simulated worker is the production entrypoint, in an isolated environment (review on #2409)
+check(runner.WORKER_ENTRYPOINT == "app.entrypoint:app", "the simulator starts app.entrypoint:app, the entrypoint deploy/run-windows.ps1 and the Stage A stack launch")
+runner_src = code_of(SIM / "run_operators.py")
+check('"-m", "uvicorn", WORKER_ENTRYPOINT' in runner_src and "app.main:app" not in runner_src, "the worker command uses the production entrypoint, not the raw app")
+import os as _os
+_saved = {k: _os.environ.get(k) for k in ("KALIV_AUDIT_DB", "KALIV_TOOLS_STATE", "MODELRIG_DB", "KALIV_DATA_DIR", "PATH")}
+try:
+    _os.environ["KALIV_AUDIT_DB"] = "/host/real/audit.db"
+    _os.environ["KALIV_TOOLS_STATE"] = "/host/real/tools.json"
+    _os.environ["MODELRIG_DB"] = "/host/real/worker.db"
+    _os.environ["KALIV_DATA_DIR"] = "/host/real/data"
+    iso = runner.isolated_environment()
+    check(not any(k.startswith(("KALIV_", "MODELRIG_")) for k in iso), "isolated_environment drops every inherited KALIV_*/MODELRIG_* override")
+    check("PATH" in iso, "isolated_environment keeps the rest of the host environment")
+finally:
+    for k, v in _saved.items():
+        if v is None:
+            _os.environ.pop(k, None)
+        else:
+            _os.environ[k] = v
+stack_src = runner_src.split("class Stack", 1)[1]
+check("KALIV_DATA_DIR=str(data_dir)" in stack_src and "isolated_environment()" in stack_src, "the stack pins KALIV_DATA_DIR inside the simulator directory on top of the isolated environment")
+check(stack_src.count("isolated_environment()") >= 2, "both the worker and the backend start from the isolated environment")
 
 # placeholders are substituted, unknown ones refuse
 check(runner.substitute("--x ${REPO}/y", {"REPO": "/r"}) == "--x /r/y", "placeholders are substituted")
