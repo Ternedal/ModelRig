@@ -6,7 +6,7 @@
 > code, so it cannot quietly become untrue. If a fact belongs here, teach
 > the generator to read it -- do not type it in.
 
-**Version:** 2.0.20
+**Version:** 2.0.21
 
 ## Tools the model can see
 
@@ -391,6 +391,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_kaliv_recovery_soak_collector.py`
 - `tests/worker_kaliv_recovery_soak_qualification.py`
 - `tests/worker_kaliv_release_manifest_assembler.py`
+- `tests/worker_kaliv_repository_authority_assembler.py`
 - `tests/worker_kaliv_repository_authority_qualifier.py`
 - `tests/worker_kaliv_software_exact_green_qualifier.py`
 - `tests/worker_kaliv_voicerig_physical_qualifier.py`
@@ -620,6 +621,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_spec_contract.py`
 - `tests/workflow_stack_starter_scheduler_env.py`
 - `tests/workflow_stage_a_checkpoint.py`
+- `tests/workflow_stage_a_dead_pin.py`
 - `tests/workflow_stage_a_one_click.py`
 - `tests/workflow_stage_a_operator_surface.py`
 - `tests/workflow_stage_a_phone_test.py`

@@ -675,6 +675,12 @@ async def _final_answer(messages: list[dict], model: str | None,
     return msg.get("content", "")
 
 
+def _cloud_upstream(req: "ToolChatReq") -> bool:
+    """Is the answering model off the rig? A cloud URL without a key is still a cloud
+    upstream (the same rule as the history cut in _tools_chat_turn and as voice)."""
+    return bool(req.cloud_key or req.cloud_base_url)
+
+
 def _rag_cloud_allowed(req: "ToolChatReq") -> bool:
     """D4: may RAG document content be sent to a cloud model?
 
@@ -888,7 +894,9 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
         # refuse to send it onward without consent (per request allow_rag_cloud,
         # or operator opt-in KALIV_ALLOW_RAG_CLOUD). Only fires when documents
         # actually matched AND the target model is cloud.
-        if matches and req.cloud_key and not _rag_cloud_allowed(req):
+        # Either field makes the upstream a cloud one (#2275 item 25): chat_tools posts to
+        # cloud_base_url with or without a key, so a URL alone must not skip the consent.
+        if matches and _cloud_upstream(req) and not _rag_cloud_allowed(req):
             raise HTTPException(
                 status_code=403,
                 detail=("RAG matched your documents and the selected model is in "
@@ -917,7 +925,7 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
         user_msg["images"] = [req.image_base64]
     messages.append(user_msg)
 
-    origin = "cloud" if req.cloud_key else "local"
+    origin = "cloud" if _cloud_upstream(req) else "local"
     result = await _run_tool_loop(
         messages, req.model, req.cloud_base_url, req.cloud_key,
         req.conversation_id, origin, sources, [], on_phase=on_phase,
