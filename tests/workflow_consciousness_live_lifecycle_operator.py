@@ -87,6 +87,7 @@ class FakeWorker:
         self.restart_during_swap = False
         self.ignore_profile = False
         self.restart_again = False      # a second restart while continuity forms
+        self.third_writer: bytes | None = None  # another process writes during the post-swap snapshot
         self.ready = READY
         self.served: dict[str, list[bytes]] = {"status": [], "snapshot": []}
         worker = self
@@ -127,6 +128,8 @@ class FakeWorker:
             current = self.profile_file.read_bytes()
             if current == PROFILE_B and self.restart_during_swap:
                 self.ref = REF_C
+            if current == PROFILE_B and self.third_writer is not None:
+                self.profile_file.write_bytes(self.third_writer)
             model = json.loads(current)["model"] if not self.ignore_profile else "qwen3:14b"
             if self.ignore_profile and current == PROFILE_B:
                 model = "qwen3:14b"
@@ -372,6 +375,19 @@ def a_profile_changed_by_someone_else_is_left_alone(r: Run) -> None:
     check(r.profile.read_bytes() == third, "another writer's profile is not overwritten")
 
 
+def a_profile_written_during_the_swap_is_not_overwritten(r: Run) -> None:
+    # Codex P2 on #2407: the restore must not overwrite another writer's update
+    # that lands between the swap and the restore.
+    third = b'{"schema": "kaliv-consciousness-core/cognitive-profile-config/v1", "model": "third"}\n'
+    r.worker.third_writer = third
+    code = r.go()
+    check(code == 2 and "changed by someone else during the swap" in r.text(), f"refused: {r.text()}")
+    check(r.profile.read_bytes() == third, "the other writer's profile is left intact")
+    check("NOT restored" in r.text(), "and the operator says it did not restore")
+    check(r.record()["verdict"] == "STOPPED", "the run is STOPPED, not QUALIFIED")
+    check("consciousness_live_lifecycle_from_snapshots.py" not in r.scripts_called(), "nothing is assembled")
+
+
 def refusals_before_anything_runs(tmp: Path) -> None:
     profile = tmp / "p.json"
     profile.write_bytes(PROFILE_A)
@@ -477,6 +493,7 @@ def main() -> None:
     case(a_probe_for_another_commit_is_refused)
     case(a_failing_probe_stops)
     case(a_profile_changed_by_someone_else_is_left_alone)
+    case(a_profile_written_during_the_swap_is_not_overwritten)
     with tempfile.TemporaryDirectory() as tmp:
         refusals_before_anything_runs(Path(tmp))
     case(command_lines_match_the_real_scripts)

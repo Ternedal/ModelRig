@@ -455,9 +455,32 @@ class Operator:
                 raise OperatorError("the worker still reports the old CognitiveProfile; the swap was not observed")
             self.save("post_swap_snapshot", raw)
         finally:
+            conflict = False
             if not self.keep_swapped_profile:
-                replace_bytes(self.profile_file, original)
-                self.say(f"Profile file restored: {self.profile_file}")
+                conflict = not self._restore_profile(original, swap_bytes)
+        if conflict:
+            raise OperatorError(
+                "the profile file was changed by someone else during the swap; it is left as it is"
+            )
+
+    def _restore_profile(self, original: bytes, swap_bytes: bytes) -> bool:
+        """Put the original back, but only over the operator's own swap.
+
+        Codex P2 on #2407: an update written by another process between the swap
+        and the restore must not be overwritten. Returns False on such a conflict.
+        """
+        try:
+            current = self.profile_file.read_bytes()
+        except OSError:
+            current = None
+        if current == original:
+            return True
+        if current != swap_bytes:
+            self.say(f"Profile file NOT restored: someone else changed it during the swap: {self.profile_file}")
+            return False
+        replace_bytes(self.profile_file, original)
+        self.say(f"Profile file restored: {self.profile_file}")
+        return True
 
     def qualify(self) -> int:
         code = self.command(_python_command(
