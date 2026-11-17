@@ -306,6 +306,35 @@ def _require_docs_only_main_move(root: Path, anchor_sha: str, current_main_sha: 
         )
 
 
+def _resolve_main_anchor(root: Path, candidate_sha: str, current_main_sha: str) -> str:
+    """ADR-SYS-002 D3 at freeze time: the anchor is the newest commit of origin/main
+    the candidate contains.
+
+    When the candidate contains current main (the normal case) the anchor IS
+    current main, exactly as before. When main has advanced past the candidate,
+    the advance must be documentation-only from that anchor — the same three
+    conditions the reader applies — otherwise the freeze is refused with the
+    offending path named. A main whose merge-base with the candidate is not in
+    main's first-parent history is still a main the candidate does not contain.
+    """
+    ancestor_code, _ = _run(root, "git", "merge-base", "--is-ancestor", current_main_sha, candidate_sha)
+    if ancestor_code == 0:
+        return current_main_sha
+    base_code, base_out = _run(root, "git", "merge-base", current_main_sha, candidate_sha)
+    anchor = base_out.strip()
+    if base_code != 0 or _SHA40.fullmatch(anchor) is None:
+        raise CandidateFreezeError(
+            f"candidate {candidate_sha} does not contain current origin/main {current_main_sha} and no common ancestor was found"
+        )
+    try:
+        _require_docs_only_main_move(root, anchor, current_main_sha)
+    except CandidateFreezeError as exc:
+        raise CandidateFreezeError(
+            f"candidate {candidate_sha} does not contain current origin/main {current_main_sha}: {exc}"
+        ) from exc
+    return anchor
+
+
 def create_receipt(
     expected_sha: str,
     *,
@@ -338,7 +367,8 @@ def create_receipt(
     if errors:
         raise CandidateFreezeError("; ".join(errors))
 
-    main_sha = _fetch_current_main(root)
+    current_main_sha = _fetch_current_main(root)
+    main_sha = _resolve_main_anchor(root, expected_sha, current_main_sha)
     _require_main_ancestor(root, expected_sha, main_sha)
 
     github_token = (token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or "").strip()

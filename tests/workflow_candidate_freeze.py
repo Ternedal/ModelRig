@@ -429,6 +429,36 @@ try:
 except freeze.CandidateFreezeError as exc:
     check("not in its history" in str(exc), "a rewritten origin/main is rejected as a new main")
 
+# ADR-SYS-002 D3 at freeze time (Codex P2 on #2412): a candidate may be frozen while
+# origin/main is already ahead by docs-only commits; the anchor is then the merge-base.
+ahead_repo, ahead_main_sha, ahead_candidate_sha = fixture()
+git(ahead_repo, "switch", "-q", "-c", "main-ahead", ahead_main_sha)
+(ahead_repo / "HANDOFF.md").write_text("# handoff\nahead\n", encoding="utf-8")
+git(ahead_repo, "add", "-A")
+git(ahead_repo, "commit", "-q", "-m", "docs ahead of candidate")
+git(ahead_repo, "push", "-q", "origin", "main-ahead:main")
+git(ahead_repo, "switch", "-q", "candidate")
+try:
+    ahead_receipt = freeze.create_receipt(ahead_candidate_sha, root=ahead_repo, token="test-token", api=free_tag_api(), now=now)
+    check(ahead_receipt["main_anchor"]["git_sha"] == ahead_main_sha, "freeze while main is ahead docs-only anchors at the merge-base, not at current main")
+    freeze.load_receipt(ahead_repo, now=now)
+    check(True, "…and the reader accepts that receipt")
+except freeze.CandidateFreezeError as exc:
+    check(False, f"a docs-only-ahead main must still allow freezing: {exc}")
+
+code_ahead_repo, code_main_sha, code_candidate_sha = fixture()
+git(code_ahead_repo, "switch", "-q", "-c", "main-code", code_main_sha)
+(code_ahead_repo / "worker" / "app" / "build_identity.py").write_text("def code_fingerprint():\n    return 'd' * 64\n", encoding="utf-8")
+git(code_ahead_repo, "add", "-A")
+git(code_ahead_repo, "commit", "-q", "-m", "code ahead of candidate")
+git(code_ahead_repo, "push", "-q", "origin", "main-code:main")
+git(code_ahead_repo, "switch", "-q", "candidate")
+try:
+    freeze.create_receipt(code_candidate_sha, root=code_ahead_repo, token="test-token", api=free_tag_api(), now=now)
+    check(False, "a code-ahead main must refuse the freeze")
+except freeze.CandidateFreezeError as exc:
+    check("does not contain current origin/main" in str(exc) and "worker/app/build_identity.py" in str(exc), "a code-ahead main refuses the freeze and names the path")
+
 # a receipt without the fingerprint (pre-ADR) is not accepted silently
 legacy_repo, legacy_main_sha, legacy_candidate_sha = fixture()
 freeze.create_receipt(legacy_candidate_sha, root=legacy_repo, token="test-token", api=free_tag_api(), now=now)

@@ -126,6 +126,18 @@ def _require_token() -> None:
         raise StageAOperatorError("GITHUB_TOKEN or GH_TOKEN is required for exact-head checks")
 
 
+def _load_candidate_freeze_check(root: Path):
+    import importlib.util
+
+    source = root / "scripts" / "candidate_freeze_check.py"
+    spec = importlib.util.spec_from_file_location("candidate_freeze_check", source)
+    if spec is None or spec.loader is None:
+        raise StageAOperatorError("candidate_freeze_check.py cannot be loaded")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _candidate_identity(expected_sha: str, *, root: Path = ROOT) -> dict[str, Any]:
     if SHA40.fullmatch(expected_sha) is None:
         raise StageAOperatorError("--expected-sha must be a lowercase 40-hex Git SHA")
@@ -165,9 +177,17 @@ def _candidate_identity(expected_sha: str, *, root: Path = ROOT) -> dict[str, An
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise StageAOperatorError("main ancestry check could not complete") from exc
     if ancestor.returncode != 0:
-        raise StageAOperatorError(
-            f"candidate {expected_sha} does not contain current origin/main {main_sha}"
-        )
+        # ADR-SYS-002 D3: main may have advanced past the candidate by
+        # documentation-only commits; the freeze reader and creator apply the
+        # same rule (candidate_freeze_check._resolve_main_anchor), so the
+        # operator asks that module instead of keeping a second copy.
+        try:
+            freeze_mod = _load_candidate_freeze_check(root)
+            freeze_mod._resolve_main_anchor(root, expected_sha, main_sha)
+        except Exception as exc:  # fail closed on any disagreement
+            raise StageAOperatorError(
+                f"candidate {expected_sha} does not contain current origin/main {main_sha}: {exc}"
+            ) from exc
 
     identity = campaign_contract.candidate_identity(root)
     expected = {
