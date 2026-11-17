@@ -42,7 +42,7 @@ class GoodPipeline:
     interrupt = property(lambda self: self._interrupt)
 
     def __call__(self, prompt=None, num_inference_steps=50, width=None, height=None, generator=None,
-                 callback_on_step_end=None):
+                 callback_on_step_end=None, guidance_scale=5.0, negative_prompt=None):
         self._interrupt = False
         for _ in range(num_inference_steps):
             if self.interrupt:
@@ -62,7 +62,17 @@ class NoCallback(GoodPipeline):
 
 class NeverResets(GoodPipeline):
     def __call__(self, prompt=None, num_inference_steps=50, width=None, height=None, generator=None,
+                 callback_on_step_end=None, guidance_scale=5.0, negative_prompt=None):
+        if self.interrupt:
+            return None
+
+
+class NoRenderDefaults(GoodPipeline):
+    """Takes the request but not the profile's render defaults (guidance_scale, negative_prompt)."""
+
+    def __call__(self, prompt=None, num_inference_steps=50, width=None, height=None, generator=None,
                  callback_on_step_end=None):
+        self._interrupt = False
         if self.interrupt:
             return None
 
@@ -122,8 +132,10 @@ class EnvironmentTests(unittest.TestCase):
 
     def test_a_pipeline_without_the_callback_or_the_interrupt_reset_fails(self):
         for broken, problem in ((NoCallback, "__call__ lacks callback_on_step_end"),
-                                (NeverResets, "__call__ does not reset the interrupt flag")):
-            with self.subTest(broken=broken.__name__):
+                                (NeverResets, "__call__ does not reset the interrupt flag"),
+                                (NoRenderDefaults, "__call__ lacks guidance_scale"),
+                                (NoRenderDefaults, "__call__ lacks negative_prompt")):
+            with self.subTest(broken=broken.__name__, problem=problem):
                 diffusers = module("diffusers", PINNED_VERSIONS["diffusers"],
                                    **{name: GoodPipeline for name in DIFFUSERS_PIPELINES})
                 setattr(diffusers, "FluxPipeline", broken)

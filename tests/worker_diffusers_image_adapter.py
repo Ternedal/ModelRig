@@ -625,6 +625,32 @@ with patch("app.diffusers_image_adapter.inspect_cuda_budget"), patch.dict(sys.mo
                          ("a lighthouse", 12, 832, 1216))
         self.assertIn(("seed", "cpu", 42), self.calls)
         self.assertIn(("empty_cache",), self.calls)
+        self.assertNotIn("guidance_scale", kwargs, "no profile default: the pipeline's own default stands")
+        self.assertNotIn("negative_prompt", kwargs)
+
+    def test_profile_render_defaults_reach_the_pipeline_only_when_set(self):
+        cases = [
+            ({"guidance_scale": 6.5, "negative_prompt": "blurry, text, watermark"},
+             {"guidance_scale": 6.5, "negative_prompt": "blurry, text, watermark"}),
+            ({"guidance_scale": 4}, {"guidance_scale": 4.0}),
+            ({"negative_prompt": "lowres"}, {"negative_prompt": "lowres"}),
+        ]
+        for options, expected in cases:
+            calls = []
+            with self.subTest(options=options), patch("app.diffusers_image_adapter.inspect_cuda_budget"), \
+                    patch.dict(sys.modules, fake_modules(calls)):
+                adapter = self.adapter(profile=parse_profile(image_profile(backend_options=options)))
+                adapter.load()
+                adapter.render(self.req(steps=12))
+                adapter.close()
+                kwargs = [c for c in calls if c[0] == "call"][0][1]
+                for key in ("guidance_scale", "negative_prompt"):
+                    if key in expected:
+                        self.assertEqual(kwargs[key], expected[key])
+                    else:
+                        self.assertNotIn(key, kwargs)
+                self.assertEqual((kwargs["prompt"], kwargs["num_inference_steps"]), ("a lighthouse", 12),
+                                 "the request itself is untouched by the defaults")
 
     # --- G2 cooperative cancellation (#2296 6510332634) ------------------------------------------
     def test_cancel_mid_render_interrupts_the_pipeline_and_discards_the_image(self):

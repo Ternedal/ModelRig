@@ -116,9 +116,32 @@ class ProfileParsingTests(unittest.TestCase):
         for options in (extra, missing, {}, None, []):
             with self.subTest(options=options), self.assertRaises(GenerationError):
                 parse_profile(video_profile(backend_options=options))
-        for options in (good, {"fps": 16}, None):
+        for options in (good, {"fps": 16}, None, []):
             with self.subTest(diffusers_options=options), self.assertRaises(GenerationError):
                 parse_profile(image_profile(backend_options=options))
+
+    # --- diffusers render defaults (first rig run, #2275) ---------------------------------------
+    def test_diffusers_render_defaults_are_optional_and_parsed(self):
+        both = parse_profile(image_profile(backend_options={"guidance_scale": 6.5, "negative_prompt": "blurry, text"}))
+        self.assertEqual((both.backend_options.guidance_scale, both.backend_options.negative_prompt), (6.5, "blurry, text"))
+        only_scale = parse_profile(image_profile(backend_options={"guidance_scale": 5}))
+        self.assertEqual((only_scale.backend_options.guidance_scale, only_scale.backend_options.negative_prompt), (5.0, None))
+        only_negative = parse_profile(image_profile(backend_options={"negative_prompt": "x"}))
+        self.assertEqual((only_negative.backend_options.guidance_scale, only_negative.backend_options.negative_prompt), (None, "x"))
+        self.assertIsNone(parse_profile(image_profile(backend_options={})).backend_options, "{} is unchanged: None")
+        bad = [
+            {"guidance_scale": 0.99}, {"guidance_scale": 30.01}, {"guidance_scale": True}, {"guidance_scale": "7"},
+            {"guidance_scale": float("nan")}, {"guidance_scale": float("inf")}, {"guidance_scale": None},
+            {"negative_prompt": ""}, {"negative_prompt": "x" * 1001}, {"negative_prompt": "two\nlines"},
+            {"negative_prompt": "nul\x00"}, {"negative_prompt": 3}, {"negative_prompt": None}, {"negative_prompt": ["a"]},
+            {"guidance_scale": 6.0, "scheduler": "euler"}, {"prompt": "x"}, {"template_name": "a.json"},
+        ]
+        for options in bad:
+            with self.subTest(options=options), self.assertRaises(GenerationError):
+                parse_profile(image_profile(backend_options=options))
+        comfy = video_profile()["backend_options"]
+        with self.subTest("comfyui does not take the diffusers keys"), self.assertRaises(GenerationError):
+            parse_profile(video_profile(backend_options=dict(comfy, guidance_scale=6.0)))
 
     # --- G3 pins (#2296 6634996133) --------------------------------------------------------------
     def _options(self, **extra):

@@ -114,3 +114,39 @@ PR'en. Workflowet nægter at køre mod `main`.
   klient-isolation gør alligevel telefonen blind for riggen; brug da
   `adb reverse tcp:8080 tcp:8080` og `http://127.0.0.1:8080` i appen.
 - De to konsolvinduer ER stakken. Luk dem ikke; brug `-Stop`.
+
+## Medie-executoren (billede/video) i dev-kanalen
+
+Scriptet starter **ikke** `modelrig-supervisor`, og dermed heller ikke
+medie-executoren. Workeren og Go-serveren læser medie-nøglerne fra
+`modelrig.env` (`KALIV_MEDIA_JOBS_API=1` m.fl., se `docs/MEDIA_EXECUTOR.md`),
+men selve executoren startes i hånden, i et eget vindue, **som samme konto og
+samme elevation** som det vindue du vil stoppe den fra igen:
+
+    # medie-nøglerne fra modelrig.env + de tre executoren selv kræver
+    $env:KALIV_MEDIA_EXECUTOR = "1"; $env:HF_HUB_OFFLINE = "1"; $env:TRANSFORMERS_OFFLINE = "1"
+    Push-Location <checkout>\worker
+    & C:\Kaliv\media-venv\Scripts\python.exe -u -m app.media_executor_main --device cuda:1
+    Pop-Location
+
+Lært 17/11/2026 på riggen (#2275, 6958719351):
+
+- **Exit 73** = en anden executor holder allerede GPU'ens lås. En executor
+  startet fra et elevated vindue er usynlig (ingen `Path`/`CommandLine`) og
+  kan ikke stoppes fra et almindeligt vindue; stop den fra et vindue med samme
+  elevation.
+- **Exit 75 `media_volume_marker_missing`** = markørfilen på mediavolumen
+  mangler (`docs/MEDIA_VOLUME.md`).
+- **`gpu_unavailable` på hvert job** = profilens VRAM-budget kan ikke gå op på
+  kortet. På et 12 GB-kort under Windows rapporterer CUDA ~11 GiB frit;
+  templaten står derfor på `min_usable_gib: 8`, `reserve_gib: 1.0`
+  (`docs/MEDIA_IMAGE_RIG_QUALIFICATION.md` §3).
+- Telefonen skal parres mod dev-appliancen (eget parringslager):
+  `Invoke-RestMethod -Method Post http://127.0.0.1:8080/api/v1/pair/start`
+  på riggen giver koden.
+- Dev-appliancen kræver en valgt, aktiveret Person Revision før den kommer op.
+  `scripts\person_create.py` taler til en kørende worker og kan derfor ikke
+  bruges i den situation; opret personen direkte via `app.person_registry`
+  (`PersonRegistry(Path(KALIV_PERSONS_STORE))`: `create_person` → tre
+  komponent-kandidater → `propose_person_revision` med fuldt review →
+  `activate` → `select`).

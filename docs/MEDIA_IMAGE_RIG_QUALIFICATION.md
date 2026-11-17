@@ -2,7 +2,7 @@
 
 This is #2275 backlog item 4, the image counterpart of `docs/MEDIA_VIDEO_RIG_QUALIFICATION.md`. It covers what the rig needs before the diffusers image path in `media_executor_main` (`docs/MEDIA_EXECUTOR.md`) may serve a job.
 
-**Nothing here has been run on the rig.** Every statement is tagged with what it rests on:
+**Status (17 Nov 2026):** steps 1 to 6 and a first render were run on the rig by Anders, in the development channel (not evidence; see #2275, 6958719351). Step 7's measurements are still pending. Every statement is tagged with what it rests on:
 
 - **[source]**: a cited upstream page;
 - **[repo]**: this repository's code;
@@ -55,9 +55,12 @@ No profile ships enabled, and nothing in this document changes a default.
 
 `deploy/media-profiles/sdxl-base-1.0.json.example` is a complete `kaliv-media-profile/v1`:
 - `qualification: "candidate"`, `devices: ["cuda:1"]`, `cpu_offload: false`;
-- `min_usable_gib: 10`, `reserve_gib: 1.5`;
+- `min_usable_gib: 8`, `reserve_gib: 1.0`;
 - the five SDXL sizes around 1 MP;
-- at most 40 steps.
+- at most 40 steps;
+- render defaults `guidance_scale: 6.0` and a negative prompt against the usual SDXL base failures (anatomy, text, watermarks). Both are `backend_options` the adapter passes to the pipeline for every job of the profile; leave them out to get the pipeline's own defaults.
+
+**Why 8 / 1.0 and not 10 / 1.5 [measured, rig, 17 Nov 2026]:** on an idle RTX 3060 12 GB under Windows, `torch.cuda.mem_get_info()` reports **10.99 GiB free of 12.00**. The admission rule is `free - reserve_gib >= min_usable_gib`, so 10 / 1.5 needs 11.5 GiB free and can never pass on this card: two jobs were deferred and failed with `gpu_unavailable` after `VRAM_MAX_WAIT_S`. With 8 / 1.0 (needs 9 GiB free) the same jobs rendered. SDXL base in bf16 at 1024² stays well inside that.
 
 **It cannot be enabled by accident:**
 - a profile directory loads only `*.json`;
@@ -131,10 +134,22 @@ No profile ships enabled, and nothing in this document changes a default.
 
 8. **Promote.** Only after 7 may the profile become `rig-qualified`.
 
-**Not possible yet.** Steps 7 and 8 need the submit/status/cancel route and the gallery API. These are owned by ChatGPT (#2365 and the route); see the audit on #2275, 6764185991. Steps 1 to 6 can be done now.
+**Route status.** The submit/status/cancel routes (`POST /api/v1/media/jobs`, `GET …/{id}`, `POST …/{id}/cancel`) and the gallery API are on main and were used from the Android app in the first rig run; the earlier note that steps 7 and 8 were blocked on them is obsolete.
+
+**Development channel.** `START_DEV_APPLIANCE.cmd` starts backend and worker, **not** the executor (no supervisor runs in that channel). Start it by hand, as the same account and the same elevation you administer it from, from `worker\` with the media venv:
+
+```powershell
+# env: the media keys from modelrig.env, plus the three the executor needs itself
+$env:KALIV_MEDIA_EXECUTOR = "1"; $env:HF_HUB_OFFLINE = "1"; $env:TRANSFORMERS_OFFLINE = "1"
+Push-Location <checkout>\worker; & C:\Kaliv\media-venv\Scripts\python.exe -u -m app.media_executor_main --device cuda:1; Pop-Location
+```
+
+Exit 73 means another executor already holds that GPU's lock; one started from an elevated window is invisible to a non-elevated one, so stop it from a window of the same elevation. Exit 75 with `media_volume_marker_missing` means the volume marker (`docs/MEDIA_VOLUME.md`) was not written.
+
+**Prompt language [observed, rig]:** SDXL is trained on English. Danish prompts gave visibly worse and stranger results than the same subject in English. Until the worker translates locally (proposal on #2275), write prompts in English.
 
 ## 5. What this does not do
 
 - It downloads nothing, enables nothing and changes no default, profile, environment file or supervisor setting.
-- It claims no measured time or VRAM figure. Every such number above is tagged [estimate] or [measure].
+- It claims no measured render time or VRAM peak yet. The one measured figure is the free VRAM in §3; everything else is tagged [estimate] or [measure].
 - It does not touch cloud or egress settings.
