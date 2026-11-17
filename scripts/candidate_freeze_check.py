@@ -42,6 +42,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import release_fingerprint  # noqa: E402  (ADR-SYS-002 D1/D3/D7)
+
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "Ternedal/ModelRig"
 SCHEMA = "kaliv-pre-release-candidate-freeze/v1"
@@ -264,6 +267,74 @@ def _require_main_ancestor(root: Path, candidate_sha: str, main_sha: str) -> Non
         )
 
 
+def _release_fingerprint(root: Path, sha: str) -> str:
+    try:
+        return release_fingerprint.fingerprint(root, sha)
+    except release_fingerprint.FingerprintError as exc:
+        raise CandidateFreezeError(f"release fingerprint unavailable: {exc}") from exc
+
+
+def _require_docs_only_main_move(root: Path, anchor_sha: str, current_main_sha: str) -> None:
+    """ADR-SYS-002 D3: origin/main may advance past the frozen anchor only by
+    documentation-class commits.
+
+    Three things must hold, each fail-closed: the anchor is in current main's
+    history (a rewritten main is a new main); every path changed between them
+    is in the documentation class; and the release fingerprint is unchanged
+    (belt and braces: the same statement measured two ways).
+    """
+    ancestor_code, _ = _run(root, "git", "merge-base", "--is-ancestor", anchor_sha, current_main_sha)
+    if ancestor_code != 0:
+        raise CandidateFreezeError(
+            f"origin/main moved from frozen anchor {anchor_sha} to {current_main_sha} and the "
+            "anchor is not in its history; rerun candidate freeze before collecting or accepting evidence"
+        )
+    try:
+        only_docs, offending = release_fingerprint.docs_only(root, anchor_sha, current_main_sha)
+    except release_fingerprint.FingerprintError as exc:
+        raise CandidateFreezeError(f"origin/main move could not be classified: {exc}") from exc
+    if not only_docs:
+        shown = ", ".join(offending[:5]) + (" ..." if len(offending) > 5 else "")
+        raise CandidateFreezeError(
+            f"origin/main moved from frozen anchor {anchor_sha} to {current_main_sha} with "
+            f"non-documentation changes ({shown}); rerun candidate freeze before collecting or accepting evidence"
+        )
+    if _release_fingerprint(root, anchor_sha) != _release_fingerprint(root, current_main_sha):
+        raise CandidateFreezeError(
+            f"origin/main moved from frozen anchor {anchor_sha} to {current_main_sha} and the release "
+            "fingerprint changed; rerun candidate freeze before collecting or accepting evidence"
+        )
+
+
+def _resolve_main_anchor(root: Path, candidate_sha: str, current_main_sha: str) -> str:
+    """ADR-SYS-002 D3 at freeze time: the anchor is the newest commit of origin/main
+    the candidate contains.
+
+    When the candidate contains current main (the normal case) the anchor IS
+    current main, exactly as before. When main has advanced past the candidate,
+    the advance must be documentation-only from that anchor — the same three
+    conditions the reader applies — otherwise the freeze is refused with the
+    offending path named. A main whose merge-base with the candidate is not in
+    main's first-parent history is still a main the candidate does not contain.
+    """
+    ancestor_code, _ = _run(root, "git", "merge-base", "--is-ancestor", current_main_sha, candidate_sha)
+    if ancestor_code == 0:
+        return current_main_sha
+    base_code, base_out = _run(root, "git", "merge-base", current_main_sha, candidate_sha)
+    anchor = base_out.strip()
+    if base_code != 0 or _SHA40.fullmatch(anchor) is None:
+        raise CandidateFreezeError(
+            f"candidate {candidate_sha} does not contain current origin/main {current_main_sha} and no common ancestor was found"
+        )
+    try:
+        _require_docs_only_main_move(root, anchor, current_main_sha)
+    except CandidateFreezeError as exc:
+        raise CandidateFreezeError(
+            f"candidate {candidate_sha} does not contain current origin/main {current_main_sha}: {exc}"
+        ) from exc
+    return anchor
+
+
 def create_receipt(
     expected_sha: str,
     *,
@@ -296,7 +367,8 @@ def create_receipt(
     if errors:
         raise CandidateFreezeError("; ".join(errors))
 
-    main_sha = _fetch_current_main(root)
+    current_main_sha = _fetch_current_main(root)
+    main_sha = _resolve_main_anchor(root, expected_sha, current_main_sha)
     _require_main_ancestor(root, expected_sha, main_sha)
 
     github_token = (token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or "").strip()
@@ -324,6 +396,8 @@ def create_receipt(
             "promoted -- bump VERSION before collecting physical evidence"
         )
     tree_paths, tree_sha256 = _tracked_tree(root)
+    candidate = dict(candidate)
+    candidate["release_fingerprint"] = _release_fingerprint(root, expected_sha)
     generated = now or datetime.now(timezone.utc)
     receipt = {
         "schema": SCHEMA,
@@ -332,6 +406,7 @@ def create_receipt(
         "main_anchor": {
             "git_sha": main_sha,
             "ancestor_of_candidate": True,
+            "release_fingerprint": _release_fingerprint(root, main_sha),
         },
         "software_checks": checks,
         "tree": {
@@ -430,14 +505,23 @@ def load_receipt(
     main_sha = main_anchor.get("git_sha")
     if not isinstance(main_sha, str) or _SHA40.fullmatch(main_sha) is None:
         raise CandidateFreezeError("candidate freeze main SHA is invalid")
+    anchor_fingerprint = main_anchor.get("release_fingerprint")
+    if not isinstance(anchor_fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", anchor_fingerprint):
+        raise CandidateFreezeError("candidate freeze main anchor release fingerprint is missing (re-freeze under ADR-SYS-002)")
+    if anchor_fingerprint != _release_fingerprint(root, main_sha):
+        raise CandidateFreezeError("candidate freeze main anchor release fingerprint no longer matches the anchor")
+
+    recorded_fingerprint = recorded.get("release_fingerprint")
+    if not isinstance(recorded_fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", recorded_fingerprint):
+        raise CandidateFreezeError("candidate freeze release fingerprint is missing (re-freeze under ADR-SYS-002)")
+    if recorded_fingerprint != _release_fingerprint(root, recorded["git_sha"]):
+        raise CandidateFreezeError("candidate freeze release fingerprint no longer matches the candidate")
 
     current_main_sha = _fetch_current_main(root)
     if current_main_sha != main_sha:
-        raise CandidateFreezeError(
-            f"origin/main moved from frozen anchor {main_sha} to {current_main_sha}; "
-            "rerun candidate freeze before collecting or accepting evidence"
-        )
-    _require_main_ancestor(root, recorded["git_sha"], current_main_sha)
+        # ADR-SYS-002 D3: a documentation-only advance of main keeps the freeze.
+        _require_docs_only_main_move(root, main_sha, current_main_sha)
+    _require_main_ancestor(root, recorded["git_sha"], main_sha)
 
     tree = value.get("tree") if isinstance(value.get("tree"), dict) else {}
     paths = tree.get("paths")

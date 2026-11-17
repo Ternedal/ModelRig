@@ -16,9 +16,10 @@ D4. ``equivalent()`` accepts an ancestor with the same fingerprint and a
    different tree, and rejects a different fingerprint, a non-ancestor and a
    descendant.
 
-Contract tests 2, 3, 5 and 7 (freeze receipt, system gate and qualifiers,
-tag placement) belong to the slices that change those scripts; they are not
-here yet, and this file says so rather than pretending.
+Contract test 2 (freeze receipt) lives in tests/workflow_candidate_freeze.py,
+test 3 (system gate) in tests/support/kaliv_system_release_gate_contract.py,
+test 5 in the existing tests/workflow_freeze_check.py ('behind' acceptance),
+and test 7 is the mutation sweep recorded in the PRs.
 
 Run: python3 tests/workflow_release_fingerprint.py
 """
