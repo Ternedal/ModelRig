@@ -441,6 +441,33 @@ def data_snapshot() -> dict[str, Any]:
 # --- trials ----------------------------------------------------------------
 
 
+def _require_boot_after_pause(state: dict[str, Any], now: datetime) -> None:
+    """The machine must have booted after the reboot pause began.
+
+    On 16/11 Enter was pressed without a restart, and the trial still said
+    "Reboot bevist": seconds_since_boot was logged, never checked. Now a boot
+    older than the pause, or a boot age that cannot be read, is refused before
+    anything is recorded, and the pause stays set for the real restart.
+    """
+    pending_raw = str(state.get("reboot_pending_since") or "")
+    try:
+        pending = datetime.fromisoformat(pending_raw)
+    except ValueError:
+        raise StageBError("Reboot-pausepunktets tidsstempel mangler; kør wizarden igen.") from None
+    since_pause = (now - pending).total_seconds()
+    boot_age = seconds_since_boot()
+    if boot_age is None:
+        raise StageBError(
+            "Maskinens opstartstidspunkt kunne ikke læses, så genstarten kan ikke bevises."
+        )
+    if boot_age >= since_pause:
+        raise StageBError(
+            f"Maskinen er ikke genstartet siden pausepunktet: den har kørt i {boot_age:.0f} s, "
+            f"pausepunktet begyndte for {since_pause:.0f} s siden. Genstart (Start -> Genstart), "
+            "log ind, og kør wizarden igen."
+        )
+
+
 def trial_reboot(observations: dict[str, Any], state: dict[str, Any]) -> None:
     if state.get("reboot_done"):
         ok("Reboot-beviset er allerede indsamlet.")
@@ -452,14 +479,18 @@ def trial_reboot(observations: dict[str, Any], state: dict[str, Any]) -> None:
     print("  Wizard'en måler, hvilke versioner der kom op, og hvor længe siden")
     print("  maskinen bootede — ikke hvor lang tid opstarten tog.")
     log = EVIDENCE / "reboot.log"
-    state["reboot_pending_since"] = datetime.now(timezone.utc).isoformat()
-    save_state(state)
+    # Set once, at the first pause: the run after the restart must not move
+    # it, or a real reboot would look like none (rig night 16/11 on 2.0.20).
+    if not state.get("reboot_pending_since"):
+        state["reboot_pending_since"] = datetime.now(timezone.utc).isoformat()
+        save_state(state)
     input("\n  Tryk Enter LIGE EFTER du er logget ind igen efter genstarten: ")
 
     note("Venter på at supervisoren bringer backend + worker op...")
     ready_ms = wait_ready()
     versions = live_versions()
     observed_at = datetime.now(timezone.utc).isoformat()
+    _require_boot_after_pause(state, datetime.fromisoformat(observed_at))
     # ready_ms is the wait from THIS moment until both services answer -- so it
     # is ~0 whenever the operator presses Enter after the rig is already up,
     # which is the normal case. Runs have recorded 0 ms and 31 ms, and both were
