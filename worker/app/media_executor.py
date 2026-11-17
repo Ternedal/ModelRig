@@ -276,19 +276,25 @@ class MediaExecutor:
         if not isinstance(params, dict) or set(params) - set(_REQUEST_PARAMS) - {"task"}:
             raise GenerationError("unknown job parameters")
         task = params.get("task", sorted(profile.tasks)[0])
-        prompt = job["prompt"]
-        if self.prompt_rewriter is not None:
-            started = self.clock()
-            try:
-                prompt, outcome = self.prompt_rewriter(prompt, max_chars=profile.limits.max_prompt_chars)
-            except Exception as exc:  # the rewriter promised not to raise; if it does, render the original
-                prompt, outcome = job["prompt"], f"fallback:{_event_code(exc)}"
-            if not isinstance(prompt, str) or not prompt:
-                prompt, outcome = job["prompt"], "fallback:bad_rewrite"
-            self.events.append(f"translate:{job['id']}:{outcome}:{self.clock() - started:.1f}")
         return validate_request(profile, GenerationRequest(
-            profile_id=profile.profile_id, task=task, prompt=prompt,
+            profile_id=profile.profile_id, task=task, prompt=job["prompt"],
             **{key: params[key] for key in _REQUEST_PARAMS if key in params}))
+
+    def _rewritten(self, job: dict, profile: ModelProfile) -> dict:
+        """The job with its prompt passed through the prompt rewriter (local translation). Without a
+        rewriter the job is returned as is. Fail-open: any failure keeps the original prompt, and only
+        an outcome code and a duration are recorded, never prompt text."""
+        if self.prompt_rewriter is None:
+            return job
+        started = self.clock()
+        try:
+            prompt, outcome = self.prompt_rewriter(job["prompt"], max_chars=profile.limits.max_prompt_chars)
+        except Exception as exc:  # the rewriter promised not to raise; if it does, render the original
+            prompt, outcome = job["prompt"], f"fallback:{_event_code(exc)}"
+        if not isinstance(prompt, str) or not prompt:
+            prompt, outcome = job["prompt"], "fallback:bad_rewrite"
+        self.events.append(f"translate:{job['id']}:{outcome}:{self.clock() - started:.1f}")
+        return {**job, "prompt": prompt}
 
     def _cancel_check(self, job_id: str) -> Callable[[], bool]:
         state = {"next": float("-inf"), "hit": False}
@@ -344,7 +350,7 @@ class MediaExecutor:
     def _run_job(self, job: dict) -> str:
         job_id, profile = job["id"], self.profiles[job["profile_id"]]
         try:
-            request = self._request(job, profile)
+            request = self._request(self._rewritten(job, profile), profile)
         except (GenerationError, ValueError, TypeError, KeyError):
             self.store.fail(job_id, self.instance, REJECTED)
             return "rejected"

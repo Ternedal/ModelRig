@@ -27,6 +27,8 @@ import urllib.parse
 import urllib.request
 from typing import Callable
 
+from .netguard import is_loopback
+
 MODEL_ENV = "KALIV_MEDIA_TRANSLATE_MODEL"      # set -> translation on; unset -> prompts pass through
 URL_ENV = "KALIV_MEDIA_TRANSLATE_URL"          # default http://127.0.0.1:11434; loopback only
 TIMEOUT_ENV = "KALIV_MEDIA_TRANSLATE_TIMEOUT_S"  # default 30
@@ -39,7 +41,6 @@ MAX_OUTPUT_TOKENS = 400
 GROWTH_FACTOR, GROWTH_SLACK = 2.5, 40
 
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}")
-_LOOPBACK_HOSTS = frozenset({"localhost", "::1"})
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 _SPACE = re.compile(r"\s+")
 _QUOTE_PAIRS = frozenset({('"', '"'), ("'", "'"), ("`", "`"), ("“", "”"), ("‘", "’"), ("«", "»")})
@@ -58,14 +59,15 @@ class PromptTranslationConfigError(ValueError):
     pass
 
 
-def _is_loopback(url: str) -> bool:
+def _is_local_ollama_url(url: str) -> bool:
+    """Plain http, nothing but a host and port, and the host is loopback by the worker's ONE
+    loopback predicate (app/netguard.py, kept single on purpose by tests/workflow_worker_entrypoints.py)."""
     parts = urllib.parse.urlsplit(url)
     if parts.scheme != "http" or parts.username or parts.password or parts.path not in ("", "/"):
         return False
     if parts.query or parts.fragment:
         return False
-    host = (parts.hostname or "").lower()
-    return host in _LOOPBACK_HOSTS or host.startswith("127.")
+    return is_loopback(parts.hostname or "")
 
 
 def translator_from_env(env, *, opener: Opener | None = None) -> "PromptTranslator | None":
@@ -85,7 +87,7 @@ def translator_from_env(env, *, opener: Opener | None = None) -> "PromptTranslat
 class PromptTranslator:
     def __init__(self, *, url: str = DEFAULT_URL, model: str, timeout_s: float = DEFAULT_TIMEOUT_S,
                  opener: Opener = urllib.request.urlopen):
-        if not isinstance(url, str) or not _is_loopback(url):
+        if not isinstance(url, str) or not _is_local_ollama_url(url):
             raise PromptTranslationConfigError(f"{URL_ENV} must be a plain http URL on loopback (media never leaves the rig)")
         if not isinstance(model, str) or not _MODEL.fullmatch(model):
             raise PromptTranslationConfigError(f"{MODEL_ENV} is malformed")
