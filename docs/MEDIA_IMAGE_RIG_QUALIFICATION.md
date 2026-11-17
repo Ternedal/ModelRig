@@ -2,7 +2,7 @@
 
 This is #2275 backlog item 4, the image counterpart of `docs/MEDIA_VIDEO_RIG_QUALIFICATION.md`. It covers what the rig needs before the diffusers image path in `media_executor_main` (`docs/MEDIA_EXECUTOR.md`) may serve a job.
 
-**Status (17 Nov 2026):** steps 1 to 6 and a first render were run on the rig by Anders, in the development channel (not evidence; see #2275, 6958719351). Step 7's measurements are still pending. Every statement is tagged with what it rests on:
+**Status (17 Nov 2026):** steps 1 to 6 and step 7's first measurements were run on the rig by Anders, in the development channel (not evidence; see #2275, 6958719351 and the follow-ups). Every statement is tagged with what it rests on:
 
 - **[source]**: a cited upstream page;
 - **[repo]**: this repository's code;
@@ -132,6 +132,19 @@ No profile ships enabled, and nothing in this document changes a default.
    - the VRAM peak (`nvidia-smi --query-gpu=index,memory.used --format=csv -l 1`);
    - that a cancel during the render ends it and publishes nothing.
 
+   **First measurements [measured, rig, 17 Nov 2026, dev channel]** — cuda:1 (RTX 3060 12 GB), 1024×1024, 30 steps, bf16, no negative prompt (2.0.20 code):
+
+   | | SDXL base 1.0 | RealVisXL V4.0 (same pipeline, candidate profile) |
+   |---|---|---|
+   | denoising | 19.9 s = 1.51 it/s | 19.8 s = 1.52 it/s |
+   | job, cold (load in the same claim) | 30.7 s | 30.1 s |
+   | job, warm (model resident) | — | 21.4 s |
+   | VRAM resident after load | — | 7 743 MiB |
+   | VRAM during denoising | — | 9 715 MiB |
+   | **VRAM peak (VAE decode)** | — | **10 967 MiB** |
+
+   The VAE-decode peak leaves ~1.3 GB on a 12 GB card: fine while the GPU is dedicated to images, not enough for 1216×832 or a chat model on the same card [estimate]. `vae.enable_tiling()` is the candidate fix; it is not in the adapter yet and must be measured. Cancel-during-render is still **[measure]**.
+
 8. **Promote.** Only after 7 may the profile become `rig-qualified`.
 
 **Route status.** The submit/status/cancel routes (`POST /api/v1/media/jobs`, `GET …/{id}`, `POST …/{id}/cancel`) and the gallery API are on main and were used from the Android app in the first rig run; the earlier note that steps 7 and 8 were blocked on them is obsolete.
@@ -151,5 +164,5 @@ Exit 73 means another executor already holds that GPU's lock; one started from a
 ## 5. What this does not do
 
 - It downloads nothing, enables nothing and changes no default, profile, environment file or supervisor setting.
-- It claims no measured render time or VRAM peak yet. The one measured figure is the free VRAM in §3; everything else is tagged [estimate] or [measure].
+- Its measured figures are the free VRAM in §3 and the §4.7 table; everything else is tagged [estimate] or [measure].
 - It does not touch cloud or egress settings.
