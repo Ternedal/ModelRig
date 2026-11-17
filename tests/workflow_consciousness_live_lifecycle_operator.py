@@ -388,6 +388,42 @@ def a_profile_written_during_the_swap_is_not_overwritten(r: Run) -> None:
     check("consciousness_live_lifecycle_from_snapshots.py" not in r.scripts_called(), "nothing is assembled")
 
 
+def a_write_between_capture_and_publish_wins(r: Run) -> None:
+    # ChatGPT on #2407: the window between the comparison and the replace.
+    # A deterministic seam writes there; the restore must not replace it.
+    third = b'{"schema": "kaliv-consciousness-core/cognitive-profile-config/v1", "model": "racer"}\n'
+    operator = r.operator()
+    operator._after_capture = lambda: r.profile.write_bytes(third)
+    try:
+        code = operator.run()
+    finally:
+        r.worker.close()
+    check(code == 2 and "during the restore" in r.text(), f"refused: {r.text()}")
+    check(r.profile.read_bytes() == third, "the write in the window survives")
+    leftovers = [p.name for p in r.tmp.iterdir() if "operator-restore" in p.name or p.name.endswith(".tmp")]
+    check(not leftovers, f"no capture or staged file is left: {leftovers}")
+    check(r.record()["verdict"] == "STOPPED", "the run is STOPPED")
+
+
+def a_conflicting_profile_written_again_keeps_both(r: Run) -> None:
+    # Someone else's content was captured, and they wrote again before it could
+    # go back: their newest file stays, the earlier one is kept beside it.
+    other = b'{"model": "other"}\n'
+    newest = b'{"model": "newest"}\n'
+    r.worker.third_writer = other
+    operator = r.operator()
+    operator._after_capture = lambda: r.profile.write_bytes(newest)
+    try:
+        code = operator.run()
+    finally:
+        r.worker.close()
+    check(code == 2, f"exit 2: {r.text()}")
+    check(r.profile.read_bytes() == newest, "the newest write stays")
+    kept = [p for p in r.tmp.iterdir() if "operator-restore" in p.name]
+    check(len(kept) == 1 and kept[0].read_bytes() == other, "the earlier write is kept beside it, not lost")
+    check("is kept at" in r.text(), "and the operator names where")
+
+
 def refusals_before_anything_runs(tmp: Path) -> None:
     profile = tmp / "p.json"
     profile.write_bytes(PROFILE_A)
@@ -494,6 +530,8 @@ def main() -> None:
     case(a_failing_probe_stops)
     case(a_profile_changed_by_someone_else_is_left_alone)
     case(a_profile_written_during_the_swap_is_not_overwritten)
+    case(a_write_between_capture_and_publish_wins)
+    case(a_conflicting_profile_written_again_keeps_both)
     with tempfile.TemporaryDirectory() as tmp:
         refusals_before_anything_runs(Path(tmp))
     case(command_lines_match_the_real_scripts)

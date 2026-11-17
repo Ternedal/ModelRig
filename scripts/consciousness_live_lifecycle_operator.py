@@ -464,23 +464,92 @@ class Operator:
             )
 
     def _restore_profile(self, original: bytes, swap_bytes: bytes) -> bool:
-        """Put the original back, but only over the operator's own swap.
+        """Put the original back without ever replacing another writer's file.
 
-        Codex P2 on #2407: an update written by another process between the swap
-        and the restore must not be overwritten. Returns False on such a conflict.
+        Codex P2 and ChatGPT's follow-up on #2407: compare-then-replace still
+        loses an update written between the comparison and the replace. So:
+
+        1. the current file is moved aside in one atomic rename, which captures
+           exactly what was there, and a writer after it creates a new file;
+        2. the captured bytes are compared with the operator's swap;
+        3. the original (or, on a conflict, the captured file) is published
+           with a no-replace link or rename, so a file that appeared since step 1
+           always wins.
+
+        No path is ever replaced, so no completed write is lost. The profile is
+        briefly absent between steps 1 and 3; the snapshots are taken by then.
+        Limit: a writer that rewrites the file in place (not atomically) while
+        it is held open is outside this guarantee. On Windows the rename then
+        fails, and that is reported as a conflict.
+        Returns False on a conflict.
         """
+        path = self.profile_file
+        aside = path.with_name(f".{path.name}.operator-restore-{os.getpid()}")
         try:
-            current = self.profile_file.read_bytes()
-        except OSError:
-            current = None
-        if current == original:
-            return True
-        if current != swap_bytes:
-            self.say(f"Profile file NOT restored: someone else changed it during the swap: {self.profile_file}")
+            os.rename(path, aside)
+        except FileNotFoundError:
+            self.say(f"Profile file NOT restored: it was removed during the swap: {path}")
             return False
-        replace_bytes(self.profile_file, original)
-        self.say(f"Profile file restored: {self.profile_file}")
-        return True
+        except OSError as exc:
+            self.say(f"Profile file NOT restored: it could not be captured ({exc}): {path}")
+            return False
+        self._after_capture()
+        captured = aside.read_bytes()
+        if captured == swap_bytes:
+            outcome = self._publish_no_replace(original, path)
+            if outcome:
+                aside.unlink()
+                self.say(f"Profile file restored: {path}")
+                return True
+            aside.unlink()
+            self.say(f"Profile file NOT restored: someone else wrote it during the restore: {path}")
+            return False
+        # Someone else's content: put it back where it was, unless they wrote again.
+        if not self._link_no_replace(aside, path):
+            self.say(f"Profile file NOT restored: someone else changed it during the swap; "
+                     f"their earlier version is kept at {aside}: {path}")
+            return False
+        aside.unlink()
+        if captured == original:
+            return True
+        self.say(f"Profile file NOT restored: someone else changed it during the swap: {path}")
+        return False
+
+    def _after_capture(self) -> None:
+        """Seam for tests: runs between the capture and the publication."""
+
+    @staticmethod
+    def _link_no_replace(source: Path, target: Path) -> bool:
+        """Give target source's bytes unless target exists. True if published."""
+        try:
+            os.link(source, target)
+            return True
+        except FileExistsError:
+            return False
+        except OSError:
+            if os.name != "nt":
+                raise
+        try:
+            data = source.read_bytes()
+            with open(target, "xb") as handle:  # NTFS without links: exclusive create
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            return True
+        except FileExistsError:
+            return False
+
+    def _publish_no_replace(self, data: bytes, target: Path) -> bool:
+        descriptor, name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+        staged = Path(name)
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            return self._link_no_replace(staged, target)
+        finally:
+            staged.unlink(missing_ok=True)
 
     def qualify(self) -> int:
         code = self.command(_python_command(
