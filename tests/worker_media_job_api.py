@@ -199,6 +199,20 @@ class RouteTests(unittest.TestCase):
             with self.subTest(bad=bad):
                 self.assertEqual(self.client.get(f"/internal/media/jobs/{bad}", headers=HEADERS).status_code, 404)
 
+    def test_the_owner_sees_a_translated_prompt_but_never_the_original_or_the_parameters(self):
+        job_id = self.submit().json()["id"]
+        before = self.client.get(f"/internal/media/jobs/{job_id}", headers=HEADERS).json()
+        self.assertIsNone(before["translated_prompt"], "nothing translated yet: null, not the original")
+        self.assertNotIn("prompt", before)
+        self.assertNotIn("params", before)
+        claimed = self.store.claim_for(["sdxl-a"], INSTANCE)
+        self.assertEqual(claimed["id"], job_id)
+        self.assertTrue(self.store.record_effective_prompt(job_id, INSTANCE, "a red bicycle, translated"))
+        after = self.client.get(f"/internal/media/jobs/{job_id}", headers=HEADERS).json()
+        self.assertEqual(after["translated_prompt"], "a red bicycle, translated")
+        self.assertNotIn("prompt", after)
+        self.assertNotIn("effective_prompt", after, "the store's column name does not leak; the view names the field")
+
     def test_a_completed_job_points_at_its_gallery_asset_and_legacy_errors_are_codes(self):
         job_id = self.submit().json()["id"]
         claimed = self.store.claim_for(["sdxl-a"], INSTANCE)

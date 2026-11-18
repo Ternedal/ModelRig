@@ -191,6 +191,8 @@ class ImageJobStore:
                 db.execute("ALTER TABLE image_jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0")
             if "deferred_since" not in columns:  # G4: when a job first had to wait for VRAM
                 db.execute("ALTER TABLE image_jobs ADD COLUMN deferred_since REAL")
+            if "effective_prompt" not in columns:  # the prompt the model rendered when translation changed it
+                db.execute("ALTER TABLE image_jobs ADD COLUMN effective_prompt TEXT")
             # A database written before every connection had secure_delete on may hold old prompt
             # text in free space (a state update can move a row and free its old copy without
             # zeroing it). The first time this version opens it, a scrub is owed; purge_prompts
@@ -240,8 +242,8 @@ class ImageJobStore:
         cutoff = (time.time() if now is None else now) - older_than_s
         with self._db() as db:
             purged = db.execute(
-                f"UPDATE image_jobs SET prompt='' WHERE state IN ({','.join('?' * len(_FINISHED))}) "
-                "AND updated < ? AND prompt != ''", (*_FINISHED, cutoff)).rowcount
+                f"UPDATE image_jobs SET prompt='', effective_prompt=NULL WHERE state IN ({','.join('?' * len(_FINISHED))}) "
+                "AND updated < ? AND (prompt != '' OR effective_prompt IS NOT NULL)", (*_FINISHED, cutoff)).rowcount
             if purged:  # same transaction: a blanking is never committed without its scrub owed
                 db.execute("UPDATE image_jobs_scrub SET owed = owed + 1 WHERE id = 1")
         self._scrub_if_owed()
@@ -516,6 +518,18 @@ class ImageJobStore:
                        "ON CONFLICT(job_id) DO UPDATE SET record=excluded.record, updated=excluded.updated",
                        (job_id, json.dumps(checked, sort_keys=True), time.time()))
             return True
+
+    def record_effective_prompt(self, job_id: str, instance: str, prompt: str) -> bool:
+        """Provenance for a translated prompt (#2418 review): the text the model actually rendered, kept
+        next to the owner's original with the same retention and blanked by the same purge. Only the
+        claiming executor may write it, only while the job is running. Never written when the prompt
+        was rendered as given."""
+        if not isinstance(prompt, str) or not prompt:
+            raise ImageJobError("effective prompt required")
+        with self._db() as db:
+            return db.execute(
+                "UPDATE image_jobs SET effective_prompt=?,updated=? WHERE id=? AND state='running' AND claimed_by=?",
+                (prompt, time.time(), job_id, self._instance(instance))).rowcount == 1
 
     def begin_publish(self, job_id: str, instance: str) -> bool:
         """The commit point: running -> publishing only if no cancel was requested. Publish only after True."""

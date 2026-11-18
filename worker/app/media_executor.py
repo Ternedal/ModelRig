@@ -294,6 +294,10 @@ class MediaExecutor:
         if not isinstance(prompt, str) or not prompt:
             prompt, outcome = job["prompt"], "fallback:bad_rewrite"
         self.events.append(f"translate:{job['id']}:{outcome}:{self.clock() - started:.1f}")
+        if outcome == "translated":
+            # Provenance before render: the owner can see what was rendered in their name, with the
+            # job's own retention. A store refusal (cancelled meanwhile) is the step's problem, not ours.
+            self.store.record_effective_prompt(job["id"], self.instance, prompt)
         return {**job, "prompt": prompt}
 
     def _cancel_check(self, job_id: str) -> Callable[[], bool]:

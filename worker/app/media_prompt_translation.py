@@ -5,20 +5,26 @@ understand English: a Danish prompt produced visibly worse, often absurd images;
 in English did not. Kaliv is Danish-first, so the translation belongs in the rig, not in the user.
 
 Rules:
-- **Local only.** The translator talks to one Ollama at a loopback URL. A URL with any other host,
-  or any scheme but http, is refused at construction (D4: nothing of a media job leaves the rig,
-  and this is not the chat path, so the cloud policy's "current message" exception does not apply).
+- **Local only, enforced in transport.** The translator talks to one Ollama at a NUMERIC loopback URL
+  (127.x or ::1, plain http, no path). Anything else is refused at construction. Its HTTP client is its
+  own: proxies are never consulted whatever HTTP_PROXY/http_proxy say, redirects are refused, so the
+  bytes of a prompt can only go to the literal address that was accepted (D4: nothing of a media job
+  leaves the rig; this is not the chat path, so the cloud policy's "current message" exception does
+  not apply).
 - **Fail-open.** Whatever goes wrong (Ollama down, timeout, bad JSON, an answer that is empty,
   too long, not printable or not one line), the job renders with the user's original prompt.
   A translation problem never fails a job.
 - **Bounded.** The answer must fit the profile's prompt limit and may not be much longer than the
   input, so a chatty or runaway model cannot replace the prompt with an essay.
-- **Private.** Prompt text is never logged here; the caller records an outcome code and a duration.
+- **Private, but accountable.** Prompt text is never logged here; the caller records an outcome code
+  and a duration, and when the translation changed the prompt it stores the rendered text on the job
+  (`effective_prompt`, same retention as the original) so the owner can see what was rendered.
 
 Nothing here imports torch; the executor runs it inside the media venv with the standard library.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 import time
@@ -60,14 +66,37 @@ class PromptTranslationConfigError(ValueError):
 
 
 def _is_local_ollama_url(url: str) -> bool:
-    """Plain http, nothing but a host and port, and the host is loopback by the worker's ONE
-    loopback predicate (app/netguard.py, kept single on purpose by tests/workflow_worker_entrypoints.py)."""
+    """Plain http, nothing but a NUMERIC host and port, and the host is loopback by the worker's ONE
+    loopback predicate (app/netguard.py, kept single on purpose by tests/workflow_worker_entrypoints.py).
+    Numeric only: a name ("localhost", anything in the hosts file or DNS) is resolved by someone else
+    at connect time; a literal 127.x / ::1 cannot point off the machine."""
     parts = urllib.parse.urlsplit(url)
     if parts.scheme != "http" or parts.username or parts.password or parts.path not in ("", "/"):
         return False
     if parts.query or parts.fragment:
         return False
-    return is_loopback(parts.hostname or "")
+    host = parts.hostname or ""
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return is_loopback(host)
+
+
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """A redirect is an instruction to send the prompt somewhere else. It is refused as the HTTP error
+    it arrived as, so the caller falls back to the original prompt; nothing is followed."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, f"redirect refused: {msg}", headers, fp)
+
+
+def local_only_opener() -> Callable[..., object]:
+    """The translator's own HTTP client: no proxies whatever the environment says (an empty
+    ProxyHandler replaces the environment-derived one, so HTTP_PROXY/http_proxy/HTTPS_PROXY are
+    never consulted), no redirects, nothing else. Connects only to the numeric loopback literal the
+    constructor accepted."""
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), _RefuseRedirects()).open
 
 
 def translator_from_env(env, *, opener: Opener | None = None) -> "PromptTranslator | None":
@@ -86,7 +115,7 @@ def translator_from_env(env, *, opener: Opener | None = None) -> "PromptTranslat
 
 class PromptTranslator:
     def __init__(self, *, url: str = DEFAULT_URL, model: str, timeout_s: float = DEFAULT_TIMEOUT_S,
-                 opener: Opener = urllib.request.urlopen):
+                 opener: Opener | None = None):
         if not isinstance(url, str) or not _is_local_ollama_url(url):
             raise PromptTranslationConfigError(f"{URL_ENV} must be a plain http URL on loopback (media never leaves the rig)")
         if not isinstance(model, str) or not _MODEL.fullmatch(model):
@@ -96,7 +125,7 @@ class PromptTranslator:
         self.url = url.rstrip("/")
         self.model = model
         self.timeout_s = float(timeout_s)
-        self._opener = opener
+        self._opener = opener if opener is not None else local_only_opener()
         self.last_duration_s = 0.0
 
     def rewrite(self, prompt: str, *, max_chars: int) -> tuple[str, str]:

@@ -11,6 +11,7 @@ import threading
 import time
 import unittest
 import urllib.request
+from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "worker"))
@@ -38,6 +39,7 @@ class ScriptedOllama:
         self.raw = None
         self.status = 200
         self.delay_s = 0.0
+        self.location = None  # with a 3xx status: where the server tries to send the client
         server = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -48,6 +50,8 @@ class ScriptedOllama:
                     time.sleep(server.delay_s)
                 body = server.raw if server.raw is not None else json.dumps(server.reply).encode("utf-8")
                 self.send_response(server.status)
+                if server.location:
+                    self.send_header("Location", server.location)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
@@ -68,13 +72,16 @@ class ScriptedOllama:
 
 class ConfigTests(unittest.TestCase):
     def test_only_a_plain_http_loopback_url_is_accepted(self):
-        for url in (DEFAULT_URL, "http://localhost:11434", "http://127.0.0.1:11434/", "http://[::1]:11434",
-                    "http://127.5.5.5:11434"):
+        for url in (DEFAULT_URL, "http://127.0.0.1:11434/", "http://[::1]:11434", "http://127.5.5.5:11434",
+                    "http://[::ffff:127.0.0.1]:11434"):  # IPv4 loopback on a dual-stack socket: numeric, loopback
             with self.subTest(url=url):
                 PromptTranslator(url=url, model="qwen3:4b")
         for url in ("https://ollama.com", "https://127.0.0.1:11434", "http://192.168.1.10:11434",
                     "http://ollama.local:11434", "http://127.0.0.1:11434/api", "http://user:pw@127.0.0.1:11434",
-                    "http://127.0.0.1:11434?x=1", "127.0.0.1:11434", "", None, 11434):
+                    "http://127.0.0.1:11434?x=1", "127.0.0.1:11434", "", None, 11434,
+                    # names are resolved by someone else at connect time: only numeric loopback literals
+                    "http://localhost:11434", "http://127.0.0.1.nip.io:11434", "http://[::ffff:10.0.0.1]:11434",
+                    "http://0.0.0.0:11434", "http://0177.0.0.1:11434", "http://2130706433:11434"):
             with self.subTest(url=url), self.assertRaises(PromptTranslationConfigError):
                 PromptTranslator(url=url, model="qwen3:4b")
 
@@ -91,8 +98,8 @@ class ConfigTests(unittest.TestCase):
         self.assertIsNone(translator_from_env({MODEL_ENV: "  "}))
         on = translator_from_env({MODEL_ENV: "qwen3:4b"})
         self.assertEqual((on.url, on.model, on.timeout_s), (DEFAULT_URL, "qwen3:4b", 30.0))
-        custom = translator_from_env({MODEL_ENV: "qwen3:4b", URL_ENV: "http://localhost:11435/", TIMEOUT_ENV: "12"})
-        self.assertEqual((custom.url, custom.timeout_s), ("http://localhost:11435", 12.0))
+        custom = translator_from_env({MODEL_ENV: "qwen3:4b", URL_ENV: "http://127.0.0.1:11435/", TIMEOUT_ENV: "12"})
+        self.assertEqual((custom.url, custom.timeout_s), ("http://127.0.0.1:11435", 12.0))
         for env in ({MODEL_ENV: "qwen3:4b", URL_ENV: "https://ollama.com"},
                     {MODEL_ENV: "qwen3:4b", TIMEOUT_ENV: "soon"},
                     {MODEL_ENV: "qwen3:4b", TIMEOUT_ENV: "0"}):
@@ -178,6 +185,47 @@ class RewriteTests(unittest.TestCase):
         odd = PromptTranslator(url=DEFAULT_URL, model="qwen3:4b", opener=boom)
         self.assertEqual(odd.rewrite(DANISH, max_chars=500), (DANISH, "fallback:error"))
 
+    # --- transport: the bytes of a prompt can only reach the accepted loopback literal ---------------
+    def test_proxy_environment_is_ignored_and_the_request_goes_straight_to_loopback(self):
+        proxy = ScriptedOllama()  # stands in for a proxy: if the client honoured the environment it would be hit
+        self.addCleanup(proxy.close)
+        env = {"HTTP_PROXY": proxy.url, "http_proxy": proxy.url, "HTTPS_PROXY": proxy.url, "https_proxy": proxy.url,
+               "ALL_PROXY": proxy.url, "all_proxy": proxy.url, "NO_PROXY": "", "no_proxy": ""}
+        with patch.dict(os.environ, env, clear=False):
+            direct = PromptTranslator(url=self.ollama.url, model="qwen3:4b", timeout_s=5)
+            self.assertEqual(direct.rewrite(DANISH, max_chars=500), (ENGLISH, "translated"))
+            # the environment-honouring default client WOULD have used the proxy: prove the test can tell
+            handler = urllib.request.ProxyHandler()  # reads the environment
+            self.assertEqual(handler.proxies.get("http"), proxy.url)
+        self.assertEqual(len(self.ollama.requests), 1, "Ollama got the request")
+        self.assertEqual(proxy.requests, [], "the proxy saw nothing")
+
+    def test_a_redirect_is_refused_and_nothing_is_sent_to_its_target(self):
+        elsewhere = ScriptedOllama()  # the redirect target; loopback here, but the point is: never followed
+        self.addCleanup(elsewhere.close)
+        for status in (301, 302, 303, 307, 308):
+            with self.subTest(status=status):
+                self.ollama.requests.clear()
+                self.ollama.status, self.ollama.location = status, elsewhere.url + "/api/generate"
+                self.assertEqual(self.rewrite(), (DANISH, f"fallback:http_{status}"))
+                self.assertEqual(len(self.ollama.requests), 1)
+                self.assertEqual(elsewhere.requests, [], "the redirect target saw nothing")
+        self.ollama.status, self.ollama.location = 200, None
+
+    def test_the_default_client_has_no_proxy_handler_and_refuses_redirects(self):
+        from app.media_prompt_translation import _RefuseRedirects, local_only_opener
+        opener = local_only_opener().__self__
+        # build_opener drops the environment-reading ProxyHandler because one of that class was given,
+        # and an empty one registers no protocol at all: the chain has NO proxy handling whatsoever.
+        self.assertFalse(any(isinstance(h, urllib.request.ProxyHandler) for h in opener.handlers))
+        with patch.dict(os.environ, {"http_proxy": "http://127.0.0.1:9/"}):
+            default = urllib.request.build_opener()
+        self.assertTrue(any(isinstance(h, urllib.request.ProxyHandler) for h in default.handlers),
+                        "the stock opener WOULD carry the environment proxy: that is what is being refused")
+        self.assertTrue(any(isinstance(h, _RefuseRedirects) for h in opener.handlers))
+        self.assertFalse(any(type(h) is urllib.request.HTTPRedirectHandler for h in opener.handlers),
+                         "the following redirect handler is not installed")
+
     def test_the_real_opener_is_urlopen_called_with_a_keyword_timeout(self):
         seen = {}
 
@@ -187,7 +235,8 @@ class RewriteTests(unittest.TestCase):
         self.assertEqual(PromptTranslator(model="qwen3:4b", timeout_s=7, opener=opener).rewrite("x", max_chars=5),
                          ("x", "fallback:timeout"))
         self.assertEqual(seen["timeout"], 7.0)
-        self.assertIs(PromptTranslator(model="qwen3:4b")._opener, urllib.request.urlopen)
+        self.assertIsNot(PromptTranslator(model="qwen3:4b")._opener, urllib.request.urlopen,
+                         "the environment-honouring default client is never the translator's client")
 
 
 if __name__ == "__main__":

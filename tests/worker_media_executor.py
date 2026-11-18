@@ -235,6 +235,8 @@ class ExecutorTests(unittest.TestCase):
         self.assertEqual(calls, [("a red bicycle", 500)], "called once, with the profile's prompt limit")
         self.assertEqual(FakeImageAdapter.rendered, ["a red bicycle, translated"])
         self.assertEqual(self.state(job)["prompt"], "a red bicycle", "the user's prompt is what the job keeps")
+        self.assertEqual(self.state(job)["effective_prompt"], "a red bicycle, translated",
+                         "provenance: what was rendered in the owner's name is on the job")
         translate = [e for e in seen if e["event"] == "translate"]
         self.assertEqual(len(translate), 1)
         self.assertTrue(translate[0]["detail"].startswith(f"{job}:translated:"))
@@ -263,6 +265,7 @@ class ExecutorTests(unittest.TestCase):
                 else:
                     self.assertEqual(result, "completed")
                     self.assertEqual(FakeImageAdapter.rendered, ["a red bicycle"])
+                    self.assertIsNone(self.state(job)["effective_prompt"], "no translation, no provenance row")
                     translate = [e for e in seen if e["event"] == "translate"]
                     self.assertTrue(translate and translate[0]["detail"].startswith(f"{job}:{outcome}:"), translate)
                 ex.shutdown()
