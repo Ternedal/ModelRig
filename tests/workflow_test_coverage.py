@@ -114,11 +114,25 @@ check(
     "Agent 3 full diagnostics delegates PR and main Stage-B ownership to exact-head qualification",
 )
 exact_head_stage_b = exact_head_workflow.split("  stage-b-slices:", 1)[1]
+# CI-tiering (#2413): the condition is folded and draft-aware. Main pushes and
+# dispatch still run Stage-B unconditionally; PRs run it when open and not a
+# draft. The literal pieces are pinned so the policy cannot drift by rewording.
 check(
-    "if: github.event_name != 'pull_request' || github.event.action != 'closed'"
-    in exact_head_stage_b
+    "github.event_name != 'pull_request' ||" in exact_head_stage_b
+    and "github.event.action != 'closed'" in exact_head_stage_b
+    and "github.event.pull_request.draft != true" in exact_head_stage_b
     and "uses: ./.github/workflows/_stage_b_slices.yml" in exact_head_stage_b,
-    "exact-head qualification is the sole Stage-B authority for PRs and pushes to main",
+    "exact-head qualification is the sole Stage-B authority for non-draft PRs and pushes to main",
+)
+check(
+    "needs.release-class.outputs.docs_only != 'true'" in exact_head_stage_b
+    and 'git show "$BASE_SHA:scripts/release_class.sh"' in exact_head_workflow
+    and "release_fingerprint.py" in (root / "scripts" / "release_class.sh").read_text(encoding="utf-8"),
+    "exact-head qualification skips Stage-B for documentation-only PRs as classified by the ADR-SYS-002 fingerprint tool",
+)
+check(
+    "ready_for_review" in exact_head_workflow.split("jobs:", 1)[0],
+    "a draft that becomes ready triggers exact-head qualification with Stage-B",
 )
 check(
     "on:\n  push:\n    branches: [main]" in exact_head_workflow,
