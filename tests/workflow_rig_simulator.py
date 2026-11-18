@@ -97,6 +97,16 @@ with tempfile.TemporaryDirectory() as tmpdir:
     rejects(bad, "an unknown placeholder is rejected", tmp)
     bad = json.loads(json.dumps(base)); bad["operators"][1]["why"] = "runs"
     rejects(bad, "an operator without a reason is rejected", tmp)
+    bad = json.loads(json.dumps(base)); bad["operators"][1]["expect"]["stdout_contains"] = ["ok", ""]
+    rejects(bad, "an empty stdout_contains string is rejected", tmp)
+    bad = json.loads(json.dumps(base)); bad["operators"][1]["expect"]["stdout_contains"] = "STOPPED"
+    rejects(bad, "stdout_contains must be a list, not a bare string", tmp)
+    bad = json.loads(json.dumps(base)); bad["operators"][1]["expect"]["files_absent"] = ["${NOPE}/x"]
+    rejects(bad, "an unknown placeholder in an expected path is rejected", tmp)
+    bad = json.loads(json.dumps(base)); bad["operators"][1]["expect"]["files_absent"] = [""]
+    rejects(bad, "an empty files_absent path is rejected", tmp)
+    bad = json.loads(json.dumps(base)); bad["operators"][1]["expect"]["files_exist"] = ["x.json"]; bad["operators"][1]["expect"]["files_absent"] = ["x.json"]
+    rejects(bad, "a path in both files_exist and files_absent is rejected", tmp)
     bad = json.loads(json.dumps(base)); bad["pending"].append({"script": base["operators"][1]["script"], "issue": 1, "why": "listed twice on purpose to test the rule"})
     rejects(bad, "a script both run and pending is rejected", tmp)
     bad = json.loads(json.dumps(base)); bad["operators"][0]["platform"] = "any"
@@ -136,6 +146,33 @@ with tempfile.TemporaryDirectory() as tmpdir:
     check(j(op(jsonl_last={"path": "j.jsonl", "fields": {"b": True}}), exit_code=0, stdout="", stderr="", repo_root=tmp), "a journal line with the wrong flag fails")
     check(j(op(jsonl_last={"path": "missing.jsonl", "fields": {"a": True}}), exit_code=0, stdout="", stderr="", repo_root=tmp), "a missing journal fails")
     check(j(op(files_exist=("nope.txt",)), exit_code=0, stdout="", stderr="", repo_root=tmp), "a missing expected file fails")
+    check(j(op(exit=(2,), stdout_contains=("STOPPED: ", "not ready")), exit_code=2, stdout="STOPPED: the worker is not ready\n", stderr="", repo_root=tmp) == [],
+          "every stdout_contains string present passes")
+    check(j(op(exit=(2,), stdout_contains=("STOPPED: ", "not ready")), exit_code=2, stdout="STOPPED: already exists\n", stderr="", repo_root=tmp),
+          "one missing stdout_contains string fails even with the right exit code")
+    check(j(op(exit=(2,), stdout_contains=("STOPPED: ",)), exit_code=2, stdout="", stderr="STOPPED: on stderr", repo_root=tmp),
+          "stdout_contains looks at stdout, not stderr")
+    check(manifest_mod.Expect(exit_codes=(2,), stdout_contains=("x",)).assertions() == 2, "stdout_contains counts as an assertion")
+    check(j(op(files_absent=("nope.txt",)), exit_code=0, stdout="", stderr="", repo_root=tmp) == [], "files_absent passes when the file was not written")
+    check(j(op(files_absent=("j.jsonl",)), exit_code=0, stdout="", stderr="", repo_root=tmp), "files_absent fails when the file exists")
+    (tmp / "adir").mkdir()
+    check(j(op(files_absent=("adir",)), exit_code=0, stdout="", stderr="", repo_root=tmp), "files_absent also fails on a directory at that path")
+    check(manifest_mod.Expect(exit_codes=(2,), files_absent=("x",)).assertions() == 2, "files_absent counts as an assertion")
+    scratch_dir = tmp / "scratch-run"
+    scratch_dir.mkdir()
+    resolved = runner.resolved_expectations(
+        op(files_absent=("${SCRATCH}/evidence",), files_exist=("${WORK_DIR}/j.jsonl",), jsonl_last={"path": "${WORK_DIR}/j.jsonl", "fields": {"a": True}}),
+        {"SCRATCH": str(scratch_dir), "WORK_DIR": str(tmp)},
+    )
+    # Compare as paths: substitute() joins with "/", which Windows accepts but
+    # str(Path) renders with "\\" (maintenance review on #2421, Windows run).
+    check(tuple(map(Path, resolved.expect.files_absent)) == (scratch_dir / "evidence",)
+          and tuple(map(Path, resolved.expect.files_exist)) == (tmp / "j.jsonl",)
+          and Path(resolved.expect.jsonl_last["path"]) == tmp / "j.jsonl",
+          "resolved_expectations substitutes placeholders in files_absent, files_exist and jsonl_last.path")
+    check(j(resolved, exit_code=0, stdout="", stderr="", repo_root=tmp) == [], "an absolute, substituted path is judged as such (nothing written → passes)")
+    (scratch_dir / "evidence").mkdir()
+    check(j(resolved, exit_code=0, stdout="", stderr="", repo_root=tmp), "…and fails once the operator wrote the directory it must not write")
 
     # the runner reports a traceback-raising script as fail even when its exit code is allowed
     boom = tmp / "boom.py"
@@ -241,6 +278,48 @@ check("runs-on: windows-latest" in text, "the workflow runs on windows-latest")
 check("shell: powershell" in text, "the workflow uses Windows PowerShell 5.1 (shell: powershell), not pwsh")
 check("--require-all" in text, "the workflow passes --require-all so a skipped operator fails")
 check("contents: read" in text and "contents: write" not in text, "the workflow is read-only")
+# --- slice 2a: the gate 2 operator runs up to its preflight -----------------
+gate2 = [op for op in manifest.operators if op.script == "scripts/consciousness_live_lifecycle_operator.py"]
+check(len(gate2) == 1, "the gate 2 operator (#2407) is run against the stack")
+if gate2:
+    g = gate2[0]
+    check(g.needs_stack and g.expect.exit_codes == (2,), "the gate 2 operator needs the stack and may only exit 2 (stopped before the qualifier)")
+    check("STOPPED: the worker is not ready for the lifecycle gate" in g.expect.stdout_contains and "flags not set to 1" in g.expect.stdout_contains,
+          "the expected refusal is the worker's readiness, named by the operator's own message")
+    check(any(a.startswith("${SCRATCH}/") for a in g.args), "the operator's --out lives under ${SCRATCH}, so a rerun does not hit 'already exists'")
+    out_arg = g.args[g.args.index("--out") + 1]
+    check(g.expect.files_absent == (out_arg,), "a refusal in preflight creates no evidence directory: files_absent pins the exact --out path (review P3 on #2421)")
+    fx = [a for a in g.args if a.startswith("scripts/rig_simulator/fixtures/")]
+    check(len(fx) == 2 and all((ROOT / f).is_file() for f in fx), "both profile fixtures are tracked files")
+    if len(fx) == 2:
+        blobs = [(ROOT / f).read_bytes() for f in fx]
+        check(blobs[0] != blobs[1] and all(isinstance(json.loads(b), dict) for b in blobs),
+              "the fixtures are two different JSON objects, so the refusal cannot come from the 'swap equals profile' check")
+# --- slice 2a: the assembler refuses before it writes ------------------------
+asm = [op for op in manifest.operators if op.script == "scripts/kaliv_release_manifest_assembler.py"]
+check(len(asm) == 2, "the release-manifest assembler (#2408) is run twice: no evidence, and fake evidence")
+for a in asm:
+    check(not a.needs_stack and a.expect.exit_codes == (2,), f"{a.id}: static, exit 2 only")
+    check(a.expect.stdout_json is not None and a.expect.stdout_json.get("state") == "INVALID" and a.expect.stdout_json.get("production_activation") is False,
+          f"{a.id}: pins INVALID and production_activation=false in the JSON")
+    out = [a.args[i + 1] for i, x in enumerate(a.args) if x == "--manifest"]
+    check(len(out) == 1 and out[0].startswith("${WORK_DIR}/") and a.expect.files_absent == (out[0].replace("${WORK_DIR}", "validation/rig-simulator"),),
+          f"{a.id}: files_absent names exactly the --manifest path, below the ignored simulator directory")
+    check("--release-scope" in a.args and a.args[a.args.index("--release-scope") + 1] == "v1", f"{a.id}: asks for the v1 scope")
+ids = {a.id for a in asm}
+check("release-assembler-no-evidence-fail-closed" in ids and "release-assembler-fake-evidence-fail-closed" in ids, "both assembler refusals are present")
+fake = next((a for a in asm if a.id == "release-assembler-fake-evidence-fail-closed"), None)
+if fake:
+    refs = [x for x in fake.args if x.endswith("-ref")]
+    check(len(refs) == 7 and "rejected by the final release gate" in fake.expect.stdout_contains,
+          "the fake-evidence run passes seven refs so the refusal comes from the final gate, not from the count check")
+
+check("SCRATCH" in manifest_mod.VARIABLES, "SCRATCH is a manifest variable")
+check('"SCRATCH": str(scratch)' in runner_src and "scratch.mkdir(parents=True, exist_ok=False)" in runner_src,
+      "the runner creates SCRATCH empty for every run and refuses to reuse one")
+check(any(p["script"] == "scripts/consciousness_live_lifecycle_qualifier.py" and "preflight" in p["why"] for p in json.loads((SIM / "operators.json").read_text(encoding="utf-8"))["pending"]),
+      "the pending entry for the gate 2 qualifier says what the simulator already covers and what is still missing")
+
 check("/validation/rig-simulator/" in (ROOT / ".gitignore").read_text(encoding="utf-8"), "simulator output is ignored by git, so a run cannot dirty the candidate checkout")
 
 print(f"{passed} passed, {failed} failed")
