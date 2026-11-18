@@ -51,7 +51,7 @@ assert stage_b is not None, "stage-b-slices job must exist"
 stage_b_if = stage_b.group("body")
 assert "github.event.pull_request.draft != true" in stage_b_if, "Stage-B must be skipped on draft PRs (#2413)"
 assert "github.event.action != 'closed'" in stage_b_if, "Stage-B must still skip closed PRs"
-assert "github.event_name != 'pull_request' ||" in stage_b_if, "main pushes and dispatch must still run Stage-B unconditionally"
+assert "(github.event_name != 'pull_request' && github.event_name != 'merge_group') ||" in stage_b_if, "main pushes and dispatch must still run Stage-B unconditionally"
 # Docs-only tiering (ADR-SYS-002 D1 applied to CI): a release-class job runs
 # scripts/release_fingerprint.py on merge-base..head and Stage-B is skipped when
 # the PR is documentation-only. Fail-closed: the job exists only for PRs, Stage-B
@@ -60,9 +60,10 @@ assert "github.event_name != 'pull_request' ||" in stage_b_if, "main pushes and 
 rc = re.search(r"(?ms)^  release-class:\n(?P<body>.*?)(?=^  [a-z-]+:\n)", WORKFLOW)
 assert rc is not None, "release-class job must exist"
 rc_body = rc.group("body")
-assert "if: github.event_name == 'pull_request' && github.event.action != 'closed'" in rc_body, "release-class runs only for open PRs"
+assert "(github.event_name == 'pull_request' && github.event.action != 'closed') ||" in rc_body and "github.event_name == 'merge_group'" in rc_body, "release-class runs only for open PRs and merge groups"
+assert "github.event_name == 'push'" not in rc_body, "release-class never runs on pushes to main"
 assert "fetch-depth: 0" in rc_body, "release-class needs history to find the merge-base"
-assert 'ref: ${{ github.event.pull_request.head.sha }}' in rc_body, "release-class checks out the exact PR head"
+assert 'ref: ${{ github.event.pull_request.head.sha || github.sha }}' in rc_body, "release-class checks out the exact PR head (or the queue's merge commit)"
 assert 'git show "$BASE_SHA:scripts/release_class.sh" > "$RUNNER_TEMP/release_class.sh"' in rc_body, "release-class takes the script from the BASE commit, never from the PR head (P2 on #2422)"
 assert 'bash "$RUNNER_TEMP/release_class.sh" "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT"' in rc_body, "release-class runs the base's script with base, head and the output file"
 assert "bash scripts/release_class.sh" not in rc_body, "release-class must never run the head's copy of the script"
@@ -71,7 +72,21 @@ assert "docs_only: ${{ steps.classify.outputs.docs_only }}" in rc_body, "release
 assert "needs: [release-class]" in stage_b_if, "Stage-B must depend on release-class"
 assert "needs.release-class.outputs.docs_only != 'true'" in stage_b_if, "Stage-B must be skipped on docs-only PRs"
 assert "!cancelled() &&" in stage_b_if and "always()" not in stage_b_if, "Stage-B must use !cancelled(), never always()"
-assert "github.event_name != 'pull_request' ||" in stage_b_if.split("!cancelled()", 1)[1], "pushes to main and dispatch bypass the release class entirely"
+assert "(github.event_name != 'pull_request' && github.event_name != 'merge_group') ||" in stage_b_if.split("!cancelled()", 1)[1], "pushes to main and dispatch bypass the release class entirely"
+
+# Merge queue (ADR-SYS-003 D3/D4, contract test 2): the workflow fires on
+# merge_group; release-class classifies the queue's merge commit (github.sha)
+# against merge_group.base_sha with the base's script; Stage-B runs in the
+# queue unless docs-only; concurrency keys non-PR runs by run_id, so a queue
+# run can never cancel a PR run on the same SHA or be cancelled by one.
+on_block = WORKFLOW.split("jobs:", 1)[0]
+assert re.search(r"(?m)^  merge_group:\n    types: \[checks_requested\]", on_block), "exact-head must trigger on merge_group checks_requested"
+assert "github.event_name == 'merge_group'" in rc_body, "release-class must also run for merge groups"
+assert "HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}" in rc_body, "release-class head in a merge group is github.sha (the queue's merge commit)"
+assert "BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}" in rc_body, "release-class base in a merge group is merge_group.base_sha"
+assert "ref: ${{ github.event.pull_request.head.sha || github.sha }}" in rc_body, "release-class checks out the same head it classifies"
+assert "(github.event_name == 'merge_group' && needs.release-class.outputs.docs_only != 'true')" in stage_b_if, "Stage-B runs in the merge queue unless the entry is docs-only"
+assert "github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id" in WORKFLOW.split("jobs:", 1)[0], "non-PR runs (push, dispatch, merge_group) keep per-run concurrency groups"
 
 core = re.search(r"(?ms)^  exact-head-core:\n(?P<body>.*?)(?=^    steps:)", WORKFLOW)
 assert core is not None and "draft" not in core.group("body"), "exact-head-core must run on drafts too"

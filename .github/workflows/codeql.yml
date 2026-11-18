@@ -9,6 +9,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
     branches: [main]
+  # Merge queue (ADR-SYS-003): CodeQL is required, so the queue needs it too.
+  merge_group:
+    types: [checks_requested]
+    branches: [main]
   schedule:
     - cron: "17 5 * * 1" # weekly, Monday morning
 concurrency:
