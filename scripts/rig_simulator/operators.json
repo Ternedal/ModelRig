@@ -319,6 +319,26 @@
       "script": "scripts/freeze_check.py",
       "issue": 2390,
       "why": "Asks GitHub for tag ownership and exact-head CI while the token is in hand (#347); the simulator has no token by design and a tokenless run answers NOT FROZEN, which proves nothing."
+    },
+    {
+      "script": "scripts/kaliv_software_exact_green_assembler.py",
+      "issue": 2390,
+      "why": "Gate 1 reads GitHub Actions runs for the four pins (#2408); the simulator has no token by design. Covered by its contract test."
+    },
+    {
+      "script": "scripts/kaliv_repository_authority_assembler.py",
+      "issue": 2390,
+      "why": "Gate 10 assembles each repository's verify-repository-authority.ps1 -Json output, which reads live GitHub protection settings; nothing to simulate without a token. Covered by its contract test."
+    },
+    {
+      "script": "scripts/kaliv_recovery_soak_qualification.py",
+      "issue": 2390,
+      "why": "Gate 9 qualifies a multi-hour journal of real restarts and reruns freeze_check (tokenless here); the collector is run, the qualifier needs a recorded campaign."
+    },
+    {
+      "script": "scripts/start-stage-a-validation-stack.ps1",
+      "issue": 2390,
+      "why": "Starts the candidate backend and worker windows on Windows; the simulator starts its own stack. Its generated worker env is covered by tests/workflow_validation_stack_v1_gates.py."
     }
   ]
 }

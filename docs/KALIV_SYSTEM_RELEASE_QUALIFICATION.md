@@ -269,6 +269,53 @@ A successful assembler run means only that the exact supplied evidence refs form
 a `QUALIFIED`, `release_ready=true` manifest under the existing final gate.
 Both the manifest and verdict retain `production_activation=false`.
 
+### Kaliv V1 (`--release-scope v1`)
+
+V1 needs the seven refs below and no body ref. Where each ref comes from:
+
+| Gate | Produced by | Runs on | How-to |
+|---|---|---|---|
+| `software_exact_green` | `scripts/kaliv_software_exact_green_assembler.py` (GitHub Actions runs on the four pins) | any machine with `gh` | [KALIV_SOFTWARE_EXACT_GREEN_QUALIFICATION.md](KALIV_SOFTWARE_EXACT_GREEN_QUALIFICATION.md) |
+| `consciousness_live_lifecycle` | `scripts/consciousness_live_lifecycle_operator.py`; worker from `start-stage-a-validation-stack.ps1 -EnableScheduler … -EnableConsciousnessLifecycle` | rig | [consciousness-core/LIVE_LIFECYCLE_QUALIFICATION.md](consciousness-core/LIVE_LIFECYCLE_QUALIFICATION.md) |
+| `visionrig_physical_perception` | VisionRig `run-v1-release-gate.ps1` (`visionrig-qualify-physical --expected-sha`); ModelRig worker with `-EnableVisionRigAdmission` | rig | VisionRig `docs/PHYSICAL_QUALIFICATION.md`, [consciousness-core/VISIONRIG_ADMISSION.md](consciousness-core/VISIONRIG_ADMISSION.md) |
+| `voicerig_physical_acceptance` | VoiceRig `complete-acceptance.ps1`, then `scripts/kaliv_voicerig_physical_qualifier.py` | rig | VoiceRig `docs/RIG_ACCEPTANCE.md` |
+| `end_to_end_latency` | worker with `-EnableE2eLatency`, `scripts/kaliv_e2e_latency_voice_driver.py`, then `scripts/kaliv_end_to_end_latency_qualifier.py` | rig | [KALIV_END_TO_END_LATENCY_QUALIFICATION.md](KALIV_END_TO_END_LATENCY_QUALIFICATION.md) |
+| `recovery_soak` | `scripts/kaliv_recovery_soak_collector.py`, then `scripts/kaliv_recovery_soak_qualification.py` | rig | [KALIV_RECOVERY_SOAK_QUALIFICATION.md](KALIV_RECOVERY_SOAK_QUALIFICATION.md) |
+| `repository_authority` | `scripts/kaliv_repository_authority_assembler.py` over each repo's `verify-repository-authority.ps1 -Json` | rig | [KALIV_REPOSITORY_AUTHORITY_QUALIFICATION.md](KALIV_REPOSITORY_AUTHORITY_QUALIFICATION.md) |
+
+Take each ref from the `release_evidence_ref` field of the producer's own
+output file. Gates 1 and 10 bind all four pins, so run them last, after the
+pins are final. The ModelRig-bound gates (2, 8, 9) also accept evidence on an
+ancestor with the same release fingerprint (ADR-SYS-002 D4); VisionRig and
+VoiceRig refs must name the exact pin.
+
+```powershell
+python scripts/kaliv_release_manifest_assembler.py `
+  --release-id kaliv-rc-<id> `
+  --release-scope v1 `
+  --modelrig-sha <40-hex> `
+  --bodyrig-sha <40-hex> `
+  --visionrig-sha <40-hex> `
+  --voicerig-sha <40-hex> `
+  --software-exact-green-ref <canonical-ref> `
+  --consciousness-live-lifecycle-ref <canonical-ref> `
+  --visionrig-physical-perception-ref <canonical-ref> `
+  --voicerig-physical-acceptance-ref <canonical-ref> `
+  --end-to-end-latency-ref <canonical-ref> `
+  --recovery-soak-ref <canonical-ref> `
+  --repository-authority-ref <canonical-ref> `
+  --manifest .\validation\kaliv-release-manifest.json `
+  --verdict .\validation\kaliv-release-verdict.json
+```
+
+**What the final gate does not check.** It checks the shape of each ref and
+which pin it binds. It does not open the evidence the digest was computed
+over. A ref with the right shape and pin is accepted whatever its digest
+(verified 18/11 on `e89e2fe9`: seven synthetic refs gave `QUALIFIED`).
+Copying a ref from the wrong run, or from an earlier run on the same
+pin, is therefore not caught here. Keep every producer output file next to the
+manifest, so that each ref can be traced to the file it came from.
+
 ## Evaluate a manifest directly
 
 ```powershell
