@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, closed]
+  # Merge queue (ADR-SYS-003 D3/D4): the queue's merge commit is github.sha; the
+  # existing `pull_request.head.sha || github.sha` derivations already pick it.
+  # Inert until a ruleset with a merge_queue rule exists on main.
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 # Only PR runs share a group (per PR number) so newer immutable PR heads
@@ -142,22 +147,27 @@ jobs:
   # every protected prefix count as code. Fail-closed by construction: if this
   # job fails or is skipped, docs_only is empty and Stage B runs. Pushes to main
   # and dispatch never consult it. Script and classifier are the BASE commit's.
+  # In a merge group (ADR-SYS-003 D3) the head is the queue's merge commit
+  # (github.sha) and the base is merge_group.base_sha; merge-base of the two is
+  # the base itself, so the classification covers exactly what the PR adds.
   release-class:
-    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    if: >-
+      (github.event_name == 'pull_request' && github.event.action != 'closed') ||
+      github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       - name: Classify merge-base..head with the release fingerprint
         id: classify
         shell: bash
         env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           # The script and the classifier come from the BASE commit, never from
           # the PR head (review P2 on #2422). A base without the script cannot
@@ -178,14 +188,16 @@ jobs:
   # commit. On a draft this job is skipped, never reported green. A PR whose
   # merge-base..head is documentation-only (release-class above) is skipped
   # too: Stage B qualifies code, and the documentation class is by definition
-  # outside the release fingerprint (ADR-SYS-002 D1).
+  # outside the release fingerprint (ADR-SYS-002 D1). The same two rules apply
+  # to a merge-group run (ADR-SYS-003 D3); pushes to main and dispatch always run.
   stage-b-slices:
     needs: [release-class]
     if: >-
       !cancelled() && (
-        github.event_name != 'pull_request' ||
-        (github.event.action != 'closed' && github.event.pull_request.draft != true &&
-         needs.release-class.outputs.docs_only != 'true')
+        (github.event_name != 'pull_request' && github.event_name != 'merge_group') ||
+        (github.event_name == 'merge_group' && needs.release-class.outputs.docs_only != 'true') ||
+        (github.event_name == 'pull_request' && github.event.action != 'closed' &&
+         github.event.pull_request.draft != true && needs.release-class.outputs.docs_only != 'true')
       )
     uses: ./.github/workflows/_stage_b_slices.yml
     with:
