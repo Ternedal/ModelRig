@@ -143,6 +143,22 @@ class ProfileParsingTests(unittest.TestCase):
         with self.subTest("comfyui does not take the diffusers keys"), self.assertRaises(GenerationError):
             parse_profile(video_profile(backend_options=dict(comfy, guidance_scale=6.0)))
 
+    def test_negative_prompt_is_refused_where_the_pipeline_would_silently_ignore_it(self):
+        # Flux and Qwen honour negative_prompt only with true_cfg_scale > 1, which the adapter never sets
+        # (#2417 review, Codex P2): accepting the key there would be an ineffective setting.
+        for pipeline in ("FluxPipeline", "QwenImagePipeline"):
+            with self.subTest(pipeline=pipeline):
+                with self.assertRaises(GenerationError) as ctx:
+                    parse_profile(image_profile(pipeline=pipeline, backend_options={"negative_prompt": "blurry"}))
+                self.assertIn("true_cfg_scale", str(ctx.exception))
+                with self.assertRaises(GenerationError):
+                    parse_profile(image_profile(pipeline=pipeline, backend_options={"guidance_scale": 3.5, "negative_prompt": "x"}))
+                only_scale = parse_profile(image_profile(pipeline=pipeline, backend_options={"guidance_scale": 3.5}))
+                self.assertEqual(only_scale.backend_options.guidance_scale, 3.5, "embedded guidance is a real knob there")
+                self.assertIsNone(parse_profile(image_profile(pipeline=pipeline, backend_options={})).backend_options)
+        sdxl = parse_profile(image_profile(pipeline="StableDiffusionXLPipeline", backend_options={"negative_prompt": "blurry"}))
+        self.assertEqual(sdxl.backend_options.negative_prompt, "blurry")
+
     # --- G3 pins (#2296 6634996133) --------------------------------------------------------------
     def _options(self, **extra):
         options = dict(video_profile()["backend_options"])
