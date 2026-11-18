@@ -33,6 +33,12 @@ REQUIRED_STATUS_CHECKS = (
     "legacy-merge-tree-equivalence",
 )
 
+# ADR-SYS-003 D3: in merge-queue mode the queue must wait for Stage B, so one
+# aggregate check is required on top of the classic list. It is not part of
+# REQUIRED_STATUS_CHECKS because classic protection (today's model) does not
+# list it; adding it there would fail gate 10 on the current repository.
+QUEUE_REQUIRED_STATUS_CHECKS = REQUIRED_STATUS_CHECKS + ("stage-b-verdict",)
+
 
 def _enabled(value: Any) -> bool:
     if isinstance(value, bool):
@@ -226,17 +232,22 @@ def evaluate_rulesets(rulesets: list[dict[str, Any]] | None) -> dict[str, Any]:
         elif rule_type == "pull_request":
             review_resolution = review_resolution or parameters.get("required_review_thread_resolution") is True
 
-    missing = [name for name in REQUIRED_STATUS_CHECKS if name not in required_checks]
+    merge_queue = "merge_queue" in rule_types
+    expected_checks = QUEUE_REQUIRED_STATUS_CHECKS if merge_queue else REQUIRED_STATUS_CHECKS
+    missing = [name for name in expected_checks if name not in required_checks]
     wrong_source = [
         name
-        for name in REQUIRED_STATUS_CHECKS
+        for name in expected_checks
         if name in required_checks and name not in source_bound_checks
     ]
     for required_rule in ("pull_request", "required_status_checks", "non_fast_forward", "deletion"):
         if required_rule not in rule_types:
             errors.append(f"required ruleset rule is missing: {required_rule}")
     if missing:
-        errors.append("required exact-green status checks are incomplete")
+        errors.append(
+            "required exact-green status checks are incomplete"
+            + (" (merge-queue mode also requires stage-b-verdict: the queue must wait for Stage B)" if merge_queue else "")
+        )
     if wrong_source:
         errors.append(
             f"required status checks are not bound to GitHub Actions app {REQUIRED_STATUS_CHECK_APP_ID}"
@@ -248,7 +259,6 @@ def evaluate_rulesets(rulesets: list[dict[str, Any]] | None) -> dict[str, Any]:
     # strict alone (today): accepted, as before. merge_queue alone: accepted, no
     # warning. Both: accepted. Neither: an error, not a warning -- without either,
     # a merge commit nobody tested can land.
-    merge_queue = "merge_queue" in rule_types
     if merge_queue:
         merge_queue_errors = _merge_queue_rule_errors(applicable)
         errors.extend(merge_queue_errors)

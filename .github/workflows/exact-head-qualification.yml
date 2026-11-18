@@ -203,6 +203,45 @@ jobs:
     with:
       head_sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
+
+  # ADR-SYS-003 D3 (Codex P1 on #2427): the merge queue must WAIT for Stage B.
+  # The slice jobs are not required checks (their names vary per shard), so
+  # this single job is: it passes only when Stage B succeeded, or was skipped
+  # for a reason the policy allows (documentation-only candidate; a draft PR,
+  # where Stage B is deferred to ready_for_review). Any other skip, a failure
+  # or a cancellation fails it. Required in queue mode (QUEUE_REQUIRED_STATUS_
+  # CHECKS in scripts/repository_authority.py); classic protection today does
+  # not list it, so gate 10's current verdict is unchanged.
+  stage-b-verdict:
+    needs: [release-class, stage-b-slices]
+    if: >-
+      !cancelled() &&
+      (github.event_name != 'pull_request' || github.event.action != 'closed')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Stage B completed, or skipped for an allowed reason
+        shell: bash
+        env:
+          RESULT: ${{ needs.stage-b-slices.result }}
+          DOCS_ONLY: ${{ needs.release-class.outputs.docs_only }}
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          set -euo pipefail
+          echo "stage-b-slices result: $RESULT; docs_only: '${DOCS_ONLY}'; event: $EVENT; draft: '${DRAFT}'"
+          case "$RESULT" in
+            success) echo "Stage B passed on this exact head" ;;
+            skipped)
+              if [ "$DOCS_ONLY" = "true" ]; then
+                echo "documentation-only candidate: Stage B is not required (ADR-SYS-002 D1)"
+              elif [ "$EVENT" = "pull_request" ] && [ "$DRAFT" = "true" ]; then
+                echo "draft pull request: Stage B is deferred to ready_for_review (#2413)"
+              else
+                echo "Stage B was skipped without an allowed reason" >&2; exit 1
+              fi ;;
+            *) echo "Stage B did not pass (result: $RESULT)" >&2; exit 1 ;;
+          esac
   # _tests.yml is shared with the release workflow and historically checks out
   # GitHub's pull-request merge ref. Until that large reusable workflow is
   # migrated independently, require its *entire repository tree* to be byte-

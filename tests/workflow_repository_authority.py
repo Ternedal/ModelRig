@@ -132,12 +132,23 @@ def main() -> None:
     # untouched by all of this (asserted above).
     import json
 
-    def with_merge_queue(rs: dict, *, strict: bool, method: str = "MERGE") -> dict:
+    def with_merge_queue(rs: dict, *, strict: bool, method: str = "MERGE", verdict: bool = True) -> dict:
         for rule in rs["rules"]:
             if rule["type"] == "required_status_checks":
                 rule["parameters"]["strict_required_status_checks_policy"] = strict
+                if verdict:
+                    # D3: queue mode requires the Stage B aggregate check on top of the classic 14.
+                    rule["parameters"]["required_status_checks"].append(
+                        {"context": "stage-b-verdict", "integration_id": module.REQUIRED_STATUS_CHECK_APP_ID}
+                    )
         rs["rules"].append({"type": "merge_queue", "parameters": {"merge_method": method, "max_entries_to_build": 1, "grouping_strategy": "ALLGREEN"}})
         return rs
+
+    assert module.QUEUE_REQUIRED_STATUS_CHECKS == module.REQUIRED_STATUS_CHECKS + ("stage-b-verdict",), "queue mode = classic 14 + stage-b-verdict, nothing else"
+    no_verdict = evaluate(r=[with_merge_queue(ruleset(), strict=False, verdict=False)])
+    assert no_verdict["passed"] is False and "stage-b-verdict" in no_verdict["rulesets"]["missing_checks"], ("a merge queue without stage-b-verdict would land before Stage B (Codex P1 on #2427)", no_verdict)
+    classic_with_verdict = evaluate(r=[ruleset()])
+    assert classic_with_verdict["passed"] is True and "stage-b-verdict" not in classic_with_verdict["rulesets"]["missing_checks"], "without merge_queue the classic 14 still suffice (gate 10 unchanged today)"
 
     queue_only = evaluate(r=[with_merge_queue(ruleset(), strict=False)])
     assert queue_only["passed"] is True, queue_only
@@ -176,6 +187,9 @@ def main() -> None:
     assert shipped["bypass_actors"] == [], "the shipped ruleset must not have bypass actors"
     pr_rule = next(r for r in shipped["rules"] if r["type"] == "pull_request")
     assert pr_rule["parameters"].get("allowed_merge_methods") == ["merge"], "only merge commits may land (ADR-SYS-003 D5)"
+    rsc_rule = next(r for r in shipped["rules"] if r["type"] == "required_status_checks")
+    shipped_contexts = [c["context"] for c in rsc_rule["parameters"]["required_status_checks"]]
+    assert shipped_contexts == list(module.QUEUE_REQUIRED_STATUS_CHECKS), "the shipped ruleset requires exactly the queue set (classic 14 + stage-b-verdict), in order"
     mq_rule = next(r for r in shipped["rules"] if r["type"] == "merge_queue")
     assert mq_rule["parameters"]["max_entries_to_build"] == 1 and mq_rule["parameters"]["grouping_strategy"] == "ALLGREEN", "one candidate at a time, all green (D5)"
     for dropped in ("deletion", "non_fast_forward", "pull_request", "required_status_checks"):
