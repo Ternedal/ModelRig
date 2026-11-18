@@ -101,6 +101,8 @@ with tempfile.TemporaryDirectory() as tmpdir:
     rejects(bad, "an empty stdout_contains string is rejected", tmp)
     bad = json.loads(json.dumps(base)); bad["operators"][1]["expect"]["stdout_contains"] = "STOPPED"
     rejects(bad, "stdout_contains must be a list, not a bare string", tmp)
+    bad = json.loads(json.dumps(base)); bad["operators"][1]["expect"]["files_absent"] = ["${NOPE}/x"]
+    rejects(bad, "an unknown placeholder in an expected path is rejected", tmp)
     bad = json.loads(json.dumps(base)); bad["operators"][1]["expect"]["files_absent"] = [""]
     rejects(bad, "an empty files_absent path is rejected", tmp)
     bad = json.loads(json.dumps(base)); bad["operators"][1]["expect"]["files_exist"] = ["x.json"]; bad["operators"][1]["expect"]["files_absent"] = ["x.json"]
@@ -156,6 +158,18 @@ with tempfile.TemporaryDirectory() as tmpdir:
     (tmp / "adir").mkdir()
     check(j(op(files_absent=("adir",)), exit_code=0, stdout="", stderr="", repo_root=tmp), "files_absent also fails on a directory at that path")
     check(manifest_mod.Expect(exit_codes=(2,), files_absent=("x",)).assertions() == 2, "files_absent counts as an assertion")
+    scratch_dir = tmp / "scratch-run"
+    scratch_dir.mkdir()
+    resolved = runner.resolved_expectations(
+        op(files_absent=("${SCRATCH}/evidence",), files_exist=("${WORK_DIR}/j.jsonl",), jsonl_last={"path": "${WORK_DIR}/j.jsonl", "fields": {"a": True}}),
+        {"SCRATCH": str(scratch_dir), "WORK_DIR": str(tmp)},
+    )
+    check(resolved.expect.files_absent == (str(scratch_dir / "evidence"),) and resolved.expect.files_exist == (str(tmp / "j.jsonl"),)
+          and resolved.expect.jsonl_last["path"] == str(tmp / "j.jsonl"),
+          "resolved_expectations substitutes placeholders in files_absent, files_exist and jsonl_last.path")
+    check(j(resolved, exit_code=0, stdout="", stderr="", repo_root=tmp) == [], "an absolute, substituted path is judged as such (nothing written → passes)")
+    (scratch_dir / "evidence").mkdir()
+    check(j(resolved, exit_code=0, stdout="", stderr="", repo_root=tmp), "…and fails once the operator wrote the directory it must not write")
 
     # the runner reports a traceback-raising script as fail even when its exit code is allowed
     boom = tmp / "boom.py"
@@ -270,6 +284,8 @@ if gate2:
     check("STOPPED: the worker is not ready for the lifecycle gate" in g.expect.stdout_contains and "flags not set to 1" in g.expect.stdout_contains,
           "the expected refusal is the worker's readiness, named by the operator's own message")
     check(any(a.startswith("${SCRATCH}/") for a in g.args), "the operator's --out lives under ${SCRATCH}, so a rerun does not hit 'already exists'")
+    out_arg = g.args[g.args.index("--out") + 1]
+    check(g.expect.files_absent == (out_arg,), "a refusal in preflight creates no evidence directory: files_absent pins the exact --out path (review P3 on #2421)")
     fx = [a for a in g.args if a.startswith("scripts/rig_simulator/fixtures/")]
     check(len(fx) == 2 and all((ROOT / f).is_file() for f in fx), "both profile fixtures are tracked files")
     if len(fx) == 2:

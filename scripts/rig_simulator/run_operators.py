@@ -47,7 +47,7 @@ import urllib.error
 import urllib.request
 import wave
 from datetime import datetime, timezone
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -274,6 +274,21 @@ def substitute(value: str, variables: dict[str, str]) -> str:
     return manifest_mod.PLACEHOLDER.sub(repl, value)
 
 
+def resolved_expectations(op: manifest_mod.Operator, variables: dict[str, str]) -> manifest_mod.Operator:
+    """The operator with placeholders in its expected paths substituted (files_exist, files_absent, jsonl_last.path)."""
+    expect = op.expect
+    jsonl_last = None
+    if expect.jsonl_last is not None:
+        jsonl_last = dict(expect.jsonl_last, path=substitute(expect.jsonl_last["path"], variables))
+    resolved = replace(
+        expect,
+        files_exist=tuple(substitute(p, variables) for p in expect.files_exist),
+        files_absent=tuple(substitute(p, variables) for p in expect.files_absent),
+        jsonl_last=jsonl_last,
+    )
+    return replace(op, expect=resolved)
+
+
 def command_for(op: manifest_mod.Operator, repo_root: Path, variables: dict[str, str]) -> list[str]:
     args = [substitute(a, variables) for a in op.args]
     script = str(repo_root / op.script)
@@ -380,7 +395,7 @@ def run_operator(op: manifest_mod.Operator, *, repo_root: Path, variables: dict[
         stdout = (exc.stdout or b"").decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
         stderr = (exc.stderr or b"").decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
     duration = time.monotonic() - started
-    failures = judge(op, exit_code=exit_code, stdout=stdout, stderr=stderr, repo_root=repo_root)
+    failures = judge(resolved_expectations(op, variables), exit_code=exit_code, stdout=stdout, stderr=stderr, repo_root=repo_root)
     return {
         "id": op.id,
         "script": op.script,

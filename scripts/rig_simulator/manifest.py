@@ -184,6 +184,9 @@ def _operator(raw: Any, index: int, repo_root: Path) -> Operator:
     needs_stack = raw.get("needs_stack", True)
     _require(isinstance(needs_stack, bool), f"{where}: needs_stack must be a boolean")
     expect = _expect(raw.get("expect"), where)
+    for path in (*expect.files_exist, *expect.files_absent, *((expect.jsonl_last or {}).get("path", ""),)):
+        for name in PLACEHOLDER.findall(path):
+            _require(name in VARIABLES, f"{where}: unknown placeholder ${{{name}}} in an expected path")
     unknown = set(raw) - {"id", "script", "kind", "platform", "args", "why", "timeout_seconds", "needs_stack", "expect"}
     _require(not unknown, f"{where}: unknown keys {sorted(unknown)}")
     return Operator(

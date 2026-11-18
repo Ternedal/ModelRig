@@ -177,9 +177,12 @@
         "stdout_contains": [
           "STOPPED: the worker is not ready for the lifecycle gate",
           "flags not set to 1"
+        ],
+        "files_absent": [
+          "${SCRATCH}/gate2-operator"
         ]
       },
-      "why": "The gate 2 operator (#2407) runs end to end up to its preflight against the production worker entrypoint: it reaches /experimental/consciousness/status, reads the runtime-status schema and refuses because the simulated worker runs without the consciousness flags. That proves the operator's Python, its HTTP path and its fail-closed message on the rig's interpreter, not that gate 2 passes. Exit 2 is the operator's own 'stopped before the qualifier' code; a traceback, a hang or a different reason is a defect. A simulated PASS needs a worker started with the consciousness flags, a SelfState, an approved Person Revision and a restart choreography the simulator cannot drive yet (pending)."
+      "why": "The gate 2 operator (#2407) runs end to end up to its preflight against the production worker entrypoint: it reaches /experimental/consciousness/status, reads the runtime-status schema and refuses because the simulated worker runs without the consciousness flags. That proves the operator's Python, its HTTP path and its fail-closed message on the rig's interpreter, not that gate 2 passes. A refusal in preflight creates no evidence directory (files_absent pins that; the operator's first mkdir is in live_cycle()). Exit 2 is the operator's own 'stopped before the qualifier' code; a traceback, a hang or a different reason is a defect. A simulated PASS needs a worker started with the consciousness flags, a SelfState, an approved Person Revision and a restart choreography the simulator cannot drive yet (pending)."
     },
     {
       "id": "release-assembler-no-evidence-fail-closed",
