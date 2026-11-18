@@ -49,6 +49,8 @@ function Invoke-GhJson {
 
 if ($PSVersionTable.PSVersion.Major -lt 7) { throw "PowerShell 7+ (pwsh) is required." }
 
+# This script lives in the repository ROOT, beside configure-repository-authority.ps1
+# and verify-repository-authority.ps1 (not under scripts/); $PSScriptRoot is the root.
 $repoRoot = (Resolve-Path $PSScriptRoot).Path
 $branchRaw = @(& git -C $repoRoot branch --show-current 2>&1)
 if ($LASTEXITCODE -ne 0 -or $branchRaw.Count -ne 1 -or ([string]$branchRaw[0]).Trim() -ne "main") {
@@ -127,7 +129,23 @@ if ($otherActive.Count -gt 0) {
 }
 $classic = Invoke-GhJson -ApiPath "repos/Ternedal/ModelRig/branches/main/protection" -AllowFailure
 
-$rulesetJson = Get-Content -LiteralPath $rulesetFile -Raw -Encoding utf8
+# The versioned file carries a top-level "_comment" for readers; the REST API
+# gets only the ruleset fields (name, target, enforcement, bypass_actors,
+# conditions, rules). Anything else is a mistake in the file, not metadata.
+$rulesetObject = Get-Content -LiteralPath $rulesetFile -Raw -Encoding utf8 | ConvertFrom-Json -Depth 60
+$allowedTopLevel = @("name", "target", "enforcement", "bypass_actors", "conditions", "rules")
+$payloadObject = [ordered]@{}
+foreach ($property in $rulesetObject.PSObject.Properties) {
+    if ($property.Name -eq "_comment") { continue }
+    if ($allowedTopLevel -notcontains $property.Name) {
+        throw "The versioned ruleset has an unexpected top-level field '$($property.Name)'. Only $($allowedTopLevel -join ', ') are sent. Nothing was sent."
+    }
+    $payloadObject[$property.Name] = $property.Value
+}
+foreach ($required in $allowedTopLevel) {
+    if (-not $payloadObject.Contains($required)) { throw "The versioned ruleset lacks the required top-level field '$required'. Nothing was sent." }
+}
+$rulesetJson = $payloadObject | ConvertTo-Json -Depth 60
 $method = if ($sameName.Count -eq 1) { "PUT" } else { "POST" }
 $apiPath = if ($sameName.Count -eq 1) { "repos/Ternedal/ModelRig/rulesets/$($sameName[0].id)" } else { "repos/Ternedal/ModelRig/rulesets" }
 

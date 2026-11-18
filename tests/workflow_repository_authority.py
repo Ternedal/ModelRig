@@ -188,6 +188,32 @@ def main() -> None:
             rule["parameters"]["required_status_checks"] = rule["parameters"]["required_status_checks"][:-1]
     assert evaluate(r=[mutant])["passed"] is False, "dropping one required check from the shipped ruleset must fail"
 
+    # ADR-SYS-003 step-3 tool: configure-repository-authority-ruleset.ps1 lives in
+    # the repository ROOT beside the classic configure script and the verifier
+    # (ChatGPT P1 on #2429 assumed scripts/), resolves the evaluator, the ruleset
+    # and the verifier relative to $PSScriptRoot = root, and sends the REST API
+    # only the ruleset fields -- never the file's "_comment".
+    tool = ROOT / "configure-repository-authority-ruleset.ps1"
+    assert tool.is_file(), "the ruleset configure script must live in the repository root"
+    assert not (ROOT / "scripts" / "configure-repository-authority-ruleset.ps1").exists(), "no second copy under scripts/"
+    assert (ROOT / "verify-repository-authority.ps1").is_file() and (ROOT / "configure-repository-authority.ps1").is_file(), "its siblings are in the root too"
+    import sys as _sys
+    _sys.path.insert(0, str(ROOT / "tests"))
+    from support.source_code import code_of
+    tool_src = code_of(tool)
+    assert '$repoRoot = (Resolve-Path $PSScriptRoot).Path' in tool_src, "repo root is the script's own directory (the root)"
+    assert 'Join-Path $repoRoot "scripts\\repository_authority.py"' in tool_src, "evaluator resolved from the root"
+    assert 'Join-Path $repoRoot "deploy\\repository-authority\\main-ruleset.json"' in tool_src, "ruleset resolved from the root"
+    assert 'Join-Path $repoRoot "verify-repository-authority.ps1"' in tool_src, "verifier resolved from the root"
+    assert '$allowedTopLevel = @("name", "target", "enforcement", "bypass_actors", "conditions", "rules")' in tool_src, "request shape is the API's six fields"
+    assert 'if ($property.Name -eq "_comment") { continue }' in tool_src, "_comment is stripped before POST/PUT"
+    assert "$rulesetJson = $payloadObject | ConvertTo-Json -Depth 60" in tool_src, "the request body is built from the filtered object, not the raw file"
+    assert "Get-Content -LiteralPath $rulesetFile -Raw -Encoding utf8\n" not in tool_src.replace("| ConvertFrom-Json", "\n"), "the raw file text is never the request body"
+    allowed = {"name", "target", "enforcement", "bypass_actors", "conditions", "rules"}
+    extra = set(shipped) - allowed - {"_comment"}
+    assert not extra, f"the shipped ruleset carries fields the API does not take: {sorted(extra)}"
+    assert allowed <= set(shipped), "the shipped ruleset carries all six API fields"
+
     print(
         "===== REPOSITORY AUTHORITY: "
         f"{len(module.REQUIRED_STATUS_CHECKS)} checks; fail-closed matrix passed ====="
