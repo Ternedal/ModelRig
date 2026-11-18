@@ -30,11 +30,20 @@ DANISH = "en mand i sort frakke ved en sø, en svane i baggrunden"
 ENGLISH = "a man in a black coat by a lake, a swan in the background"
 
 
+LOCAL_SHOW = {"modelfile": "FROM qwen3:4b", "details": {"format": "gguf", "family": "qwen3"}, "model_info": {}}
+
+
 class ScriptedOllama:
-    """One answer per test: a JSON body, a raw body, a status or a delay. Records every request."""
+    """One /api/generate answer per test: a JSON body, a raw body, a status or a delay. /api/show answers
+    show_reply (local model metadata by default) with show_status. Records generate requests in
+    `requests` and show requests in `shows`."""
 
     def __init__(self):
         self.requests = []
+        self.shows = []
+        self.show_reply = LOCAL_SHOW
+        self.show_raw = None
+        self.show_status = 200
         self.reply = {"response": ENGLISH}
         self.raw = None
         self.status = 200
@@ -45,7 +54,17 @@ class ScriptedOllama:
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
                 length = int(self.headers.get("Content-Length", "0"))
-                server.requests.append((self.path, json.loads(self.rfile.read(length) or b"{}")))
+                payload = json.loads(self.rfile.read(length) or b"{}")
+                if self.path == "/api/show":
+                    server.shows.append(payload)
+                    body = server.show_raw if server.show_raw is not None else json.dumps(server.show_reply).encode("utf-8")
+                    self.send_response(server.show_status)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                server.requests.append((self.path, payload))
                 if server.delay_s:
                     time.sleep(server.delay_s)
                 body = server.raw if server.raw is not None else json.dumps(server.reply).encode("utf-8")
@@ -184,6 +203,46 @@ class RewriteTests(unittest.TestCase):
             raise RuntimeError("socket library on fire")
         odd = PromptTranslator(url=DEFAULT_URL, model="qwen3:4b", opener=boom)
         self.assertEqual(odd.rewrite(DANISH, max_chars=500), (DANISH, "fallback:error"))
+
+    # --- execution: the model must be local by the daemon's own metadata (#2418 review, P2) ---------
+    def test_a_cloud_tagged_model_is_refused_at_construction(self):
+        for model in ("gpt-oss:120b-cloud", "qwen3-coder:480b-cloud", "deepseek-v3.1:671b-cloud", "kimi-k2:cloud",
+                      "gpt-oss:CLOUD", "something-cloud"):
+            with self.subTest(model=model), self.assertRaisesRegex(PromptTranslationConfigError, "cloud"):
+                PromptTranslator(url=self.ollama.url, model=model)
+        for model in ("qwen3:4b", "cloudy-llama:7b", "llama3.2:3b-instruct-q4"):
+            with self.subTest(model=model):
+                PromptTranslator(url=self.ollama.url, model=model)
+
+    def test_the_model_is_checked_before_every_prompt_and_only_its_name_is_sent(self):
+        self.assertEqual(self.rewrite(), (ENGLISH, "translated"))
+        self.assertEqual(self.rewrite(), (ENGLISH, "translated"))
+        self.assertEqual(self.ollama.shows, [{"model": "qwen3:4b"}, {"model": "qwen3:4b"}])
+
+    def test_a_model_the_daemon_runs_remotely_or_cannot_show_gets_no_prompt(self):
+        cases = [
+            ({**LOCAL_SHOW, "remote_model": "gpt-oss:120b", "remote_host": "https://ollama.com:443"}, None, 200,
+             "fallback:model_not_local"),
+            ({**LOCAL_SHOW, "remote_host": "https://ollama.com:443"}, None, 200, "fallback:model_not_local"),
+            ({"modelfile": "FROM x"}, None, 200, "fallback:model_unverified"),       # no details object
+            ({**LOCAL_SHOW, "details": "gguf"}, None, 200, "fallback:model_unverified"),
+            (["details"], None, 200, "fallback:model_unverified"),
+            (None, b"<html>not json", 200, "fallback:model_unverified"),
+            (None, b"\xff\xfe", 200, "fallback:model_unverified"),
+            ({"error": "model 'qwen3:4b' not found"}, None, 404, "fallback:http_404"),  # unknown model
+            (LOCAL_SHOW, None, 500, "fallback:http_500"),
+        ]
+        for reply, raw, status, outcome in cases:
+            with self.subTest(outcome=outcome, reply=str(reply or raw)[:50]):
+                self.ollama.requests.clear()
+                self.ollama.show_reply, self.ollama.show_raw, self.ollama.show_status = reply, raw, status
+                self.assertEqual(self.rewrite(), (DANISH, outcome))
+                self.assertEqual(self.ollama.requests, [], "no /api/generate, so the prompt was never sent")
+        self.ollama.show_reply, self.ollama.show_raw, self.ollama.show_status = LOCAL_SHOW, None, 200
+        self.assertEqual(self.rewrite(), (ENGLISH, "translated"), "a locally shown model translates")
+        empty_remote = {**LOCAL_SHOW, "remote_host": "", "remote_model": None}
+        self.ollama.show_reply = empty_remote
+        self.assertEqual(self.rewrite(), (ENGLISH, "translated"), "empty remote_* fields are not a remote model")
 
     # --- transport: the bytes of a prompt can only reach the accepted loopback literal ---------------
     def test_proxy_environment_is_ignored_and_the_request_goes_straight_to_loopback(self):

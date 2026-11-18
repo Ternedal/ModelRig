@@ -11,6 +11,14 @@ Rules:
   bytes of a prompt can only go to the literal address that was accepted (D4: nothing of a media job
   leaves the rig; this is not the chat path, so the cloud policy's "current message" exception does
   not apply).
+- **Local model only, checked before every prompt.** A local Ollama daemon also runs cloud models
+  (Ollama Cloud, tags like `gpt-oss:120b-cloud`) by forwarding the prompt upstream, past every
+  transport guarantee above (#2418 review, P2). So a cloud-tagged model name is refused at
+  construction, and before each `/api/generate` the translator asks the daemon about the model
+  (`/api/show`): the answer must be local model metadata (a `details` object) with no `remote_*`
+  field, or the job renders the original prompt and nothing is sent (`fallback:model_not_local`,
+  `fallback:model_unverified`). Limitation, kept honest: which fields mark a remote model is
+  Ollama's contract, not ours; docs/MEDIA_PROMPT_TRANSLATION.md says how to check it on the rig.
 - **Fail-open.** Whatever goes wrong (Ollama down, timeout, bad JSON, an answer that is empty,
   too long, not printable or not one line), the job renders with the user's original prompt.
   A translation problem never fails a job.
@@ -63,6 +71,21 @@ Opener = Callable[..., object]  # urllib.request.urlopen(request, timeout=...) o
 
 class PromptTranslationConfigError(ValueError):
     pass
+
+
+class _ModelNotLocal(Exception):
+    """The daemon did not show the model as local; the outcome code says why. Not a ValueError, so
+    it is never mistaken for a bad generate reply."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+def _is_cloud_tagged(model: str) -> bool:
+    """Ollama Cloud models carry a `cloud` tag (`name:cloud`) or a `-cloud` suffix on the tag."""
+    tag = model.rsplit(":", 1)[-1].lower() if ":" in model else ""
+    return tag == "cloud" or tag.endswith("-cloud") or model.lower().endswith("-cloud")
 
 
 def _is_local_ollama_url(url: str) -> bool:
@@ -120,6 +143,8 @@ class PromptTranslator:
             raise PromptTranslationConfigError(f"{URL_ENV} must be a plain http URL on loopback (media never leaves the rig)")
         if not isinstance(model, str) or not _MODEL.fullmatch(model):
             raise PromptTranslationConfigError(f"{MODEL_ENV} is malformed")
+        if _is_cloud_tagged(model):
+            raise PromptTranslationConfigError(f"{MODEL_ENV} names a cloud model (media never leaves the rig)")
         if type(timeout_s) not in (int, float) or not 1 <= timeout_s <= MAX_TIMEOUT_S:
             raise PromptTranslationConfigError(f"{TIMEOUT_ENV} must be 1..{int(MAX_TIMEOUT_S)} seconds")
         self.url = url.rstrip("/")
@@ -132,7 +157,10 @@ class PromptTranslator:
         """Return (prompt to render, outcome). outcome is 'translated', 'unchanged' or 'fallback:<code>';
         on any fallback the prompt is the original. Never raises, never logs the prompt."""
         try:
+            self._require_local_model()
             text = self._ask(prompt)
+        except _ModelNotLocal as exc:
+            return prompt, f"fallback:{exc.code}"
         except urllib.error.HTTPError as exc:
             return prompt, f"fallback:http_{exc.code}"
         except urllib.error.URLError as exc:
@@ -155,20 +183,37 @@ class PromptTranslator:
             return prompt, "unchanged"
         return cleaned, "translated"
 
+    def _post(self, path: str, payload: dict) -> bytes:
+        request = urllib.request.Request(self.url + path, data=json.dumps(payload).encode("utf-8"), method="POST",
+                                         headers={"Content-Type": "application/json"})
+        with self._opener(request, timeout=self.timeout_s) as response:
+            return response.read(1 << 20)  # model metadata and a translation are small; a megabyte is already wrong
+
+    def _require_local_model(self) -> None:
+        """Ask the daemon about the model before any prompt is sent. Local model metadata has a
+        `details` object; a model the daemon forwards upstream reports `remote_host`/`remote_model`.
+        Anything else (unknown model -> HTTP 404, not JSON, no details) is not proof of local
+        execution and refuses. Only the model name is sent here, never the prompt."""
+        try:
+            info = json.loads(self._post("/api/show", {"model": self.model}).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            raise _ModelNotLocal("model_unverified") from None
+        if not isinstance(info, dict) or not isinstance(info.get("details"), dict):
+            raise _ModelNotLocal("model_unverified")
+        if any(key.startswith("remote") and value for key, value in info.items()):
+            raise _ModelNotLocal("model_not_local")
+
     def _ask(self, prompt: str) -> str:
-        body = json.dumps({
+        payload = {
             "model": self.model,
             "system": SYSTEM_PROMPT,
             "prompt": prompt,
             "stream": False,
             "think": False,  # qwen3 and friends: no reasoning preamble; older servers ignore the key
             "options": {"temperature": 0, "num_predict": MAX_OUTPUT_TOKENS},
-        }).encode("utf-8")
-        request = urllib.request.Request(self.url + "/api/generate", data=body, method="POST",
-                                         headers={"Content-Type": "application/json"})
+        }
         started = time.monotonic()
-        with self._opener(request, timeout=self.timeout_s) as response:
-            raw = response.read(1 << 20)  # a translation is small; a megabyte is already wrong
+        raw = self._post("/api/generate", payload)
         self.last_duration_s = time.monotonic() - started
         reply = json.loads(raw.decode("utf-8"))
         if not isinstance(reply, dict) or not isinstance(reply.get("response"), str):
