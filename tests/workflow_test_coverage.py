@@ -125,6 +125,11 @@ check(
     "exact-head qualification is the sole Stage-B authority for non-draft PRs and pushes to main",
 )
 check(
+    "needs.release-class.outputs.docs_only != 'true'" in exact_head_stage_b
+    and "scripts/release_fingerprint.py changed" in exact_head_workflow,
+    "exact-head qualification skips Stage-B for documentation-only PRs as classified by the ADR-SYS-002 fingerprint tool",
+)
+check(
     "ready_for_review" in exact_head_workflow.split("jobs:", 1)[0],
     "a draft that becomes ready triggers exact-head qualification with Stage-B",
 )

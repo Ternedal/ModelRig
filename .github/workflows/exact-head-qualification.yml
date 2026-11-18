@@ -137,14 +137,53 @@ jobs:
 
   # CI-tiering (#2413): the Stage B chain is ~650 job-minutes and 2-3 h of
   # wall-clock, 92% of a PR run. It runs on main pushes, on workflow_dispatch,
+  # Release class of a PR (ADR-SYS-002): does merge-base..head touch only the
+  # documentation class? Computed by scripts/release_fingerprint.py, the same
+  # classifier the freeze reader uses, so "docs-only" means the same thing in
+  # CI as in a freeze receipt: protected documents (RIGDAG_SIMPEL.md, ...) and
+  # every protected prefix count as code. Fail-closed by construction: if this
+  # job fails or is skipped, docs_only is empty and Stage B runs. Pushes to main
+  # and dispatch never consult it.
+  release-class:
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Classify merge-base..head with the release fingerprint
+        id: classify
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          base="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
+          result="$(python3 -B scripts/release_fingerprint.py changed "$base" "$HEAD_SHA")"
+          echo "$result"
+          docs_only="$(printf '%s' "$result" | python3 -c 'import json,sys; print(str(json.load(sys.stdin)["docs_only"]).lower())')"
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+
   # and on pull requests that are NOT drafts; a draft becoming ready fires
   # ready_for_review, which re-qualifies the same head with Stage B included.
   # The merge rule is unchanged: full CI incl. Stage B green on the qualified
-  # commit. On a draft this job is skipped, never reported green.
+  # commit. On a draft this job is skipped, never reported green. A PR whose
+  # merge-base..head is documentation-only (release-class above) is skipped
+  # too: Stage B qualifies code, and the documentation class is by definition
+  # outside the release fingerprint (ADR-SYS-002 D1).
   stage-b-slices:
+    needs: [release-class]
     if: >-
-      github.event_name != 'pull_request' ||
-      (github.event.action != 'closed' && github.event.pull_request.draft != true)
+      !cancelled() && (
+        github.event_name != 'pull_request' ||
+        (github.event.action != 'closed' && github.event.pull_request.draft != true &&
+         needs.release-class.outputs.docs_only != 'true')
+      )
     uses: ./.github/workflows/_stage_b_slices.yml
     with:
       head_sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
