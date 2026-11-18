@@ -62,6 +62,7 @@ kaliv-tools-state.json.tmp
 /validation/rig-preflight-latest.json
 # V1 gate 2: one directory per consciousness_live_lifecycle_operator.py run.
 /validation/consciousness-lifecycle/
+/validation/e2e-latency/
 /validation/rig-preflight-latest.json.tmp
 /validation/agent3-model-eval-latest.json
 /validation/agent3-model-eval-latest.json.tmp

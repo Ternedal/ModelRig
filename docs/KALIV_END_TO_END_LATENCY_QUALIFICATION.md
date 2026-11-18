@@ -107,17 +107,25 @@ observer identity are the worker's own.
 utterance, posts it, hands the reply to the player on the rig, and only then
 reports the start.
 
-Start the worker from the clean candidate checkout with the Consciousness
-flags and profile of
-[`consciousness-core/LIVE_CYCLE_QUALIFICATION.md`](consciousness-core/LIVE_CYCLE_QUALIFICATION.md)
-(the route needs the live cognitive session, speech recognition and speech
-synthesis), plus:
+Start the worker from the clean candidate checkout with the validation stack.
+The route needs the live cognitive session of
+[`consciousness-core/LIVE_CYCLE_QUALIFICATION.md`](consciousness-core/LIVE_CYCLE_QUALIFICATION.md),
+a CognitiveProfile, speech recognition and speech synthesis.
+`-EnableE2eLatency` writes the latency flag, the checkout's HEAD SHA and the
+evidence root `validation\e2e-latency` into the generated worker cmd, together
+with the live-cycle flags and the profile (default
+`deploy\consciousness-dev-profile.json`, or `-ConsciousnessProfileFile`):
 
 ```powershell
-$env:KALIV_E2E_LATENCY_QUALIFICATION_ENABLED = "1"
-$env:KALIV_E2E_LATENCY_CANDIDATE_GIT_SHA = (git rev-parse HEAD)
-$env:KALIV_E2E_LATENCY_EVIDENCE_ROOT = (Join-Path (Get-Location) "validation\e2e-latency")
+.\scripts\start-stage-a-validation-stack.ps1 -PlannerModel qwen3:14b `
+  -ValidationReport <absolute path> -WorkerOnly -EnableE2eLatency [-ConsciousnessProfileFile <file>]
 ```
+
+The worker cmd builds its environment explicitly, so `$env:` lines set in the
+operator's shell are not the authority. The evidence root is git-ignored, so
+the checkout stays clean. Speech recognition and synthesis must be installed
+in the worker's Python; without them the route answers 503 `voice
+qualification backend unavailable`.
 
 Then, in another window in the same checkout:
 
