@@ -234,6 +234,14 @@ class DiffusersImageAdapter:
             "width": request.width,
             "height": request.height,
         }
+        # Profile render defaults (DiffusersOptions). Only keys the operator set are passed, so a
+        # profile without them renders exactly as before this slice.
+        options = self.profile.backend_options
+        if options is not None:
+            if options.guidance_scale is not None:
+                kwargs["guidance_scale"] = options.guidance_scale
+            if options.negative_prompt is not None:
+                kwargs["negative_prompt"] = options.negative_prompt
         if request.seed is not None:
             import torch
             kwargs["generator"] = torch.Generator(device="cpu").manual_seed(request.seed)
