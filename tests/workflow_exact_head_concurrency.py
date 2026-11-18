@@ -52,6 +52,27 @@ stage_b_if = stage_b.group("body")
 assert "github.event.pull_request.draft != true" in stage_b_if, "Stage-B must be skipped on draft PRs (#2413)"
 assert "github.event.action != 'closed'" in stage_b_if, "Stage-B must still skip closed PRs"
 assert "github.event_name != 'pull_request' ||" in stage_b_if, "main pushes and dispatch must still run Stage-B unconditionally"
+# Docs-only tiering (ADR-SYS-002 D1 applied to CI): a release-class job runs
+# scripts/release_fingerprint.py on merge-base..head and Stage-B is skipped when
+# the PR is documentation-only. Fail-closed: the job exists only for PRs, Stage-B
+# consults it through needs.* with !cancelled() (never always(), which would run
+# Stage-B in a cancelled run), and an empty/failed classification runs Stage-B.
+rc = re.search(r"(?ms)^  release-class:\n(?P<body>.*?)(?=^  [a-z-]+:\n)", WORKFLOW)
+assert rc is not None, "release-class job must exist"
+rc_body = rc.group("body")
+assert "if: github.event_name == 'pull_request' && github.event.action != 'closed'" in rc_body, "release-class runs only for open PRs"
+assert "fetch-depth: 0" in rc_body, "release-class needs history to find the merge-base"
+assert 'ref: ${{ github.event.pull_request.head.sha }}' in rc_body, "release-class checks out the exact PR head"
+assert 'git show "$BASE_SHA:scripts/release_class.sh" > "$RUNNER_TEMP/release_class.sh"' in rc_body, "release-class takes the script from the BASE commit, never from the PR head (P2 on #2422)"
+assert 'bash "$RUNNER_TEMP/release_class.sh" "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT"' in rc_body, "release-class runs the base's script with base, head and the output file"
+assert "bash scripts/release_class.sh" not in rc_body, "release-class must never run the head's copy of the script"
+assert 'echo "docs_only=false" >> "$GITHUB_OUTPUT"' in rc_body and 'git cat-file -e "$BASE_SHA:scripts/release_class.sh"' in rc_body, "a base without the script classifies the PR as code"
+assert "docs_only: ${{ steps.classify.outputs.docs_only }}" in rc_body, "release-class exposes docs_only as a job output"
+assert "needs: [release-class]" in stage_b_if, "Stage-B must depend on release-class"
+assert "needs.release-class.outputs.docs_only != 'true'" in stage_b_if, "Stage-B must be skipped on docs-only PRs"
+assert "!cancelled() &&" in stage_b_if and "always()" not in stage_b_if, "Stage-B must use !cancelled(), never always()"
+assert "github.event_name != 'pull_request' ||" in stage_b_if.split("!cancelled()", 1)[1], "pushes to main and dispatch bypass the release class entirely"
+
 core = re.search(r"(?ms)^  exact-head-core:\n(?P<body>.*?)(?=^    steps:)", WORKFLOW)
 assert core is not None and "draft" not in core.group("body"), "exact-head-core must run on drafts too"
 legacy = re.search(r"(?ms)^  legacy-merge-tree-equivalence:\n(?P<body>.*?)(?=^    steps:)", WORKFLOW)
