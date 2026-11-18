@@ -306,6 +306,13 @@ def parse_profile(obj: object) -> ModelProfile:
                 negative_prompt=(_negative_prompt(options["negative_prompt"])
                                  if "negative_prompt" in options else None),
             )
+            # The SDXL negative branch runs only when guidance_scale > 1 (do_classifier_free_guidance);
+            # at exactly 1.0 the negative prompt would be accepted and silently ignored (#2417, P3).
+            # Without an explicit guidance_scale the pipeline default (5.0) applies, so that is fine.
+            if (backend_options.negative_prompt is not None and backend_options.guidance_scale is not None
+                    and backend_options.guidance_scale <= 1.0):
+                raise _fail("backend_options.negative_prompt has no effect with guidance_scale "
+                            f"{backend_options.guidance_scale} (classifier-free guidance needs guidance_scale > 1)")
 
     return ModelProfile(
         profile_id=profile_id, modality=modality, tasks=frozenset(tasks), backend=backend,

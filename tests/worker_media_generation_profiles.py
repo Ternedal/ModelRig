@@ -143,6 +143,16 @@ class ProfileParsingTests(unittest.TestCase):
         with self.subTest("comfyui does not take the diffusers keys"), self.assertRaises(GenerationError):
             parse_profile(video_profile(backend_options=dict(comfy, guidance_scale=6.0)))
 
+    def test_negative_prompt_is_refused_when_guidance_disables_the_negative_branch(self):
+        # SDXL runs the negative branch only when guidance_scale > 1; at 1.0 it would be ignored
+        for scale in (1.0, 1):
+            with self.subTest(scale=scale):
+                with self.assertRaisesRegex(GenerationError, "guidance_scale > 1"):
+                    parse_profile(image_profile(backend_options={"guidance_scale": scale, "negative_prompt": "blurry"}))
+        just_above = parse_profile(image_profile(backend_options={"guidance_scale": 1.01, "negative_prompt": "blurry"}))
+        self.assertEqual(just_above.backend_options.negative_prompt, "blurry")
+        self.assertEqual(parse_profile(image_profile(backend_options={"guidance_scale": 1.0})).backend_options.guidance_scale, 1.0)
+
     def test_negative_prompt_is_refused_where_the_pipeline_would_silently_ignore_it(self):
         # Flux and Qwen honour negative_prompt only with true_cfg_scale > 1, which the adapter never sets
         # (#2417 review, Codex P2): accepting the key there would be an ineffective setting.
