@@ -223,6 +223,16 @@ def main() -> None:
     assert 'if ($property.Name -eq "_comment") { continue }' in tool_src, "_comment is stripped before POST/PUT"
     assert "$rulesetJson = $payloadObject | ConvertTo-Json -Depth 60" in tool_src, "the request body is built from the filtered object, not the raw file"
     assert "Get-Content -LiteralPath $rulesetFile -Raw -Encoding utf8\n" not in tool_src.replace("| ConvertFrom-Json", "\n"), "the raw file text is never the request body"
+    # Codex P1 on #2429: -Apply must refuse while any required-check workflow lacks
+    # merge_group (a queue would wait forever). The script checks the five
+    # producers before sending; the producer map must name every queue context.
+    assert '"exact-head-qualification.yml": ("exact-head-core", "legacy-merge-tree-equivalence", "stage-b-verdict")' in tool_src, "the producer map covers the queue-only context too"
+    assert "Merge-queue prerequisite missing" in tool_src and "Nothing was sent." in tool_src, "a missing merge_group trigger refuses before any write"
+    producer_contexts = set()
+    import re as _re
+    producers_block = tool_src.split("producers = {", 1)[1].split("}", 1)[0]
+    producer_contexts = set(_re.findall(r'"([^"]+)"', producers_block)) - {"ci.yml", "codeql.yml", "agent3-diagnostics.yml", "agent3-full-diagnostics.yml", "exact-head-qualification.yml"}
+    assert producer_contexts == set(module.QUEUE_REQUIRED_STATUS_CHECKS), ("the script's producer map must equal the queue-required set", producer_contexts ^ set(module.QUEUE_REQUIRED_STATUS_CHECKS))
     allowed = {"name", "target", "enforcement", "bypass_actors", "conditions", "rules"}
     extra = set(shipped) - allowed - {"_comment"}
     assert not extra, f"the shipped ruleset carries fields the API does not take: {sorted(extra)}"

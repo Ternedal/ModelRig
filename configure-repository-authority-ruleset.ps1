@@ -112,6 +112,36 @@ if ($null -eq $offline.bypass_actors -or @($offline.bypass_actors).Count -ne 0) 
 $rulesetName = [string]$offline.name
 if ([string]::IsNullOrWhiteSpace($rulesetName)) { throw "The versioned ruleset has no name." }
 
+# Migration prerequisite (Codex P1 on #2429): a merge queue reports required
+# checks only from workflows with a merge_group trigger. Every workflow that
+# produces a queue-required context must carry it in THIS checkout, or queued
+# PRs would wait forever. Checked here, before anything is sent.
+$triggerCode = @'
+import pathlib, re, sys
+root = pathlib.Path(sys.argv[1])
+producers = {
+    "ci.yml": ("test / test", "test / test-windows-appliance", "test / test-windows-tool-isolation",
+               "browser-use-runtime-contract", "android-compile", "desktop-compile",
+               "desktop-dpapi-windows", "agent3-memory-dpapi-windows"),
+    "codeql.yml": ("analyze (go)", "analyze (python)"),
+    "agent3-diagnostics.yml": ("agent3-python",),
+    "agent3-full-diagnostics.yml": ("full-test-log",),
+    "exact-head-qualification.yml": ("exact-head-core", "legacy-merge-tree-equivalence", "stage-b-verdict"),
+}
+missing = []
+for name in producers:
+    text = (root / ".github" / "workflows" / name).read_text(encoding="utf-8").split("jobs:", 1)[0]
+    if not re.search(r"(?m)^  merge_group:\n(?:    .*\n)*?    types: \[checks_requested\]", text):
+        missing.append(name)
+print(",".join(missing))
+'@
+$missingRaw = @(& $Python -c $triggerCode $repoRoot 2>&1)
+if ($LASTEXITCODE -ne 0 -or $missingRaw.Count -ne 1) { throw "Could not check the workflows for merge_group triggers." }
+$missingTriggers = [string]$missingRaw[0]
+if (-not [string]::IsNullOrWhiteSpace($missingTriggers)) {
+    throw "Merge-queue prerequisite missing: these required-check workflows have no merge_group trigger in this checkout: $missingTriggers. A queue would wait forever for their checks. Nothing was sent."
+}
+
 # Local HEAD must be GitHub main: the ruleset is applied from the commit that carries it.
 $branch = Invoke-GhJson -ApiPath "repos/Ternedal/ModelRig/branches/main"
 $githubHead = Need-Revision -Value ([string]$branch.commit.sha) -Label "GitHub main HEAD"
