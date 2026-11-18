@@ -46,7 +46,8 @@ import time
 import urllib.error
 import urllib.request
 import wave
-from dataclasses import dataclass
+from datetime import datetime, timezone
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -273,6 +274,21 @@ def substitute(value: str, variables: dict[str, str]) -> str:
     return manifest_mod.PLACEHOLDER.sub(repl, value)
 
 
+def resolved_expectations(op: manifest_mod.Operator, variables: dict[str, str]) -> manifest_mod.Operator:
+    """The operator with placeholders in its expected paths substituted (files_exist, files_absent, jsonl_last.path)."""
+    expect = op.expect
+    jsonl_last = None
+    if expect.jsonl_last is not None:
+        jsonl_last = dict(expect.jsonl_last, path=substitute(expect.jsonl_last["path"], variables))
+    resolved = replace(
+        expect,
+        files_exist=tuple(substitute(p, variables) for p in expect.files_exist),
+        files_absent=tuple(substitute(p, variables) for p in expect.files_absent),
+        jsonl_last=jsonl_last,
+    )
+    return replace(op, expect=resolved)
+
+
 def command_for(op: manifest_mod.Operator, repo_root: Path, variables: dict[str, str]) -> list[str]:
     args = [substitute(a, variables) for a in op.args]
     script = str(repo_root / op.script)
@@ -355,6 +371,12 @@ def judge(op: manifest_mod.Operator, *, exit_code: int | None, stdout: str, stde
     for relative in expect.files_exist:
         if not (repo_root / relative).is_file():
             failures.append(f"expected file missing: {relative}")
+    for relative in expect.files_absent:
+        if (repo_root / relative).exists():
+            failures.append(f"file must not exist after the run: {relative}")
+    for text in expect.stdout_contains:
+        if text not in stdout:
+            failures.append(f"stdout lacks {text!r}")
     return failures
 
 
@@ -373,7 +395,7 @@ def run_operator(op: manifest_mod.Operator, *, repo_root: Path, variables: dict[
         stdout = (exc.stdout or b"").decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
         stderr = (exc.stderr or b"").decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
     duration = time.monotonic() - started
-    failures = judge(op, exit_code=exit_code, stdout=stdout, stderr=stderr, repo_root=repo_root)
+    failures = judge(resolved_expectations(op, variables), exit_code=exit_code, stdout=stdout, stderr=stderr, repo_root=repo_root)
     return {
         "id": op.id,
         "script": op.script,
@@ -443,6 +465,8 @@ def main(argv: list[str] | None = None) -> int:
             for problem in stack_problems:
                 print(f"STACK: {problem}")
 
+        scratch = work_dir / "scratch" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        scratch.mkdir(parents=True, exist_ok=False)
         variables = {
             "REPO": str(repo_root),
             "HEAD_SHA": head,
@@ -452,6 +476,7 @@ def main(argv: list[str] | None = None) -> int:
             "HEARTBEAT": str(stack.heartbeat_path) if stack else "",
             "FRESH_WAV": str(work_dir / "fresh.wav"),
             "WORK_DIR": str(work_dir),
+            "SCRATCH": str(scratch),
             "PYTHON": sys.executable,
         }
         env = dict(isolated_environment(), PYTHONDONTWRITEBYTECODE="1", KALIV_DATA_DIR=str(work_dir / "kaliv-data"))
