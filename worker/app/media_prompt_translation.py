@@ -11,14 +11,17 @@ Rules:
   bytes of a prompt can only go to the literal address that was accepted (D4: nothing of a media job
   leaves the rig; this is not the chat path, so the cloud policy's "current message" exception does
   not apply).
-- **Local model only, checked before every prompt.** A local Ollama daemon also runs cloud models
+- **Local model only, proven before every prompt.** A local Ollama daemon also runs cloud models
   (Ollama Cloud, tags like `gpt-oss:120b-cloud`) by forwarding the prompt upstream, past every
-  transport guarantee above (#2418 review, P2). So a cloud-tagged model name is refused at
-  construction, and before each `/api/generate` the translator asks the daemon about the model
-  (`/api/show`): the answer must be local model metadata (a `details` object) with no `remote_*`
-  field, or the job renders the original prompt and nothing is sent (`fallback:model_not_local`,
-  `fallback:model_unverified`). Limitation, kept honest: which fields mark a remote model is
-  Ollama's contract, not ours; docs/MEDIA_PROMPT_TRANSLATION.md says how to check it on the rig.
+  transport guarantee above (#2418 review, P2). Measured on the rig (Ollama 0.40.16, 18 Nov 2026):
+  `/api/show` for a cloud model that was never pulled answers 200 with a `details` object and NO
+  `remote_*` field, so "no remote field" proves nothing. The contract is therefore an allowlist of
+  what a local model looks like, all of it required, before each `/api/generate`:
+  the model is in the daemon's local inventory (`/api/tags`) with `details.format == "gguf"` and a
+  positive size, and `/api/show` reports `details.format == "gguf"`, carries a `modelfile`, and no
+  non-empty `remote_*` field. The cloud model above fails four of those. Anything else renders the
+  original prompt and sends nothing (`fallback:model_not_installed`, `fallback:model_not_local`,
+  `fallback:model_unverified`). A cloud-tagged name is also refused at construction.
 - **Fail-open.** Whatever goes wrong (Ollama down, timeout, bad JSON, an answer that is empty,
   too long, not printable or not one line), the job renders with the user's original prompt.
   A translation problem never fails a job.
@@ -183,25 +186,46 @@ class PromptTranslator:
             return prompt, "unchanged"
         return cleaned, "translated"
 
-    def _post(self, path: str, payload: dict) -> bytes:
-        request = urllib.request.Request(self.url + path, data=json.dumps(payload).encode("utf-8"), method="POST",
-                                         headers={"Content-Type": "application/json"})
+    def _post(self, path: str, payload: dict | None) -> bytes:
+        if payload is None:
+            request = urllib.request.Request(self.url + path, method="GET")
+        else:
+            request = urllib.request.Request(self.url + path, data=json.dumps(payload).encode("utf-8"), method="POST",
+                                             headers={"Content-Type": "application/json"})
         with self._opener(request, timeout=self.timeout_s) as response:
             return response.read(1 << 20)  # model metadata and a translation are small; a megabyte is already wrong
 
-    def _require_local_model(self) -> None:
-        """Ask the daemon about the model before any prompt is sent. Local model metadata has a
-        `details` object; a model the daemon forwards upstream reports `remote_host`/`remote_model`.
-        Anything else (unknown model -> HTTP 404, not JSON, no details) is not proof of local
-        execution and refuses. Only the model name is sent here, never the prompt."""
+    def _json(self, path: str, payload: dict | None) -> object:
         try:
-            info = json.loads(self._post("/api/show", {"model": self.model}).decode("utf-8"))
+            return json.loads(self._post(path, payload).decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             raise _ModelNotLocal("model_unverified") from None
-        if not isinstance(info, dict) or not isinstance(info.get("details"), dict):
+
+    def _require_local_model(self) -> None:
+        """Prove the model is a local one before any prompt is sent; only the model name goes out here.
+        Allowlist, measured on Ollama 0.40.16 (see the module docstring): in /api/tags with format gguf
+        and a positive size, and /api/show with format gguf, a modelfile and no non-empty remote_* field.
+        An unknown model (HTTP 404), malformed metadata or anything not matching refuses."""
+        name = self.model if ":" in self.model.rsplit("/", 1)[-1] else self.model + ":latest"
+        tags = self._json("/api/tags", None)
+        if not isinstance(tags, dict) or not isinstance(tags.get("models"), list):
             raise _ModelNotLocal("model_unverified")
-        if any(key.startswith("remote") and value for key, value in info.items()):
+        entry = next((m for m in tags["models"] if isinstance(m, dict) and m.get("name") == name), None)
+        if entry is None:
+            raise _ModelNotLocal("model_not_installed")
+        if not self._looks_local(entry) or type(entry.get("size")) is not int or entry["size"] <= 0:
             raise _ModelNotLocal("model_not_local")
+        show = self._json("/api/show", {"model": self.model})
+        if not isinstance(show, dict) or not isinstance(show.get("details"), dict):
+            raise _ModelNotLocal("model_unverified")
+        if not self._looks_local(show) or not isinstance(show.get("modelfile"), str) or not show["modelfile"]:
+            raise _ModelNotLocal("model_not_local")
+
+    @staticmethod
+    def _looks_local(record: dict) -> bool:
+        details = record.get("details")
+        return (isinstance(details, dict) and details.get("format") == "gguf"
+                and not any(str(key).startswith("remote") and value for key, value in record.items()))
 
     def _ask(self, prompt: str) -> str:
         payload = {

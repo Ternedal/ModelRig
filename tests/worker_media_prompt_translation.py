@@ -30,7 +30,17 @@ DANISH = "en mand i sort frakke ved en sø, en svane i baggrunden"
 ENGLISH = "a man in a black coat by a lake, a swan in the background"
 
 
-LOCAL_SHOW = {"modelfile": "FROM qwen3:4b", "details": {"format": "gguf", "family": "qwen3"}, "model_info": {}}
+# Shapes measured on the rig, Ollama 0.40.16, 18 Nov 2026 (#2418): a local qwen3:14b and a cloud model
+# that was never pulled. The cloud model's /api/show answers 200 with details and NO remote_* field.
+LOCAL_SHOW = {"license": "Apache", "modelfile": "FROM qwen3:4b", "parameters": "", "template": "{{ .Prompt }}",
+              "details": {"parent_model": "", "format": "gguf", "family": "qwen3", "families": ["qwen3"],
+                          "parameter_size": "4.0B", "quantization_level": "Q4_K_M"},
+              "model_info": {}, "capabilities": ["completion"], "modified_at": "2026-11-15T10:00:00Z"}
+CLOUD_SHOW_MEASURED = {"details": {"parent_model": "gpt-oss:120b", "format": "", "family": "gptoss", "families": None,
+                                   "parameter_size": "116829156672", "quantization_level": "MXFP4"},
+                       "model_info": {}, "capabilities": ["completion"], "modified_at": "2026-11-18T20:48:00Z"}
+LOCAL_TAG = {"name": "qwen3:4b", "size": 2497293931, "details": {"format": "gguf", "family": "qwen3"}}
+LOCAL_TAGS = {"models": [LOCAL_TAG, {"name": "nomic-embed-text:latest", "size": 274302450, "details": {"format": "gguf"}}]}
 
 
 class ScriptedOllama:
@@ -44,6 +54,8 @@ class ScriptedOllama:
         self.show_reply = LOCAL_SHOW
         self.show_raw = None
         self.show_status = 200
+        self.tags_reply = LOCAL_TAGS
+        self.tags_gets = 0
         self.reply = {"response": ENGLISH}
         self.raw = None
         self.status = 200
@@ -52,6 +64,19 @@ class ScriptedOllama:
         server = self
 
         class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path != "/api/tags":
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                server.tags_gets += 1
+                body = json.dumps(server.tags_reply).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
             def do_POST(self):
                 length = int(self.headers.get("Content-Length", "0"))
                 payload = json.loads(self.rfile.read(length) or b"{}")
@@ -218,31 +243,48 @@ class RewriteTests(unittest.TestCase):
         self.assertEqual(self.rewrite(), (ENGLISH, "translated"))
         self.assertEqual(self.rewrite(), (ENGLISH, "translated"))
         self.assertEqual(self.ollama.shows, [{"model": "qwen3:4b"}, {"model": "qwen3:4b"}])
+        self.assertEqual(self.ollama.tags_gets, 2, "the local inventory is read before every prompt too")
 
-    def test_a_model_the_daemon_runs_remotely_or_cannot_show_gets_no_prompt(self):
+    def test_a_model_that_is_not_proven_local_gets_no_prompt(self):
         cases = [
-            ({**LOCAL_SHOW, "remote_model": "gpt-oss:120b", "remote_host": "https://ollama.com:443"}, None, 200,
+            # (tags, show, raw show, show status, outcome)
+            (LOCAL_TAGS, CLOUD_SHOW_MEASURED, None, 200, "fallback:model_not_local"),      # the measured cloud shape
+            ({"models": [LOCAL_TAGS["models"][1]]}, LOCAL_SHOW, None, 200, "fallback:model_not_installed"),
+            ({"models": []}, LOCAL_SHOW, None, 200, "fallback:model_not_installed"),
+            ({"models": [{**LOCAL_TAG, "details": {"format": ""}}]}, LOCAL_SHOW, None, 200, "fallback:model_not_local"),
+            ({"models": [{**LOCAL_TAG, "size": 0}]}, LOCAL_SHOW, None, 200, "fallback:model_not_local"),
+            ({"models": [{**LOCAL_TAG, "size": "big"}]}, LOCAL_SHOW, None, 200, "fallback:model_not_local"),
+            ({"models": [{**LOCAL_TAG, "remote_host": "https://ollama.com:443"}]}, LOCAL_SHOW, None, 200,
              "fallback:model_not_local"),
-            ({**LOCAL_SHOW, "remote_host": "https://ollama.com:443"}, None, 200, "fallback:model_not_local"),
-            ({"modelfile": "FROM x"}, None, 200, "fallback:model_unverified"),       # no details object
-            ({**LOCAL_SHOW, "details": "gguf"}, None, 200, "fallback:model_unverified"),
-            (["details"], None, 200, "fallback:model_unverified"),
-            (None, b"<html>not json", 200, "fallback:model_unverified"),
-            (None, b"\xff\xfe", 200, "fallback:model_unverified"),
-            ({"error": "model 'qwen3:4b' not found"}, None, 404, "fallback:http_404"),  # unknown model
-            (LOCAL_SHOW, None, 500, "fallback:http_500"),
+            (LOCAL_TAGS, {**LOCAL_SHOW, "remote_model": "gpt-oss:120b"}, None, 200, "fallback:model_not_local"),
+            (LOCAL_TAGS, {k: v for k, v in LOCAL_SHOW.items() if k != "modelfile"}, None, 200, "fallback:model_not_local"),
+            (LOCAL_TAGS, {**LOCAL_SHOW, "details": {**LOCAL_SHOW["details"], "format": "safetensors"}}, None, 200,
+             "fallback:model_not_local"),
+            (LOCAL_TAGS, {**LOCAL_SHOW, "details": "gguf"}, None, 200, "fallback:model_unverified"),
+            (LOCAL_TAGS, None, b"<html>not json", 200, "fallback:model_unverified"),
+            (LOCAL_TAGS, None, b"\xff\xfe", 200, "fallback:model_unverified"),
+            (LOCAL_TAGS, {"error": "model 'qwen3:4b' not found"}, None, 404, "fallback:http_404"),
+            ({"tags": []}, LOCAL_SHOW, None, 200, "fallback:model_unverified"),
+            (["qwen3:4b"], LOCAL_SHOW, None, 200, "fallback:model_unverified"),
         ]
-        for reply, raw, status, outcome in cases:
-            with self.subTest(outcome=outcome, reply=str(reply or raw)[:50]):
+        for tags, show, raw, status, outcome in cases:
+            with self.subTest(outcome=outcome, tags=str(tags)[:40], show=str(show or raw)[:40]):
                 self.ollama.requests.clear()
-                self.ollama.show_reply, self.ollama.show_raw, self.ollama.show_status = reply, raw, status
+                self.ollama.tags_reply = tags
+                self.ollama.show_reply, self.ollama.show_raw, self.ollama.show_status = show, raw, status
                 self.assertEqual(self.rewrite(), (DANISH, outcome))
                 self.assertEqual(self.ollama.requests, [], "no /api/generate, so the prompt was never sent")
+        self.ollama.tags_reply = LOCAL_TAGS
         self.ollama.show_reply, self.ollama.show_raw, self.ollama.show_status = LOCAL_SHOW, None, 200
-        self.assertEqual(self.rewrite(), (ENGLISH, "translated"), "a locally shown model translates")
-        empty_remote = {**LOCAL_SHOW, "remote_host": "", "remote_model": None}
-        self.ollama.show_reply = empty_remote
+        self.assertEqual(self.rewrite(), (ENGLISH, "translated"), "a proven local model translates")
+        self.ollama.show_reply = {**LOCAL_SHOW, "remote_host": "", "remote_model": None}
         self.assertEqual(self.rewrite(), (ENGLISH, "translated"), "empty remote_* fields are not a remote model")
+
+    def test_an_untagged_model_name_is_looked_up_as_latest(self):
+        untagged = PromptTranslator(url=self.ollama.url, model="nomic-embed-text", timeout_s=5)
+        self.assertEqual(untagged.rewrite(DANISH, max_chars=500), (ENGLISH, "translated"))
+        self.ollama.tags_reply = {"models": [LOCAL_TAG]}
+        self.assertEqual(untagged.rewrite(DANISH, max_chars=500), (DANISH, "fallback:model_not_installed"))
 
     # --- transport: the bytes of a prompt can only reach the accepted loopback literal ---------------
     def test_proxy_environment_is_ignored_and_the_request_goes_straight_to_loopback(self):
