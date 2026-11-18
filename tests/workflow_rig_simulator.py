@@ -164,8 +164,11 @@ with tempfile.TemporaryDirectory() as tmpdir:
         op(files_absent=("${SCRATCH}/evidence",), files_exist=("${WORK_DIR}/j.jsonl",), jsonl_last={"path": "${WORK_DIR}/j.jsonl", "fields": {"a": True}}),
         {"SCRATCH": str(scratch_dir), "WORK_DIR": str(tmp)},
     )
-    check(resolved.expect.files_absent == (str(scratch_dir / "evidence"),) and resolved.expect.files_exist == (str(tmp / "j.jsonl"),)
-          and resolved.expect.jsonl_last["path"] == str(tmp / "j.jsonl"),
+    # Compare as paths: substitute() joins with "/", which Windows accepts but
+    # str(Path) renders with "\\" (maintenance review on #2421, Windows run).
+    check(tuple(map(Path, resolved.expect.files_absent)) == (scratch_dir / "evidence",)
+          and tuple(map(Path, resolved.expect.files_exist)) == (tmp / "j.jsonl",)
+          and Path(resolved.expect.jsonl_last["path"]) == tmp / "j.jsonl",
           "resolved_expectations substitutes placeholders in files_absent, files_exist and jsonl_last.path")
     check(j(resolved, exit_code=0, stdout="", stderr="", repo_root=tmp) == [], "an absolute, substituted path is judged as such (nothing written → passes)")
     (scratch_dir / "evidence").mkdir()
