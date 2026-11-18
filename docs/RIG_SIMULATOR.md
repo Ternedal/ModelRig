@@ -53,9 +53,28 @@ the static operators through the runner on Linux.
 | `recovery-soak-sample-once` | the gate 9 collector journals one probe with all four health flags true |
 | `e2e-latency-voice-driver` | the gate 8 driver fails closed with JSON when the voice runtime is absent |
 
-Pending, with the issue that tracks each: the gate 2 operator (#2407), the gate
-1 assembler (#2408), the qualifiers that need evidence from the rig or from the
-sister repositories, and `freeze_check.py` (needs a token by design).
+## Slice 2a (18/11): the gate 2 operator up to its preflight
+
+| Operator | Proves |
+|---|---|
+| `v1-gate2-operator-preflight-fail-closed` | `consciousness_live_lifecycle_operator.py` (#2407) starts on the rig's interpreter, reads two profile fixtures, reaches `/experimental/consciousness/status` on the production worker entrypoint, parses the runtime-status schema and stops with exit 2 and its own message (`STOPPED: the worker is not ready for the lifecycle gate: flags not set to 1: …`) because the simulated worker runs without the consciousness flags. A traceback, a hang, exit 0/1 or another refusal (`already exists`, `checkout is not clean`) is a defect. |
+
+Two things made this possible and are available to every operator:
+
+- `${SCRATCH}`: a directory the runner creates empty for each run
+  (`validation/rig-simulator/scratch/<utc stamp>/`). Operators that refuse an
+  existing output path (`--out`) take it from there, so a second local run
+  does not fail on "already exists".
+- `expect.stdout_contains`: a list of strings that must all occur on stdout.
+  It is how a fail-closed message is pinned when the operator prints prose
+  instead of JSON. It never reads stderr, so a traceback cannot satisfy it.
+
+Still pending, with the issue that tracks each: a simulated gate 2 *verdict*
+(needs a worker started with the consciousness flags, `KALIV_SCHEDULER=1` and
+the qualification snapshot, a SelfState, an approved Person Revision and a
+restart the operator asks a human for), the gate 1 assembler (#2408), the
+qualifiers that need evidence from the rig or from the sister repositories,
+and `freeze_check.py` (needs a token by design).
 
 ## What it does not prove
 
@@ -72,8 +91,9 @@ sister repositories, and `freeze_check.py` (needs a token by design).
 
 1. Add an entry to `operators.json` with `id`, `script`, `kind`, `args`
    (placeholders: `${REPO}`, `${HEAD_SHA}`, `${BACKEND_URL}`, `${WORKER_URL}`,
-   `${OLLAMA_URL}`, `${HEARTBEAT}`, `${FRESH_WAV}`, `${WORK_DIR}`, `${PYTHON}`),
-   an `expect` that can fail, and a `why` sentence.
+   `${OLLAMA_URL}`, `${HEARTBEAT}`, `${FRESH_WAV}`, `${WORK_DIR}`, `${SCRATCH}`, `${PYTHON}`),
+   an `expect` that can fail (`exit`, and at least one of `stdout_json`,
+   `jsonl_last`, `files_exist`, `stdout_contains`), and a `why` sentence.
 2. Run `python scripts/rig_simulator/run_operators.py --only <id> --backend-bin <modelrig-server>`
    locally, then `python tests/workflow_rig_simulator.py`.
 3. Expectations describe what the simulator guarantees, not what the rig

@@ -97,6 +97,10 @@ with tempfile.TemporaryDirectory() as tmpdir:
     rejects(bad, "an unknown placeholder is rejected", tmp)
     bad = json.loads(json.dumps(base)); bad["operators"][1]["why"] = "runs"
     rejects(bad, "an operator without a reason is rejected", tmp)
+    bad = json.loads(json.dumps(base)); bad["operators"][1]["expect"]["stdout_contains"] = ["ok", ""]
+    rejects(bad, "an empty stdout_contains string is rejected", tmp)
+    bad = json.loads(json.dumps(base)); bad["operators"][1]["expect"]["stdout_contains"] = "STOPPED"
+    rejects(bad, "stdout_contains must be a list, not a bare string", tmp)
     bad = json.loads(json.dumps(base)); bad["pending"].append({"script": base["operators"][1]["script"], "issue": 1, "why": "listed twice on purpose to test the rule"})
     rejects(bad, "a script both run and pending is rejected", tmp)
     bad = json.loads(json.dumps(base)); bad["operators"][0]["platform"] = "any"
@@ -136,6 +140,13 @@ with tempfile.TemporaryDirectory() as tmpdir:
     check(j(op(jsonl_last={"path": "j.jsonl", "fields": {"b": True}}), exit_code=0, stdout="", stderr="", repo_root=tmp), "a journal line with the wrong flag fails")
     check(j(op(jsonl_last={"path": "missing.jsonl", "fields": {"a": True}}), exit_code=0, stdout="", stderr="", repo_root=tmp), "a missing journal fails")
     check(j(op(files_exist=("nope.txt",)), exit_code=0, stdout="", stderr="", repo_root=tmp), "a missing expected file fails")
+    check(j(op(exit=(2,), stdout_contains=("STOPPED: ", "not ready")), exit_code=2, stdout="STOPPED: the worker is not ready\n", stderr="", repo_root=tmp) == [],
+          "every stdout_contains string present passes")
+    check(j(op(exit=(2,), stdout_contains=("STOPPED: ", "not ready")), exit_code=2, stdout="STOPPED: already exists\n", stderr="", repo_root=tmp),
+          "one missing stdout_contains string fails even with the right exit code")
+    check(j(op(exit=(2,), stdout_contains=("STOPPED: ",)), exit_code=2, stdout="", stderr="STOPPED: on stderr", repo_root=tmp),
+          "stdout_contains looks at stdout, not stderr")
+    check(manifest_mod.Expect(exit_codes=(2,), stdout_contains=("x",)).assertions() == 2, "stdout_contains counts as an assertion")
 
     # the runner reports a traceback-raising script as fail even when its exit code is allowed
     boom = tmp / "boom.py"
@@ -241,6 +252,27 @@ check("runs-on: windows-latest" in text, "the workflow runs on windows-latest")
 check("shell: powershell" in text, "the workflow uses Windows PowerShell 5.1 (shell: powershell), not pwsh")
 check("--require-all" in text, "the workflow passes --require-all so a skipped operator fails")
 check("contents: read" in text and "contents: write" not in text, "the workflow is read-only")
+# --- slice 2a: the gate 2 operator runs up to its preflight -----------------
+gate2 = [op for op in manifest.operators if op.script == "scripts/consciousness_live_lifecycle_operator.py"]
+check(len(gate2) == 1, "the gate 2 operator (#2407) is run against the stack")
+if gate2:
+    g = gate2[0]
+    check(g.needs_stack and g.expect.exit_codes == (2,), "the gate 2 operator needs the stack and may only exit 2 (stopped before the qualifier)")
+    check("STOPPED: the worker is not ready for the lifecycle gate" in g.expect.stdout_contains and "flags not set to 1" in g.expect.stdout_contains,
+          "the expected refusal is the worker's readiness, named by the operator's own message")
+    check(any(a.startswith("${SCRATCH}/") for a in g.args), "the operator's --out lives under ${SCRATCH}, so a rerun does not hit 'already exists'")
+    fx = [a for a in g.args if a.startswith("scripts/rig_simulator/fixtures/")]
+    check(len(fx) == 2 and all((ROOT / f).is_file() for f in fx), "both profile fixtures are tracked files")
+    if len(fx) == 2:
+        blobs = [(ROOT / f).read_bytes() for f in fx]
+        check(blobs[0] != blobs[1] and all(isinstance(json.loads(b), dict) for b in blobs),
+              "the fixtures are two different JSON objects, so the refusal cannot come from the 'swap equals profile' check")
+check("SCRATCH" in manifest_mod.VARIABLES, "SCRATCH is a manifest variable")
+check('"SCRATCH": str(scratch)' in runner_src and "scratch.mkdir(parents=True, exist_ok=False)" in runner_src,
+      "the runner creates SCRATCH empty for every run and refuses to reuse one")
+check(any(p["script"] == "scripts/consciousness_live_lifecycle_qualifier.py" and "preflight" in p["why"] for p in json.loads((SIM / "operators.json").read_text(encoding="utf-8"))["pending"]),
+      "the pending entry for the gate 2 qualifier says what the simulator already covers and what is still missing")
+
 check("/validation/rig-simulator/" in (ROOT / ".gitignore").read_text(encoding="utf-8"), "simulator output is ignored by git, so a run cannot dirty the candidate checkout")
 
 print(f"{passed} passed, {failed} failed")

@@ -7,8 +7,17 @@
       "kind": "powershell",
       "platform": "windows",
       "needs_stack": false,
-      "args": ["-RepositoryRoot", "${REPO}", "-Report", "${WORK_DIR}\\ps51-parse.json"],
-      "expect": { "exit": [0] },
+      "args": [
+        "-RepositoryRoot",
+        "${REPO}",
+        "-Report",
+        "${WORK_DIR}\\ps51-parse.json"
+      ],
+      "expect": {
+        "exit": [
+          0
+        ]
+      },
       "why": "Every root, scripts/, scripts/rig_simulator/ and deploy/ .ps1 parses under Windows PowerShell 5.1, the rig's shell (workflow_ps1_encoding covers pwsh 7); pwsh-only syntax fails here instead of on the rig day."
     },
     {
@@ -16,8 +25,21 @@
       "script": "scripts/rig_simulator/cmd_targets.py",
       "kind": "python",
       "needs_stack": false,
-      "args": ["--repository-root", "${REPO}", "--report", "${WORK_DIR}/cmd-targets.json"],
-      "expect": { "exit": [0], "stdout_json": { "schema": "kaliv-rig-simulator-cmd-targets/v1", "ok": true } },
+      "args": [
+        "--repository-root",
+        "${REPO}",
+        "--report",
+        "${WORK_DIR}/cmd-targets.json"
+      ],
+      "expect": {
+        "exit": [
+          0
+        ],
+        "stdout_json": {
+          "schema": "kaliv-rig-simulator-cmd-targets/v1",
+          "ok": true
+        }
+      },
       "why": "Every scripts\\, deploy\\ and tools\\ source file a root .cmd launcher or operator .ps1 points at exists with that exact spelling, so a renamed script cannot strand a launcher."
     },
     {
@@ -25,10 +47,19 @@
       "script": "scripts/kaliv_system_release_gate.py",
       "kind": "python",
       "needs_stack": false,
-      "args": ["${REPO}/scripts/rig_simulator/fixtures/v1-manifest-all-pending.json"],
+      "args": [
+        "${REPO}/scripts/rig_simulator/fixtures/v1-manifest-all-pending.json"
+      ],
       "expect": {
-        "exit": [1],
-        "stdout_json": { "schema": "kaliv-system-release-verdict/v2", "state": "BLOCKED", "release_scope": "v1", "production_activation": false }
+        "exit": [
+          1
+        ],
+        "stdout_json": {
+          "schema": "kaliv-system-release-verdict/v2",
+          "state": "BLOCKED",
+          "release_scope": "v1",
+          "production_activation": false
+        }
       },
       "why": "The final V1 gate runs on this Python and this OS and answers BLOCKED for a manifest with every gate pending; it emits its verdict as JSON, never a traceback."
     },
@@ -36,10 +67,20 @@
       "id": "v1-rig-smoke",
       "script": "scripts/kaliv_v1_rig_smoke.py",
       "kind": "python",
-      "args": ["--expected-modelrig-sha", "${HEAD_SHA}", "--backend-url", "${BACKEND_URL}", "--worker-url", "${WORKER_URL}"],
+      "args": [
+        "--expected-modelrig-sha",
+        "${HEAD_SHA}",
+        "--backend-url",
+        "${BACKEND_URL}",
+        "--worker-url",
+        "${WORKER_URL}"
+      ],
       "timeout_seconds": 180,
       "expect": {
-        "exit": [0, 1],
+        "exit": [
+          0,
+          1
+        ],
         "stdout_json": {
           "schema": "kaliv-v1-readonly-rig-smoke/v1",
           "probes.backend.status": "PASS",
@@ -55,21 +96,36 @@
       "script": "scripts/kaliv_recovery_soak_collector.py",
       "kind": "python",
       "args": [
-        "sample", "--once",
-        "--repository-root", "${REPO}",
-        "--journal", "validation/rig-simulator/recovery-soak-journal.jsonl",
-        "--backend-url", "${BACKEND_URL}",
-        "--worker-url", "${WORKER_URL}",
-        "--heartbeat", "${HEARTBEAT}",
-        "--heartbeat-settle-seconds", "4",
-        "--timeout", "5"
+        "sample",
+        "--once",
+        "--repository-root",
+        "${REPO}",
+        "--journal",
+        "validation/rig-simulator/recovery-soak-journal.jsonl",
+        "--backend-url",
+        "${BACKEND_URL}",
+        "--worker-url",
+        "${WORKER_URL}",
+        "--heartbeat",
+        "${HEARTBEAT}",
+        "--heartbeat-settle-seconds",
+        "4",
+        "--timeout",
+        "5"
       ],
       "timeout_seconds": 120,
       "expect": {
-        "exit": [0],
+        "exit": [
+          0
+        ],
         "jsonl_last": {
           "path": "validation/rig-simulator/recovery-soak-journal.jsonl",
-          "fields": { "backend_healthy": true, "worker_healthy": true, "supervisor_looping": true, "state_error_absent": true }
+          "fields": {
+            "backend_healthy": true,
+            "worker_healthy": true,
+            "supervisor_looping": true,
+            "state_error_absent": true
+          }
         }
       },
       "why": "The recovery_soak collector (gate 9) takes one probe against a live stack and an advancing heartbeat file, and journals a line in which all four health flags hold (backend, worker incl. /health/full, advancing heartbeat, no tool-gate state error); the gate's collector has otherwise never run outside the rig."
@@ -78,17 +134,59 @@
       "id": "e2e-latency-voice-driver",
       "script": "scripts/kaliv_e2e_latency_voice_driver.py",
       "kind": "python",
-      "args": ["--worker-url", "${WORKER_URL}", "--wav", "${FRESH_WAV}", "--timeout", "30"],
+      "args": [
+        "--worker-url",
+        "${WORKER_URL}",
+        "--wav",
+        "${FRESH_WAV}",
+        "--timeout",
+        "30"
+      ],
       "timeout_seconds": 120,
-      "expect": { "exit": [0, 2], "stdout_json": { "ok": false } },
+      "expect": {
+        "exit": [
+          0,
+          2
+        ],
+        "stdout_json": {
+          "ok": false
+        }
+      },
       "why": "The gate 8 rig driver accepts a just-written WAV, reaches the worker and reports its outcome as JSON. The simulated worker has no voice runtime and the latency route is dormant, so the driver must fail closed: exit 2 and a JSON object with ok=false, never a traceback. The expectation flips to ok=true the day the simulator carries a voice runtime."
+    },
+    {
+      "id": "v1-gate2-operator-preflight-fail-closed",
+      "script": "scripts/consciousness_live_lifecycle_operator.py",
+      "kind": "python",
+      "needs_stack": true,
+      "args": [
+        "--profile-file",
+        "scripts/rig_simulator/fixtures/gate2-profile.json",
+        "--swap-profile",
+        "scripts/rig_simulator/fixtures/gate2-profile-swap.json",
+        "--worker-url",
+        "${WORKER_URL}",
+        "--out",
+        "${SCRATCH}/gate2-operator"
+      ],
+      "timeout_seconds": 120,
+      "expect": {
+        "exit": [
+          2
+        ],
+        "stdout_contains": [
+          "STOPPED: the worker is not ready for the lifecycle gate",
+          "flags not set to 1"
+        ]
+      },
+      "why": "The gate 2 operator (#2407) runs end to end up to its preflight against the production worker entrypoint: it reaches /experimental/consciousness/status, reads the runtime-status schema and refuses because the simulated worker runs without the consciousness flags. That proves the operator's Python, its HTTP path and its fail-closed message on the rig's interpreter, not that gate 2 passes. Exit 2 is the operator's own 'stopped before the qualifier' code; a traceback, a hang or a different reason is a defect. A simulated PASS needs a worker started with the consciousness flags, a SelfState, an approved Person Revision and a restart choreography the simulator cannot drive yet (pending)."
     }
   ],
   "pending": [
     {
       "script": "scripts/consciousness_live_lifecycle_qualifier.py",
       "issue": 2390,
-      "why": "The gate 2 operator (#2407) is not on main yet; once it lands, the simulator runs it against the stack with a dev CognitiveProfile and expects a verdict JSON."
+      "why": "The gate 2 operator (#2407) is on main and the simulator runs it up to its preflight (v1-gate2-operator-preflight-fail-closed). The qualifier itself, and a simulated QUALIFIED verdict, need a worker started with KALIV_CONSCIOUSNESS_* flags, KALIV_SCHEDULER=1 and KALIV_CONSCIOUSNESS_QUALIFICATION_EVIDENCE_ENABLED=1, a SelfState, an approved Person Revision and a worker restart the operator asks a human for; the simulator does not drive that yet."
     },
     {
       "script": "scripts/kaliv_software_exact_green_qualifier.py",

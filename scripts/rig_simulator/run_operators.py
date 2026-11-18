@@ -46,6 +46,7 @@ import time
 import urllib.error
 import urllib.request
 import wave
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -355,6 +356,9 @@ def judge(op: manifest_mod.Operator, *, exit_code: int | None, stdout: str, stde
     for relative in expect.files_exist:
         if not (repo_root / relative).is_file():
             failures.append(f"expected file missing: {relative}")
+    for text in expect.stdout_contains:
+        if text not in stdout:
+            failures.append(f"stdout lacks {text!r}")
     return failures
 
 
@@ -443,6 +447,8 @@ def main(argv: list[str] | None = None) -> int:
             for problem in stack_problems:
                 print(f"STACK: {problem}")
 
+        scratch = work_dir / "scratch" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        scratch.mkdir(parents=True, exist_ok=False)
         variables = {
             "REPO": str(repo_root),
             "HEAD_SHA": head,
@@ -452,6 +458,7 @@ def main(argv: list[str] | None = None) -> int:
             "HEARTBEAT": str(stack.heartbeat_path) if stack else "",
             "FRESH_WAV": str(work_dir / "fresh.wav"),
             "WORK_DIR": str(work_dir),
+            "SCRATCH": str(scratch),
             "PYTHON": sys.executable,
         }
         env = dict(isolated_environment(), PYTHONDONTWRITEBYTECODE="1", KALIV_DATA_DIR=str(work_dir / "kaliv-data"))
