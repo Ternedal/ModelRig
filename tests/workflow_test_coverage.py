@@ -126,7 +126,8 @@ check(
 )
 check(
     "needs.release-class.outputs.docs_only != 'true'" in exact_head_stage_b
-    and "scripts/release_fingerprint.py changed" in exact_head_workflow,
+    and "scripts/release_class.sh" in exact_head_workflow
+    and "scripts/release_fingerprint.py changed" in (root / "scripts" / "release_class.sh").read_text(encoding="utf-8"),
     "exact-head qualification skips Stage-B for documentation-only PRs as classified by the ADR-SYS-002 fingerprint tool",
 )
 check(

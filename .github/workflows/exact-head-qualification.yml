@@ -160,14 +160,7 @@ jobs:
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
-          base="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
-          result="$(python3 -B scripts/release_fingerprint.py changed "$base" "$HEAD_SHA")"
-          echo "$result"
-          docs_only="$(printf '%s' "$result" | python3 -c 'import json,sys; print(str(json.load(sys.stdin)["docs_only"]).lower())')"
-          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+        run: bash scripts/release_class.sh "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT"
 
   # and on pull requests that are NOT drafts; a draft becoming ready fires
   # ready_for_review, which re-qualifies the same head with Stage B included.
