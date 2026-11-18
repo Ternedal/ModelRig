@@ -228,13 +228,13 @@ with tempfile.TemporaryDirectory() as tmpdir:
     # merge-base(base, merge commit) is the base itself, so the classification is
     # exactly what the PR adds — docs-only stays docs-only, code stays code.
     git(repo, "checkout", "-q", "-b", "queue-docs", main_moved)
-    git(repo, "merge", "-q", "--no-ff", "--no-edit", docs_head)
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "merge", "-q", "--no-ff", "--no-edit", docs_head)
     queue_docs = git(repo, "rev-parse", "HEAD").strip()
     check(len(git(repo, "rev-list", "--parents", "-n1", queue_docs).split()) == 3, "fixture: the queue commit has two parents")
     rc_code, rc_out, _ = release_class(main_moved, queue_docs)
     check(rc_code == 0 and rc_out == "docs_only=true\n", "release_class.sh: a merge-queue commit of a docs-only PR classifies docs-only against merge_group.base_sha")
     git(repo, "checkout", "-q", "-b", "queue-code", main_moved)
-    git(repo, "merge", "-q", "--no-ff", "--no-edit", code_head)
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "merge", "-q", "--no-ff", "--no-edit", code_head)
     queue_code = git(repo, "rev-parse", "HEAD").strip()
     rc_code, rc_out, _ = release_class(main_moved, queue_code)
     check(rc_code == 0 and rc_out == "docs_only=false\n", "release_class.sh: a merge-queue commit of a code PR classifies as code")
