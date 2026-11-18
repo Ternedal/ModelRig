@@ -58,7 +58,7 @@ No profile ships enabled, and nothing in this document changes a default.
 - `min_usable_gib: 8`, `reserve_gib: 1.0`;
 - the five SDXL sizes around 1 MP;
 - at most 40 steps;
-- render defaults `guidance_scale: 6.0` and a negative prompt against the usual SDXL base failures (anatomy, text, watermarks). Both are `backend_options` the adapter passes to the pipeline for every job of the profile; leave them out to get the pipeline's own defaults.
+- render defaults `guidance_scale: 6.0` and a negative prompt against the usual SDXL base failures (anatomy, text, watermarks). Both are `backend_options` the adapter passes to the pipeline for every job of the profile; leave them out to get the pipeline's own defaults. `negative_prompt` is accepted for `StableDiffusionXLPipeline` only: Flux and Qwen-Image honour it only with `true_cfg_scale > 1`, which the adapter does not set yet, so a profile for those pipelines is refused with it rather than rendering without it. With an explicit `guidance_scale` of 1.0 or less the SDXL negative branch does not run, so `negative_prompt` is refused there too.
 
 **Why 8 / 1.0 and not 10 / 1.5 [measured, rig, 17 Nov 2026]:** on an idle RTX 3060 12 GB under Windows, `torch.cuda.mem_get_info()` reports **10.99 GiB free of 12.00**. The admission rule is `free - reserve_gib >= min_usable_gib`, so 10 / 1.5 needs 11.5 GiB free and can never pass on this card: two jobs were deferred and failed with `gpu_unavailable` after `VRAM_MAX_WAIT_S`. With 8 / 1.0 (needs 9 GiB free) the same jobs rendered. SDXL base in bf16 at 1024² stays well inside that.
 

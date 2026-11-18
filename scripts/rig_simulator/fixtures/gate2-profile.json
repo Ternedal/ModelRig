@@ -1,0 +1,5 @@
+{
+  "schema": "kaliv-consciousness-profile/simulator-fixture",
+  "name": "simulator-baseline",
+  "note": "Not a real CognitiveProfile. The simulator only needs two valid, different JSON objects: the gate 2 operator must refuse in its preflight before either is ever written to the worker."
+}

@@ -1,0 +1,5 @@
+{
+  "schema": "kaliv-consciousness-profile/simulator-fixture",
+  "name": "simulator-swap",
+  "note": "Differs from gate2-profile.json so the operator's 'swap equals current profile' check passes and the refusal comes from the worker's readiness, not from the fixtures."
+}

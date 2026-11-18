@@ -22,11 +22,13 @@ GitHub Releases.
 
 - [KALIV_SYSTEM_RELEASE_QUALIFICATION.md](KALIV_SYSTEM_RELEASE_QUALIFICATION.md) — Kaliv system release qualification: exact repository pins plus uafhængig fysisk evidens; manifest, gates og binding af Consciousness-evidens.
 - [system/ADR-SYS-001_V1_AND_EMBODIED_RELEASES.md](system/ADR-SYS-001_V1_AND_EMBODIED_RELEASES.md) — ADR-SYS-001: Kaliv V1 (syv gates) og Kaliv Embodied (alle ti) som to releases (vedtaget 12/11-2026). *Beslutning (ADR).*
+- [system/ADR-SYS-002_RELEASE_FINGERPRINT_EVIDENCE_BINDING.md](system/ADR-SYS-002_RELEASE_FINGERPRINT_EVIDENCE_BINDING.md) — ADR-SYS-002: evidens og freeze bundet til et repo-bredt release-fingerprint frem for eksakt SHA, så docs-only kan lande under en freeze. *Beslutning (ADR) — vedtaget 16/11-2026, landing afventer 2.0.20-freezen.*
 - [KALIV_SOFTWARE_EXACT_GREEN_QUALIFICATION.md](KALIV_SOFTWARE_EXACT_GREEN_QUALIFICATION.md) — evidens for `software_exact_green`-gaten via `scripts/kaliv_software_exact_green_qualifier.py`.
 - [KALIV_REPOSITORY_AUTHORITY_QUALIFICATION.md](KALIV_REPOSITORY_AUTHORITY_QUALIFICATION.md) — evidens for `repository_authority`-gaten via `scripts/kaliv_repository_authority_qualifier.py`; evidensfilen samles af `scripts/kaliv_repository_authority_assembler.py`.
 - [KALIV_END_TO_END_LATENCY_QUALIFICATION.md](KALIV_END_TO_END_LATENCY_QUALIFICATION.md) — evidens for `end_to_end_latency`-gaten via `scripts/kaliv_end_to_end_latency_qualifier.py`.
 - [KALIV_RECOVERY_SOAK_QUALIFICATION.md](KALIV_RECOVERY_SOAK_QUALIFICATION.md) — evidens for `recovery_soak`-gaten: `scripts/kaliv_recovery_soak_collector.py` tager helbredsprøverne, `scripts/kaliv_recovery_soak_qualification.py` kvalificerer dem. *Runbook.*
 - [KALIV_V1_RIG_SMOKE.md](KALIV_V1_RIG_SMOKE.md) — read-only readiness-diagnostik for riggen (checkout, backend/worker, ASR/TTS); ikke fysisk accept. *Runbook.*
+- [RIG_SIMULATOR.md](RIG_SIMULATOR.md) — rig-simulatoren: operatørerne køres i CI på Windows PowerShell 5.1 mod en simuleret appliance (`scripts/rig_simulator/`, `.github/workflows/rig-simulator.yml`) før de må bruges på riggen; ingen evidens. *Runbook.*
 - [RELEASE_TEST_2.0.14.md](RELEASE_TEST_2.0.14.md) — operatørens testvej for den første integrerede 2.0.14-kandidat. *Historisk.*
 - [release/V1_EVIDENCE_TRUST_BOUNDARY.md](release/V1_EVIDENCE_TRUST_BOUNDARY.md) — operatørnote om hvad den eksisterende release-gate validerer, og hvad den ikke beviser.
 - [release/KALIV_RELEASE_ACCEPTANCE_MATRIX_2026-10-16.md](release/KALIV_RELEASE_ACCEPTANCE_MATRIX_2026-10-16.md) — planlægnings- og evidensskabelon for release-accept, baseline 16/10-2026. *Historisk.*

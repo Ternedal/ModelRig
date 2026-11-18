@@ -833,7 +833,44 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     tiende ikke dit arbejde. `git status --short` før `git add`, og vær
     særligt mistroisk efter en testkørsel — suiter skriver tilstand.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 16/11)
+## 9. Kø — hvem har bolden (16/7, opdateret 18/11)
+
+### 18/11: ADR-SYS-002-kæden er landet — og sådan lander en stak på `main`
+
+**[18/11 06:5x — main = `2653a581` (merge-commit af #2411, forældre `bd063d5` +
+`c734571`). Kæden #2414→#2409→#2410→#2411→#2412 (Stage B kun på ikke-draft,
+rig-simulator, ADR-SYS-002 D1–D7 i kode) er på main. V1-pinnen er stadig
+`e73f80a4`; main er bevidst IKKE fingerprint-ækvivalent med pinnen — det er
+præcis det, ADR'en er lavet til.]**
+
+**Landingsmekanik — læs før næste stak (målt 17/11, kostede ~2 timer):**
+
+- **`main` kan ikke fast-forwardes.** Branch protection svarer `GH006` med tre
+  krav: ændringer kun via PR, alle review-tråde løst, 14 required checks.
+  Admin har ingen bypass. Listen i `scripts/repository_authority.py`
+  (`REQUIRED_STATUS_CHECKS`) matcher GitHub (14/14).
+- **To af de 14 findes kun på PR'er med base `main`:** `analyze (go)` og
+  `analyze (python)` — `codeql.yml` filtrerer på base-branch. En PR i en stak,
+  der peger på en anden branch, kan derfor aldrig blive `clean`, uanset hvor
+  grøn den er.
+- **Opskriften, der virkede:** (1) stak lineært med den PR nederst, hvis regel
+  skal gælde hele kæden; (2) kvalificér toppen på exact head; (3) retarget
+  **top-PR'en** til `main` (Edit → base) — det kan kun gøres i GitHub-UI'et,
+  sessionens token nægtes `PATCH pulls/{n}` base; (4) markér ready og
+  luk/genåbn PR'en, så CodeQL og exact-head kører på headet med base `main`
+  (`ready_for_review` og base-skift er ikke CodeQL-triggere); (5) løs
+  review-tråde (`ccr/comments/{id}/resolve`); (6) merge med
+  **merge-commit** via API — træet i merge-committen er identisk med det
+  testede head, og `release_fingerprint.py equivalent <head> main` svarer
+  `true` (D4). GitHub markerer de underliggende PR'er med base `main` som
+  merged; dem med anden base lukkes som "landet via".
+- **Tryk aldrig Merge på en stakket PR i UI'et:** det merger den ind i dens
+  base-*branch*, ikke i `main` (#2412 → #2411's branch 17/11; ufarligt, fordi
+  træet var identisk, men det flyttede toppen).
+- **Branches:** sessionens proxy tillader hverken `DELETE git/refs` eller
+  `git push --delete`; oprydning er Anders'.
+- Rest-kø: Anders' triage-paste på #2275; #2415 merge queue efter V1-tag;
+  rig-simulator slice 2 (gate 2-operator, `-WhatIf` for Stage A/B-ops).
 
 ### 16/11: bumpet til 2.0.21 er klar, men lander først efter freezen
 
@@ -1493,6 +1530,16 @@ v2.0.10. Kandidat = `origin/physical-proof/2.0.11`, som SKAL være lig
 > 12/11-2026** (#2275 kommentar 6816274261): `main` er åben igen, og `v2.0.19`
 > bliver ikke Stage A-valideret, som den er. Koordinering sker i #2275. #731,
 > `v2.0.11` og rækkefølgen i punkt 3 nedenfor er 2.0.11-æraens.
+
+> **ADR-SYS-002 (vedtaget 16/11-2026, `docs/system/ADR-SYS-002_RELEASE_FINGERPRINT_EVIDENCE_BINDING.md`,
+> første anvendelse 2.0.21):** "intet lander på `main`" bliver til "intet
+> *uden for dokumentationsklassen* lander på `main`". Freeze og evidens binder
+> til et repo-bredt release-fingerprint (`scripts/release_fingerprint.py`),
+> ikke til den eksakte SHA; en docs-only landing (HANDOFF, ADR'er, `docs/**`)
+> flytter ikke fingerprintet og ugyldiggør ikke en freeze. Kampagne-runbooks
+> og generatorudgange er beskyttede dokumenter og tæller som kode. Tagget
+> sættes på den frosne kandidat, ikke på `main`s head (D5). Reglen nedenfor
+> gælder uændret for alt, der rører en beskyttet sti.
 
 Fra det øjeblik riggen har produceret et grønt `candidate_freeze_check.py`-
 receipt på en exact SHA (meldt som kommentar på #731 / #58), og indtil den SHA

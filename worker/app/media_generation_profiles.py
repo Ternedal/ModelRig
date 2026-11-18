@@ -78,6 +78,12 @@ _RESOURCE_KEYS = frozenset({"min_usable_gib", "reserve_gib", "devices", "cpu_off
 # accept: classifier-free guidance below 1.0 is disabled, above 30 is noise; a negative prompt
 # is text like the prompt itself, so it shares the prompt's size cap and must be printable.
 _DIFFUSERS_OPTIONAL_KEYS = frozenset({"guidance_scale", "negative_prompt"})
+# negative_prompt is classifier-free guidance's negative branch. In the pinned diffusers 0.35.2 that
+# branch runs for StableDiffusionXLPipeline whenever guidance_scale > 1, but FluxPipeline and
+# QwenImagePipeline use embedded guidance and only honour negative_prompt when true_cfg_scale > 1,
+# which this adapter does not set (#2417 review, Codex P2). Accepting the key there would be an
+# ineffective setting; it is refused until true CFG is implemented and measured.
+_NEGATIVE_PROMPT_PIPELINES = frozenset({"StableDiffusionXLPipeline"})
 MIN_GUIDANCE_SCALE, MAX_GUIDANCE_SCALE = 1.0, 30.0
 MAX_NEGATIVE_PROMPT_CHARS = 1000
 
@@ -289,6 +295,9 @@ def parse_profile(obj: object) -> ModelProfile:
             raise _fail("a rig-qualified comfyui profile must pin comfyui_version and weights")
     else:
         options = _exact_keys(raw_options, frozenset(), "backend_options", optional=_DIFFUSERS_OPTIONAL_KEYS)
+        if "negative_prompt" in options and pipeline not in _NEGATIVE_PROMPT_PIPELINES:
+            raise _fail(f"backend_options.negative_prompt has no effect with {pipeline} "
+                        f"(needs true_cfg_scale, not implemented); only {sorted(_NEGATIVE_PROMPT_PIPELINES)} take it")
         if options:  # {} stays None, so existing profiles and callers are unchanged
             backend_options = DiffusersOptions(
                 guidance_scale=(_strict_number(options["guidance_scale"], MIN_GUIDANCE_SCALE, MAX_GUIDANCE_SCALE,
@@ -297,6 +306,13 @@ def parse_profile(obj: object) -> ModelProfile:
                 negative_prompt=(_negative_prompt(options["negative_prompt"])
                                  if "negative_prompt" in options else None),
             )
+            # The SDXL negative branch runs only when guidance_scale > 1 (do_classifier_free_guidance);
+            # at exactly 1.0 the negative prompt would be accepted and silently ignored (#2417, P3).
+            # Without an explicit guidance_scale the pipeline default (5.0) applies, so that is fine.
+            if (backend_options.negative_prompt is not None and backend_options.guidance_scale is not None
+                    and backend_options.guidance_scale <= 1.0):
+                raise _fail("backend_options.negative_prompt has no effect with guidance_scale "
+                            f"{backend_options.guidance_scale} (classifier-free guidance needs guidance_scale > 1)")
 
     return ModelProfile(
         profile_id=profile_id, modality=modality, tasks=frozenset(tasks), backend=backend,

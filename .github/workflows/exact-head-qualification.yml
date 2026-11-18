@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened, closed]
+    types: [opened, synchronize, reopened, ready_for_review, closed]
   workflow_dispatch:
 
 # Only PR runs share a group (per PR number) so newer immutable PR heads
@@ -135,8 +135,58 @@ jobs:
         shell: bash
         run: PYTHONPATH=devcontrol/src python3 -m unittest discover -s devcontrol/tests -p 'test_*.py' -v
 
+  # Release class of a PR (ADR-SYS-002): does merge-base..head touch only the
+  # documentation class? Computed by scripts/release_fingerprint.py, the same
+  # classifier the freeze reader uses, so "docs-only" means the same thing in
+  # CI as in a freeze receipt: protected documents (RIGDAG_SIMPEL.md, ...) and
+  # every protected prefix count as code. Fail-closed by construction: if this
+  # job fails or is skipped, docs_only is empty and Stage B runs. Pushes to main
+  # and dispatch never consult it. Script and classifier are the BASE commit's.
+  release-class:
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Classify merge-base..head with the release fingerprint
+        id: classify
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # The script and the classifier come from the BASE commit, never from
+          # the PR head (review P2 on #2422). A base without the script cannot
+          # classify: say so and run the full chain.
+          if git cat-file -e "$BASE_SHA:scripts/release_class.sh" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/release_class.sh" > "$RUNNER_TEMP/release_class.sh"
+            bash "$RUNNER_TEMP/release_class.sh" "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT"
+          else
+            echo "::notice::base $BASE_SHA has no scripts/release_class.sh; treating the PR as code"
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # CI-tiering (#2413): the Stage B chain is ~650 job-minutes and 2-3 h of
+  # wall-clock, 92% of a PR run. It runs on main pushes, on workflow_dispatch,
+  # and on pull requests that are NOT drafts; a draft becoming ready fires
+  # ready_for_review, which re-qualifies the same head with Stage B included.
+  # The merge rule is unchanged: full CI incl. Stage B green on the qualified
+  # commit. On a draft this job is skipped, never reported green. A PR whose
+  # merge-base..head is documentation-only (release-class above) is skipped
+  # too: Stage B qualifies code, and the documentation class is by definition
+  # outside the release fingerprint (ADR-SYS-002 D1).
   stage-b-slices:
-    if: github.event_name != 'pull_request' || github.event.action != 'closed'
+    needs: [release-class]
+    if: >-
+      !cancelled() && (
+        github.event_name != 'pull_request' ||
+        (github.event.action != 'closed' && github.event.pull_request.draft != true &&
+         needs.release-class.outputs.docs_only != 'true')
+      )
     uses: ./.github/workflows/_stage_b_slices.yml
     with:
       head_sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
