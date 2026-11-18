@@ -1,8 +1,8 @@
 # ADR-SYS-003: Landing gennem merge queue — det testede er det landede
 
-**Status:** UDKAST rev. 1, skrevet af Claude 18-11-2026 kl. 21:30 CET efter Anders' "Kør" på anbefalingerne i #2415 (1 script, 2 ADR, 3 Stage B i køen, 4 ChatGPT-status senere). Anders disponerer dokumentet og dets PR alene og kan rette ethvert valg i afsnit 7 med én kommentar. **Ingen ændring af `main`s beskyttelse før V1-tagget**; workflow-siden (afsnit 6, trin 1) må lande før, fordi den er inert uden en kø.
+**Status:** UDKAST rev. 2, 18-11-2026 kl. 23:15 CET. Rev. 1 skrevet af Claude kl. 21:30 efter Anders' "Kør" på anbefalingerne i #2415 (1 script, 2 ADR, 3 Stage B i køen, 4 ChatGPT-status senere); rev. 2 indarbejder ChatGPTs beslutningsreview (betinget ACCEPT af D1–D6, HOLD på D7): D7 er nu eksplicit en *definition* uden håndhævelse i denne ADR, og stopreglen siger entydigt, at kun trin 3 venter på V1-tagget. Anders disponerer dokumentet og dets PR alene og kan rette ethvert valg i afsnit 7 med én kommentar.
 **Serie:** tredje dokument i SYS-serien (efter ADR-SYS-001 og ADR-SYS-002).
-**Stopreglen (A4-005):** dokumentet lander først; kontrakttestene i afsnit 5 skrives røde derefter. Ruleset-migrationen (trin 2–3) kører først den dag V1 er tagget og gate 10 er målt på den nuværende model.
+**Stopreglen (A4-005):** dokumentet lander først; kontrakttestene i afsnit 5 skrives røde derefter. **Trin 1 og 2 (afsnit 6) må lande før V1-tagget** — de er inerte uden en kø, og gate 10's dom på den klassiske model er uændret af dem. **Kun trin 3 (aktivering af rulesetet og fjernelse af klassisk protection) venter på V1-tagget**, fordi gate 10 skal være målt på den nuværende model, før modellen skiftes.
 
 ---
 
@@ -35,7 +35,7 @@ Køen kræver en ruleset (ikke klassisk protection), og den rapporterer kun chec
 
 **D6 — ChatGPT-ACCEPT bliver en required status i et senere trin, ikke nu.** Indtil da gælder HANDOFF's regel: ingen PR sættes i køen uden SHA-scoped ACCEPT i tråden, og det er Anders (eller den session, han har givet landing til), der sætter den i køen. Kommentar-parsing i et landingsscript udgår; `gh pr merge --auto` (eller UI'ets "Merge when ready") er landingshandlingen.
 
-**D7 — Freeze-vinduet omdefineres.** En freeze under en kampagne betyder: *intet uden for dokumentationsklassen i køen*, håndhævet af `release-class` + en `KALIV_FREEZE`-markør, som køens kvalifikation læser (afsnit 6, trin 3). `main` behøver ikke stå stille; evidensen overlever docs-flytninger (ADR-SYS-002 D3).
+**D7 — Freeze-vinduet omdefineres (definition; håndhævelse er ikke en del af denne ADR).** En freeze under en kampagne *betyder* fra nu af: intet uden for dokumentationsklassen (ADR-SYS-002 D1) sættes i køen. `main` behøver ikke stå stille; evidensen overlever docs-flytninger (ADR-SYS-002 D3). **Indtil en separat implementerings-PR lander, håndhæves D7 som i dag:** ved aftale på #2275, ved at ingen PR sættes i køen uden SHA-scoped ACCEPT (D6), og ved at `release-class` allerede rapporterer `docs_only` på hver kandidat, så et brud er synligt i kørslen. Den PR skal levere: en freeze-markør med én ejer (Anders) og ét sted (en fil i repoet eller en repository-variabel — valget er PR'ens, ikke denne ADR's), et `release-class`-trin der fejler en kø-kandidat med `docs_only=false`, når markøren er sat, negative tests for begge veje (markør sat + kode → fejl; markør sat + docs → kør; markør ikke sat → uændret) og en HANDOFF-opdatering. Denne ADR lover ikke den garanti, før den PR er landet.
 
 ## 3. Fravalgte alternativer
 
@@ -46,7 +46,7 @@ Køen kræver en ruleset (ikke klassisk protection), og den rapporterer kun chec
 
 ## 4. Konsekvenser
 
-- **Positivt:** ingen rekvalifikation fordi en anden landede; det testede commit er det landede; landing uden menneskelig timing; CodeQL-retarget-fælden forsvinder (køen tager kun PR'er mod `main`); freeze bliver et indholdskrav, ikke et stilstandskrav.
+- **Positivt:** ingen rekvalifikation fordi en anden landede; det testede commit er det landede; landing uden menneskelig timing; CodeQL-retarget-fælden forsvinder (køen tager kun PR'er mod `main`); freeze bliver et indholdskrav, ikke et stilstandskrav (D7 — defineret her, håndhævet af en senere PR).
 - **Pris:** hver kø-kandidat koster sin egen fulde kvalifikation (~1,5 t required, ~3,5 t med Stage B for kode) — serielt. Med 3–6 kode-landinger om dagen er køen flaskehalsen; det er *villet* under en kampagne (D5) og kan løsnes (`max_entries_to_build`) efter V1.
 - **Gate 10 ændrer definition** (D2). Det kræver, at ADR'en er vedtaget og evaluatoren ændret *før* rulesetet aktiveres, ellers er gate 10 rød i mellemtiden.
 - **Alle sessioner skal kunne skelne `pull_request`- og `merge_group`-kontekst** i workflows (D4). Det er en engangsomkostning med test (afsnit 5).
@@ -60,6 +60,7 @@ Køen kræver en ruleset (ikke klassisk protection), og den rapporterer kun chec
 4. `tests/workflow_release_fingerprint.py`: `release_class.sh` tager base fra `merge_group.base_sha`, når den findes; fixture-test med en kø-lignende merge-commit (to forældre) klassificerer merge-base..head korrekt.
 5. `deploy/repository-authority/main-ruleset.json` valideres af `repository_authority.py` offline → PASS; en mutation, der fjerner `deletion`-reglen → FAIL.
 6. Mutationssweep på 1–5 dokumenteres i PR'en (HANDOFF §8-standard).
+7. *(D7, separat PR — ikke en forudsætning for trin 1–3):* markør sat + kode-kandidat → kø-kvalifikationen fejler; markør sat + docs-only → kører; markør ikke sat → uændret adfærd.
 
 ## 6. Implementering (efter vedtagelse)
 
@@ -69,7 +70,7 @@ Køen kræver en ruleset (ikke klassisk protection), og den rapporterer kun chec
 
 **Trin 3 — migration (den dag V1 er tagget; Anders, ~1 time):** (a) `verify-repository-authority.ps1` → PASS på klassisk model og gem rapporten; (b) `configure-repository-authority-ruleset.ps1 -Apply`; (c) fjern klassisk protection (UI eller script); (d) `verify` → PASS i ruleset-tilstand uden advarsler; (e) første kø-landing er en docs-only PR (billig, beviser kæden); (f) HANDOFF §3/§4/§9 omskrives: landingsscriptet udgår, "Kør merge <sha>" bliver "sæt i kø", freeze = D7.
 
-**Trin 4 (senere):** ChatGPT-ACCEPT som check-run (D6).
+**Trin 4 (senere, hver sin PR):** D7's freeze-markør og kø-guard med kontrakttest 7; ChatGPT-ACCEPT som check-run (D6).
 
 ## 7. Valg truffet ved vedtagelsen
 
@@ -80,11 +81,13 @@ Køen kræver en ruleset (ikke klassisk protection), og den rapporterer kun chec
 | Q3 | Stage B i køen | Ja (D3) | samme |
 | Q4 | ChatGPT-ACCEPT som status | Senere trin (D6) | samme |
 | Q5 | Kø-parametre | merge-commit, 1 ad gangen, ALLGREEN (D5) | Claude-forslag; kan rettes |
-| Q6 | Hvornår trin 3 må køre | Den dag V1 er tagget — ikke før | fastholdt fra #2415 |
+| Q6 | Hvornår trin 3 må køre | Den dag V1 er tagget — ikke før; trin 1–2 må lande før | fastholdt fra #2415, præciseret i rev. 2 |
+| Q7 | D7's håndhævelse | Defineret her, leveret i en separat PR (trin 4) med egen ejer og negative tests; indtil da gælder dagens aftale-baserede freeze | ChatGPT-review 18/11; Claude rev. 2 |
 
 ## 8. Hvad dokumentet bevidst ikke gør
 
 - Det ændrer ikke, *hvad* der kvalificerer en release (gates 1–10, ADR-SYS-001) eller hvad evidens binder til (ADR-SYS-002). Det ændrer kun, hvordan et kvalificeret commit bliver `main`.
 - Det rører ikke søsterrepoernes beskyttelse.
+- Det lover ikke, at en freeze er maskinelt håndhævet i køen, før D7's implementerings-PR er landet (Q7).
 - Det lover ikke kortere Stage B. Kæden er stadig ~3,5 t for kode; køen sørger bare for, at den betales én gang pr. landing.
 - Det fjerner ikke menneskelig accept: ACCEPT i tråden er stadig kravet for at sætte en PR i køen (D6), og kun Anders eller den session, han har givet landing til, gør det.
