@@ -34,8 +34,11 @@ PINNED_VERSIONS = {
     "safetensors": "0.6.2",
     "huggingface_hub": "0.35.3",
 }
-# What DiffusersImageAdapter.render passes to the pipeline.
-PIPELINE_CALL_ARGS = ("prompt", "num_inference_steps", "width", "height", "generator", "callback_on_step_end")
+# What DiffusersImageAdapter.render passes to the pipeline: the request, and the profile's optional
+# render defaults (guidance_scale, negative_prompt). Checked against diffusers 0.35.2 by AST for all
+# three allowlisted pipelines (#2275, 17 Nov 2026).
+PIPELINE_CALL_ARGS = ("prompt", "num_inference_steps", "width", "height", "generator", "callback_on_step_end",
+                      "guidance_scale", "negative_prompt")
 INTERRUPT_RESET = "self._interrupt = False"
 INTERRUPT_CHECK = "if self.interrupt"
 
