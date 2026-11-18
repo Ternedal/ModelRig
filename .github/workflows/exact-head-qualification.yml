@@ -135,15 +135,13 @@ jobs:
         shell: bash
         run: PYTHONPATH=devcontrol/src python3 -m unittest discover -s devcontrol/tests -p 'test_*.py' -v
 
-  # CI-tiering (#2413): the Stage B chain is ~650 job-minutes and 2-3 h of
-  # wall-clock, 92% of a PR run. It runs on main pushes, on workflow_dispatch,
   # Release class of a PR (ADR-SYS-002): does merge-base..head touch only the
   # documentation class? Computed by scripts/release_fingerprint.py, the same
   # classifier the freeze reader uses, so "docs-only" means the same thing in
   # CI as in a freeze receipt: protected documents (RIGDAG_SIMPEL.md, ...) and
   # every protected prefix count as code. Fail-closed by construction: if this
   # job fails or is skipped, docs_only is empty and Stage B runs. Pushes to main
-  # and dispatch never consult it.
+  # and dispatch never consult it. Script and classifier are the BASE commit's.
   release-class:
     if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest
@@ -160,8 +158,20 @@ jobs:
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: bash scripts/release_class.sh "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT"
+        run: |
+          # The script and the classifier come from the BASE commit, never from
+          # the PR head (review P2 on #2422). A base without the script cannot
+          # classify: say so and run the full chain.
+          if git cat-file -e "$BASE_SHA:scripts/release_class.sh" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/release_class.sh" > "$RUNNER_TEMP/release_class.sh"
+            bash "$RUNNER_TEMP/release_class.sh" "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT"
+          else
+            echo "::notice::base $BASE_SHA has no scripts/release_class.sh; treating the PR as code"
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          fi
 
+  # CI-tiering (#2413): the Stage B chain is ~650 job-minutes and 2-3 h of
+  # wall-clock, 92% of a PR run. It runs on main pushes, on workflow_dispatch,
   # and on pull requests that are NOT drafts; a draft becoming ready fires
   # ready_for_review, which re-qualifies the same head with Stage B included.
   # The merge rule is unchanged: full CI incl. Stage B green on the qualified

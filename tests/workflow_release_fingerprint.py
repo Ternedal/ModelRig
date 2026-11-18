@@ -34,6 +34,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / "scripts"))
 import release_fingerprint as rf  # noqa: E402
+sys.path.insert(0, str(ROOT / "tests"))
+from support.source_code import code_of  # noqa: E402
 
 passed = failed = 0
 
@@ -203,6 +205,23 @@ with tempfile.TemporaryDirectory() as tmpdir:
     check(rc_code == 1 and rc_out == "" and "HEAD is not" in err, "release_class.sh: refuses when the checkout is not the head it is asked about")
     rc_code, rc_out, err = release_class("0" * 40, docs_head)
     check(rc_code == 1 and rc_out == "", "release_class.sh: an unknown base is exit 1 with no output (the caller runs the full chain)")
+    # P2 on #2422: the PR head must not classify itself. A head that sabotages
+    # the classifier (`changed` always says docs-only) AND touches code is still
+    # code under the base's classifier.
+    git(repo, "checkout", "-q", "-b", "sabotage-branch", tip_before_rc)
+    needle = "ok, offending = docs_only(root, args.from_rev, args.to_rev)"
+    check(needle in code_of(repo / "scripts" / "release_fingerprint.py"), "fixture: the classifier's changed-branch line is where the sabotage goes")
+    sab = (repo / "scripts" / "release_fingerprint.py").read_bytes()
+    (repo / "scripts" / "release_fingerprint.py").write_bytes(sab.replace(needle.encode(), needle.encode() + b"\n            ok, offending = True, []"))
+    write(repo, "worker/app/sabotage.py", "z = 3\n")
+    sabotage_head = commit_all(repo, "sabotaged classifier plus code")
+    own = _sp.run([sys.executable, "-B", str(repo / "scripts" / "release_fingerprint.py"), "--repository-root", str(repo), "changed", tip_before_rc, sabotage_head],
+                  cwd=repo, capture_output=True, text=True, check=False)
+    check(own.returncode == 0 and '"docs_only": true' in own.stdout, "fixture: the sabotaged head's own classifier would call itself docs-only")
+    rc_code, rc_out, _ = release_class(tip_before_rc, sabotage_head)
+    check(rc_code == 0 and rc_out == "docs_only=false\n", "release_class.sh: classifies with the BASE's classifier, so a head cannot exempt itself")
+    rc_code, rc_out, err = release_class(base, docs_head)
+    check(rc_code == 1 and rc_out == "" and "has no scripts/release_fingerprint.py" in err, "release_class.sh: a base without the classifier cannot classify (exit 1, no output)")
     git(repo, "checkout", "-q", "main")
 
     # moving a code file without changing its bytes is still a code change
