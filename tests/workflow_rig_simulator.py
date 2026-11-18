@@ -101,6 +101,10 @@ with tempfile.TemporaryDirectory() as tmpdir:
     rejects(bad, "an empty stdout_contains string is rejected", tmp)
     bad = json.loads(json.dumps(base)); bad["operators"][1]["expect"]["stdout_contains"] = "STOPPED"
     rejects(bad, "stdout_contains must be a list, not a bare string", tmp)
+    bad = json.loads(json.dumps(base)); bad["operators"][1]["expect"]["files_absent"] = [""]
+    rejects(bad, "an empty files_absent path is rejected", tmp)
+    bad = json.loads(json.dumps(base)); bad["operators"][1]["expect"]["files_exist"] = ["x.json"]; bad["operators"][1]["expect"]["files_absent"] = ["x.json"]
+    rejects(bad, "a path in both files_exist and files_absent is rejected", tmp)
     bad = json.loads(json.dumps(base)); bad["pending"].append({"script": base["operators"][1]["script"], "issue": 1, "why": "listed twice on purpose to test the rule"})
     rejects(bad, "a script both run and pending is rejected", tmp)
     bad = json.loads(json.dumps(base)); bad["operators"][0]["platform"] = "any"
@@ -147,6 +151,11 @@ with tempfile.TemporaryDirectory() as tmpdir:
     check(j(op(exit=(2,), stdout_contains=("STOPPED: ",)), exit_code=2, stdout="", stderr="STOPPED: on stderr", repo_root=tmp),
           "stdout_contains looks at stdout, not stderr")
     check(manifest_mod.Expect(exit_codes=(2,), stdout_contains=("x",)).assertions() == 2, "stdout_contains counts as an assertion")
+    check(j(op(files_absent=("nope.txt",)), exit_code=0, stdout="", stderr="", repo_root=tmp) == [], "files_absent passes when the file was not written")
+    check(j(op(files_absent=("j.jsonl",)), exit_code=0, stdout="", stderr="", repo_root=tmp), "files_absent fails when the file exists")
+    (tmp / "adir").mkdir()
+    check(j(op(files_absent=("adir",)), exit_code=0, stdout="", stderr="", repo_root=tmp), "files_absent also fails on a directory at that path")
+    check(manifest_mod.Expect(exit_codes=(2,), files_absent=("x",)).assertions() == 2, "files_absent counts as an assertion")
 
     # the runner reports a traceback-raising script as fail even when its exit code is allowed
     boom = tmp / "boom.py"
@@ -267,6 +276,25 @@ if gate2:
         blobs = [(ROOT / f).read_bytes() for f in fx]
         check(blobs[0] != blobs[1] and all(isinstance(json.loads(b), dict) for b in blobs),
               "the fixtures are two different JSON objects, so the refusal cannot come from the 'swap equals profile' check")
+# --- slice 2a: the assembler refuses before it writes ------------------------
+asm = [op for op in manifest.operators if op.script == "scripts/kaliv_release_manifest_assembler.py"]
+check(len(asm) == 2, "the release-manifest assembler (#2408) is run twice: no evidence, and fake evidence")
+for a in asm:
+    check(not a.needs_stack and a.expect.exit_codes == (2,), f"{a.id}: static, exit 2 only")
+    check(a.expect.stdout_json is not None and a.expect.stdout_json.get("state") == "INVALID" and a.expect.stdout_json.get("production_activation") is False,
+          f"{a.id}: pins INVALID and production_activation=false in the JSON")
+    out = [a.args[i + 1] for i, x in enumerate(a.args) if x == "--manifest"]
+    check(len(out) == 1 and out[0].startswith("${WORK_DIR}/") and a.expect.files_absent == (out[0].replace("${WORK_DIR}", "validation/rig-simulator"),),
+          f"{a.id}: files_absent names exactly the --manifest path, below the ignored simulator directory")
+    check("--release-scope" in a.args and a.args[a.args.index("--release-scope") + 1] == "v1", f"{a.id}: asks for the v1 scope")
+ids = {a.id for a in asm}
+check("release-assembler-no-evidence-fail-closed" in ids and "release-assembler-fake-evidence-fail-closed" in ids, "both assembler refusals are present")
+fake = next((a for a in asm if a.id == "release-assembler-fake-evidence-fail-closed"), None)
+if fake:
+    refs = [x for x in fake.args if x.endswith("-ref")]
+    check(len(refs) == 7 and "rejected by the final release gate" in fake.expect.stdout_contains,
+          "the fake-evidence run passes seven refs so the refusal comes from the final gate, not from the count check")
+
 check("SCRATCH" in manifest_mod.VARIABLES, "SCRATCH is a manifest variable")
 check('"SCRATCH": str(scratch)' in runner_src and "scratch.mkdir(parents=True, exist_ok=False)" in runner_src,
       "the runner creates SCRATCH empty for every run and refuses to reuse one")

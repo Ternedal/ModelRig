@@ -59,7 +59,10 @@ the static operators through the runner on Linux.
 |---|---|
 | `v1-gate2-operator-preflight-fail-closed` | `consciousness_live_lifecycle_operator.py` (#2407) starts on the rig's interpreter, reads two profile fixtures, reaches `/experimental/consciousness/status` on the production worker entrypoint, parses the runtime-status schema and stops with exit 2 and its own message (`STOPPED: the worker is not ready for the lifecycle gate: flags not set to 1: …`) because the simulated worker runs without the consciousness flags. A traceback, a hang, exit 0/1 or another refusal (`already exists`, `checkout is not clean`) is a defect. |
 
-Two things made this possible and are available to every operator:
+| `release-assembler-no-evidence-fail-closed` | `kaliv_release_manifest_assembler.py` (#2408) asked for a V1 manifest with no evidence answers `INVALID` as JSON naming the missing gates, exits 2 and writes **no** manifest file |
+| `release-assembler-fake-evidence-fail-closed` | seven refs of the right count and shape but with nothing canonical behind them: the assembler hands the manifest to `kaliv_system_release_gate`, which rejects it, so `INVALID`, exit 2, nothing written. A `QUALIFIED` here would be a hole in the gate itself |
+
+Three things made this possible and are available to every operator:
 
 - `${SCRATCH}`: a directory the runner creates empty for each run
   (`validation/rig-simulator/scratch/<utc stamp>/`). Operators that refuse an
@@ -68,12 +71,14 @@ Two things made this possible and are available to every operator:
 - `expect.stdout_contains`: a list of strings that must all occur on stdout.
   It is how a fail-closed message is pinned when the operator prints prose
   instead of JSON. It never reads stderr, so a traceback cannot satisfy it.
+- `expect.files_absent`: paths (relative to the checkout) that must not exist
+  after the run — file or directory. It pins "refuses before it writes".
 
 Still pending, with the issue that tracks each: a simulated gate 2 *verdict*
 (needs a worker started with the consciousness flags, `KALIV_SCHEDULER=1` and
 the qualification snapshot, a SelfState, an approved Person Revision and a
-restart the operator asks a human for), the gate 1 assembler (#2408), the
-qualifiers that need evidence from the rig or from the sister repositories,
+restart the operator asks a human for), a QUALIFIED assembly from real
+verdict files (the assembler is only shown refusing), the qualifiers that need evidence from the rig or from the sister repositories,
 and `freeze_check.py` (needs a token by design).
 
 ## What it does not prove
@@ -93,7 +98,7 @@ and `freeze_check.py` (needs a token by design).
    (placeholders: `${REPO}`, `${HEAD_SHA}`, `${BACKEND_URL}`, `${WORKER_URL}`,
    `${OLLAMA_URL}`, `${HEARTBEAT}`, `${FRESH_WAV}`, `${WORK_DIR}`, `${SCRATCH}`, `${PYTHON}`),
    an `expect` that can fail (`exit`, and at least one of `stdout_json`,
-   `jsonl_last`, `files_exist`, `stdout_contains`), and a `why` sentence.
+   `jsonl_last`, `files_exist`, `files_absent`, `stdout_contains`), and a `why` sentence.
 2. Run `python scripts/rig_simulator/run_operators.py --only <id> --backend-bin <modelrig-server>`
    locally, then `python tests/workflow_rig_simulator.py`.
 3. Expectations describe what the simulator guarantees, not what the rig

@@ -356,6 +356,9 @@ def judge(op: manifest_mod.Operator, *, exit_code: int | None, stdout: str, stde
     for relative in expect.files_exist:
         if not (repo_root / relative).is_file():
             failures.append(f"expected file missing: {relative}")
+    for relative in expect.files_absent:
+        if (repo_root / relative).exists():
+            failures.append(f"file must not exist after the run: {relative}")
     for text in expect.stdout_contains:
         if text not in stdout:
             failures.append(f"stdout lacks {text!r}")

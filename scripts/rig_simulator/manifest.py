@@ -66,6 +66,7 @@ class Expect:
     stdout_json: dict[str, Any] | None = None       # {} = any JSON object; {"schema": "..."} = fields that must match
     jsonl_last: dict[str, Any] | None = None        # {"path": "...", "fields": {...}}
     files_exist: tuple[str, ...] = ()
+    files_absent: tuple[str, ...] = ()              # none of these may exist afterwards (an operator that must not write on refusal)
     stdout_contains: tuple[str, ...] = ()           # every string must occur in stdout (fail-closed messages)
     allow_traceback: bool = False
 
@@ -75,6 +76,7 @@ class Expect:
             + (self.stdout_json is not None)
             + (self.jsonl_last is not None)
             + (len(self.files_exist) > 0)
+            + (len(self.files_absent) > 0)
             + (len(self.stdout_contains) > 0)
         )
 
@@ -131,6 +133,9 @@ def _expect(raw: Any, where: str) -> Expect:
         _require(isinstance(jsonl_last.get("fields"), dict) and jsonl_last["fields"], f"{where}: expect.jsonl_last.fields missing")
     files_exist = raw.get("files_exist", [])
     _require(isinstance(files_exist, list) and all(isinstance(f, str) for f in files_exist), f"{where}: expect.files_exist must be a list of strings")
+    files_absent = raw.get("files_absent", [])
+    _require(isinstance(files_absent, list) and all(isinstance(f, str) and f for f in files_absent), f"{where}: expect.files_absent must be a list of non-empty strings")
+    _require(not (set(files_absent) & set(files_exist)), f"{where}: a path cannot be in both files_exist and files_absent")
     stdout_contains = raw.get("stdout_contains", [])
     _require(
         isinstance(stdout_contains, list) and all(isinstance(t, str) and t for t in stdout_contains),
@@ -138,13 +143,14 @@ def _expect(raw: Any, where: str) -> Expect:
     )
     allow_traceback = raw.get("allow_traceback", False)
     _require(isinstance(allow_traceback, bool), f"{where}: expect.allow_traceback must be a boolean")
-    unknown = set(raw) - {"exit", "stdout_json", "jsonl_last", "files_exist", "stdout_contains", "allow_traceback"}
+    unknown = set(raw) - {"exit", "stdout_json", "jsonl_last", "files_exist", "files_absent", "stdout_contains", "allow_traceback"}
     _require(not unknown, f"{where}: unknown expect keys {sorted(unknown)}")
     return Expect(
         exit_codes=tuple(codes),
         stdout_json=stdout_json,
         jsonl_last=jsonl_last,
         files_exist=tuple(files_exist),
+        files_absent=tuple(files_absent),
         stdout_contains=tuple(stdout_contains),
         allow_traceback=allow_traceback,
     )
