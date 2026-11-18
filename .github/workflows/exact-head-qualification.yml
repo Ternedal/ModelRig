@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened, closed]
+    types: [opened, synchronize, reopened, ready_for_review, closed]
   workflow_dispatch:
 
 # Only PR runs share a group (per PR number) so newer immutable PR heads
@@ -135,8 +135,16 @@ jobs:
         shell: bash
         run: PYTHONPATH=devcontrol/src python3 -m unittest discover -s devcontrol/tests -p 'test_*.py' -v
 
+  # CI-tiering (#2413): the Stage B chain is ~650 job-minutes and 2-3 h of
+  # wall-clock, 92% of a PR run. It runs on main pushes, on workflow_dispatch,
+  # and on pull requests that are NOT drafts; a draft becoming ready fires
+  # ready_for_review, which re-qualifies the same head with Stage B included.
+  # The merge rule is unchanged: full CI incl. Stage B green on the qualified
+  # commit. On a draft this job is skipped, never reported green.
   stage-b-slices:
-    if: github.event_name != 'pull_request' || github.event.action != 'closed'
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.action != 'closed' && github.event.pull_request.draft != true)
     uses: ./.github/workflows/_stage_b_slices.yml
     with:
       head_sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}

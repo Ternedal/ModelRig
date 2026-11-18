@@ -61,5 +61,13 @@ check("enable_auto" not in lower, "operator has no automatic integration path")
 check("create_release" not in lower, "operator has no release creation path")
 check("production_activation\": true" not in lower, "operator cannot emit an active production gate")
 
+# ADR-SYS-002 D3: when the candidate does not contain current origin/main, the
+# operator asks candidate_freeze_check._resolve_main_anchor (one rule, one place)
+# instead of keeping its own copy; it must still fail closed on any exception.
+ancestry = PY.split('if ancestor.returncode != 0:', 1)[1].split('identity = campaign_contract.candidate_identity', 1)[0]
+check("_resolve_main_anchor(root, expected_sha, main_sha)" in ancestry, "operator delegates the main-ancestry exception to candidate_freeze_check (ADR-SYS-002 D3)")
+check("raise StageAOperatorError" in ancestry and "except Exception" in ancestry, "operator fails closed when the docs-only rule does not hold")
+check("def _resolve_main_anchor" in (ROOT / "scripts" / "candidate_freeze_check.py").read_text(encoding="utf-8"), "the delegated rule exists")
+
 print(f"stage A operator surface: {passed} passed, {failed} failed")
 raise SystemExit(1 if failed else 0)

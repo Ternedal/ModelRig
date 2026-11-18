@@ -11,7 +11,9 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = code_of(ROOT / ".github" / "workflows" / "exact-head-qualification.yml")
 
 assert "push:\n    branches: [main]" in WORKFLOW
-assert "pull_request:\n    types: [opened, synchronize, reopened, closed]" in WORKFLOW
+# CI-tiering (#2413): ready_for_review must be a trigger, because a draft that
+# becomes ready has to be re-qualified WITH Stage-B on the same head.
+assert "pull_request:\n    types: [opened, synchronize, reopened, ready_for_review, closed]" in WORKFLOW
 assert "workflow_dispatch:" in WORKFLOW
 
 # Only the top-level exact-head workflow group may supersede previous PR heads.
@@ -39,6 +41,21 @@ assert 'ref: ${{ github.event_name == \'pull_request\' && github.event.pull_requ
 assert "test \"$actual\" = \"$EXPECTED_SHA\"" in WORKFLOW
 assert "uses: ./.github/workflows/_stage_b_slices.yml" in WORKFLOW
 assert "head_sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" in WORKFLOW
+
+# CI-tiering (#2413): Stage-B runs on main pushes, on dispatch, and on PRs that
+# are not drafts. The draft condition must sit on the stage-b-slices job ONLY:
+# exact-head-core and merge-tree equivalence still run on every draft push, and
+# nothing may run Stage-B on a closed PR.
+stage_b = re.search(r"(?ms)^  stage-b-slices:\n(?P<body>.*?)(?=^  [a-z-]+:\n)", WORKFLOW)
+assert stage_b is not None, "stage-b-slices job must exist"
+stage_b_if = stage_b.group("body")
+assert "github.event.pull_request.draft != true" in stage_b_if, "Stage-B must be skipped on draft PRs (#2413)"
+assert "github.event.action != 'closed'" in stage_b_if, "Stage-B must still skip closed PRs"
+assert "github.event_name != 'pull_request' ||" in stage_b_if, "main pushes and dispatch must still run Stage-B unconditionally"
+core = re.search(r"(?ms)^  exact-head-core:\n(?P<body>.*?)(?=^    steps:)", WORKFLOW)
+assert core is not None and "draft" not in core.group("body"), "exact-head-core must run on drafts too"
+legacy = re.search(r"(?ms)^  legacy-merge-tree-equivalence:\n(?P<body>.*?)(?=^    steps:)", WORKFLOW)
+assert legacy is not None and "draft" not in legacy.group("body"), "merge-tree equivalence must run on drafts too"
 assert "legacy-merge-tree-equivalence:" in WORKFLOW
 assert "test \"$merge_tree\" = \"$head_tree\"" in WORKFLOW
 assert "exact-head-core:" in WORKFLOW

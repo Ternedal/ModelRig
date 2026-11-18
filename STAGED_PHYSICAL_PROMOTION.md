@@ -63,7 +63,8 @@ merge af bump-PR'en er prep-grenens SHA ikke den taggede.
 
 Både `candidate_freeze_check.py` og operatoren kræver, at den aktuelle
 `origin/main` er indeholdt i kandidaten, og hver receipt-consumer refetcher
-`main`. Efter publicering holder det kun, så længe `main` står på RC-SHA'en.
+`main`. Efter publicering holder det kun, så længe `main` står på RC-SHA'en —
+eller, under ADR-SYS-002, kun er flyttet med docs-only commits.
 
 > **Freeze-vinduet er ophævet 12/11-2026 (Anders, #2275-kommentar 6816274261).**
 > Reglen om, at intet merges til `main` fra tagget, til A3's kandidatgate er grøn, gælder
@@ -74,6 +75,19 @@ Både `candidate_freeze_check.py` og operatoren kræver, at den aktuelle
 
 Er `main` flyttet, stopper kontrollen fail-closed. Den må ikke omgås; stop og
 rapportér i #2275.
+
+> **ADR-SYS-002 (vedtaget 16/11-2026, første anvendelse 2.0.21):** en freeze
+> overlever, at `origin/main` flytter sig med **docs-only** commits — stier i
+> dokumentationsklassen (`release_fingerprint_exclusions.txt`: `docs/**`, `*.md`,
+> `.github/*.md`, issue-skabeloner, `LICENSE`). `candidate_freeze_check.py`
+> kræver da, at det frosne anker er i `main`s historie, at ingen ændret sti
+> ligger uden for klassen, og at release-fingerprintet er uændret. De tre
+> kampagne-runbooks (denne, `STAGED_PHYSICAL_PROMOTION.md`,
+> `STAGE_B_UPDATER_EVIDENCE.md`) og generatorudgangene (`CURRENT_STATE.md`,
+> `ACTIVATION_READINESS.md`, `ROUTE_INVENTORY.md`) er **beskyttede dokumenter**
+> og tæller som kode. Tagget sættes på den frosne kandidat (D5), så de
+> publicerede bytes er dem, Stage A kørte på; `main` må være foran med
+> docs-only commits. Alt andet er uændret: kode på `main` ⇒ re-freeze.
 
 ### A1. Opret en frisk freeze-receipt
 

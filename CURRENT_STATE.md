@@ -606,11 +606,13 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_proof_scope_git_fail_closed.py`
 - `tests/workflow_ps1_encoding.py`
 - `tests/workflow_release.py`
+- `tests/workflow_release_fingerprint.py`
 - `tests/workflow_release_tag_guard.py`
 - `tests/workflow_remaining_physical_pilots.py`
 - `tests/workflow_repository_authority.py`
 - `tests/workflow_repository_authority_wrapper.py`
 - `tests/workflow_rig_preflight.py`
+- `tests/workflow_rig_simulator.py`
 - `tests/workflow_route_inventory.py`
 - `tests/workflow_runner_offline.py`
 - `tests/workflow_scheduler_m2_composition.py`
