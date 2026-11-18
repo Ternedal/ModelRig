@@ -35,7 +35,15 @@ param(
     # the autonomous scheduler, whose tick forms lived continuity after the
     # restart, is mounted only with KALIV_SCHEDULER=1.
     [switch]$EnableConsciousnessLifecycle,
-    [string]$ConsciousnessProfileFile
+    [string]$ConsciousnessProfileFile,
+
+    # V1 gate 8 (end_to_end_latency): mounts the voice qualification routes
+    # bound to this checkout's HEAD. V1 gate 3 (visionrig_physical_perception):
+    # mounts VisionRig's admission route. Both need the live Consciousness
+    # session; without -EnableConsciousnessLifecycle the live-cycle flags and
+    # the profile are written for them.
+    [switch]$EnableE2eLatency,
+    [switch]$EnableVisionRigAdmission
 )
 
 $ErrorActionPreference = "Stop"
@@ -185,17 +193,20 @@ $schedulerEnv = ""
 $taskUiEnv = if ($EnableTaskUi) { 'set "KALIV_AGENT3_TASK_UI=1"' } else { '' }
 # V1 gate 2: the lifecycle flags, the qualification snapshot and the profile
 # file, written into the worker cmd like the task-ui flag (no inheritance).
-$consciousnessEnv = ''
-if ($EnableConsciousnessLifecycle) {
-    $profilePath = if ([string]::IsNullOrWhiteSpace($ConsciousnessProfileFile)) {
+function Resolve-ConsciousnessProfile {
+    $path = if ([string]::IsNullOrWhiteSpace($ConsciousnessProfileFile)) {
         Join-Path $repoRoot "deploy\consciousness-dev-profile.json"
     } else {
         [IO.Path]::GetFullPath($ConsciousnessProfileFile)
     }
-    if (-not (Test-Path -LiteralPath $profilePath -PathType Leaf)) {
-        throw "ConsciousnessProfileFile findes ikke: $profilePath"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "ConsciousnessProfileFile findes ikke: $path"
     }
-    $escapedProfile = Escape-CmdValue $profilePath
+    return $path
+}
+$consciousnessEnv = ''
+if ($EnableConsciousnessLifecycle) {
+    $escapedProfile = Escape-CmdValue (Resolve-ConsciousnessProfile)
     $consciousnessEnv = @"
 set "KALIV_CONSCIOUSNESS_CORE_ENABLED=1"
 set "KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED=1"
@@ -213,6 +224,34 @@ set "KALIV_CONSCIOUSNESS_QUALIFICATION_EVIDENCE_ENABLED=1"
 set "KALIV_CONSCIOUSNESS_PROFILE_FILE=$escapedProfile"
 "@
 }
+# V1 gates 8 and 3: written into the worker cmd like the gate 2 block, never
+# inherited. The live session is docs/consciousness-core/LIVE_CYCLE_QUALIFICATION.md;
+# with -EnableConsciousnessLifecycle it is already part of $consciousnessEnv.
+$liveSessionEnv = ''
+if (($EnableE2eLatency -or $EnableVisionRigAdmission) -and -not $EnableConsciousnessLifecycle) {
+    $escapedLiveProfile = Escape-CmdValue (Resolve-ConsciousnessProfile)
+    $liveSessionEnv = @"
+set "KALIV_CONSCIOUSNESS_CORE_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_CHAT_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_PROFILE_FILE=$escapedLiveProfile"
+"@
+}
+$e2eLatencyEnv = ''
+if ($EnableE2eLatency) {
+    $candidateSha = ([string](& git -C $repoRoot rev-parse HEAD)).Trim()
+    if ($LASTEXITCODE -ne 0 -or $candidateSha -notmatch '^[0-9a-f]{40}$') {
+        throw "-EnableE2eLatency: kunne ikke laese kandidatens HEAD-SHA."
+    }
+    $escapedE2eRoot = Escape-CmdValue (Join-Path $repoRoot "validation\e2e-latency")
+    $e2eLatencyEnv = @"
+set "KALIV_E2E_LATENCY_QUALIFICATION_ENABLED=1"
+set "KALIV_E2E_LATENCY_CANDIDATE_GIT_SHA=$candidateSha"
+set "KALIV_E2E_LATENCY_EVIDENCE_ROOT=$escapedE2eRoot"
+"@
+}
+$visionRigEnv = if ($EnableVisionRigAdmission) { 'set "KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED=1"' } else { '' }
 $workerCommand = 'python -u -m uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099'
 $resolvedWorkerLog = $null
 $resolvedSchedulerDir = $null
@@ -256,6 +295,9 @@ set "KALIV_AGENT3_PLANNER_MODEL=$PlannerModel"
 set "KALIV_AGENT3_VALIDATION_REPORT=$escapedReport"
 $schedulerEnv
 $consciousnessEnv
+$liveSessionEnv
+$e2eLatencyEnv
+$visionRigEnv
 $workerCommand
 "@ | Set-Content -LiteralPath $workerCmd -Encoding ASCII
 
