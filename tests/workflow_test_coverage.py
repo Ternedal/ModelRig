@@ -118,7 +118,7 @@ exact_head_stage_b = exact_head_workflow.split("  stage-b-slices:", 1)[1]
 # dispatch still run Stage-B unconditionally; PRs run it when open and not a
 # draft. The literal pieces are pinned so the policy cannot drift by rewording.
 check(
-    "github.event_name != 'pull_request' ||" in exact_head_stage_b
+    "(github.event_name != 'pull_request' && github.event_name != 'merge_group') ||" in exact_head_stage_b
     and "github.event.action != 'closed'" in exact_head_stage_b
     and "github.event.pull_request.draft != true" in exact_head_stage_b
     and "uses: ./.github/workflows/_stage_b_slices.yml" in exact_head_stage_b,
@@ -130,6 +130,30 @@ check(
     and "release_fingerprint.py" in (root / "scripts" / "release_class.sh").read_text(encoding="utf-8"),
     "exact-head qualification skips Stage-B for documentation-only PRs as classified by the ADR-SYS-002 fingerprint tool",
 )
+# Merge queue (ADR-SYS-003, contract test 3): every workflow that produces a
+# name in REQUIRED_STATUS_CHECKS must fire on merge_group, or the queue waits
+# forever for a check that never reports. The map is maintained by hand on
+# purpose: a new required check must be placed here, and a workflow that stops
+# producing one must be removed.
+required_check_workflows = {
+    "ci.yml": ("test / test", "test / test-windows-appliance", "test / test-windows-tool-isolation",
+               "browser-use-runtime-contract", "android-compile", "desktop-compile",
+               "desktop-dpapi-windows", "agent3-memory-dpapi-windows"),
+    "codeql.yml": ("analyze (go)", "analyze (python)"),
+    "agent3-diagnostics.yml": ("agent3-python",),
+    "agent3-full-diagnostics.yml": ("full-test-log",),
+    "exact-head-qualification.yml": ("exact-head-core", "legacy-merge-tree-equivalence"),
+}
+import sys as _sys
+_sys.path.insert(0, str(root / "scripts"))
+import repository_authority as _ra  # noqa: E402
+mapped = {name for names in required_check_workflows.values() for name in names}
+check(mapped == set(_ra.REQUIRED_STATUS_CHECKS), "the required-check → workflow map covers exactly REQUIRED_STATUS_CHECKS")
+for wf_name in required_check_workflows:
+    wf_on = (root / ".github" / "workflows" / wf_name).read_text(encoding="utf-8").split("jobs:", 1)[0]
+    check(re.search(r"(?m)^  merge_group:\n(?:    .*\n)*?    types: \[checks_requested\]", wf_on) is not None,
+          f"{wf_name} produces required checks and therefore fires on merge_group checks_requested (ADR-SYS-003)")
+
 check(
     "ready_for_review" in exact_head_workflow.split("jobs:", 1)[0],
     "a draft that becomes ready triggers exact-head qualification with Stage-B",
