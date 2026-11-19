@@ -88,6 +88,22 @@ assert "ref: ${{ github.event.pull_request.head.sha || github.sha }}" in rc_body
 assert "(github.event_name == 'merge_group' && needs.release-class.outputs.docs_only != 'true')" in stage_b_if, "Stage-B runs in the merge queue unless the entry is docs-only"
 assert "github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id" in WORKFLOW.split("jobs:", 1)[0], "non-PR runs (push, dispatch, merge_group) keep per-run concurrency groups"
 
+# ADR-SYS-003 D3 (Codex P1 on #2427): the queue must wait for Stage B. The
+# slice jobs are not required checks, so one aggregate job is: it needs both
+# release-class and stage-b-slices, never uses always(), passes only on
+# success or an allowed skip (docs-only, draft), and fails every other outcome.
+sv = re.search(r"(?ms)^  stage-b-verdict:\n(?P<body>.*?)(?=^  [a-z][a-z0-9-]*:\n)", WORKFLOW)
+assert sv is not None, "stage-b-verdict job must exist"
+sv_body = sv.group("body")
+assert "needs: [release-class, stage-b-slices]" in sv_body, "stage-b-verdict depends on the class and on Stage B"
+assert "!cancelled() &&" in sv_body and "always()" not in sv_body, "stage-b-verdict uses !cancelled(), never always()"
+assert "(github.event_name != 'pull_request' || github.event.action != 'closed')" in sv_body, "stage-b-verdict is not reported on closed PRs"
+assert "RESULT: ${{ needs.stage-b-slices.result }}" in sv_body and "DOCS_ONLY: ${{ needs.release-class.outputs.docs_only }}" in sv_body, "stage-b-verdict judges the Stage B result and the release class"
+assert 'success) echo "Stage B passed on this exact head" ;;' in sv_body, "success passes"
+assert 'if [ "$DOCS_ONLY" = "true" ]; then' in sv_body and '[ "$EVENT" = "pull_request" ] && [ "$DRAFT" = "true" ]' in sv_body, "the only allowed skips are docs-only and draft"
+assert 'echo "Stage B was skipped without an allowed reason" >&2; exit 1' in sv_body, "any other skip fails"
+assert '*) echo "Stage B did not pass (result: $RESULT)" >&2; exit 1 ;;' in sv_body, "failure and cancellation fail"
+
 core = re.search(r"(?ms)^  exact-head-core:\n(?P<body>.*?)(?=^    steps:)", WORKFLOW)
 assert core is not None and "draft" not in core.group("body"), "exact-head-core must run on drafts too"
 legacy = re.search(r"(?ms)^  legacy-merge-tree-equivalence:\n(?P<body>.*?)(?=^    steps:)", WORKFLOW)
