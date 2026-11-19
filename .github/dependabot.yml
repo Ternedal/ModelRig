@@ -16,6 +16,17 @@ updates:
     directory: /worker
     schedule: { interval: weekly }
     open-pull-requests-limit: 3
+    ignore:
+      # browser-use is pinned in code (SUPPORTED_BROWSER_USE_VERSION in
+      # worker/app/browser_use_adapter.py) and asserted by the runtime
+      # contract; a requirements-only major bump can never go green (#2431).
+      # Majors move through a deliberate adaptation PR that moves the pin too.
+      - dependency-name: browser-use
+        update-types: ["version-update:semver-major"]
+      # CUDA/cuDNN runtimes are win32-only and load under the rig's GPU voice
+      # path; Linux CI never imports them, so the first real test of a bump is
+      # a rig day (#2377). They move together, on purpose, after a release.
+      - dependency-name: "nvidia-*"
   - package-ecosystem: gradle
     directory: /android
     schedule: { interval: weekly }
