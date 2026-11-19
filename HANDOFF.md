@@ -329,7 +329,12 @@ matchede nogen fil).
 - **Skeln verificeret / kvalificeret antagelse / gæt.** Sig hvad der ikke er
   testet. Standard-forbehold på UI: "verificeret ved build, ikke med øjne".
 - **"kør" / "kør videre"** = fuld autonom eksekvering uden check-ins, med
-  fuld commit-autoritet. **"test jeg"** = Anders tester på hardware.
+  fuld commit-autoritet **på grene og PR'er — ikke landing.** Landing på
+  `main` sker kun på Anders' eksplicitte ord: **"sæt i kø #N"** (merge-kø,
+  fra 20/11; før det "`Kør merge <fuld sha>`"). Sessionen slår altid
+  PR'ens aktuelle head op via API før den gentager en sha — skriv den aldrig
+  fra hukommelsen (19/11: en sha skrevet fra hukommelsen var forkert).
+  **"test jeg"** = Anders tester på hardware.
 - **Anders kører FLERE parallelle Claude-sessioner.** Derfor: `git pull
   --rebase` før alt arbejde, tjek version-sites for kollisioner, og forvent
   at en anden session kan have tilføjet det samme (skete med
@@ -371,17 +376,26 @@ halv release og lignede en hel. Flowet nu:
    `python3 tests/workflow_*.py` · `ruff check --select E9,F63,F7,F82`.
    **Kotlin kan IKKE kompileres her — CI er den eneste verifikation.**
 3. **Alt landes gennem CI — ikke ved push til main.** Arbejdet ligger paa
-   en gren, får sin PR, og landingen er et fast-forward af
-   `refs/heads/main` EFTER grønt run paa den NYESTE sha. Verdiktet er en
-   HAARD betingelse INDE i landingsscriptet: check-runs paa præcis den sha,
-   alle `completed`, nul `failure` — ellers exit FØR patch. Verdikter
-   håndhæves, aldrig kun rapporteres (#315 landede paa rød CI med en falsk
-   grøn kommentar). **CHECK-RUNS ≠ WORKFLOW-RUNS:** fire grønne workflows
-   kan staa ved siden af et rødt CodeQL-check-run. Gate paa BEGGE.
-   Bekræft ad TO veje (`ls-remote` + REST med retry) FØR PR'en lukkes, og
-   lad lukningen ligge INDE i den bekræftede gren af scriptet — en
-   ';'-kædet lukning fyrer på falsk bekræftelse. `scripts/stale_check.py`
-   før enhver merge. Først når main står paa din sha gælder resten:
+   en gren, får sin PR, og lander gennem **merge-køen** (ADR-SYS-003, fra
+   20/11): PR'en kvalificeres på sit exact head (14 required checks +
+   `freeze-guard`), Anders siger **"sæt i kø"** (og kun Anders — en
+   session lægger aldrig selv noget i køen), GitHub bygger merge-gruppen,
+   de 16 required kontekster kører på DEN commit (inkl. `stage-b-verdict`
+   = Stage B på det, der faktisk lander), og den merges med merge-commit.
+   Ingen strict mode: en anden landing sender ikke din PR tilbage til start
+   (#2436 rekvalificerede syv gange for samme indhold 19/11 — det er det,
+   køen fjerner). Freeze er en indholdsregel, ikke stilstand: med
+   `KALIV_FREEZE=1` afviser `freeze-guard` alt, der ikke er docs-only.
+   *Historik:* til og med 19/11 var landingen "`Kør merge <fuld sha>`" fra
+   Anders → merge-commit via API på præcis den sha; før 17/11 et
+   fast-forward af `refs/heads/main`, som branch protection siden nægtede
+   (GH006). Scripts, der stadig fast-forwarder, er forældede.
+   Verdikter håndhæves, aldrig kun rapporteres (#315 landede paa rød CI med
+   en falsk grøn kommentar). **CHECK-RUNS ≠ WORKFLOW-RUNS:** fire grønne
+   workflows kan staa ved siden af et rødt CodeQL-check-run. Gate paa BEGGE.
+   Bekræft ad TO veje (`ls-remote` + REST med retry) FØR noget bygger videre
+   på "det er landet". `scripts/stale_check.py` før enhver merge. Først når
+   main indeholder din sha (`git merge-base --is-ancestor`) gælder resten:
 
    `git add -A && git -c commit.gpgsign=false commit -q -F /tmp/m.txt` →
    `git fetch -q origin main && git rebase origin/main` → **STRAM PROTOKOL
