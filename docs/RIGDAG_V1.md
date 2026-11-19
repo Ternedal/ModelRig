@@ -19,9 +19,13 @@ der noget andet dér, gælder den. Udskiftede værdier står som `<…>`.
    første forsøg og løbe mindst 6 timer; Stage B's genstarter skal ligge inde i
    vinduet ([KALIV_RECOVERY_SOAK_QUALIFICATION.md](KALIV_RECOVERY_SOAK_QUALIFICATION.md)).
    Gate 9 kræver altså en Stage B på 2.0.21-kandidaten.
-4. **Gate 1 og 10 sidst**, når alle fire pins ligger fast. Gate 10 kan kun
-   tages, mens hvert repos `main` stadig står på sin pin.
-5. **Manifestet** til sidst.
+4. **Gate 10 tidligt, så snart hver pin står.** En verdict kan kun tages,
+   mens det repos `main` stadig står på pinnen. For **ModelRig betyder det lige
+   efter merge af bump-PR'en, før noget andet lander**: meld landingspausen på
+   #2275 først. BodyRig, VisionRig og VoiceRig, så snart deres pins er valgt.
+   Selve assembleren kan køres senere.
+5. **Gate 1 sidst**, når alle fire pins har grøn exact-head.
+6. **Manifestet** til sidst.
 
 ## 0. Før alt
 
@@ -34,6 +38,16 @@ der noget andet dér, gælder den. Udskiftede værdier står som `<…>`.
 ## 1. Gate 2 — `consciousness_live_lifecycle`
 
 Vejledning: [consciousness-core/LIVE_LIFECYCLE_QUALIFICATION.md](consciousness-core/LIVE_LIFECYCLE_QUALIFICATION.md).
+
+**Forudsætning:** en SelfState og en valgt, godkendt Person Revision i
+workerens datarod. Findes de ikke, så fra `worker/` med samme miljø som
+workeren (vejledningen, "prerequisites"):
+
+```powershell
+python -m app.consciousness_core.dev_bootstrap
+```
+
+Operatorens preflight stopper med en `readiness_gaps`-liste, hvis noget mangler.
 
 ```powershell
 .\scripts\start-stage-a-validation-stack.ps1 -PlannerModel qwen3:14b `
@@ -161,9 +175,11 @@ python scripts\kaliv_software_exact_green_assembler.py `
 ## 7. Gate 10 — `repository_authority`
 
 Vejledning: [KALIV_REPOSITORY_AUTHORITY_QUALIFICATION.md](KALIV_REPOSITORY_AUTHORITY_QUALIFICATION.md).
-En verdict pr. repo fra en ren `main`-checkout, mens `main` står på pinnen,
-gemt uden for alle checkouts; derefter `kaliv_repository_authority_assembler.py`
-som vejledningen viser.
+**Tages når pinnen står, ikke her** (se rækkefølgen): ModelRig lige efter
+bump-mergen under landingspause, de tre andre når deres pins er valgt. En
+verdict pr. repo fra en ren `main`-checkout, gemt uden for alle checkouts.
+Her til sidst kører du kun `kaliv_repository_authority_assembler.py` på de
+fire gemte verdicts, som vejledningen viser.
 
 ## 8. Manifestet
 
