@@ -835,6 +835,23 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 
 ## 9. Kø — hvem har bolden (16/7, opdateret 18/11)
 
+### 19/11: merge-queue-sporet er på main; freeze har fået en kontakt
+
+**[19/11 07:xx — ADR-SYS-003 rev. 3 (`14562e7`), trin 1 (`33f43bf`) og trin 2
+(`df04a2a`) er landet. Alt er inert, indtil Anders kører trin 3 (runbook på
+#2415) den dag V1 er tagget. Gate 10's klassiske dom er uændret.]**
+
+**Freeze-kontakten (ADR-SYS-003 D7, trin 4):** repository-variablen
+`KALIV_FREEZE` (Settings → Secrets and variables → Actions → Variables, eller
+`gh variable set KALIV_FREEZE --body 1 -R Ternedal/ModelRig`). **Ejer: Anders.**
+`1` = kampagne-freeze på; alt andet = af. Virkning: `stage-b-verdict` afviser
+enhver kandidat, der ikke er docs-only (ADR-SYS-002 D1), i merge groups — og
+viser det samme rødt på PR'er, så forfatteren ser det før køen. Push til
+`main` og dispatch rammes ikke. Freeze betyder altså ikke længere "main står
+stille", men "kun dokumentation lander"; evidensen overlever det (ADR-SYS-002
+D3). Indtil trin 3 er kørt, er variablen kun et signal på PR'er (checket er
+ikke required i den klassiske model) — aftalen på #2275 gælder stadig.
+
 ### 18/11: ADR-SYS-002-kæden er landet — og sådan lander en stak på `main`
 
 **[18/11 06:5x — main = `2653a581` (merge-commit af #2411, forældre `bd063d5` +

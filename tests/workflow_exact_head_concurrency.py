@@ -99,10 +99,8 @@ assert "needs: [release-class, stage-b-slices]" in sv_body, "stage-b-verdict dep
 assert "!cancelled() &&" in sv_body and "always()" not in sv_body, "stage-b-verdict uses !cancelled(), never always()"
 assert "(github.event_name != 'pull_request' || github.event.action != 'closed')" in sv_body, "stage-b-verdict is not reported on closed PRs"
 assert "RESULT: ${{ needs.stage-b-slices.result }}" in sv_body and "DOCS_ONLY: ${{ needs.release-class.outputs.docs_only }}" in sv_body, "stage-b-verdict judges the Stage B result and the release class"
-assert 'success) echo "Stage B passed on this exact head" ;;' in sv_body, "success passes"
-assert 'if [ "$DOCS_ONLY" = "true" ]; then' in sv_body and '[ "$EVENT" = "pull_request" ] && [ "$DRAFT" = "true" ]' in sv_body, "the only allowed skips are docs-only and draft"
-assert 'echo "Stage B was skipped without an allowed reason" >&2; exit 1' in sv_body, "any other skip fails"
-assert '*) echo "Stage B did not pass (result: $RESULT)" >&2; exit 1 ;;' in sv_body, "failure and cancellation fail"
+assert "FREEZE: ${{ vars.KALIV_FREEZE }}" in sv_body, "stage-b-verdict reads the campaign freeze marker (ADR-SYS-003 D7)"
+assert "run: bash scripts/stage_b_verdict.sh" in sv_body, "the verdict logic is the tested script (tests/workflow_stage_b_verdict.py), not inline shell"
 
 core = re.search(r"(?ms)^  exact-head-core:\n(?P<body>.*?)(?=^    steps:)", WORKFLOW)
 assert core is not None and "draft" not in core.group("body"), "exact-head-core must run on drafts too"
