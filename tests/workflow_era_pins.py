@@ -19,7 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 FAILED = 0
-SOURCE_RELEASE_VERSION = "2.0.12"
+SOURCE_RELEASE_VERSION = "2.0.20"
 
 
 def check(ok: bool, message: str) -> None:

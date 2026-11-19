@@ -14,7 +14,7 @@ for _old, _new in (
     # on the branch the Stage A operator requires, not the release-prep branch.
     ("agent/unified-candidate-1.58.143", "physical-proof/2.0.21"),
     ("1.58.143", "2.0.21"),
-    ("1.58.142", "2.0.12"),
+    ("1.58.142", "2.0.20"),
     ("draft-PR #150", "origin/physical-proof/2.0.21"),
 ):
     _source = _source.replace(_old, _new)

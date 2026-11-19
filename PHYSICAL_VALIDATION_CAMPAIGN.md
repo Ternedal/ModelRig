@@ -140,7 +140,7 @@ at skrive til kampagnens sti.
 ## Stage B — publiceret release og T-006
 
 Stage B starter først efter, at `v2.0.21` er tagget og publiceret som komplet
-signeret release (D3, #2275). Kildereleasen er 2.0.12; målreleasen er 2.0.21.
+signeret release (D3, #2275). Kildereleasen er 2.0.20; målreleasen er 2.0.21.
 
 Følg `STAGE_B_UPDATER_EVIDENCE.md`. Updateren fra `v2.0.21` verificeres én gang
 som bootstrap-grænse (checksum + provenance). Server, supervisor og worker må
@@ -148,7 +148,7 @@ kun flyttes gennem updateren.
 
 Gennemfør og dokumentér:
 
-1. god appliance-update 2.0.12 → 2.0.21;
+1. god appliance-update 2.0.20 → 2.0.21;
 2. reboot til ready på 2.0.21;
 3. backend supervisor-restart;
 4. worker supervisor-restart;
@@ -158,7 +158,7 @@ Gennemfør og dokumentér:
 
 Det automatiske signed-release-to-signed-release self-update-bevis er deferred
 til issue #401. Forudsætningen (signeret source med self-update og en nyere
-signeret target) er til stede med 2.0.12 → 2.0.21, men beviset er separat og er
+signeret target) er til stede med 2.0.20 → 2.0.21, men beviset er separat og er
 ikke en blocker for denne release.
 
 ### Lifecycle-observationer
