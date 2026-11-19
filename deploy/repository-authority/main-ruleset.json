@@ -97,6 +97,10 @@
           {
             "context": "stage-b-verdict",
             "integration_id": 15368
+          },
+          {
+            "context": "freeze-guard",
+            "integration_id": 15368
           }
         ]
       }

@@ -570,6 +570,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_era_pins.py`
 - `tests/workflow_exact_head_concurrency.py`
 - `tests/workflow_freeze_check.py`
+- `tests/workflow_freeze_guard.py`
 - `tests/workflow_frozen_voice_package.py`
 - `tests/workflow_gates_read_code.py`
 - `tests/workflow_kaliv_delivery_report.py`
@@ -639,6 +640,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_stage_b_one_click.py`
 - `tests/workflow_stage_b_physical_gate.py`
 - `tests/workflow_stage_b_reboot_proof.py`
+- `tests/workflow_stage_b_verdict.py`
 - `tests/workflow_stage_b_weighted_sharding.py`
 - `tests/workflow_staged_promotion_runbook.py`
 - `tests/workflow_stale_check.py`

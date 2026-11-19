@@ -212,6 +212,10 @@ jobs:
   # or a cancellation fails it. Required in queue mode (QUEUE_REQUIRED_STATUS_
   # CHECKS in scripts/repository_authority.py); classic protection today does
   # not list it, so gate 10's current verdict is unchanged.
+  # The logic lives in scripts/stage_b_verdict.sh so the gate can test every
+  # branch (tests/workflow_stage_b_verdict.py). The campaign freeze (D7) is NOT
+  # judged here -- this job runs the candidate's own files -- but in
+  # .github/workflows/freeze-guard.yml, required via the ruleset from main.
   stage-b-verdict:
     needs: [release-class, stage-b-slices]
     if: >-
@@ -220,6 +224,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Stage B completed, or skipped for an allowed reason
         shell: bash
         env:
@@ -227,26 +234,8 @@ jobs:
           DOCS_ONLY: ${{ needs.release-class.outputs.docs_only }}
           EVENT: ${{ github.event_name }}
           DRAFT: ${{ github.event.pull_request.draft }}
-        run: |
-          set -euo pipefail
-          echo "stage-b-slices result: $RESULT; docs_only: '${DOCS_ONLY}'; event: $EVENT; draft: '${DRAFT}'"
-          case "$RESULT" in
-            success) echo "Stage B passed on this exact head" ;;
-            skipped)
-              if [ "$DOCS_ONLY" = "true" ]; then
-                echo "documentation-only candidate: Stage B is not required (ADR-SYS-002 D1)"
-              elif [ "$EVENT" = "pull_request" ] && [ "$DRAFT" = "true" ]; then
-                echo "draft pull request: Stage B is deferred to ready_for_review (#2413)"
-              else
-                echo "Stage B was skipped without an allowed reason" >&2; exit 1
-              fi ;;
-            *) echo "Stage B did not pass (result: $RESULT)" >&2; exit 1 ;;
-          esac
-  # _tests.yml is shared with the release workflow and historically checks out
-  # GitHub's pull-request merge ref. Until that large reusable workflow is
-  # migrated independently, require its *entire repository tree* to be byte-
-  # identical to the immutable PR head. Base drift therefore fails closed
-  # instead of silently injecting files into qualification.
+        run: bash scripts/stage_b_verdict.sh
+
   legacy-merge-tree-equivalence:
     if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest

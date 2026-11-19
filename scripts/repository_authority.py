@@ -37,7 +37,12 @@ REQUIRED_STATUS_CHECKS = (
 # aggregate check is required on top of the classic list. It is not part of
 # REQUIRED_STATUS_CHECKS because classic protection (today's model) does not
 # list it; adding it there would fail gate 10 on the current repository.
-QUEUE_REQUIRED_STATUS_CHECKS = REQUIRED_STATUS_CHECKS + ("stage-b-verdict",)
+# ADR-SYS-003 D7: the freeze guard is a required status check too. Ternedal is a
+# user account, so GitHub's "require workflows to pass" rule (organization
+# rulesets only) is not available; the guard's independence comes from judging
+# from the BASE checkout inside .github/workflows/freeze-guard.yml, and a change
+# to that file is code under a protected prefix with human SHA-scoped ACCEPT.
+QUEUE_REQUIRED_STATUS_CHECKS = REQUIRED_STATUS_CHECKS + ("stage-b-verdict", "freeze-guard")
 
 
 def _enabled(value: Any) -> bool:
@@ -246,7 +251,7 @@ def evaluate_rulesets(rulesets: list[dict[str, Any]] | None) -> dict[str, Any]:
     if missing:
         errors.append(
             "required exact-green status checks are incomplete"
-            + (" (merge-queue mode also requires stage-b-verdict: the queue must wait for Stage B)" if merge_queue else "")
+            + (" (merge-queue mode also requires stage-b-verdict and freeze-guard)" if merge_queue else "")
         )
     if wrong_source:
         errors.append(
