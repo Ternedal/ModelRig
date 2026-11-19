@@ -57,4 +57,17 @@ jobs:
           git cat-file -e "$HEAD_SHA^{commit}"
       - name: Judge with the base's guard
         shell: bash
-        run: bash scripts/freeze_guard.sh "$BASE_SHA" "$HEAD_SHA"
+        run: |
+          set -euo pipefail
+          # A base without the guard (only the PR that introduces it, or a very
+          # old base) cannot judge. Same semantics as the script: with no freeze
+          # there is nothing to enforce; with a freeze on, "cannot judge" refuses.
+          if [ ! -f scripts/freeze_guard.sh ]; then
+            if [ "${FREEZE:-}" = "1" ]; then
+              echo "::error::KALIV_FREEZE=1 but the base $BASE_SHA has no scripts/freeze_guard.sh; refusing (cannot enforce)"
+              exit 1
+            fi
+            echo "::notice::base $BASE_SHA has no scripts/freeze_guard.sh and no freeze is on; nothing to enforce"
+            exit 0
+          fi
+          bash scripts/freeze_guard.sh "$BASE_SHA" "$HEAD_SHA"

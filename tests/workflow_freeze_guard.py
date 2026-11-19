@@ -156,7 +156,9 @@ check("ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.b
 check("github.event.pull_request.head.sha }}\n" not in jobs.split("steps:", 1)[1].split("- name: Fetch", 1)[0], "the candidate head is never checked out")
 check('test "$(git rev-parse HEAD)" = "$BASE_SHA"' in jobs, "the job asserts the checkout is the base before anything else")
 check('git fetch --no-tags origin "$HEAD_SHA"' in jobs and 'git cat-file -e "$HEAD_SHA^{commit}"' in jobs, "the candidate head is fetched as an object only")
-check('run: bash scripts/freeze_guard.sh "$BASE_SHA" "$HEAD_SHA"' in jobs, "the base's guard script judges")
+check('bash scripts/freeze_guard.sh "$BASE_SHA" "$HEAD_SHA"' in jobs, "the base's guard script judges")
+check('if [ ! -f scripts/freeze_guard.sh ]; then' in jobs and 'if [ "${FREEZE:-}" = "1" ]; then' in jobs and "refusing (cannot enforce)" in jobs,
+      "a base without the guard: refused while frozen (cannot enforce), otherwise nothing to enforce — same semantics as the script")
 check("FREEZE: ${{ vars.KALIV_FREEZE }}" in jobs, "the freeze marker is the repository variable KALIV_FREEZE")
 check("permissions:\n  contents: read" in wf, "the workflow has read-only permissions")
 check("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in jobs, "actions/checkout is pinned by SHA")
