@@ -5,7 +5,7 @@
 
 **Version på main:** `2.0.21`
 **Kørende appliance:** ingen fundet på 127.0.0.1:8080 — dommen bygger på dette miljøs rapportstier (CI-fallback)
-**Genereret:** 2026-11-16 06:51 UTC
+**Genereret:** 2026-11-17 21:18 UTC
 
 ---
 
