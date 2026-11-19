@@ -720,6 +720,10 @@ private data class Msg(
     // Epoch-ms for turens oprettelse (capslinjens klokkeslaet). null for
     // indlaest historik, hvor DB'en ikke gemmer tid pr. besked.
     val at: Long? = System.currentTimeMillis(),
+    // #2419: billedjob turen satte i koe via image_generate (job-id'er fra
+    // riggens `media_jobs`). Én boble pr. id under svaret. Ikke persisteret i
+    // denne slice: efter genstart ligger billedet i galleriet, ikke i samtalen.
+    val mediaJobs: List<String> = emptyList(),
 )
 
 /**
@@ -1610,6 +1614,12 @@ private fun ChatScreen(
                     messages[idx] = cur.copy(personLabel = label)
                 }
             }
+            val onMediaJobs: (List<String>) -> Unit = { ids ->
+                scope.launch {
+                    val cur = messages.getOrNull(idx) ?: return@launch
+                    messages[idx] = cur.copy(mediaJobs = ids)
+                }
+            }
             // Riggens egen fase erstatter startgaettet fra TurnStatus.forPlan.
             // Ukendt fase -> null -> statussen staar; en nyere worker maa ikke
             // kunne blanke indikatoren.
@@ -1686,6 +1696,7 @@ private fun ChatScreen(
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.context.isNotEmpty()) onContext(turn.context)
+                            if (turn.mediaJobs.isNotEmpty()) onMediaJobs(turn.mediaJobs)
                             turn.personName?.let { name ->
                                 onPerson(if (turn.personRevision != null) "$name \u00b7 ${turn.personRevision}" else name)
                             }
@@ -1807,6 +1818,9 @@ private fun ChatScreen(
             val onPersonRetry: (String) -> Unit = { label ->
                 scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(personLabel = label) }
             }
+            val onMediaJobsRetry: (List<String>) -> Unit = { ids ->
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(mediaJobs = ids) }
+            }
             val onPhase: (String) -> Unit = { name ->
                 TurnStatus.forPhase(name)?.let { label ->
                     scope.launch {
@@ -1842,6 +1856,7 @@ private fun ChatScreen(
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.context.isNotEmpty()) onContext(turn.context)
+                            if (turn.mediaJobs.isNotEmpty()) onMediaJobsRetry(turn.mediaJobs)
                             turn.personName?.let { name ->
                                 onPersonRetry(if (turn.personRevision != null) "$name \u00b7 ${turn.personRevision}" else name)
                             }
@@ -2616,6 +2631,35 @@ private fun ChatScreen(
                             body = { MarkdownText(m.text, color = KalivTheme.colors.textBody) },
                             onRetry = if (m.error) ({ retry(i) }) else null,
                         )
+                        if (m.mediaJobs.isNotEmpty()) {
+                            // #2419: én boble pr. billedjob. Klienterne bygges mod den parrede
+                            // oprindelse; kan de ikke (ikke parret, afvist oprindelse), siger
+                            // boblen det i stedet for at gaette.
+                            val mediaClients = remember(store.baseUrl, store.token) {
+                                runCatching {
+                                    dk.ternedal.modelrig.net.MediaJobClient(store.baseUrl, store.token) to
+                                        dk.ternedal.modelrig.net.MediaGalleryClient(store.baseUrl, store.token)
+                                }
+                            }
+                            m.mediaJobs.forEach { jobId ->
+                                mediaClients.fold(
+                                    onSuccess = { (jobs, gallery) ->
+                                        dk.ternedal.modelrig.ui.chat.ImageJobBubble(
+                                            jobId = jobId, jobs = jobs, gallery = gallery,
+                                            modifier = Modifier.padding(start = 15.dp),
+                                        )
+                                    },
+                                    onFailure = {
+                                        dk.ternedal.modelrig.ui.chat.ImageJobBubbleContent(
+                                            dk.ternedal.modelrig.ui.chat.ImageJobPhase.Ended(
+                                                "Billedet ligger i galleriet, n\u00e5r det er klar",
+                                            ),
+                                            modifier = Modifier.padding(start = 15.dp),
+                                        )
+                                    },
+                                )
+                            }
+                        }
                         if (m.context.isNotEmpty() && !m.streaming) {
                             var showCitations by remember(m.at) { mutableStateOf(false) }
                             Text(

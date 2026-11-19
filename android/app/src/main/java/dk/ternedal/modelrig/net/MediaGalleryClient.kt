@@ -19,6 +19,15 @@ interface MediaGallerySource {
     fun thumbnail(item: MediaItem): ByteArray
     fun image(item: MediaItem): ByteArray
     fun video(item: MediaItem): MediaVideoStream
+
+    /**
+     * #2419: one completed image by the asset id a job reported (`asset_id` on
+     * `kaliv-media-job/v1`), for the chat bubble, which has no [MediaItem] yet.
+     * Same route and bounds as [image]. Default refuses, so a fake that does
+     * not know about images stays honest.
+     */
+    fun asset(assetId: String): ByteArray =
+        throw MediaGalleryException(MediaGalleryException.Reason.NOT_FOUND, "Billedet kan ikke hentes her")
 }
 
 /**
@@ -145,6 +154,13 @@ class MediaGalleryClient(
         require(item.kind == MediaKind.IMAGE) { "not an image" }
         if (item.sizeBytes > IMAGE_MAX_BYTES) throw tooLarge()
         return execute(origin.resolveExact(item.mediaPath), IMAGE_MAX_BYTES, requireImage = true)
+    }
+
+    override fun asset(assetId: String): ByteArray {
+        if (!MediaGalleryContract.isSafeId(assetId)) {
+            throw MediaGalleryException(MediaGalleryException.Reason.NOT_FOUND, "Ugyldigt billed-id")
+        }
+        return execute(origin.resolveExact(MediaGalleryContract.mediaPath(assetId)), IMAGE_MAX_BYTES, requireImage = true)
     }
 
     /**
