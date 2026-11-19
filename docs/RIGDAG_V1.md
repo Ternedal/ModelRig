@@ -20,10 +20,12 @@ der noget andet dér, gælder den. Udskiftede værdier står som `<…>`.
    vinduet ([KALIV_RECOVERY_SOAK_QUALIFICATION.md](KALIV_RECOVERY_SOAK_QUALIFICATION.md)).
    Gate 9 kræver altså en Stage B på 2.0.21-kandidaten.
 4. **Gate 10 tidligt, så snart hver pin står.** En verdict kan kun tages,
-   mens det repos `main` stadig står på pinnen. For **ModelRig betyder det lige
-   efter merge af bump-PR'en, før noget andet lander**: meld landingspausen på
-   #2275 først. BodyRig, VisionRig og VoiceRig, så snart deres pins er valgt.
-   Selve assembleren kan køres senere.
+   mens det repos `main` stadig står på pinnen. For 2.0.21 er bumpet allerede
+   merget (`e73f80a4`, 17/11), og main er gået videre; **ModelRig-pinnen er
+   derfor main, som den står, når du fryser**: meld landingspausen på #2275
+   først, tag så verdicten, og lad intet lande før manifestet er samlet.
+   BodyRig, VisionRig og VoiceRig, så snart deres pins er valgt. Selve
+   assembleren kan køres senere.
 5. **Gate 1 sidst**, når alle fire pins har grøn exact-head.
 6. **Manifestet** til sidst.
 
@@ -206,8 +208,9 @@ python scripts\kaliv_software_exact_green_assembler.py `
 ## 7. Gate 10 — `repository_authority`
 
 Vejledning: [KALIV_REPOSITORY_AUTHORITY_QUALIFICATION.md](KALIV_REPOSITORY_AUTHORITY_QUALIFICATION.md).
-**Tages når pinnen står, ikke her** (se rækkefølgen): ModelRig lige efter
-bump-mergen under landingspause, de tre andre når deres pins er valgt. En
+**Tages når pinnen står, ikke her** (se rækkefølgen): ModelRig på main under
+landingspausen (bumpet til 2.0.21 er allerede merget), de tre andre når deres
+pins er valgt. En
 verdict pr. repo fra en ren `main`-checkout, gemt uden for alle checkouts.
 
 **VisionRig-pinnen til 2.0.21 skal være `07c47ca8` eller nyere** (ellers
@@ -227,8 +230,12 @@ manifestet: den endelige gate tjekker kun ref'ens form og pin, ikke filen bag.
 
 - Gate 3's fysiske webcam-kvalifikation er ikke kørt (se evidens-tabellen i
   afsnit 3).
-- Gate 5 punkt 9 kræver at "ModelRig backend rapporterer VoiceRig": om det er
-  appliancen eller valideringsstakken, står ikke i VoiceRig's vejledning.
+- Gate 5 punkt 9 ("ModelRig backend rapporterer VoiceRig") er **afklaret**:
+  VoiceRig bruger den backend, `MODELRIG_BASE_URL` peger på (standard
+  `127.0.0.1:8080`, autentificeret), og gate 5's ref binder kun VoiceRig-SHA'en.
+  Appliancen og valideringsstakken er begge gyldige; `MODELRIG_VOICES_DIR` skal
+  være den samme for VoiceRig og ModelRig-workeren (VoiceRig
+  `docs/MODELRIG_INTEGRATION.md`).
 - Gate 9 betyder en fuld Stage B på 2.0.21 med soak omkring. **Kilden er den
   signerede 2.0.12**, ikke 2.0.20: `stage_b_one_click_v2.py` kræver backend og
   worker på præcis 2.0.12 (`EXPECTED_SOURCE_VERSION`), og
