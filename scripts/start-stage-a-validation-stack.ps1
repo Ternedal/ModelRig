@@ -43,7 +43,12 @@ param(
     # session; without -EnableConsciousnessLifecycle the live-cycle flags and
     # the profile are written for them.
     [switch]$EnableE2eLatency,
-    [switch]$EnableVisionRigAdmission
+    [switch]$EnableVisionRigAdmission,
+
+    # Dry run for the rig simulator (and for checking a rig-day command line):
+    # write the worker cmd exactly as a real start would, print it between
+    # markers and stop -- no port waits, no backend build, nothing started.
+    [switch]$WriteWorkerCmdOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -300,6 +305,13 @@ $e2eLatencyEnv
 $visionRigEnv
 $workerCommand
 "@ | Set-Content -LiteralPath $workerCmd -Encoding ASCII
+
+if ($WriteWorkerCmdOnly) {
+    Write-Output "WORKER-CMD-BEGIN $workerCmd"
+    Get-Content -LiteralPath $workerCmd | Write-Output
+    Write-Output "WORKER-CMD-END"
+    return
+}
 
 if ($WorkerOnly) {
     Wait-PortFree -Port 8099 -Label "worker"
