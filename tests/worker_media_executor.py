@@ -272,6 +272,28 @@ class ExecutorTests(unittest.TestCase):
                 ex.release_lock()
                 self.executors.remove(ex)
 
+    def test_a_fallback_retry_clears_the_translation_kept_from_a_deferred_attempt(self):
+        # Codex P2 on #2418: translated, then deferred by GPU admission (defer keeps effective_prompt),
+        # then a retry that falls back renders the original. Provenance must describe that retry.
+        def deferred_attempt(job):
+            claimed = self.store.claim_for(["sdxl-a"], ex.instance)
+            self.assertEqual(claimed["id"], job)
+            self.assertTrue(self.store.record_effective_prompt(job, ex.instance, "a blue bicycle"))
+            self.assertEqual(self.store.defer(job, ex.instance, max_wait_s=600, error="gpu_unavailable"), "requeued")
+            self.assertEqual(self.state(job)["effective_prompt"], "a blue bicycle", "defer keeps it (the precondition)")
+        for rewriter in ((lambda p, *, max_chars: (p, "fallback:timeout")), None):
+            with self.subTest(rewriter="fallback" if rewriter else "none"):
+                FakeImageAdapter.rendered.clear()
+                ex = self.executor([self.image()], prompt_rewriter=rewriter)
+                job = self.submit("sdxl-a")
+                deferred_attempt(job)
+                self.assertEqual(ex.step(), "completed")
+                self.assertEqual(FakeImageAdapter.rendered, ["a red bicycle"])
+                self.assertIsNone(self.state(job)["effective_prompt"], "the stale translation is gone")
+                ex.shutdown()
+                ex.release_lock()
+                self.executors.remove(ex)
+
     def test_without_a_rewriter_nothing_changes_and_no_translate_event_exists(self):
         seen = []
         ex = self.executor([self.image()])

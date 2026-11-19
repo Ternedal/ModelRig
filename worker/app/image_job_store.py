@@ -531,6 +531,16 @@ class ImageJobStore:
                 "UPDATE image_jobs SET effective_prompt=?,updated=? WHERE id=? AND state='running' AND claimed_by=?",
                 (prompt, time.time(), job_id, self._instance(instance))).rowcount == 1
 
+    def clear_effective_prompt(self, job_id: str, instance: str) -> bool:
+        """This attempt renders the prompt as given: drop provenance left by an earlier attempt (a
+        translated attempt that GPU admission deferred keeps its effective_prompt through defer()), so
+        translated_prompt describes the attempt that actually rendered (#2418, Codex P2). Same writer
+        rule as record_effective_prompt."""
+        with self._db() as db:
+            return db.execute(
+                "UPDATE image_jobs SET effective_prompt=NULL,updated=? WHERE id=? AND state='running' AND claimed_by=? "
+                "AND effective_prompt IS NOT NULL", (time.time(), job_id, self._instance(instance))).rowcount == 1
+
     def begin_publish(self, job_id: str, instance: str) -> bool:
         """The commit point: running -> publishing only if no cancel was requested. Publish only after True."""
         with self._db() as db:

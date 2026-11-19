@@ -285,6 +285,8 @@ class MediaExecutor:
         rewriter the job is returned as is. Fail-open: any failure keeps the original prompt, and only
         an outcome code and a duration are recorded, never prompt text."""
         if self.prompt_rewriter is None:
+            # an earlier attempt (another configuration, before a deferral) may have left a translation
+            self.store.clear_effective_prompt(job["id"], self.instance)
             return job
         started = self.clock()
         try:
@@ -298,6 +300,9 @@ class MediaExecutor:
             # Provenance before render: the owner can see what was rendered in their name, with the
             # job's own retention. A store refusal (cancelled meanwhile) is the step's problem, not ours.
             self.store.record_effective_prompt(job["id"], self.instance, prompt)
+        else:
+            # rendered as given: a translation kept from a deferred attempt must not describe this one
+            self.store.clear_effective_prompt(job["id"], self.instance)
         return {**job, "prompt": prompt}
 
     def _cancel_check(self, job_id: str) -> Callable[[], bool]:

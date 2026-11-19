@@ -743,6 +743,11 @@ class PromptRetentionTests(unittest.TestCase):
         with self.assertRaises(ImageJobError):
             self.store.record_effective_prompt(job_id, instance, "")
         self.assertTrue(self.store.record_effective_prompt(job_id, instance, "a red bicycle"))
+        self.assertFalse(self.store.clear_effective_prompt(job_id, "GPU-" + "b" * 36 + ":" + "2" * 16), "another claimant")
+        self.assertTrue(self.store.clear_effective_prompt(job_id, instance))
+        self.assertIsNone(self.store.get(job_id, "anders")["effective_prompt"])
+        self.assertFalse(self.store.clear_effective_prompt(job_id, instance), "nothing left to clear")
+        self.assertTrue(self.store.record_effective_prompt(job_id, instance, "a red bicycle"))
         self.assertEqual(self.store.get(job_id, "anders")["effective_prompt"], "a red bicycle")
         self.assertIsNone(self.store.get(job_id, "anders").get("translated_prompt"), "the column is the store's; the view names it")
         with sqlite3.connect(self.db) as db:
