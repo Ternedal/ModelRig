@@ -718,8 +718,13 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
     what ran.
     """
     from . import tools as t
+    from .image_generate_tool import TOOL_NAME as _IMAGE_TOOL, parse_job_reference as _image_job_ref
     _schema = t.ollama_tool_schema(t.GATE)
     last_result = None
+    # #2419: image jobs the turn queued, lifted out of the tool result so the app
+    # can draw a bubble that polls GET /api/v1/media/jobs/{id}. Additive wire
+    # field, always present on an answered turn; empty when no image was asked for.
+    media_jobs: list[dict] = []
 
     _BODY_STATES = {"generating": "thinking", "tool_run": "waiting_for_tool"}
 
@@ -751,6 +756,7 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
             return {"status": "answered", "answer": msg.get("content", ""),
                     "tool": tools_used[-1] if tools_used else None,
                     "tools_used": tools_used, "sources": sources,
+                    "media_jobs": media_jobs,
                     # De udsnit der FAKTISK laa i konteksten. "sources" er
                     # navnene; dette er hvad der blev laest. Vi paastaar IKKE
                     # hvilken saetning i svaret der brugte hvilket udsnit --
@@ -791,6 +797,10 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
                     "context": context or []}
         tools_used.append(name)
         last_result = result["result"]
+        if name == _IMAGE_TOOL:
+            ref = _image_job_ref(result["result"])
+            if ref is not None:
+                media_jobs.append(ref)
         messages.append({"role": "tool", "content": result["result"]})
     try:
         answer = await _final_answer(messages, model, cloud_base_url, cloud_key)
@@ -798,7 +808,8 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
         raise HTTPException(status_code=502, detail=str(e))
     return {"status": "answered", "tool": tools_used[-1] if tools_used else None,
             "tools_used": tools_used, "answer": answer, "origin": origin,
-            "tool_result": last_result, "steps_exhausted": True}
+            "tool_result": last_result, "steps_exhausted": True,
+            "media_jobs": media_jobs}
 
 
 async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
