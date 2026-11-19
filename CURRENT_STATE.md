@@ -408,6 +408,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_media_job_api.py`
 - `tests/worker_media_job_to_gallery.py`
 - `tests/worker_media_preflight.py`
+- `tests/worker_media_prompt_translation.py`
 - `tests/worker_media_recovery_inventory.py`
 - `tests/worker_media_repair.py`
 - `tests/worker_media_security_properties.py`

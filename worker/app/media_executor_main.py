@@ -63,6 +63,7 @@ from .media_executor import EXIT_CONFIG, EXIT_SINK_UNAVAILABLE, ExecutorConfigEr
 from .media_gallery_store import ExternalMediaSink
 from .media_generation_contract import MAX_ARTIFACT_BYTES, ArtifactSinkUnavailable, GenerationError
 from .media_generation_profiles import ModelProfile, enabled_profiles, load_profile_dir
+from .media_prompt_translation import PromptTranslationConfigError, translator_from_env
 from .media_staged_video_sink import ExternalStagedVideoSink
 from .media_volume import VOLUME_ID_ENV, MediaVolumeConfigError, MountedMediaVolume, media_volume_from_env
 from .media_work_area import MediaWorkAreaConfigError, PrivateWorkArea, work_area_from_env
@@ -393,9 +394,14 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
     factory = adapter_factory or default_adapter_factory(device, lease_dir, env, video=video,
                                                          supervisor_class=supervisor_class,
                                                          image_adapter_factory=image_adapter_factory)
+    try:
+        translator = translator_from_env(env)
+    except PromptTranslationConfigError as exc:
+        raise ExecutorConfigError(str(exc)) from None
     return MediaExecutor(store, gpu_uuid=gpu_uuid, lease_dir=lease_dir, profiles=mine, adapter_factory=factory,
                          image_sink=published_through, video_sink=video_sink, idle_unload_s=idle,
-                         volume_root=str(volume.root))
+                         volume_root=str(volume.root),
+                         prompt_rewriter=translator.rewrite if translator is not None else None)
 
 
 def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) -> int:
