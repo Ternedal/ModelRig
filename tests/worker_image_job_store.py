@@ -734,6 +734,33 @@ class PromptRetentionTests(unittest.TestCase):
         self.assertEqual((row["state"], row["asset_id"]), ("completed", "a" * 32), "the row itself stays")
         self.assertEqual(self.store.purge_prompts(now=time.time() + 31 * self.DAY), 0, "idempotent")
 
+    def test_the_effective_prompt_lives_and_dies_with_the_original(self):
+        instance = "GPU-" + "a" * 36 + ":" + "1" * 16
+        job_id = self.store.submit("anders", "en rød cykel", profile_id="test-profile", max_owner_active=16)["job_id"]
+        self.assertFalse(self.store.record_effective_prompt(job_id, instance, "a red bicycle"), "queued: not ours yet")
+        self.assertEqual(self.store.claim_for(["test-profile"], instance)["id"], job_id)
+        self.assertFalse(self.store.record_effective_prompt(job_id, "GPU-" + "b" * 36 + ":" + "2" * 16, "x"), "another claimant")
+        with self.assertRaises(ImageJobError):
+            self.store.record_effective_prompt(job_id, instance, "")
+        self.assertTrue(self.store.record_effective_prompt(job_id, instance, "a red bicycle"))
+        self.assertFalse(self.store.clear_effective_prompt(job_id, "GPU-" + "b" * 36 + ":" + "2" * 16), "another claimant")
+        self.assertTrue(self.store.clear_effective_prompt(job_id, instance))
+        self.assertIsNone(self.store.get(job_id, "anders")["effective_prompt"])
+        self.assertFalse(self.store.clear_effective_prompt(job_id, instance), "nothing left to clear")
+        self.assertTrue(self.store.record_effective_prompt(job_id, instance, "a red bicycle"))
+        self.assertEqual(self.store.get(job_id, "anders")["effective_prompt"], "a red bicycle")
+        self.assertIsNone(self.store.get(job_id, "anders").get("translated_prompt"), "the column is the store's; the view names it")
+        with sqlite3.connect(self.db) as db:
+            db.execute("UPDATE image_jobs SET state='completed', asset_id=? WHERE id=?", ("a" * 32, job_id))
+        self.assertEqual(self.store.purge_prompts(now=time.time() + 31 * self.DAY), 1)
+        row = self.store.get(job_id, "anders")
+        self.assertEqual((row["prompt"], row["effective_prompt"]), ("", None), "both texts gone together")
+        self.assertEqual(self.store.purge_prompts(now=time.time() + 31 * self.DAY), 0, "idempotent")
+
+    def test_a_job_without_translation_never_gets_an_effective_prompt(self):
+        job_id = self.job("completed", "plain english")
+        self.assertIsNone(self.store.get(job_id, "anders")["effective_prompt"])
+
     def test_the_old_text_is_not_left_in_the_database_file(self):
         # Some SQLite builds have secure_delete on by default, others not: start every connection
         # with it OFF, so only the store's own PRAGMA can remove the old text from the file.

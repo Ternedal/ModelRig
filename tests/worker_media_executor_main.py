@@ -258,6 +258,23 @@ class EntryPointTests(unittest.TestCase):
         self.assertEqual(main(["--device", "cuda:0"], {**self.env, "KALIV_GPU_DEVICE_UUIDS": f"cuda:1={GPU}"}),
                          EXIT_CONFIG, "no UUID for the executor's own device")
 
+    def test_prompt_translation_is_off_by_default_and_loopback_only_when_on(self):
+        from app.media_prompt_translation import PromptTranslator
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            off = build_from_env("cuda:0", self.env, adapter_factory=lambda p: FakeAdapter(p, self.env["KALIV_GPU_LEASE_DIR"]))
+            self.assertIsNone(off.prompt_rewriter, "no model configured: prompts render as given")
+            on = build_from_env("cuda:0", {**self.env, "KALIV_MEDIA_TRANSLATE_MODEL": "qwen3:4b"},
+                                adapter_factory=lambda p: FakeAdapter(p, self.env["KALIV_GPU_LEASE_DIR"]))
+            self.assertIsInstance(on.prompt_rewriter.__self__, PromptTranslator)
+            self.assertEqual(on.prompt_rewriter.__self__.url, "http://127.0.0.1:11434")
+            for change in ({"KALIV_MEDIA_TRANSLATE_URL": "https://ollama.com"},
+                           {"KALIV_MEDIA_TRANSLATE_URL": "http://192.168.1.2:11434"},
+                           {"KALIV_MEDIA_TRANSLATE_TIMEOUT_S": "never"}):
+                with self.subTest(change=change):
+                    self.assertEqual(main(["--device", "cuda:0"],
+                                          {**self.env, "KALIV_MEDIA_TRANSLATE_MODEL": "qwen3:4b", **change}), EXIT_CONFIG,
+                                     "a translation endpoint off the rig is a configuration error, never a request")
+
     def test_no_enabled_profile_for_this_device_is_a_config_error(self):
         self.assertEqual(main(["--device", "cuda:1"], {**self.env, "KALIV_GPU_DEVICE_UUIDS": f"cuda:1={GPU}"}),
                          EXIT_CONFIG)
