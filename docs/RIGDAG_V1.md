@@ -4,7 +4,7 @@ Kommandoerne til de syv V1-gates (ADR-SYS-001), gate for gate og i den
 rækkefølge der virker. Hvert trin peger på sin autoritative vejledning; står
 der noget andet dér, gælder den. Udskiftede værdier står som `<…>`.
 
-> **Status:** samlet 19/11-2026 fra vejledningerne nedenfor. **Ikke kørt som
+> **Status:** samlet 19/11-2026, gate 3's webcam-vej tilføjet samme aften fra vejledningerne nedenfor. **Ikke kørt som
 > helhed.** Stak-kommandolinjerne til gate 2, 3 og 8 og workerens opstart med
 > dem er kørt i rig-simulatoren på windows-latest (#2437, #2438). Ingen gate er
 > kørt på 2.0.21.
@@ -98,18 +98,49 @@ ModelRig-workeren med admission:
 
 Gate 3 og 8 kan køre på samme worker: giv begge switches.
 
-I VisionRig-checkouten på `<visionrig-sha>`, én kilde:
+VisionRig-kernen skal køre på loopback med ModelRig-broen slået til
+(VisionRig `docs/PHYSICAL_QUALIFICATION.md`, "Prerequisites"):
 
-```powershell
-.\run-v1-release-gate.ps1 -QualifyKinect -KinectModelManifest <fil> -ModelRigWorkerUrl http://127.0.0.1:8099
+```text
+VISIONRIG_MODELRIG_BRIDGE=1
+VISIONRIG_MODELRIG_WORKER_URL=http://127.0.0.1:8099
 ```
 
-(eller `-QualifyAndroid` / `-QualifyQuest`). Ref'en
-(`visionrig-physical-perception:<visionrig-sha>:<sha256>`) står i
-`validation\visionrig-physical-perception-latest.json`.
+**Kilde: riggens webcam** (beslutning 12/11). Kræver VisionRig `07c47ca8`
+eller nyere (#206, `-QualifySourceId`). I VisionRig-checkouten på
+`<visionrig-sha>`:
 
-> **Åbent:** hvilken kilde V1 skal bevises med. Beslutningen 12/11 nævner
-> "webcam på riggen"; wrapperen kender Kinect, Android (CameraX) og Quest.
+Vindue 1 — produceren. Den skal køre hele tiden og have leveret frames, før
+kvalifikationen starter; luk den ikke undervejs:
+
+```powershell
+visionrig-producer --camera 0 --source-id windows-webcam --fps 5
+```
+
+Vindue 2 — kvalifikationen:
+
+```powershell
+.\run-v1-release-gate.ps1 -QualifySourceId windows-webcam
+```
+
+Ref'en (`visionrig-physical-perception:<visionrig-sha>:<sha256>`) står som
+`release_evidence_ref` i `validation\visionrig-windows-webcam-physical.json`.
+(Kinect, Android og Quest findes stadig: `-QualifyKinect`, `-QualifyAndroid`,
+`-QualifyQuest`.)
+
+**Evidens — hvad der er bevist, og hvad der ikke er:**
+
+| | Status |
+|---|---|
+| `-QualifySourceId` afviser ugyldige og gentagne id'er før noget kører (CI, Windows PowerShell 5.1) | bevist i CI |
+| Wrapperen kører under Windows PowerShell 5.1 (`-StatusOnly`) | bevist i CI |
+| Fysisk webcam-kvalifikation: rigtigt kamera → frames → ModelRig-admission → PASS | **ikke kørt** |
+
+Grøn CI er ikke gate 3. Gate 3 er kun bestået, når wrapperen er endt uden
+fejl og rapporten har en `release_evidence_ref` på den valgte VisionRig-SHA.
+Fejler eller afbrydes kvalifikationen, mangler rapporten, eller mangler ref'en,
+**er gate 3 ikke bestået** og må ikke meldes som PASS; ret årsagen og kør den
+igen. Brug aldrig en ref fra en tidligere kørsel eller en anden SHA.
 
 ## 4. Gate 5 — `voicerig_physical_acceptance`
 
@@ -178,6 +209,11 @@ Vejledning: [KALIV_REPOSITORY_AUTHORITY_QUALIFICATION.md](KALIV_REPOSITORY_AUTHO
 **Tages når pinnen står, ikke her** (se rækkefølgen): ModelRig lige efter
 bump-mergen under landingspause, de tre andre når deres pins er valgt. En
 verdict pr. repo fra en ren `main`-checkout, gemt uden for alle checkouts.
+
+**VisionRig-pinnen til 2.0.21 skal være `07c47ca8` eller nyere** (ellers
+mangler `-QualifySourceId` til gate 3). VisionRig-verdicten skal være taget på
+præcis den pin, der står i manifestet; en verdict fra en anden VisionRig-SHA
+gælder ikke. Det samme gælder gate 3's ref og gate 1.
 Her til sidst kører du kun `kaliv_repository_authority_assembler.py` på de
 fire gemte verdicts, som vejledningen viser.
 
@@ -189,7 +225,8 @@ manifestet: den endelige gate tjekker kun ref'ens form og pin, ikke filen bag.
 
 ## Åbne punkter før rigdagen
 
-- Kilden til gate 3 (se ovenfor).
+- Gate 3's fysiske webcam-kvalifikation er ikke kørt (se evidens-tabellen i
+  afsnit 3).
 - Gate 5 punkt 9 kræver at "ModelRig backend rapporterer VoiceRig": om det er
   appliancen eller valideringsstakken, står ikke i VoiceRig's vejledning.
 - Gate 9 betyder en fuld Stage B på 2.0.21 med soak omkring. **Kilden er den
