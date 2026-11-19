@@ -141,7 +141,7 @@ smoke-trinet og start prøvetagningen efter
 Stage B. Collectoren sender kun GET til loopback og starter, stopper eller
 aktiverer intet.
 
-Kildereleasen er den signerede 2.0.12; target er 2.0.21. Target-updaterens
+Kildereleasen er den signerede 2.0.20; target er 2.0.21. Target-updaterens
 checksum og provenance verificeres som den autoritative bootstrap-grænse, før
 server, supervisor og worker må flyttes gennem updateren. Stage B-runbooken er
 autoritet for den præcise updater-/self-update-semantik; der må ikke håndkopieres
