@@ -21,6 +21,7 @@ Run: python3 tests/workflow_validation_stack_v1_gates.py
 """
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -126,8 +127,11 @@ def write_worker_cmd_only_stops_before_anything_starts() -> None:
                                   STACK.find("& go build")) if i >= 0)
     check(0 <= written < dry < first_start,
           "the dry run returns after the worker cmd is written and before any port wait, build or start")
-    simulated = (ROOT / "scripts" / "rig_simulator" / "operators.json").read_text(encoding="utf-8")
-    check('"stack-worker-cmd-v1-gates-3-8"' in simulated, "the rig simulator runs the gate 3/8 command line")
+    manifest = json.loads((ROOT / "scripts" / "rig_simulator" / "operators.json").read_text(encoding="utf-8"))
+    simulated = {op["id"] for op in manifest["operators"]}
+    check({"stack-worker-cmd-v1-gates-3-8", "stack-worker-cmd-v1-gate2-with-3-8",
+           "stack-worker-cmd-gate2-refuses-without-scheduler"} <= simulated,
+          "the rig simulator runs the three V1 stack command lines")
 
 
 def evidence_root_is_ignored() -> None:
