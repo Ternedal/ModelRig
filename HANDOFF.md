@@ -837,11 +837,24 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 
 ### 19/11: merge-queue-sporet er på main; freeze har fået en kontakt
 
-**[19/11 07:xx — ADR-SYS-003 rev. 3 (`14562e7`), trin 1 (`33f43bf`) og trin 2
-(`df04a2a`) er landet. Alt er inert, indtil Anders kører trin 3 (runbook på
-#2415) den dag V1 er tagget. Gate 10's klassiske dom er uændret.]**
+**[19/11 21:29 — ADR-SYS-003 rev. 3 (`14562e7`), trin 1 (`33f43bf`), trin 2
+(`df04a2a`) og trin 4 (`ef0473d`, #2436) er landet. Alt er inert, indtil
+Anders kører trin 3 (runbook på #2415) — besluttet 19/11 17:04 til **20/11**,
+ikke efter V1-tag. Gate 10's klassiske dom er uændret; den offline evaluering
+af `deploy/repository-authority/main-ruleset.json` på `ef0473d` giver
+`passed: true`, 16 kontekster, `merge_queue: true`.]**
 
-**Freeze-kontakten (ADR-SYS-003 D7, trin 4 — foreslået i #2436, ikke landet):**
+**Hvad det kostede at lande trin 4 i strict mode (målt 19/11):** #2436
+rekvalificerede **syv gange** for byte-identisk indhold (`git range-diff` mod
+den ACCEPTede head: 4/4 `=`), fordi en anden PR landede, hver gang de 14
+required checks var grønne — heraf to af Anders' egne docs-/release-landinger
+om aftenen. Strict mode gør det umuligt at lande to PR'er inden for samme
+CI-cyklus; det er ikke en fejl, det er det, trin 3 fjerner. Landingen skete
+på required checks + ChatGPT's SHA-bundne kode-ACCEPT (som #2421), uden at
+vente på Stage B-slices — Anders' beslutning 17:04, fordi slices er ~3,5 t og
+blev slået tilbage af hver main-flytning.
+
+**Freeze-kontakten (ADR-SYS-003 D7, trin 4 — landet i #2436 → `ef0473d`):**
 repository-variablen `KALIV_FREEZE` (Settings → Secrets and variables →
 Actions → Variables, eller `gh variable set KALIV_FREEZE --body 1 -R
 Ternedal/ModelRig`). **Ejer: Anders.** `1` = kampagne-freeze på; alt andet =
@@ -863,7 +876,19 @@ køen. Push til `main` og dispatch rammes ikke. Freeze betyder altså ikke
 længere "main står stille", men "kun dokumentation lander"; evidensen
 overlever det (ADR-SYS-002 D3). **Indtil trin 3 er kørt, er checket ikke
 required** (klassisk protection kender det ikke) — det er et signal, og
-aftalen på #2275 gælder.
+aftalen på #2275 gælder. Første rigtige kørsel af `freeze-guard` på en PR
+mod `main` (19/11, #2436 selv, `KALIV_FREEZE` ikke sat): grøn med
+"nothing to enforce" — kontakten er af, indtil Anders sætter den.
+
+**Trin 3 — udføres 20/11 af Anders (runbook på #2415):** ren klon af `main`
+→ `./verify-repository-authority.ps1` (klassisk PASS) →
+`./configure-repository-authority-ruleset.ps1` (dry-run: offline gate 10 +
+producer-map) → `-Apply` → `-Apply -RemoveClassicProtection` → `verify` i
+ruleset-tilstand. Beviser bagefter: (5) denne docs-PR som første kø-landing,
+(6) én kode-landing der viser 16 kontekster i køen, (7) `KALIV_FREEZE=1` →
+en ikke-docs-kandidat afvises i køen, (8) §3/§4 opdateres: "`Kør merge
+<sha>`" bliver "sæt i kø". *[Resultater indsættes her, når trinnet er
+kørt.]*
 
 ### 18/11: ADR-SYS-002-kæden er landet — og sådan lander en stak på `main`
 
@@ -899,8 +924,8 @@ præcis det, ADR'en er lavet til.]**
   træet var identisk, men det flyttede toppen).
 - **Branches:** sessionens proxy tillader hverken `DELETE git/refs` eller
   `git push --delete`; oprydning er Anders'.
-- Rest-kø: Anders' triage-paste på #2275; #2415 merge queue efter V1-tag;
-  rig-simulator slice 2 (gate 2-operator, `-WhatIf` for Stage A/B-ops).
+- Rest-kø: Anders' triage-paste på #2275; #2415 trin 3 (20/11);
+  rig-simulator slice 2 landede 18/11 (#2421).
 
 ### 16/11: bumpet til 2.0.21 er klar, men lander først efter freezen
 
