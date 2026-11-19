@@ -99,7 +99,7 @@ assert "needs: [release-class, stage-b-slices]" in sv_body, "stage-b-verdict dep
 assert "!cancelled() &&" in sv_body and "always()" not in sv_body, "stage-b-verdict uses !cancelled(), never always()"
 assert "(github.event_name != 'pull_request' || github.event.action != 'closed')" in sv_body, "stage-b-verdict is not reported on closed PRs"
 assert "RESULT: ${{ needs.stage-b-slices.result }}" in sv_body and "DOCS_ONLY: ${{ needs.release-class.outputs.docs_only }}" in sv_body, "stage-b-verdict judges the Stage B result and the release class"
-assert "FREEZE: ${{ vars.KALIV_FREEZE }}" in sv_body, "stage-b-verdict reads the campaign freeze marker (ADR-SYS-003 D7)"
+assert "KALIV_FREEZE" not in sv_body, "stage-b-verdict must not judge the freeze: it runs the candidate's files (D7 lives in freeze-guard.yml)"
 assert "run: bash scripts/stage_b_verdict.sh" in sv_body, "the verdict logic is the tested script (tests/workflow_stage_b_verdict.py), not inline shell"
 
 core = re.search(r"(?ms)^  exact-head-core:\n(?P<body>.*?)(?=^    steps:)", WORKFLOW)

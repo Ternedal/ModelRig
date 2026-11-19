@@ -132,7 +132,8 @@ def main() -> None:
     # untouched by all of this (asserted above).
     import json
 
-    def with_merge_queue(rs: dict, *, strict: bool, method: str = "MERGE", verdict: bool = True) -> dict:
+    def with_merge_queue(rs: dict, *, strict: bool, method: str = "MERGE", verdict: bool = True, guard: bool = True,
+                         guard_ref: str = "refs/heads/main", guard_repo: int = 1287914122, guard_path: str = ".github/workflows/freeze-guard.yml") -> dict:
         for rule in rs["rules"]:
             if rule["type"] == "required_status_checks":
                 rule["parameters"]["strict_required_status_checks_policy"] = strict
@@ -142,7 +143,17 @@ def main() -> None:
                         {"context": "stage-b-verdict", "integration_id": module.REQUIRED_STATUS_CHECK_APP_ID}
                     )
         rs["rules"].append({"type": "merge_queue", "parameters": {"merge_method": method, "max_entries_to_build": 1, "grouping_strategy": "ALLGREEN"}})
+        if guard:
+            # D7: the freeze guard is a required workflow pinned to main, so the candidate cannot edit it.
+            rs["rules"].append({"type": "workflows", "parameters": {"do_not_enforce_on_create": False,
+                                "workflows": [{"path": guard_path, "ref": guard_ref, "repository_id": guard_repo}]}})
         return rs
+
+    no_guard = evaluate(r=[with_merge_queue(ruleset(), strict=False, guard=False)])
+    assert no_guard["passed"] is False and any("freeze guard" in e for e in no_guard["rulesets"]["errors"]), ("queue mode without the pinned freeze guard must FAIL (D7)", no_guard)
+    for bad in (dict(guard_ref="refs/heads/feature"), dict(guard_repo=1), dict(guard_path=".github/workflows/ci.yml")):
+        r = evaluate(r=[with_merge_queue(ruleset(), strict=False, **bad)])
+        assert r["passed"] is False, (f"a freeze guard that is not {bad} must not count", r)
 
     assert module.QUEUE_REQUIRED_STATUS_CHECKS == module.REQUIRED_STATUS_CHECKS + ("stage-b-verdict",), "queue mode = classic 14 + stage-b-verdict, nothing else"
     no_verdict = evaluate(r=[with_merge_queue(ruleset(), strict=False, verdict=False)])
@@ -192,7 +203,10 @@ def main() -> None:
     assert shipped_contexts == list(module.QUEUE_REQUIRED_STATUS_CHECKS), "the shipped ruleset requires exactly the queue set (classic 14 + stage-b-verdict), in order"
     mq_rule = next(r for r in shipped["rules"] if r["type"] == "merge_queue")
     assert mq_rule["parameters"]["max_entries_to_build"] == 1 and mq_rule["parameters"]["grouping_strategy"] == "ALLGREEN", "one candidate at a time, all green (D5)"
-    for dropped in ("deletion", "non_fast_forward", "pull_request", "required_status_checks"):
+    wf_rule = next(r for r in shipped["rules"] if r["type"] == "workflows")
+    assert wf_rule["parameters"]["workflows"] == [{"path": module.FREEZE_GUARD_WORKFLOW_PATH, "ref": module.FREEZE_GUARD_WORKFLOW_REF, "repository_id": module.FREEZE_GUARD_REPOSITORY_ID}], "the shipped ruleset pins exactly the freeze guard, from main, in this repository"
+    assert (ROOT / module.FREEZE_GUARD_WORKFLOW_PATH).is_file(), "the pinned workflow exists in the checkout"
+    for dropped in ("deletion", "non_fast_forward", "pull_request", "required_status_checks", "workflows"):
         mutant = json.loads(json.dumps(shipped))
         mutant["rules"] = [r for r in mutant["rules"] if r["type"] != dropped]
         assert evaluate(r=[mutant])["passed"] is False, f"dropping {dropped} from the shipped ruleset must fail"

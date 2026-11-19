@@ -212,11 +212,10 @@ jobs:
   # or a cancellation fails it. Required in queue mode (QUEUE_REQUIRED_STATUS_
   # CHECKS in scripts/repository_authority.py); classic protection today does
   # not list it, so gate 10's current verdict is unchanged.
-  # ADR-SYS-003 D7: the same job is the freeze guard. The repository variable
-  # KALIV_FREEZE (Actions variable, owner: Anders; '1' = on) refuses every
-  # candidate that is not documentation-only while a campaign freeze is on.
   # The logic lives in scripts/stage_b_verdict.sh so the gate can test every
-  # branch (tests/workflow_stage_b_verdict.py).
+  # branch (tests/workflow_stage_b_verdict.py). The campaign freeze (D7) is NOT
+  # judged here -- this job runs the candidate's own files -- but in
+  # .github/workflows/freeze-guard.yml, required via the ruleset from main.
   stage-b-verdict:
     needs: [release-class, stage-b-slices]
     if: >-
@@ -228,14 +227,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Stage B completed (or skipped for an allowed reason) and no campaign freeze is violated
+      - name: Stage B completed, or skipped for an allowed reason
         shell: bash
         env:
           RESULT: ${{ needs.stage-b-slices.result }}
           DOCS_ONLY: ${{ needs.release-class.outputs.docs_only }}
           EVENT: ${{ github.event_name }}
           DRAFT: ${{ github.event.pull_request.draft }}
-          FREEZE: ${{ vars.KALIV_FREEZE }}
         run: bash scripts/stage_b_verdict.sh
 
   legacy-merge-tree-equivalence:

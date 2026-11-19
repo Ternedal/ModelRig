@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Gate for scripts/stage_b_verdict.sh — the required queue check `stage-b-verdict`
-(ADR-SYS-003 D3) and the campaign freeze guard (ADR-SYS-003 D7, contract test 7).
+(ADR-SYS-003 D3). The campaign freeze (D7) is deliberately not here: see
+tests/workflow_freeze_guard.py.
 
 The script is a pure function of five environment variables, so every branch is
 exercised here without GitHub. Fail-closed is the standard: anything that is not
@@ -60,24 +61,11 @@ for bad in ("failure", "cancelled", "", "SUCCESS", "succes"):
     rc, out = verdict(RESULT=bad, DOCS_ONLY="true", EVENT="merge_group")
     check(rc == 1 and "did not pass" in out, f"Stage B result {bad!r} is refused even for a docs-only candidate")
 
-# --- D7: campaign freeze -----------------------------------------------------
+# --- D7 is NOT judged here (ChatGPT P1 on #2436): this script runs from the
+# candidate's checkout. The freeze lives in scripts/freeze_guard.sh behind
+# .github/workflows/freeze-guard.yml (tests/workflow_freeze_guard.py).
 rc, out = verdict(RESULT="success", DOCS_ONLY="false", EVENT="merge_group", FREEZE="1")
-check(rc == 1 and "KALIV_FREEZE=1" in out and "not documentation-only" in out, "freeze on + code queue candidate → refused even with Stage B green")
-rc, out = verdict(RESULT="skipped", DOCS_ONLY="true", EVENT="merge_group", FREEZE="1")
-check(rc == 0, "freeze on + docs-only queue candidate → allowed")
-rc, out = verdict(RESULT="success", DOCS_ONLY="", EVENT="merge_group", FREEZE="1")
-check(rc == 1, "freeze on + unclassified candidate → refused (fail-closed when the class is unknown)")
-rc, out = verdict(RESULT="success", DOCS_ONLY="false", EVENT="pull_request", DRAFT="false", FREEZE="1")
-check(rc == 1 and "ADR-SYS-003 D7" in out, "freeze on + code pull request → reported red so the author sees it before enqueueing")
-rc, out = verdict(RESULT="success", DOCS_ONLY="false", EVENT="push", FREEZE="1")
-check(rc == 0 and "not a candidate" in out, "freeze on + push to main → not a candidate, not refused")
-rc, out = verdict(RESULT="success", DOCS_ONLY="false", EVENT="workflow_dispatch", FREEZE="1")
-check(rc == 0, "freeze on + dispatch → not a candidate")
-for off in ("", "0", "true", "yes", "on", " 1"):
-    rc, out = verdict(RESULT="success", DOCS_ONLY="false", EVENT="merge_group", FREEZE=off)
-    check(rc == 0, f"FREEZE={off!r} is not a freeze; only the literal '1' is")
-rc, out = verdict(RESULT="failure", DOCS_ONLY="false", EVENT="merge_group", FREEZE="1")
-check(rc == 1 and "KALIV_FREEZE=1" in out, "freeze is judged first: the message names the freeze, not only the Stage B failure")
+check(rc == 0, "a FREEZE variable has no effect here — the freeze is enforced by freeze-guard.yml, not by a candidate-controlled script")
 
 # --- the workflow uses the script, with the five inputs ---------------------
 wf = (ROOT / ".github" / "workflows" / "exact-head-qualification.yml").read_text(encoding="utf-8")
@@ -88,12 +76,10 @@ for line in (
     "DOCS_ONLY: ${{ needs.release-class.outputs.docs_only }}",
     "EVENT: ${{ github.event_name }}",
     "DRAFT: ${{ github.event.pull_request.draft }}",
-    "FREEZE: ${{ vars.KALIV_FREEZE }}",
 ):
     check(line in job, f"stage-b-verdict passes {line.split(':')[0].strip()} from the right source")
 check("ref: ${{ github.event.pull_request.head.sha || github.sha }}" in job, "the script is taken from the exact head being judged")
 src = code_of(SCRIPT)
-check('if [ "$FREEZE" = "1" ] && [ "$DOCS_ONLY" != "true" ]; then' in src, "freeze guard: literal '1' and anything but docs_only=true")
 check("exit 0" not in src.split("case \"$RESULT\" in", 1)[0].replace("exit 1", ""), "no early success exit before the Stage B judgement")
 
 print(f"===== STAGE B VERDICT: {PASSED} passed, {FAILED} failed =====")
