@@ -127,6 +127,10 @@ def write_worker_cmd_only_stops_before_anything_starts() -> None:
                                   STACK.find("& go build")) if i >= 0)
     check(0 <= written < dry < first_start,
           "the dry run returns after the worker cmd is written and before any port wait, build or start")
+    stray = STACK.find("$inheritedKaliv = @(Get-ChildItem Env:")
+    check(written < stray < dry and "Write-Warning" in STACK[stray:dry],
+          "inherited KALIV_* names are computed after the cmd is written and warned about on a real start")
+    check('"INHERITED-KALIV: "' in STACK[dry:first_start], "and printed by the dry run")
     manifest = json.loads((ROOT / "scripts" / "rig_simulator" / "operators.json").read_text(encoding="utf-8"))
     simulated = {op["id"] for op in manifest["operators"]}
     check({"stack-worker-cmd-v1-gates-3-8", "stack-worker-cmd-v1-gate2-with-3-8",

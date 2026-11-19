@@ -404,6 +404,8 @@
         "mounted.supervisor",
         "--status-true",
         "prerequisites.cognitive_profile_available",
+        "--stray",
+        "KALIV_SIMULATOR_STRAY_FLAG=1",
         "--",
         "-EnableE2eLatency",
         "-EnableVisionRigAdmission",
@@ -418,10 +420,13 @@
         ],
         "stdout_json": {
           "schema": "kaliv-rig-simulator-worker-cmd-boot/v1",
-          "ok": true
+          "ok": true,
+          "inherited_kaliv": [
+            "KALIV_SIMULATOR_STRAY_FLAG"
+          ]
         }
       },
-      "why": "The production worker (app.entrypoint:app) boots on the rig's interpreter with exactly the environment the gate 3+8 command line generates (-WriteWorkerCmdOnly, #2437): /healthz answers, the latency and VisionRig admission routes are in its OpenAPI surface, the supervisor mounts and the CognitiveProfile from the generated path loads. Not proven: that either gate passes (no GPU, speech backends, camera or model here)."
+      "why": "The production worker (app.entrypoint:app) boots on the rig's interpreter with exactly the environment the gate 3+8 command line generates (-WriteWorkerCmdOnly, #2437): /healthz answers, the latency and VisionRig admission routes are in its OpenAPI surface, the supervisor mounts and the CognitiveProfile from the generated path loads. Not proven: that either gate passes (no GPU, speech backends, camera or model here). A KALIV_* variable left in the operator's shell is named by the stack (INHERITED-KALIV, warning on a real start): the worker cmd inherits it, since only the variables the cmd sets are overridden."
     },
     {
       "id": "worker-boots-with-v1-gate2-3-8-env",
@@ -469,7 +474,8 @@
         ],
         "stdout_json": {
           "schema": "kaliv-rig-simulator-worker-cmd-boot/v1",
-          "ok": true
+          "ok": true,
+          "inherited_kaliv": []
         }
       },
       "why": "Same for gate 2's command line together with 3 and 8: the worker boots with the scheduler and all lifecycle flags. mounted.autonomous_scheduler is not asserted: it also needs a SelfState and live session the simulator does not create (gate 2 operator preflight covers that refusal)."

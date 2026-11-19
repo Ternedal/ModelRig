@@ -189,8 +189,10 @@ $schedulerValue = if ($EnableScheduler) { "1" } else { "0" }
 $schedulerApiValue = if ($EnableSchedulerApi) { "1" } else { "0" }
 $schedulerEnv = ""
 # T-023's task-UI qualification only: the flag is default-off by design, and
-# the generated cmd files build an explicit env, so process inheritance never
-# reaches the worker (#753 -- the campaign's T-023 died on operator_disabled).
+# what the generated cmd sets is the authority for it (#753 -- the campaign's
+# T-023 died on operator_disabled). Note: the cmd still INHERITS everything
+# else from this shell; only the variables it sets are overridden. Stray
+# KALIV_* names are reported after the worker cmd is written.
 # Defined HERE, outside both scheduler branches: an earlier version of this
 # line was spliced into the middle of the scheduler here-string assignment,
 # which silently dropped KALIV_SCHEDULER, the DB paths and the approval
@@ -306,7 +308,21 @@ $visionRigEnv
 $workerCommand
 "@ | Set-Content -LiteralPath $workerCmd -Encoding ASCII
 
+# cmd.exe started from this shell inherits this shell's environment; only the
+# variables the worker cmd sets itself are overridden. A KALIV_* left in this
+# window from an earlier attempt therefore reaches the worker. Name each one.
+$setInWorkerCmd = @(Get-Content -LiteralPath $workerCmd | ForEach-Object {
+    if ($_ -match '^set "([A-Za-z_][A-Za-z0-9_]*)=') { $Matches[1] }
+})
+$inheritedKaliv = @(Get-ChildItem Env: | Where-Object {
+    $_.Name -like 'KALIV_*' -and $setInWorkerCmd -notcontains $_.Name
+} | ForEach-Object { $_.Name } | Sort-Object)
+if ($inheritedKaliv.Count -gt 0) {
+    Write-Warning ("Arvet fra dette vindue og ikke sat af worker-cmd'en - naar workeren: " + ($inheritedKaliv -join ', ') + ". Start fra et nyt vindue, hvis det ikke er meningen.")
+}
+
 if ($WriteWorkerCmdOnly) {
+    Write-Output ("INHERITED-KALIV: " + $(if ($inheritedKaliv.Count -gt 0) { $inheritedKaliv -join ',' } else { 'none' }))
     Write-Output "WORKER-CMD-BEGIN $workerCmd"
     Get-Content -LiteralPath $workerCmd | Write-Output
     Write-Output "WORKER-CMD-END"

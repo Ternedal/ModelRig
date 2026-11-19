@@ -61,19 +61,26 @@ def parse_worker_cmd(text: str) -> dict[str, str]:
     return env
 
 
-def worker_cmd_from_stack(repo: Path, stack_args: list[str]) -> str:
+def worker_cmd_from_stack(repo: Path, stack_args: list[str], stray: dict[str, str] | None = None) -> tuple[str, list[str]]:
+    """The worker cmd text and the KALIV_* names the stack reported as inherited from its shell."""
     exe = shutil.which("powershell.exe") or shutil.which("powershell") or "powershell.exe"
     script = repo / "scripts" / "start-stage-a-validation-stack.ps1"
     completed = subprocess.run(
         [exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script),
          *stack_args, "-WriteWorkerCmdOnly"],
         cwd=str(repo), capture_output=True, text=True, timeout=120,
+        env={**{k: v for k, v in os.environ.items() if not k.startswith(ISOLATED_PREFIXES)}, **(stray or {})},
     )
     out = completed.stdout
     if completed.returncode != 0 or "WORKER-CMD-BEGIN" not in out or "WORKER-CMD-END" not in out:
         raise RuntimeError(f"stack refused to write the worker cmd (exit {completed.returncode}): "
                            f"{(completed.stderr or out)[-600:]}")
-    return out.split("WORKER-CMD-BEGIN", 1)[1].split("WORKER-CMD-END", 1)[0]
+    inherited: list[str] = []
+    for line in out.splitlines():
+        if line.startswith("INHERITED-KALIV: "):
+            value = line.split(": ", 1)[1].strip()
+            inherited = [] if value == "none" else value.split(",")
+    return out.split("WORKER-CMD-BEGIN", 1)[1].split("WORKER-CMD-END", 1)[0], inherited
 
 
 def free_port() -> int:
@@ -163,6 +170,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expect-path", action="append", default=[])
     parser.add_argument("--status-true", action="append", default=[],
                         help=f"dotted field of {STATUS_PATH} that must be true, e.g. prerequisites.cognitive_profile_available")
+    parser.add_argument("--stray", action="append", default=[], metavar="KALIV_NAME=VALUE",
+                        help="put this variable in the stack's shell, as a leftover from an earlier attempt would be")
     parser.add_argument("--report")
     parser.add_argument("--worker-cmd", help="a generated worker cmd file instead of running the stack")
     args = parser.parse_args(argv)
@@ -170,9 +179,13 @@ def main(argv: list[str] | None = None) -> int:
     if bool(args.worker_cmd) == bool(stack_args):
         print(json.dumps({"schema": SCHEMA, "ok": False, "error": "give either --worker-cmd or stack args after --"}))
         return 2
+    stray = dict(item.split("=", 1) for item in args.stray if "=" in item)
+    inherited: list[str] | None = None
     try:
-        text = (Path(args.worker_cmd).read_text(encoding="ascii") if args.worker_cmd
-                else worker_cmd_from_stack(repo, stack_args))
+        if args.worker_cmd:
+            text = Path(args.worker_cmd).read_text(encoding="ascii")
+        else:
+            text, inherited = worker_cmd_from_stack(repo, stack_args, stray)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
         print(json.dumps({"schema": SCHEMA, "ok": False, "error": str(exc)}))
         return 2
@@ -181,6 +194,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"schema": SCHEMA, "ok": False, "error": "the worker cmd has no set lines"}))
         return 2
     report = boot(repo, Path(args.scratch), cmd_env, args.expect_path, args.status_true)
+    if inherited is not None:
+        report["inherited_kaliv"] = inherited
     if args.report:
         Path(args.report).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({k: v for k, v in report.items() if k != "worker_log_tail"} if report["ok"] else report))
