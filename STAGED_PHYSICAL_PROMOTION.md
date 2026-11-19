@@ -189,7 +189,7 @@ handling er Anders' beslutning.
 
 Følg den operative autoritet i `STAGE_B_UPDATER_EVIDENCE.md`.
 
-Kildereleasen for appliance-transitionen er den signerede `2.0.12`, og målet er
+Kildereleasen for appliance-transitionen er den signerede `2.0.20`, og målet er
 `2.0.21`. Target-updaterens checksum og provenance verificeres før swap som den
 aktuelle bootstrap-grænse. Server, supervisor og worker må ikke kopieres
 manuelt; deres transition skal ske gennem updateren.
@@ -201,7 +201,7 @@ den authority ændres særskilt.
 
 Stage B skal dokumentere:
 
-1. normal update fra 2.0.12 til 2.0.21;
+1. normal update fra 2.0.20 til 2.0.21;
 2. reboot på 2.0.21;
 3. backend supervisor-restart;
 4. worker supervisor-restart;
