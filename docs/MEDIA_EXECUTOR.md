@@ -105,6 +105,9 @@ Each executor runs in the supervisor's process tree (a Windows Job Object), so s
 | `KALIV_MEDIA_PROFILE_DIR` | executor | Operator profile directory |
 | `KALIV_MEDIA_IDLE_UNLOAD_S` | executor | Optional; default 300 |
 | `KALIV_MEDIA_VIDEO=1` | executor | The video switch. It is separate from the master switch. With any other value, an enabled video profile is exit 78 |
+| `KALIV_MEDIA_TRANSLATE_MODEL` | executor | Optional. An Ollama model name (e.g. `qwen3:4b`): every prompt is translated to English by that model before it reaches the image or video model, locally, fail-open (`docs/MEDIA_PROMPT_TRANSLATION.md`). Unset: prompts render as written |
+| `KALIV_MEDIA_TRANSLATE_URL` | executor | Optional, default `http://127.0.0.1:11434`. **Numeric loopback only** (`127.x`/`::1`; names such as `localhost` refused), plain http: anything else is exit 78. The client ignores proxy variables and refuses redirects. Deliberately not `MODELRIG_OLLAMA_URL`, which may point at Ollama Cloud |
+| `KALIV_MEDIA_TRANSLATE_TIMEOUT_S` | executor | Optional, default 30, at most 300. On timeout the original prompt renders |
 | `KALIV_MEDIA_JOBS_API=1` | server, worker | The device routes for jobs and the gallery (`docs/MEDIA_GALLERY.md`). Without it they are not registered (jobs) or answer 503 (gallery) |
 | `KALIV_MEDIA_INTERNAL_SECRET` | server, worker | At least 32 characters, no line break, the same value on both sides. It authenticates the server to the worker's `/internal/media/*` routes and never reaches a device or a log |
 | `KALIV_COMFY_PYTHON`, `KALIV_COMFY_MAIN` | executor (video) | Absolute paths of the pinned ComfyUI environment's python and of its `main.py`. `main.py` must not be a link |
