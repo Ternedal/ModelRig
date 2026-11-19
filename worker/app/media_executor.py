@@ -139,7 +139,8 @@ class MediaExecutor:
                  idle_unload_s: float = 300.0, cancel_poll_s: float = 1.0,
                  source_reader: Callable[[str, str], bytes] | None = None,
                  clock: Callable[[], float] = time.monotonic, volume_root: str | None = None,
-                 diagnostics: Callable[[dict], None] | None = None):
+                 diagnostics: Callable[[dict], None] | None = None,
+                 prompt_rewriter: Callable[..., tuple[str, str]] | None = None):
         if not isinstance(store, ImageJobStore):
             raise ExecutorConfigError("store must be an ImageJobStore")
         if not profiles:
@@ -164,6 +165,11 @@ class MediaExecutor:
         # source_reader(owner, asset_id) -> PNG bytes. In production ChatGPT's read_owned_source_png:
         # it authorizes the owner before any gallery I/O (#2296 6651187815).
         self.source_reader = source_reader
+        # prompt_rewriter(prompt, max_chars=...) -> (prompt, outcome): the local translation step
+        # (media_prompt_translation). Fail-open by contract; only its outcome code is recorded.
+        if prompt_rewriter is not None and not callable(prompt_rewriter):
+            raise ExecutorConfigError("prompt_rewriter must be callable")
+        self.prompt_rewriter = prompt_rewriter
         self.idle_unload_s, self.cancel_poll_s, self.clock = float(idle_unload_s), float(cancel_poll_s), clock
         self.instance = f"{self.gpu_uuid}:{secrets.token_hex(8)}"
         self.adapter = None
@@ -274,6 +280,31 @@ class MediaExecutor:
             profile_id=profile.profile_id, task=task, prompt=job["prompt"],
             **{key: params[key] for key in _REQUEST_PARAMS if key in params}))
 
+    def _rewritten(self, job: dict, profile: ModelProfile) -> dict:
+        """The job with its prompt passed through the prompt rewriter (local translation). Without a
+        rewriter the job is returned as is. Fail-open: any failure keeps the original prompt, and only
+        an outcome code and a duration are recorded, never prompt text."""
+        if self.prompt_rewriter is None:
+            # an earlier attempt (another configuration, before a deferral) may have left a translation
+            self.store.clear_effective_prompt(job["id"], self.instance)
+            return job
+        started = self.clock()
+        try:
+            prompt, outcome = self.prompt_rewriter(job["prompt"], max_chars=profile.limits.max_prompt_chars)
+        except Exception as exc:  # the rewriter promised not to raise; if it does, render the original
+            prompt, outcome = job["prompt"], f"fallback:{_event_code(exc)}"
+        if not isinstance(prompt, str) or not prompt:
+            prompt, outcome = job["prompt"], "fallback:bad_rewrite"
+        self.events.append(f"translate:{job['id']}:{outcome}:{self.clock() - started:.1f}")
+        if outcome == "translated":
+            # Provenance before render: the owner can see what was rendered in their name, with the
+            # job's own retention. A store refusal (cancelled meanwhile) is the step's problem, not ours.
+            self.store.record_effective_prompt(job["id"], self.instance, prompt)
+        else:
+            # rendered as given: a translation kept from a deferred attempt must not describe this one
+            self.store.clear_effective_prompt(job["id"], self.instance)
+        return {**job, "prompt": prompt}
+
     def _cancel_check(self, job_id: str) -> Callable[[], bool]:
         state = {"next": float("-inf"), "hit": False}
 
@@ -328,7 +359,7 @@ class MediaExecutor:
     def _run_job(self, job: dict) -> str:
         job_id, profile = job["id"], self.profiles[job["profile_id"]]
         try:
-            request = self._request(job, profile)
+            request = self._request(self._rewritten(job, profile), profile)
         except (GenerationError, ValueError, TypeError, KeyError):
             self.store.fail(job_id, self.instance, REJECTED)
             return "rejected"
