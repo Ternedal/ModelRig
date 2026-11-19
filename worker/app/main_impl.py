@@ -846,6 +846,11 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
         "action. If no tool fits, answer normally."
     )
     messages.append({"role": "system", "content": _tool_nudge})
+    # #2419 slice C: one more line, only while image_generate is registered.
+    from .image_generate_tool import system_rule_if_registered as _image_rule
+    _rule = _image_rule()
+    if _rule:
+        messages.append({"role": "system", "content": _rule})
     # Person Profile binding (#752): a selected person's active personality
     # takes precedence over the client's persona text; with no person
     # selected the client's prompt is used exactly as before.

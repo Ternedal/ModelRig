@@ -74,13 +74,21 @@ def answer(text):
     return {"tool_calls": [], "content": text}
 
 
+seen_messages: list[list[dict]] = []
+
+
 def script(responses):
     seq = list(responses)
 
-    async def _mock(*a, **k):
+    async def _mock(messages, *a, **k):
+        seen_messages.append(list(messages))
         return seq.pop(0) if seq else answer("done")
 
     main.oc.chat_tools = _mock
+
+
+def system_texts() -> list[str]:
+    return [m["content"] for m in (seen_messages[-1] if seen_messages else []) if m.get("role") == "system"]
 
 
 def chat(msg="lav et billede af en mand ved en sø"):
@@ -128,6 +136,9 @@ try:
     stored = store.get(job.get("job_id", ""), OWNER) if job.get("job_id") else None
     check(stored is not None and stored["state"] == "queued", "the referenced job exists in the store for OWNER")
     check(PROMPT not in json.dumps(d, ensure_ascii=False), "result object never repeats the prompt")
+    check(any(igt.SYSTEM_RULE == t for t in system_texts()), "slice C: the image rule is in the system prompt while registered")
+    check(system_texts().index(igt.SYSTEM_RULE) == 1 if igt.SYSTEM_RULE in system_texts() else False,
+          "the rule follows the tool nudge, before any persona text")
 
     script([call("image_generate", {"prompt": PROMPT}), answer("På vej.")])
     lines = stream()
@@ -160,11 +171,13 @@ try:
     check(d.get("tools_used") == ["image_generate"], "unavailable: the tool ran and answered as text")
     check(before is not None, "unavailable: previously queued job untouched")
 
-    # 5: unregistered -> unknown tool on the wire.
+    # 5: unregistered -> unknown tool on the wire, and no rule in the system prompt.
     tools.REGISTRY.pop(igt.TOOL_NAME, None)
     script([call("image_generate", {"prompt": PROMPT})])
     r = chat()
     check(r.status_code == 404, f"gate off: image_generate is an unknown tool (got {r.status_code})")
+    check(igt.SYSTEM_RULE not in system_texts(), "gate off: the model is not told about image_generate")
+    check(igt.system_rule_if_registered() is None, "system_rule_if_registered follows REGISTRY, not the flag")
 finally:
     tools.REGISTRY.pop(igt.TOOL_NAME, None)
     shutil.rmtree(_tmp, ignore_errors=True)

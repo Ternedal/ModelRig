@@ -271,6 +271,26 @@ def parse_job_reference(result: str) -> dict | None:
             "status_url": data["status_url"]}
 
 
+SYSTEM_RULE = (
+    "When the user asks for a picture, an image or a drawing (Danish: 'billede', "
+    "'tegn', 'lav et billede af'), call image_generate with an English, concrete "
+    "prompt that has one main subject; then tell the user the image is on its way "
+    "in this conversation. Never describe the image as finished."
+)
+
+
+def system_rule_if_registered() -> str | None:
+    """The one-line nudge for the turn's system prompt, only while the tool is live.
+
+    Sent unconditionally it would teach the model to call a tool that is not
+    there (-> unknown tool, the turn ends with a 404). So the rule follows the
+    REGISTRY, not the flag: registered = the model is told, absent = silence.
+    """
+    from . import tools as _tools
+
+    return SYSTEM_RULE if TOOL_NAME in _tools.REGISTRY else None
+
+
 def register_image_generate_tool() -> bool:
     """Register the tool iff the gate is on. Idempotent; refuses to shadow another registration."""
     if not image_tool_enabled():
