@@ -161,6 +161,10 @@ check('if [ ! -f scripts/freeze_guard.sh ]; then' in jobs and 'if [ "${FREEZE:-}
       "a base without the guard: refused while frozen (cannot enforce), otherwise nothing to enforce — same semantics as the script")
 check("FREEZE: ${{ vars.KALIV_FREEZE }}" in jobs, "the freeze marker is the repository variable KALIV_FREEZE")
 check("permissions:\n  contents: read" in wf, "the workflow has read-only permissions")
+sys.path.insert(0, str(ROOT / "scripts"))
+import repository_authority as _ra  # noqa: E402
+check("freeze-guard" in _ra.QUEUE_REQUIRED_STATUS_CHECKS, "freeze-guard is a required status check in queue mode (no org-level 'workflows' rule on a user account)")
+check(re.search(r"(?m)^  freeze-guard:\n", jobs) is not None, "the job id is freeze-guard, so the check context matches the required name")
 check("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in jobs, "actions/checkout is pinned by SHA")
 src = code_of(ROOT / "scripts" / "freeze_guard.sh")
 check('test "$(git rev-parse HEAD)" = "$base_sha"' in src, "the script refuses a checkout that is not the base")

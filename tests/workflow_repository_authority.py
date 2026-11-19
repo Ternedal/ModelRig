@@ -132,30 +132,24 @@ def main() -> None:
     # untouched by all of this (asserted above).
     import json
 
-    def with_merge_queue(rs: dict, *, strict: bool, method: str = "MERGE", verdict: bool = True, guard: bool = True,
-                         guard_ref: str = "refs/heads/main", guard_repo: int = 1287914122, guard_path: str = ".github/workflows/freeze-guard.yml") -> dict:
+    def with_merge_queue(rs: dict, *, strict: bool, method: str = "MERGE", verdict: bool = True, guard: bool = True) -> dict:
         for rule in rs["rules"]:
             if rule["type"] == "required_status_checks":
                 rule["parameters"]["strict_required_status_checks_policy"] = strict
-                if verdict:
-                    # D3: queue mode requires the Stage B aggregate check on top of the classic 14.
+                extra = ([ "stage-b-verdict"] if verdict else []) + (["freeze-guard"] if guard else [])
+                for ctx in extra:
+                    # D3/D7: queue mode requires the Stage B aggregate and the freeze guard on top of the classic 14.
                     rule["parameters"]["required_status_checks"].append(
-                        {"context": "stage-b-verdict", "integration_id": module.REQUIRED_STATUS_CHECK_APP_ID}
+                        {"context": ctx, "integration_id": module.REQUIRED_STATUS_CHECK_APP_ID}
                     )
         rs["rules"].append({"type": "merge_queue", "parameters": {"merge_method": method, "max_entries_to_build": 1, "grouping_strategy": "ALLGREEN"}})
-        if guard:
-            # D7: the freeze guard is a required workflow pinned to main, so the candidate cannot edit it.
-            rs["rules"].append({"type": "workflows", "parameters": {"do_not_enforce_on_create": False,
-                                "workflows": [{"path": guard_path, "ref": guard_ref, "repository_id": guard_repo}]}})
         return rs
 
     no_guard = evaluate(r=[with_merge_queue(ruleset(), strict=False, guard=False)])
-    assert no_guard["passed"] is False and any("freeze guard" in e for e in no_guard["rulesets"]["errors"]), ("queue mode without the pinned freeze guard must FAIL (D7)", no_guard)
-    for bad in (dict(guard_ref="refs/heads/feature"), dict(guard_repo=1), dict(guard_path=".github/workflows/ci.yml")):
-        r = evaluate(r=[with_merge_queue(ruleset(), strict=False, **bad)])
-        assert r["passed"] is False, (f"a freeze guard that is not {bad} must not count", r)
+    assert no_guard["passed"] is False and "freeze-guard" in no_guard["rulesets"]["missing_checks"], ("queue mode without the freeze-guard check must FAIL (D7)", no_guard)
+    assert not any(r["type"] == "workflows" for r in json.loads((ROOT / "deploy" / "repository-authority" / "main-ruleset.json").read_text(encoding="utf-8"))["rules"]), "no 'workflows' rule: organization-only on GitHub, and Ternedal is a user account (Codex P1 on #2436)"
 
-    assert module.QUEUE_REQUIRED_STATUS_CHECKS == module.REQUIRED_STATUS_CHECKS + ("stage-b-verdict",), "queue mode = classic 14 + stage-b-verdict, nothing else"
+    assert module.QUEUE_REQUIRED_STATUS_CHECKS == module.REQUIRED_STATUS_CHECKS + ("stage-b-verdict", "freeze-guard"), "queue mode = classic 14 + stage-b-verdict + freeze-guard, nothing else"
     no_verdict = evaluate(r=[with_merge_queue(ruleset(), strict=False, verdict=False)])
     assert no_verdict["passed"] is False and "stage-b-verdict" in no_verdict["rulesets"]["missing_checks"], ("a merge queue without stage-b-verdict would land before Stage B (Codex P1 on #2427)", no_verdict)
     classic_with_verdict = evaluate(r=[ruleset()])
@@ -203,10 +197,8 @@ def main() -> None:
     assert shipped_contexts == list(module.QUEUE_REQUIRED_STATUS_CHECKS), "the shipped ruleset requires exactly the queue set (classic 14 + stage-b-verdict), in order"
     mq_rule = next(r for r in shipped["rules"] if r["type"] == "merge_queue")
     assert mq_rule["parameters"]["max_entries_to_build"] == 1 and mq_rule["parameters"]["grouping_strategy"] == "ALLGREEN", "one candidate at a time, all green (D5)"
-    wf_rule = next(r for r in shipped["rules"] if r["type"] == "workflows")
-    assert wf_rule["parameters"]["workflows"] == [{"path": module.FREEZE_GUARD_WORKFLOW_PATH, "ref": module.FREEZE_GUARD_WORKFLOW_REF, "repository_id": module.FREEZE_GUARD_REPOSITORY_ID}], "the shipped ruleset pins exactly the freeze guard, from main, in this repository"
-    assert (ROOT / module.FREEZE_GUARD_WORKFLOW_PATH).is_file(), "the pinned workflow exists in the checkout"
-    for dropped in ("deletion", "non_fast_forward", "pull_request", "required_status_checks", "workflows"):
+    assert (ROOT / ".github" / "workflows" / "freeze-guard.yml").is_file(), "the workflow producing the freeze-guard check exists in the checkout"
+    for dropped in ("deletion", "non_fast_forward", "pull_request", "required_status_checks"):
         mutant = json.loads(json.dumps(shipped))
         mutant["rules"] = [r for r in mutant["rules"] if r["type"] != dropped]
         assert evaluate(r=[mutant])["passed"] is False, f"dropping {dropped} from the shipped ruleset must fail"
@@ -240,12 +232,12 @@ def main() -> None:
     # Codex P1 on #2429: -Apply must refuse while any required-check workflow lacks
     # merge_group (a queue would wait forever). The script checks the five
     # producers before sending; the producer map must name every queue context.
-    assert '"exact-head-qualification.yml": ("exact-head-core", "legacy-merge-tree-equivalence", "stage-b-verdict")' in tool_src, "the producer map covers the queue-only context too"
+    assert '"exact-head-qualification.yml": ("exact-head-core", "legacy-merge-tree-equivalence", "stage-b-verdict")' in tool_src and '"freeze-guard.yml": ("freeze-guard",)' in tool_src, "the producer map covers both queue-only contexts"
     assert "Merge-queue prerequisite missing" in tool_src and "Nothing was sent." in tool_src, "a missing merge_group trigger refuses before any write"
     producer_contexts = set()
     import re as _re
     producers_block = tool_src.split("producers = {", 1)[1].split("}", 1)[0]
-    producer_contexts = set(_re.findall(r'"([^"]+)"', producers_block)) - {"ci.yml", "codeql.yml", "agent3-diagnostics.yml", "agent3-full-diagnostics.yml", "exact-head-qualification.yml"}
+    producer_contexts = set(_re.findall(r'"([^"]+)"', producers_block)) - {"ci.yml", "codeql.yml", "agent3-diagnostics.yml", "agent3-full-diagnostics.yml", "exact-head-qualification.yml", "freeze-guard.yml"}
     assert producer_contexts == set(module.QUEUE_REQUIRED_STATUS_CHECKS), ("the script's producer map must equal the queue-required set", producer_contexts ^ set(module.QUEUE_REQUIRED_STATUS_CHECKS))
     allowed = {"name", "target", "enforcement", "bypass_actors", "conditions", "rules"}
     extra = set(shipped) - allowed - {"_comment"}

@@ -845,22 +845,25 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 repository-variablen `KALIV_FREEZE` (Settings → Secrets and variables →
 Actions → Variables, eller `gh variable set KALIV_FREEZE --body 1 -R
 Ternedal/ModelRig`). **Ejer: Anders.** `1` = kampagne-freeze på; alt andet =
-af. Håndhæves af `.github/workflows/freeze-guard.yml`, der i rulesetet er
-*required workflow pinnet til `main`*: GitHub kører filen som den står på
-main, uanset kandidatens kopi, og inde i den tjekkes **base** ud (aldrig
+af. Håndhæves af `.github/workflows/freeze-guard.yml`, required ved navn
+(`freeze-guard`) i kø-tilstand. Inde i den tjekkes **base** ud (aldrig
 kandidaten), kandidatens head hentes kun som objekt, og basens
 `scripts/freeze_guard.sh` dømmer med basens classifier. En kandidat, der
 skriver classifier eller guard om til `exit 0`, afvises alligevel (testet).
+**Restrisikoen er selve workflow-filen:** GitHubs "require workflows to pass"
+(der ville køre filen som den står på main) findes kun for organisations-
+rulesets, og Ternedal er en brugerkonto. Derfor: `.github/workflows/` er
+beskyttet præfiks (kode → menneskeligt SHA-scoped ACCEPT), gaten
+`tests/workflow_freeze_guard.py` pinner filens indhold (en ændring er rød,
+medmindre testen ændres åbent med), og **enhver PR der rører
+`freeze-guard.yml` er en freeze-politik-ændring og reviewes som sådan.**
 Virkning: enhver kandidat, der ikke er docs-only (ADR-SYS-002 D1), afvises i
 merge groups — og vises rødt på PR'er mod `main`, så forfatteren ser det før
 køen. Push til `main` og dispatch rammes ikke. Freeze betyder altså ikke
 længere "main står stille", men "kun dokumentation lander"; evidensen
 overlever det (ADR-SYS-002 D3). **Indtil trin 3 er kørt, er checket ikke
 required** (klassisk protection kender det ikke) — det er et signal, og
-aftalen på #2275 gælder. Grænsen er ærligt talt denne: alt andet i
-exact-head-kvalifikationen er kandidatens egen YAML; kun freeze-guarden står
-uden for kandidatens kontrol, og `.github/workflows/` er en beskyttet præfiks,
-så ændringer dér er kode med menneskeligt SHA-scoped ACCEPT (D6).
+aftalen på #2275 gælder.
 
 ### 18/11: ADR-SYS-002-kæden er landet — og sådan lander en stak på `main`
 

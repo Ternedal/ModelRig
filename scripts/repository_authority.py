@@ -37,7 +37,12 @@ REQUIRED_STATUS_CHECKS = (
 # aggregate check is required on top of the classic list. It is not part of
 # REQUIRED_STATUS_CHECKS because classic protection (today's model) does not
 # list it; adding it there would fail gate 10 on the current repository.
-QUEUE_REQUIRED_STATUS_CHECKS = REQUIRED_STATUS_CHECKS + ("stage-b-verdict",)
+# ADR-SYS-003 D7: the freeze guard is a required status check too. Ternedal is a
+# user account, so GitHub's "require workflows to pass" rule (organization
+# rulesets only) is not available; the guard's independence comes from judging
+# from the BASE checkout inside .github/workflows/freeze-guard.yml, and a change
+# to that file is code under a protected prefix with human SHA-scoped ACCEPT.
+QUEUE_REQUIRED_STATUS_CHECKS = REQUIRED_STATUS_CHECKS + ("stage-b-verdict", "freeze-guard")
 
 
 def _enabled(value: Any) -> bool:
@@ -246,7 +251,7 @@ def evaluate_rulesets(rulesets: list[dict[str, Any]] | None) -> dict[str, Any]:
     if missing:
         errors.append(
             "required exact-green status checks are incomplete"
-            + (" (merge-queue mode also requires stage-b-verdict: the queue must wait for Stage B)" if merge_queue else "")
+            + (" (merge-queue mode also requires stage-b-verdict and freeze-guard)" if merge_queue else "")
         )
     if wrong_source:
         errors.append(
@@ -262,13 +267,6 @@ def evaluate_rulesets(rulesets: list[dict[str, Any]] | None) -> dict[str, Any]:
     if merge_queue:
         merge_queue_errors = _merge_queue_rule_errors(applicable)
         errors.extend(merge_queue_errors)
-        # ADR-SYS-003 D7: the campaign freeze is enforced by a workflow the
-        # candidate cannot edit -- required via the ruleset and pinned to main.
-        if not _has_pinned_freeze_guard(applicable):
-            errors.append(
-                "merge-queue mode requires the freeze guard as a required workflow pinned to main "
-                f"({FREEZE_GUARD_WORKFLOW_PATH} @ {FREEZE_GUARD_WORKFLOW_REF}, repository {FREEZE_GUARD_REPOSITORY_ID})"
-            )
     if not strict and not merge_queue:
         errors.append(
             "neither an up-to-date-branch requirement (strict) nor a merge queue binds the tested commit to the landed one"
@@ -296,26 +294,6 @@ def evaluate_rulesets(rulesets: list[dict[str, Any]] | None) -> dict[str, Any]:
 MERGE_QUEUE_REQUIRED_PARAMETERS = {
     "merge_method": "MERGE",
 }
-
-
-# ADR-SYS-003 D7: the freeze guard must run from main, not from the candidate.
-FREEZE_GUARD_WORKFLOW_PATH = ".github/workflows/freeze-guard.yml"
-FREEZE_GUARD_WORKFLOW_REF = "refs/heads/main"
-FREEZE_GUARD_REPOSITORY_ID = 1287914122  # Ternedal/ModelRig
-
-
-def _has_pinned_freeze_guard(rulesets: Iterable[dict[str, Any]]) -> bool:
-    for rule in _iter_rules(rulesets):
-        if rule.get("type") != "workflows":
-            continue
-        for wf in (rule.get("parameters") or {}).get("workflows") or []:
-            if (
-                wf.get("path") == FREEZE_GUARD_WORKFLOW_PATH
-                and wf.get("ref") == FREEZE_GUARD_WORKFLOW_REF
-                and wf.get("repository_id") == FREEZE_GUARD_REPOSITORY_ID
-            ):
-                return True
-    return False
 
 
 def _merge_queue_rule_errors(rulesets: Iterable[dict[str, Any]]) -> list[str]:

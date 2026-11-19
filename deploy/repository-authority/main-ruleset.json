@@ -97,6 +97,10 @@
           {
             "context": "stage-b-verdict",
             "integration_id": 15368
+          },
+          {
+            "context": "freeze-guard",
+            "integration_id": 15368
           }
         ]
       }
@@ -111,19 +115,6 @@
         "min_entries_to_merge_wait_minutes": 0,
         "grouping_strategy": "ALLGREEN",
         "check_response_timeout_minutes": 360
-      }
-    },
-    {
-      "type": "workflows",
-      "parameters": {
-        "do_not_enforce_on_create": false,
-        "workflows": [
-          {
-            "path": ".github/workflows/freeze-guard.yml",
-            "ref": "refs/heads/main",
-            "repository_id": 1287914122
-          }
-        ]
       }
     }
   ]

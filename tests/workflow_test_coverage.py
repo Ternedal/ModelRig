@@ -150,8 +150,12 @@ import repository_authority as _ra  # noqa: E402
 mapped = {name for names in required_check_workflows.values() for name in names}
 check(mapped == set(_ra.REQUIRED_STATUS_CHECKS), "the required-check → workflow map covers exactly REQUIRED_STATUS_CHECKS")
 queue_extra = set(_ra.QUEUE_REQUIRED_STATUS_CHECKS) - set(_ra.REQUIRED_STATUS_CHECKS)
-check(queue_extra == {"stage-b-verdict"} and re.search(r"(?m)^  stage-b-verdict:$", exact_head_workflow) is not None,
-      "the one extra queue-mode required check (stage-b-verdict) is produced by exact-head-qualification, which fires on merge_group")
+freeze_guard_workflow = (root / ".github" / "workflows" / "freeze-guard.yml").read_text(encoding="utf-8")
+check(queue_extra == {"stage-b-verdict", "freeze-guard"}
+      and re.search(r"(?m)^  stage-b-verdict:$", exact_head_workflow) is not None
+      and re.search(r"(?m)^  freeze-guard:$", freeze_guard_workflow) is not None
+      and re.search(r"(?m)^  merge_group:\n(?:    .*\n)*?    types: \[checks_requested\]", freeze_guard_workflow.split("jobs:", 1)[0]) is not None,
+      "the two extra queue-mode required checks (stage-b-verdict, freeze-guard) are produced by workflows that fire on merge_group")
 for wf_name in required_check_workflows:
     wf_on = (root / ".github" / "workflows" / wf_name).read_text(encoding="utf-8").split("jobs:", 1)[0]
     check(re.search(r"(?m)^  merge_group:\n(?:    .*\n)*?    types: \[checks_requested\]", wf_on) is not None,

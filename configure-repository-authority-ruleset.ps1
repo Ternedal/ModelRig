@@ -127,6 +127,7 @@ producers = {
     "agent3-diagnostics.yml": ("agent3-python",),
     "agent3-full-diagnostics.yml": ("full-test-log",),
     "exact-head-qualification.yml": ("exact-head-core", "legacy-merge-tree-equivalence", "stage-b-verdict"),
+    "freeze-guard.yml": ("freeze-guard",),
 }
 missing = []
 for name in producers:

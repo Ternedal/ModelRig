@@ -2,15 +2,19 @@ name: freeze-guard
 
 # ADR-SYS-003 D7 — the campaign freeze, enforced OUTSIDE the candidate's control.
 #
-# Trust boundary (ChatGPT P1 on #2436): a check that runs the candidate's own
-# workflow YAML or scripts can be edited by the candidate into `exit 0`. This
-# workflow is therefore meant to be required through the ruleset's `workflows`
-# rule, pinned to refs/heads/main (deploy/repository-authority/main-ruleset.json):
-# GitHub then runs THIS FILE AS IT IS ON MAIN for every candidate, whatever the
-# candidate's copy says. Inside, nothing of the candidate's is executed: the
-# checkout is the BASE (merge_group.base_sha / pull_request.base.sha), the
-# classifier and the guard script are the base's, and the candidate head is
-# only an object the base's classifier reads.
+# Trust boundary (ChatGPT P1 on #2436): a guard that runs the candidate's own
+# scripts can be edited by the candidate into `exit 0`. Inside this workflow
+# nothing of the candidate's is executed: the checkout is the BASE
+# (merge_group.base_sha / pull_request.base.sha), the classifier and the guard
+# script are the base's, and the candidate head is only an object the base's
+# classifier reads. The residual is this FILE: GitHub's "require workflows to
+# pass" rule, which would run it as it is on main, exists for organization
+# rulesets only, and Ternedal is a user account (Codex P1 on #2436). So the
+# check is required by NAME (`freeze-guard`, QUEUE_REQUIRED_STATUS_CHECKS), and
+# a change to .github/workflows/freeze-guard.yml is code under a protected
+# prefix: human SHA-scoped ACCEPT (ADR-SYS-003 D6), and the gate
+# tests/workflow_freeze_guard.py pins this file's content so an edit is red
+# unless the test is changed with it, in the open.
 #
 # Verdict: KALIV_FREEZE (repository variable, owner Anders) == '1' and the
 # candidate is not documentation-only → fail. Everything else → pass. Pushes
