@@ -57,6 +57,7 @@ class Clock:
 
 class FakeImageAdapter:
     """Takes the real GPU lease, so exclusivity and release are real; no torch."""
+    rendered: list = []
 
     def __init__(self, profile, *, lease_dir, gpu_uuid, close_ok=True, load_error=None, log=None, on_render=None,
                  fail_after_acquire=None):
@@ -80,6 +81,7 @@ class FakeImageAdapter:
     def render(self, request, *, should_cancel=None):
         if self.on_render:
             self.on_render()  # e.g. the owner cancels after the adapter's last poll
+        FakeImageAdapter.rendered.append(request.prompt)  # what reached the model (prompt translation tests)
         return RenderedArtifact(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16, "image/png")
 
     def close(self):
@@ -149,6 +151,7 @@ def lease_free(uuid, lease_dir) -> bool:
 
 class ExecutorTests(unittest.TestCase):
     def setUp(self):
+        FakeImageAdapter.rendered.clear()
         self.tmp = tempfile.mkdtemp()
         self.lease_dir = os.path.join(self.tmp, "lease")
         os.mkdir(self.lease_dir, 0o700)
@@ -217,6 +220,90 @@ class ExecutorTests(unittest.TestCase):
         self.submit("sdxl-a")
         ex.step()
         self.assertEqual(self.log, ["load:sdxl-a"], "loaded once, reused")
+
+    # --- local prompt translation (#2275, 17 Nov 2026) ---------------------------------------------
+    def test_the_prompt_rewriter_decides_what_the_adapter_renders_and_only_its_outcome_is_recorded(self):
+        seen, calls = [], []
+
+        def rewriter(prompt, *, max_chars):
+            calls.append((prompt, max_chars))
+            return "a red bicycle, translated", "translated"
+        ex = self.executor([self.image()], prompt_rewriter=rewriter)
+        ex.events.sink = seen.append
+        job = self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "completed")
+        self.assertEqual(calls, [("a red bicycle", 500)], "called once, with the profile's prompt limit")
+        self.assertEqual(FakeImageAdapter.rendered, ["a red bicycle, translated"])
+        self.assertEqual(self.state(job)["prompt"], "a red bicycle", "the user's prompt is what the job keeps")
+        self.assertEqual(self.state(job)["effective_prompt"], "a red bicycle, translated",
+                         "provenance: what was rendered in the owner's name is on the job")
+        translate = [e for e in seen if e["event"] == "translate"]
+        self.assertEqual(len(translate), 1)
+        self.assertTrue(translate[0]["detail"].startswith(f"{job}:translated:"))
+        self.assertNotIn("bicycle", json.dumps(seen), "prompt text never reaches the event stream")
+
+    def test_every_rewriter_failure_renders_the_original_prompt(self):
+        cases = [
+            (lambda p, *, max_chars: (p, "fallback:timeout"), "fallback:timeout"),
+            (lambda p, *, max_chars: (_ for _ in ()).throw(RuntimeError("Boom, no code")), "fallback:RuntimeError"),
+            (lambda p, *, max_chars: ("", "translated"), "fallback:bad_rewrite"),
+            (lambda p, *, max_chars: (None, "translated"), "fallback:bad_rewrite"),
+            (lambda p, *, max_chars: ("x" * 501, "translated"), None),  # over the limit: validate_request refuses
+        ]
+        for number, (rewriter, outcome) in enumerate(cases):
+            with self.subTest(outcome=outcome):
+                FakeImageAdapter.rendered.clear()
+                seen = []
+                ex = self.executor([self.image(profile_id=f"sdxl-t{number}")], prompt_rewriter=rewriter)
+                ex.events.sink = seen.append
+                profile_id = next(iter(ex.profiles))
+                job = self.submit(profile_id)
+                result = ex.step()
+                if outcome is None:
+                    self.assertEqual(result, "rejected", "a rewrite the profile cannot take is a rejected job, never a crash")
+                    self.assertEqual(FakeImageAdapter.rendered, [])
+                else:
+                    self.assertEqual(result, "completed")
+                    self.assertEqual(FakeImageAdapter.rendered, ["a red bicycle"])
+                    self.assertIsNone(self.state(job)["effective_prompt"], "no translation, no provenance row")
+                    translate = [e for e in seen if e["event"] == "translate"]
+                    self.assertTrue(translate and translate[0]["detail"].startswith(f"{job}:{outcome}:"), translate)
+                ex.shutdown()
+                ex.release_lock()
+                self.executors.remove(ex)
+
+    def test_a_fallback_retry_clears_the_translation_kept_from_a_deferred_attempt(self):
+        # Codex P2 on #2418: translated, then deferred by GPU admission (defer keeps effective_prompt),
+        # then a retry that falls back renders the original. Provenance must describe that retry.
+        def deferred_attempt(job):
+            claimed = self.store.claim_for(["sdxl-a"], ex.instance)
+            self.assertEqual(claimed["id"], job)
+            self.assertTrue(self.store.record_effective_prompt(job, ex.instance, "a blue bicycle"))
+            self.assertEqual(self.store.defer(job, ex.instance, max_wait_s=600, error="gpu_unavailable"), "requeued")
+            self.assertEqual(self.state(job)["effective_prompt"], "a blue bicycle", "defer keeps it (the precondition)")
+        for rewriter in ((lambda p, *, max_chars: (p, "fallback:timeout")), None):
+            with self.subTest(rewriter="fallback" if rewriter else "none"):
+                FakeImageAdapter.rendered.clear()
+                ex = self.executor([self.image()], prompt_rewriter=rewriter)
+                job = self.submit("sdxl-a")
+                deferred_attempt(job)
+                self.assertEqual(ex.step(), "completed")
+                self.assertEqual(FakeImageAdapter.rendered, ["a red bicycle"])
+                self.assertIsNone(self.state(job)["effective_prompt"], "the stale translation is gone")
+                ex.shutdown()
+                ex.release_lock()
+                self.executors.remove(ex)
+
+    def test_without_a_rewriter_nothing_changes_and_no_translate_event_exists(self):
+        seen = []
+        ex = self.executor([self.image()])
+        ex.events.sink = seen.append
+        self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "completed")
+        self.assertEqual(FakeImageAdapter.rendered, ["a red bicycle"])
+        self.assertEqual([e for e in seen if e["event"] == "translate"], [])
+        with self.assertRaises(ExecutorConfigError):
+            self.executor([self.image()], start=False, prompt_rewriter="not callable")
 
     def test_idle_unload_frees_the_gpu_for_others(self):
         ex = self.executor([self.image()])

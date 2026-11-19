@@ -116,7 +116,9 @@ def _usable_secret(secret: object) -> bool:
 
 
 def job_view(job: dict) -> dict:
-    """What a device may see of a job: no prompt, no parameters, no internal claim."""
+    """What a device may see of a job: no parameters, no internal claim, not the prompt it sent
+    itself. `translated_prompt` is the one exception, and only when local translation changed the
+    prompt: the owner must be able to see what was rendered in their name (#2418 review)."""
     asset_id = job.get("asset_id") if job.get("state") == "completed" else None
     return {
         "schema": "kaliv-media-job/v1",
@@ -127,6 +129,7 @@ def job_view(job: dict) -> dict:
         "asset_url": f"/api/v1/media/{asset_id}" if asset_id else None,
         "error": public_error(job.get("error")),
         "cancel_requested": bool(job.get("cancel_requested")),
+        "translated_prompt": job.get("effective_prompt") or None,
         "created": job.get("created"),
         "updated": job.get("updated"),
     }
