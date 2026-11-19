@@ -2,6 +2,7 @@ package dk.ternedal.modelrig.ui.chat
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -56,7 +57,8 @@ import kotlinx.coroutines.withContext
  * through the existing [MediaJobSource] (bearer to the paired origin only, no
  * redirects, bounded bodies), with the generate screen's backoff, until the job
  * is terminal; a completed job's `asset_id` is fetched once through
- * [MediaGallerySource.asset] and decoded bounded. Errors are the rig's codes
+ * [MediaGallerySource.asset] and decoded bounded; tapping the picture opens
+ * [ZoomableImageDialog] on the same bytes. Errors are the rig's codes
  * through [MediaGenerate.errorText], never free text from the rig, never a
  * crash. The prompt is nowhere in here: the bubble never sees it.
  *
@@ -67,8 +69,9 @@ import kotlinx.coroutines.withContext
 sealed class ImageJobPhase {
     /** Asking the rig; [job] is the last answer, null before the first. */
     data class Following(val job: MediaJob?, val failures: Int) : ImageJobPhase()
-    /** Terminal with a picture. */
-    data class Shown(val job: MediaJob, val bitmap: Bitmap) : ImageJobPhase()
+    /** Terminal with a picture; [bytes] are kept for the full-size viewer (decoded larger there). */
+    @Suppress("ArrayInDataClass")
+    data class Shown(val job: MediaJob, val bitmap: Bitmap, val bytes: ByteArray) : ImageJobPhase()
     /** Terminal without a picture, or the bubble gave up; [text] is what to show. */
     data class Ended(val text: String) : ImageJobPhase()
 }
@@ -110,8 +113,8 @@ object ImageJobBubbleLogic {
     }
 
     /** The completed job's picture arrived (or did not). */
-    fun fetched(job: MediaJob, result: Result<Bitmap>): ImageJobPhase = result.fold(
-        onSuccess = { ImageJobPhase.Shown(job, it) },
+    fun fetched(job: MediaJob, result: Result<Pair<ByteArray, Bitmap>>): ImageJobPhase = result.fold(
+        onSuccess = { (bytes, bitmap) -> ImageJobPhase.Shown(job, bitmap, bytes) },
         onFailure = { e ->
             ImageJobPhase.Ended((e as? MediaGalleryException)?.message ?: "Billedet kunne ikke hentes fra riggen")
         },
@@ -150,10 +153,13 @@ fun ImageJobBubble(
             val toFetch = ImageJobBubbleLogic.toFetch(phase)
             if (toFetch != null) {
                 val assetId = toFetch.assetId ?: break
-                val bytes = withContext(io) {
-                    runCatching { decodeBounded(gallery.asset(assetId), ImageJobBubbleLogic.IMAGE_SIDE_PX) }
+                val picture = withContext(io) {
+                    runCatching {
+                        val bytes = gallery.asset(assetId)
+                        bytes to decodeBounded(bytes, ImageJobBubbleLogic.IMAGE_SIDE_PX)
+                    }
                 }
-                phase = ImageJobBubbleLogic.fetched(toFetch, bytes)
+                phase = ImageJobBubbleLogic.fetched(toFetch, picture)
                 break
             }
             if (!first) delay(ImageJobBubbleLogic.delayMillis(phase, pollMillis))
@@ -172,12 +178,18 @@ fun ImageJobBubble(
         }
     }
 
-    ImageJobBubbleContent(phase, modifier)
+    // Tap the picture -> full-size viewer with pinch-zoom (Anders 19/11 23:02).
+    var viewing by remember(jobId) { mutableStateOf(false) }
+    val shown = phase as? ImageJobPhase.Shown
+    ImageJobBubbleContent(phase, modifier, onOpen = if (shown != null) ({ viewing = true }) else null)
+    if (viewing && shown != null) {
+        ZoomableImageDialog(bytes = shown.bytes, onDismiss = { viewing = false })
+    }
 }
 
 /** Stateless renderer, so the three phases can be screenshot-tested without a rig. */
 @Composable
-fun ImageJobBubbleContent(phase: ImageJobPhase, modifier: Modifier = Modifier) {
+fun ImageJobBubbleContent(phase: ImageJobPhase, modifier: Modifier = Modifier, onOpen: (() -> Unit)? = null) {
     val maxWidth = (LocalConfiguration.current.screenWidthDp * 0.78f).dp
     Column(
         modifier = modifier.widthIn(max = maxWidth).padding(top = 8.dp).testTag("image-job-bubble"),
@@ -191,6 +203,7 @@ fun ImageJobBubbleContent(phase: ImageJobPhase, modifier: Modifier = Modifier) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
+                    .then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier)
                     .testTag("image-job-picture"),
             )
             is ImageJobPhase.Following -> Surface(

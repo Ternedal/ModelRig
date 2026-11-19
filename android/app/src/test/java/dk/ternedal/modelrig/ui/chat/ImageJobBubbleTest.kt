@@ -7,6 +7,8 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.geometry.Offset
 import androidx.media3.datasource.DataSource
 import dk.ternedal.modelrig.net.MediaGalleryException
 import dk.ternedal.modelrig.net.MediaGallerySource
@@ -143,7 +145,37 @@ class ImageJobBubbleTest {
         waitForText("For stort til at blive vist på telefonen")
     }
 
+    @Test
+    fun `tapping the picture opens the full-size viewer, close returns to the bubble`() {
+        show(FakeJobs(listOf({ job(MediaJobState.COMPLETED, assetId = "asset-9") })), FakeGallery(::png))
+        waitForTag("image-job-picture")
+        compose.onNodeWithTag("image-job-picture").performClick()
+        waitForTag("image-viewer")
+        compose.onNodeWithTag("image-viewer-picture").assertIsDisplayed()
+        compose.onNodeWithTag("image-viewer-close").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("image-viewer").fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithTag("image-job-picture").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a status bubble is not tappable`() {
+        show(FakeJobs(listOf({ job(MediaJobState.RUNNING) })), FakeGallery(::png))
+        waitForTag("image-job-status")
+        compose.onNodeWithTag("image-job-status").assertIsDisplayed()
+        assertTrue(compose.onAllNodesWithTag("image-job-picture").fetchSemanticsNodes().isEmpty())
+    }
+
     // --- pure logic ----------------------------------------------------------------
+
+    @Test
+    fun `zoom is clamped and pan only counts when zoomed in`() {
+        assertEquals(1f, ZoomableImage.nextScale(1f, 0.5f))
+        assertEquals(2f, ZoomableImage.nextScale(1f, 2f))
+        assertEquals(ZoomableImage.MAX_SCALE, ZoomableImage.nextScale(5f, 3f))
+        assertEquals(Offset.Zero, ZoomableImage.nextOffset(Offset(40f, 40f), Offset(10f, 0f), 1f))
+        assertEquals(Offset(50f, 40f), ZoomableImage.nextOffset(Offset(40f, 40f), Offset(10f, 0f), 2f))
+    }
+
 
     @Test
     fun `backoff doubles per failure and is capped`() {
