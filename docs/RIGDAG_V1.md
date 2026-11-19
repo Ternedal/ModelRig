@@ -4,7 +4,7 @@ Kommandoerne til de syv V1-gates (ADR-SYS-001), gate for gate og i den
 rækkefølge der virker. Hvert trin peger på sin autoritative vejledning; står
 der noget andet dér, gælder den. Udskiftede værdier står som `<…>`.
 
-> **Status:** samlet 19/11-2026 fra vejledningerne nedenfor. **Ikke kørt som
+> **Status:** samlet 19/11-2026, gate 3's webcam-vej tilføjet samme aften fra vejledningerne nedenfor. **Ikke kørt som
 > helhed.** Stak-kommandolinjerne til gate 2, 3 og 8 og workerens opstart med
 > dem er kørt i rig-simulatoren på windows-latest (#2437, #2438). Ingen gate er
 > kørt på 2.0.21.
@@ -20,10 +20,12 @@ der noget andet dér, gælder den. Udskiftede værdier står som `<…>`.
    vinduet ([KALIV_RECOVERY_SOAK_QUALIFICATION.md](KALIV_RECOVERY_SOAK_QUALIFICATION.md)).
    Gate 9 kræver altså en Stage B på 2.0.21-kandidaten.
 4. **Gate 10 tidligt, så snart hver pin står.** En verdict kan kun tages,
-   mens det repos `main` stadig står på pinnen. For **ModelRig betyder det lige
-   efter merge af bump-PR'en, før noget andet lander**: meld landingspausen på
-   #2275 først. BodyRig, VisionRig og VoiceRig, så snart deres pins er valgt.
-   Selve assembleren kan køres senere.
+   mens det repos `main` stadig står på pinnen. For 2.0.21 er bumpet allerede
+   merget (`e73f80a4`, 17/11), og main er gået videre; **ModelRig-pinnen er
+   derfor main, som den står, når du fryser**: meld landingspausen på #2275
+   først, tag så verdicten, og lad intet lande før manifestet er samlet.
+   BodyRig, VisionRig og VoiceRig, så snart deres pins er valgt. Selve
+   assembleren kan køres senere.
 5. **Gate 1 sidst**, når alle fire pins har grøn exact-head.
 6. **Manifestet** til sidst.
 
@@ -98,18 +100,49 @@ ModelRig-workeren med admission:
 
 Gate 3 og 8 kan køre på samme worker: giv begge switches.
 
-I VisionRig-checkouten på `<visionrig-sha>`, én kilde:
+VisionRig-kernen skal køre på loopback med ModelRig-broen slået til
+(VisionRig `docs/PHYSICAL_QUALIFICATION.md`, "Prerequisites"):
 
-```powershell
-.\run-v1-release-gate.ps1 -QualifyKinect -KinectModelManifest <fil> -ModelRigWorkerUrl http://127.0.0.1:8099
+```text
+VISIONRIG_MODELRIG_BRIDGE=1
+VISIONRIG_MODELRIG_WORKER_URL=http://127.0.0.1:8099
 ```
 
-(eller `-QualifyAndroid` / `-QualifyQuest`). Ref'en
-(`visionrig-physical-perception:<visionrig-sha>:<sha256>`) står i
-`validation\visionrig-physical-perception-latest.json`.
+**Kilde: riggens webcam** (beslutning 12/11). Kræver VisionRig `07c47ca8`
+eller nyere (#206, `-QualifySourceId`). I VisionRig-checkouten på
+`<visionrig-sha>`:
 
-> **Åbent:** hvilken kilde V1 skal bevises med. Beslutningen 12/11 nævner
-> "webcam på riggen"; wrapperen kender Kinect, Android (CameraX) og Quest.
+Vindue 1 — produceren. Den skal køre hele tiden og have leveret frames, før
+kvalifikationen starter; luk den ikke undervejs:
+
+```powershell
+visionrig-producer --camera 0 --source-id windows-webcam --fps 5
+```
+
+Vindue 2 — kvalifikationen:
+
+```powershell
+.\run-v1-release-gate.ps1 -QualifySourceId windows-webcam
+```
+
+Ref'en (`visionrig-physical-perception:<visionrig-sha>:<sha256>`) står som
+`release_evidence_ref` i `validation\visionrig-windows-webcam-physical.json`.
+(Kinect, Android og Quest findes stadig: `-QualifyKinect`, `-QualifyAndroid`,
+`-QualifyQuest`.)
+
+**Evidens — hvad der er bevist, og hvad der ikke er:**
+
+| | Status |
+|---|---|
+| `-QualifySourceId` afviser ugyldige og gentagne id'er før noget kører (CI, Windows PowerShell 5.1) | bevist i CI |
+| Wrapperen kører under Windows PowerShell 5.1 (`-StatusOnly`) | bevist i CI |
+| Fysisk webcam-kvalifikation: rigtigt kamera → frames → ModelRig-admission → PASS | **ikke kørt** |
+
+Grøn CI er ikke gate 3. Gate 3 er kun bestået, når wrapperen er endt uden
+fejl og rapporten har en `release_evidence_ref` på den valgte VisionRig-SHA.
+Fejler eller afbrydes kvalifikationen, mangler rapporten, eller mangler ref'en,
+**er gate 3 ikke bestået** og må ikke meldes som PASS; ret årsagen og kør den
+igen. Brug aldrig en ref fra en tidligere kørsel eller en anden SHA.
 
 ## 4. Gate 5 — `voicerig_physical_acceptance`
 
@@ -175,9 +208,15 @@ python scripts\kaliv_software_exact_green_assembler.py `
 ## 7. Gate 10 — `repository_authority`
 
 Vejledning: [KALIV_REPOSITORY_AUTHORITY_QUALIFICATION.md](KALIV_REPOSITORY_AUTHORITY_QUALIFICATION.md).
-**Tages når pinnen står, ikke her** (se rækkefølgen): ModelRig lige efter
-bump-mergen under landingspause, de tre andre når deres pins er valgt. En
+**Tages når pinnen står, ikke her** (se rækkefølgen): ModelRig på main under
+landingspausen (bumpet til 2.0.21 er allerede merget), de tre andre når deres
+pins er valgt. En
 verdict pr. repo fra en ren `main`-checkout, gemt uden for alle checkouts.
+
+**VisionRig-pinnen til 2.0.21 skal være `07c47ca8` eller nyere** (ellers
+mangler `-QualifySourceId` til gate 3). VisionRig-verdicten skal være taget på
+præcis den pin, der står i manifestet; en verdict fra en anden VisionRig-SHA
+gælder ikke. Det samme gælder gate 3's ref og gate 1.
 Her til sidst kører du kun `kaliv_repository_authority_assembler.py` på de
 fire gemte verdicts, som vejledningen viser.
 
@@ -189,9 +228,14 @@ manifestet: den endelige gate tjekker kun ref'ens form og pin, ikke filen bag.
 
 ## Åbne punkter før rigdagen
 
-- Kilden til gate 3 (se ovenfor).
-- Gate 5 punkt 9 kræver at "ModelRig backend rapporterer VoiceRig": om det er
-  appliancen eller valideringsstakken, står ikke i VoiceRig's vejledning.
+- Gate 3's fysiske webcam-kvalifikation er ikke kørt (se evidens-tabellen i
+  afsnit 3).
+- Gate 5 punkt 9 ("ModelRig backend rapporterer VoiceRig") er **afklaret**:
+  VoiceRig bruger den backend, `MODELRIG_BASE_URL` peger på (standard
+  `127.0.0.1:8080`, autentificeret), og gate 5's ref binder kun VoiceRig-SHA'en.
+  Appliancen og valideringsstakken er begge gyldige; `MODELRIG_VOICES_DIR` skal
+  være den samme for VoiceRig og ModelRig-workeren (VoiceRig
+  `docs/MODELRIG_INTEGRATION.md`).
 - Gate 9 betyder en fuld Stage B på 2.0.21 med soak omkring. **Kilden er den
   signerede 2.0.12**, ikke 2.0.20: `stage_b_one_click_v2.py` kræver backend og
   worker på præcis 2.0.12 (`EXPECTED_SOURCE_VERSION`), og
