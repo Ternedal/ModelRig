@@ -21,6 +21,7 @@ Run: python3 tests/workflow_validation_stack_v1_gates.py
 """
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -118,6 +119,25 @@ def worker_cmd_carries_the_blocks() -> None:
           "the backend cmd does not get the worker's qualification flags")
 
 
+def write_worker_cmd_only_stops_before_anything_starts() -> None:
+    check("[switch]$WriteWorkerCmdOnly" in STACK, "the stack has -WriteWorkerCmdOnly")
+    written = STACK.find("Set-Content -LiteralPath $workerCmd")
+    dry = STACK.find("if ($WriteWorkerCmdOnly) {")
+    first_start = min(i for i in (STACK.find("Wait-PortFree -Port"), STACK.find("Start-WorkerCommand\n"),
+                                  STACK.find("& go build")) if i >= 0)
+    check(0 <= written < dry < first_start,
+          "the dry run returns after the worker cmd is written and before any port wait, build or start")
+    stray = STACK.find("$inheritedKaliv = @(Get-ChildItem Env:")
+    check(written < stray < dry and "Write-Warning" in STACK[stray:dry],
+          "inherited KALIV_* names are computed after the cmd is written and warned about on a real start")
+    check('"INHERITED-KALIV: "' in STACK[dry:first_start], "and printed by the dry run")
+    manifest = json.loads((ROOT / "scripts" / "rig_simulator" / "operators.json").read_text(encoding="utf-8"))
+    simulated = {op["id"] for op in manifest["operators"]}
+    check({"stack-worker-cmd-v1-gates-3-8", "stack-worker-cmd-v1-gate2-with-3-8",
+           "stack-worker-cmd-gate2-refuses-without-scheduler"} <= simulated,
+          "the rig simulator runs the three V1 stack command lines")
+
+
 def evidence_root_is_ignored() -> None:
     probe = "validation/e2e-latency/run-1/perception_received.json"
     result = subprocess.run(
@@ -132,6 +152,7 @@ def main() -> int:
         visionrig_switch_writes_the_worker_name,
         live_session_is_the_documented_one,
         worker_cmd_carries_the_blocks,
+        write_worker_cmd_only_stops_before_anything_starts,
         evidence_root_is_ignored,
     ):
         case()

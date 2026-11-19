@@ -277,6 +277,208 @@
         ]
       },
       "why": "Seven refs of the right count and shape but with no canonical evidence behind them: the assembler hands the manifest to kaliv_system_release_gate, which must reject it (canonical evidence required per gate), so the assembler answers INVALID, exit 2 and writes nothing. This is the path a hurried operator would hit on the rig; a QUALIFIED here would be a hole in the gate itself."
+    },
+    {
+      "id": "stack-worker-cmd-v1-gates-3-8",
+      "script": "scripts/start-stage-a-validation-stack.ps1",
+      "kind": "powershell",
+      "platform": "windows",
+      "needs_stack": false,
+      "args": [
+        "-PlannerModel",
+        "qwen3:14b",
+        "-ValidationReport",
+        "${SCRATCH}\\agent3-report.json",
+        "-WriteWorkerCmdOnly",
+        "-EnableE2eLatency",
+        "-EnableVisionRigAdmission"
+      ],
+      "expect": {
+        "exit": [
+          0
+        ],
+        "stdout_contains": [
+          "WORKER-CMD-BEGIN",
+          "WORKER-CMD-END",
+          "set \"KALIV_CONSCIOUSNESS_CORE_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_CHAT_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_PROFILE_FILE=",
+          "deploy\\consciousness-dev-profile.json\"",
+          "set \"KALIV_E2E_LATENCY_QUALIFICATION_ENABLED=1\"",
+          "set \"KALIV_E2E_LATENCY_CANDIDATE_GIT_SHA=",
+          "validation\\e2e-latency\"",
+          "set \"KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED=1\""
+        ]
+      },
+      "why": "The rig-day command line for V1 gates 8 and 3 (#2425) runs under Windows PowerShell 5.1 and writes the latency flag, the HEAD SHA, the evidence root, VisionRig's admission flag and the live-cycle session with the default profile into the generated worker cmd. -WriteWorkerCmdOnly stops before any port wait or start, so this proves the generated environment, not that the worker starts."
+    },
+    {
+      "id": "stack-worker-cmd-v1-gate2-with-3-8",
+      "script": "scripts/start-stage-a-validation-stack.ps1",
+      "kind": "powershell",
+      "platform": "windows",
+      "needs_stack": false,
+      "args": [
+        "-PlannerModel",
+        "qwen3:14b",
+        "-ValidationReport",
+        "${SCRATCH}\\agent3-report.json",
+        "-WriteWorkerCmdOnly",
+        "-EnableScheduler",
+        "-SchedulerDataDir",
+        "${SCRATCH}\\scheduler",
+        "-SchedulerApprovalSecret",
+        "simulator-approval-secret-0123456789abcdef",
+        "-EnableConsciousnessLifecycle",
+        "-EnableE2eLatency",
+        "-EnableVisionRigAdmission"
+      ],
+      "expect": {
+        "exit": [
+          0
+        ],
+        "stdout_contains": [
+          "WORKER-CMD-BEGIN",
+          "set \"KALIV_SCHEDULER=1\"",
+          "set \"KALIV_CONSCIOUSNESS_AUTONOMOUS_SCHEDULER_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_QUALIFICATION_EVIDENCE_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_CORE_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_CHAT_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_PROFILE_FILE=",
+          "deploy\\consciousness-dev-profile.json\"",
+          "set \"KALIV_E2E_LATENCY_QUALIFICATION_ENABLED=1\"",
+          "set \"KALIV_E2E_LATENCY_CANDIDATE_GIT_SHA=",
+          "validation\\e2e-latency\"",
+          "set \"KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED=1\"",
+          "WORKER-CMD-END"
+        ]
+      },
+      "why": "Gate 2's command line (#2407) together with gates 8 and 3: the scheduler, the twelve lifecycle flags, the profile, the latency block and the VisionRig flag all land in one worker cmd under PowerShell 5.1."
+    },
+    {
+      "id": "stack-worker-cmd-gate2-refuses-without-scheduler",
+      "script": "scripts/start-stage-a-validation-stack.ps1",
+      "kind": "powershell",
+      "platform": "windows",
+      "needs_stack": false,
+      "args": [
+        "-PlannerModel",
+        "qwen3:14b",
+        "-ValidationReport",
+        "${SCRATCH}\\agent3-report.json",
+        "-WriteWorkerCmdOnly",
+        "-EnableConsciousnessLifecycle"
+      ],
+      "expect": {
+        "exit": [
+          1
+        ]
+      },
+      "why": "-EnableConsciousnessLifecycle without -EnableScheduler is refused before anything is written: the autonomous scheduler only mounts with KALIV_SCHEDULER=1 (#2407). Exit 1 is PowerShell's for a thrown error under -File."
+    },
+    {
+      "id": "worker-boots-with-v1-gates-3-8-env",
+      "script": "scripts/rig_simulator/worker_cmd_boot.py",
+      "kind": "python",
+      "platform": "windows",
+      "needs_stack": false,
+      "timeout_seconds": 240,
+      "args": [
+        "--repository-root",
+        "${REPO}",
+        "--scratch",
+        "${SCRATCH}\\boot-3-8",
+        "--expect-path",
+        "/experimental/e2e-latency/voice",
+        "--expect-path",
+        "/experimental/consciousness/visionrig-event",
+        "--status-true",
+        "enabled.visionrig_admission",
+        "--status-true",
+        "enabled.event_step",
+        "--status-true",
+        "mounted.supervisor",
+        "--status-true",
+        "prerequisites.cognitive_profile_available",
+        "--stray",
+        "KALIV_SIMULATOR_STRAY_FLAG=1",
+        "--",
+        "-EnableE2eLatency",
+        "-EnableVisionRigAdmission",
+        "-PlannerModel",
+        "qwen3:14b",
+        "-ValidationReport",
+        "${SCRATCH}\\agent3-report.json"
+      ],
+      "expect": {
+        "exit": [
+          0
+        ],
+        "stdout_json": {
+          "schema": "kaliv-rig-simulator-worker-cmd-boot/v1",
+          "ok": true,
+          "inherited_kaliv": [
+            "KALIV_SIMULATOR_STRAY_FLAG"
+          ]
+        }
+      },
+      "why": "The production worker (app.entrypoint:app) boots on the rig's interpreter with exactly the environment the gate 3+8 command line generates (-WriteWorkerCmdOnly, #2437): /healthz answers, the latency and VisionRig admission routes are in its OpenAPI surface, the supervisor mounts and the CognitiveProfile from the generated path loads. Not proven: that either gate passes (no GPU, speech backends, camera or model here). A KALIV_* variable left in the operator's shell is named by the stack (INHERITED-KALIV, warning on a real start): the worker cmd inherits it, since only the variables the cmd sets are overridden."
+    },
+    {
+      "id": "worker-boots-with-v1-gate2-3-8-env",
+      "script": "scripts/rig_simulator/worker_cmd_boot.py",
+      "kind": "python",
+      "platform": "windows",
+      "needs_stack": false,
+      "timeout_seconds": 240,
+      "args": [
+        "--repository-root",
+        "${REPO}",
+        "--scratch",
+        "${SCRATCH}\\boot-2-3-8",
+        "--expect-path",
+        "/experimental/e2e-latency/voice",
+        "--expect-path",
+        "/experimental/consciousness/visionrig-event",
+        "--status-true",
+        "enabled.autonomous_scheduler",
+        "--status-true",
+        "enabled.continuous_loop",
+        "--status-true",
+        "enabled.visionrig_admission",
+        "--status-true",
+        "mounted.supervisor",
+        "--status-true",
+        "prerequisites.cognitive_profile_available",
+        "--",
+        "-EnableScheduler",
+        "-SchedulerDataDir",
+        "${SCRATCH}\\boot-scheduler",
+        "-SchedulerApprovalSecret",
+        "simulator-approval-secret-0123456789abcdef",
+        "-EnableConsciousnessLifecycle",
+        "-EnableE2eLatency",
+        "-EnableVisionRigAdmission",
+        "-PlannerModel",
+        "qwen3:14b",
+        "-ValidationReport",
+        "${SCRATCH}\\agent3-report.json"
+      ],
+      "expect": {
+        "exit": [
+          0
+        ],
+        "stdout_json": {
+          "schema": "kaliv-rig-simulator-worker-cmd-boot/v1",
+          "ok": true,
+          "inherited_kaliv": []
+        }
+      },
+      "why": "Same for gate 2's command line together with 3 and 8: the worker boots with the scheduler and all lifecycle flags. mounted.autonomous_scheduler is not asserted: it also needs a SelfState and live session the simulator does not create (gate 2 operator preflight covers that refusal)."
     }
   ],
   "pending": [
@@ -334,11 +536,6 @@
       "script": "scripts/kaliv_recovery_soak_qualification.py",
       "issue": 2390,
       "why": "Gate 9 qualifies a multi-hour journal of real restarts and reruns freeze_check (tokenless here); the collector is run, the qualifier needs a recorded campaign."
-    },
-    {
-      "script": "scripts/start-stage-a-validation-stack.ps1",
-      "issue": 2390,
-      "why": "Starts the candidate backend and worker windows on Windows; the simulator starts its own stack. Its generated worker env is covered by tests/workflow_validation_stack_v1_gates.py."
     }
   ]
 }
