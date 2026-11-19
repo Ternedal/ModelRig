@@ -192,4 +192,8 @@ manifestet: den endelige gate tjekker kun ref'ens form og pin, ikke filen bag.
 - Kilden til gate 3 (se ovenfor).
 - Gate 5 punkt 9 kræver at "ModelRig backend rapporterer VoiceRig": om det er
   appliancen eller valideringsstakken, står ikke i VoiceRig's vejledning.
-- Gate 9 betyder en fuld Stage B på 2.0.21 (kilde 2.0.20) med soak omkring.
+- Gate 9 betyder en fuld Stage B på 2.0.21 med soak omkring. **Kilden er den
+  signerede 2.0.12**, ikke 2.0.20: `stage_b_one_click_v2.py` kræver backend og
+  worker på præcis 2.0.12 (`EXPECTED_SOURCE_VERSION`), og
+  `STAGE_B_UPDATER_EVIDENCE.md` kræver overgangen 2.0.12 → 2.0.21. Appliancen
+  skal altså stå på 2.0.12, før soak-prøverne startes.
