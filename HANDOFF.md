@@ -330,10 +330,11 @@ matchede nogen fil).
   testet. Standard-forbehold på UI: "verificeret ved build, ikke med øjne".
 - **"kør" / "kør videre"** = fuld autonom eksekvering uden check-ins, med
   fuld commit-autoritet **på grene og PR'er — ikke landing.** Landing på
-  `main` sker kun på Anders' eksplicitte ord: **"sæt i kø #N"** (merge-kø,
-  fra 20/11; før det "`Kør merge <fuld sha>`"). Sessionen slår altid
-  PR'ens aktuelle head op via API før den gentager en sha — skriv den aldrig
-  fra hukommelsen (19/11: en sha skrevet fra hukommelsen var forkert).
+  `main` sker kun på Anders' eksplicitte ord: **"`Kør merge <fuld sha>`"**
+  på PR'ens aktuelle head. Sessionen slår altid headet op via API, før den
+  skriver en sha — aldrig fra hukommelsen (19/11: en sha skrevet fra
+  hukommelsen var forkert). Når/hvis repoet får en merge-kø (ADR-SYS-003,
+  kræver organisationsejerskab — se §9 19/11), bliver ordet "sæt i kø #N".
   **"test jeg"** = Anders tester på hardware.
 - **Anders kører FLERE parallelle Claude-sessioner.** Derfor: `git pull
   --rebase` før alt arbejde, tjek version-sites for kollisioner, og forvent
@@ -376,20 +377,20 @@ halv release og lignede en hel. Flowet nu:
    `python3 tests/workflow_*.py` · `ruff check --select E9,F63,F7,F82`.
    **Kotlin kan IKKE kompileres her — CI er den eneste verifikation.**
 3. **Alt landes gennem CI — ikke ved push til main.** Arbejdet ligger paa
-   en gren, får sin PR, og lander gennem **merge-køen** (ADR-SYS-003, fra
-   20/11): PR'en kvalificeres på sit exact head (14 required checks +
-   `freeze-guard`), Anders siger **"sæt i kø"** (og kun Anders — en
-   session lægger aldrig selv noget i køen), GitHub bygger merge-gruppen,
-   de 16 required kontekster kører på DEN commit (inkl. `stage-b-verdict`
-   = Stage B på det, der faktisk lander), og den merges med merge-commit.
-   Ingen strict mode: en anden landing sender ikke din PR tilbage til start
-   (#2436 rekvalificerede syv gange for samme indhold 19/11 — det er det,
-   køen fjerner). Freeze er en indholdsregel, ikke stilstand: med
-   `KALIV_FREEZE=1` afviser `freeze-guard` alt, der ikke er docs-only.
-   *Historik:* til og med 19/11 var landingen "`Kør merge <fuld sha>`" fra
-   Anders → merge-commit via API på præcis den sha; før 17/11 et
-   fast-forward af `refs/heads/main`, som branch protection siden nægtede
-   (GH006). Scripts, der stadig fast-forwarder, er forældede.
+   en gren, får sin PR, kvalificeres på sit exact head (14 required checks,
+   strict: branchen skal indeholde `main`s tip), og lander på Anders'
+   "`Kør merge <fuld sha>`" som **merge-commit via API på præcis den sha**
+   (træet er identisk med det testede head; ADR-SYS-002 D4 bekræfter det).
+   Prisen på strict er, at enhver anden landing sender PR'en tilbage til
+   `behind` og ~3,5 t rekvalifikation (#2436: syv gange 19/11). Derfor
+   **landingsvinduer**: ingen lander noget, mens en PR er grøn og venter på
+   sit "Kør merge". Merge-kø (ADR-SYS-003) ville fjerne det, men GitHub
+   tilbyder kun merge queue i organisationsejede repos — se §9 19/11.
+   `freeze-guard` kører som signal på alle PR'er mod `main`; med
+   `KALIV_FREEZE=1` er det rødt på alt, der ikke er docs-only.
+   *Historik:* før 17/11 var landingen et fast-forward af `refs/heads/main`,
+   som branch protection siden nægtede (GH006). Scripts, der stadig
+   fast-forwarder, er forældede.
    Verdikter håndhæves, aldrig kun rapporteres (#315 landede paa rød CI med
    en falsk grøn kommentar). **CHECK-RUNS ≠ WORKFLOW-RUNS:** fire grønne
    workflows kan staa ved siden af et rødt CodeQL-check-run. Gate paa BEGGE.
@@ -851,12 +852,15 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 
 ### 19/11: merge-queue-sporet er på main; freeze har fået en kontakt
 
-**[19/11 21:29 — ADR-SYS-003 rev. 3 (`14562e7`), trin 1 (`33f43bf`), trin 2
-(`df04a2a`) og trin 4 (`ef0473d`, #2436) er landet. Alt er inert, indtil
-Anders kører trin 3 (runbook på #2415) — besluttet 19/11 17:04 til **20/11**,
-ikke efter V1-tag. Gate 10's klassiske dom er uændret; den offline evaluering
-af `deploy/repository-authority/main-ruleset.json` på `ef0473d` giver
-`passed: true`, 16 kontekster, `merge_queue: true`.]**
+**[19/11 22:07 — ADR-SYS-003 rev. 3 (`14562e7`), trin 1 (`33f43bf`), trin 2
+(`df04a2a`) og trin 4 (`ef0473d`, #2436) er landet. Trin 3 blev forsøgt
+samme aften og **afvist af GitHub: `422 Invalid rule 'merge_queue'`** —
+merge queue findes kun i organisationsejede repos, og `Ternedal/ModelRig`
+ejes af en brugerkonto. Intet blev ændret (0 rulesets, klassisk protection
+intakt). Alt fra trin 1/2/4 er korrekt og inert; gate 10's klassiske dom er
+uændret. Beslutning udestår (#2415): flyt repoet til en organisation efter
+V1, eller bliv på strict med landingsvinduer. Review-miss: tre reviews
+tjekkede `workflows`-reglens org-krav, ingen tjekkede `merge_queue`s.]**
 
 **Hvad det kostede at lande trin 4 i strict mode (målt 19/11):** #2436
 rekvalificerede **syv gange** for byte-identisk indhold (`git range-diff` mod
@@ -894,15 +898,17 @@ aftalen på #2275 gælder. Første rigtige kørsel af `freeze-guard` på en PR
 mod `main` (19/11, #2436 selv, `KALIV_FREEZE` ikke sat): grøn med
 "nothing to enforce" — kontakten er af, indtil Anders sætter den.
 
-**Trin 3 — udføres 20/11 af Anders (runbook på #2415):** ren klon af `main`
-→ `./verify-repository-authority.ps1` (klassisk PASS) →
-`./configure-repository-authority-ruleset.ps1` (dry-run: offline gate 10 +
-producer-map) → `-Apply` → `-Apply -RemoveClassicProtection` → `verify` i
-ruleset-tilstand. Beviser bagefter: (5) denne docs-PR som første kø-landing,
-(6) én kode-landing der viser 16 kontekster i køen, (7) `KALIV_FREEZE=1` →
-en ikke-docs-kandidat afvises i køen, (8) §3/§4 opdateres: "`Kør merge
-<sha>`" bliver "sæt i kø". *[Resultater indsættes her, når trinnet er
-kørt.]*
+**Trin 3 — forsøgt 19/11 22:07 på riggen:** `verify` PASS (klassisk),
+dry-run PASS (offline gate 10, 16 kontekster, ingen bypass), `-Apply` →
+scriptets generiske fejl; samme payload sendt direkte med `gh api` gav
+`422 Validation Failed: Invalid rule 'merge_queue'`. Token var ejerens med
+`repo`-scope, så det er ikke rettigheder. GitHub-docs ("Managing a merge
+queue"): kun public repos **ejet af en organisation** (private kun på
+Enterprise Cloud). Lærestreg: `configure-…-ruleset.ps1` skjulte API-svaret
+(`| Out-Null`) og kostede en ekstra kørsel — den skal vise det. Vejen til
+en kø er en org-flytning (174 ikke-md-filer hardcoder `Ternedal/ModelRig`,
+heraf 2 i updater-stien; gate 10 og Stage B navngiver ejeren) — en halv dag
+plus én Stage B, efter V1.
 
 ### 18/11: ADR-SYS-002-kæden er landet — og sådan lander en stak på `main`
 
