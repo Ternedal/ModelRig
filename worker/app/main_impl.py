@@ -794,9 +794,11 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
         except t.ToolError as e:
             raise HTTPException(status_code=503, detail=str(e))
         if result["status"] == "confirmation_required":
+            # media_jobs too: a picture queued earlier in this turn is already rendering,
+            # and without its reference here the client could never show its bubble.
             return {**result, "extra_tool_calls_ignored": len(calls) - 1,
                     "tools_used": tools_used, "sources": sources,
-                    "context": context or []}
+                    "context": context or [], "media_jobs": media_jobs}
         tools_used.append(name)
         last_result = result["result"]
         if name in _MEDIA_TOOLS:

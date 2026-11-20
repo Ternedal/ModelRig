@@ -176,10 +176,15 @@ listen, og 1.4 skal give et rent tekstsvar. Sæt den tilbage til 1 bagefter.
 **2.1 APK fra CI** [repo; samme vej som 19/8 og 20/8]
 
 ```powershell
-gh workflow run candidate-apk.yml -R Ternedal/ModelRig -f ref=integration/media-chat
+gh workflow run candidate-apk.yml -R Ternedal/ModelRig --ref integration/media-chat -f ref=integration/media-chat
+Start-Sleep 10; gh run watch (gh run list -R Ternedal/ModelRig --workflow candidate-apk.yml -L 1 --json databaseId --jq '.[0].databaseId') -R Ternedal/ModelRig --exit-status
 ```
 
-Når kørslen er grøn:
+`--ref` skal med: uden den registreres kørslen på `main`, og `headSha` nedenfor
+viser så `main` i stedet for det, der blev bygget. Bygget tager ca. 4 minutter.
+
+Når kørslen er grøn — og **kun** hvis `headSha` er integrationsgrenens hoved
+(20/11 gav `-L 1` en kørsel fra 14/11, fordi den nye ikke var startet endnu):
 
 ```powershell
 $run = gh run list -R Ternedal/ModelRig --workflow candidate-apk.yml -L 1 --json databaseId,conclusion,headSha | ConvertFrom-Json; $run

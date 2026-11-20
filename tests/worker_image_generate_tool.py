@@ -152,6 +152,8 @@ ref = parse_job_reference(out)
 check(ref is not None, "result starts with a parseable job reference")
 check(ref and ref["profile_id"] == "sdxl-a", "sole image profile chosen without configuration")
 check(ref and ref["status_url"] == f"/api/v1/media/jobs/{ref['job_id']}", "status_url points at the job route")
+check(ref and ref["job_id"] not in out.split("\n", 1)[1] and "nævn ikke job-id" in out,
+      "the sentence the model relays carries no job id (rig 20/11: an answer printed it to the user)")
 job = svc.store.get(ref["job_id"], OWNER) if ref else None
 check(job is not None and job["state"] == "queued", "job is queued for OWNER=installation")
 check(job is not None and job["prompt"] == PROMPT, "the store holds the prompt as written (translation is the executor's)")
@@ -187,7 +189,8 @@ def text_result(fn, label):
     except Exception as exc:  # noqa: BLE001
         check(False, f"{label}: raised {type(exc).__name__} instead of returning text")
         return ""
-    check(isinstance(out, str) and "ikke tilgængelig" in out and parse_job_reference(out) is None,
+    refusal = isinstance(out, str) and ("ikke tilgængelig" in out or out.startswith(("Riggen er optaget", "Riggen afviste")))
+    check(refusal and parse_job_reference(out) is None,
           f"{label}: text result, no job reference")
     return out
 
@@ -220,6 +223,24 @@ o = text_result(lambda: _run_image_generate({"prompt": PROMPT, "width": 640, "he
                                             service_getter=lambda: svc, env={}),
                 "size the profile refuses")
 check("invalid_request" in o, "executor's own validation rule applies at submit")
+check(o.startswith("Riggen afviste") and "width, height" in o and "image_generate igen uden dem" in o,
+      "a refused size names the arguments and says to call again without them (the model cannot know the allowed sizes)")
+check("640" not in o and "480" not in o, "only argument names are echoed, never values")
+
+import logging as _logging
+class _Seen(_logging.Handler):
+    def __init__(self):
+        super().__init__(); self.lines = []
+    def emit(self, record):
+        self.lines.append(record.getMessage())
+_seen = _Seen(); _wlog = _logging.getLogger("modelrig.worker"); _wlog.addHandler(_seen); _prev = _wlog.level; _wlog.setLevel(_logging.INFO)
+_run_image_generate({"prompt": PROMPT, "width": 640, "height": 480}, service_getter=lambda: svc, env={})
+_run_image_generate({"prompt": PROMPT}, service_getter=None, env={})
+_wlog.removeHandler(_seen); _wlog.setLevel(_prev)
+check(_seen.lines == ["media_tool=refused modality=image code=invalid_request optional=width,height",
+                      "media_tool=refused modality=image code=media_jobs_api_off"],
+      "each refusal is one worker log line with its code (and argument names, never the prompt)")
+check(not any(PROMPT in line for line in _seen.lines), "the prompt is not logged")
 
 svc_full = service_with(IMG_A)
 for _ in range(3):
@@ -227,6 +248,9 @@ for _ in range(3):
 o = text_result(lambda: _run_image_generate({"prompt": PROMPT}, service_getter=lambda: svc_full, env={}),
                 "owner limit reached")
 check("owner_limit" in o, "quota is relayed as a code")
+check(o.startswith("Riggen er optaget") and "ikke en fejl" in o and "ikke tilgængelig" not in o,
+      "a full owner quota says wait, not unavailable (rig 20/11: relayed as 'tekniske problemer')")
+check(parse_job_reference(o) is None, "a busy text is not a job reference")
 
 for bad, label in (
     ("not a dict", "args not an object"),

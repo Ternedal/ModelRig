@@ -44,12 +44,17 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 import os
 from typing import Callable, Mapping
 
 from fastapi import HTTPException
 
 from .tools import Tool, ToolDenied
+
+# The worker's own logger: a refusal is one line with its code, so the cause can be read
+# on the rig afterwards. The model only relays a paraphrase ("tekniske problemer", 20/11).
+_logger = logging.getLogger("modelrig.worker")
 
 TOOL_NAME = "image_generate"
 IMAGE_TASK = "text_to_image"
@@ -138,12 +143,45 @@ def _production_service_getter() -> Callable[[], object] | None:
     return _production_service[0]
 
 
+# Refusals that are about load, not about the rig being off. Measured on the rig
+# 20/11: the model relayed the generic sentence as "der er tekniske problemer",
+# which tells the user nothing they can act on. These say what to do: wait.
+_BUSY_CODES = frozenset({"owner_limit", "queue_full"})
+
+
 def _unavailable(code: str, modality: str = "image") -> str:
     """The text result for a rig-side refusal; names what was asked for, so a
-    refused clip is not relayed to the user as "billedgenerering"."""
+    refused clip is not relayed to the user as "billedgenerering".
+
+    A busy rig is its own sentence: nothing is wrong, the earlier jobs are still
+    being made, and the user can ask again when one of them is done.
+    """
+    _logger.info("media_tool=refused modality=%s code=%s", modality, code)
+    if code in _BUSY_CODES:
+        what = "videoer" if modality == "video" else "billeder"
+        return (f"Riggen er optaget: der er allerede flere {what} på vej ({code}). Der blev ikke startet et nyt job. "
+                "Det er ikke en fejl. Sig til brugeren, at de kan bede om det igen, når et af dem er færdigt.")
     what = "Videogenerering" if modality == "video" else "Billedgenerering"
     return (f"{what} er ikke tilgængelig lige nu ({code}). "
             "Fortsæt samtalen som tekst og sig det til brugeren.")
+
+
+# Refusals the model caused with an optional argument it could not know the allowed
+# values of: no size or profile id is named in the tool's description. The rig's
+# own defaults always work, so the result says how to get the picture, not that
+# it failed.
+_RETRY_PLAIN_CODES = frozenset({"invalid_request", "profile_not_enabled"})
+
+
+def _refused(code: str, modality: str, optional: list[str]) -> str:
+    """A refusal as text. With optional arguments in play and a code they can cause:
+    name them and say to call again without them. Otherwise the plain refusal."""
+    if code in _RETRY_PLAIN_CODES and optional:
+        _logger.info("media_tool=refused modality=%s code=%s optional=%s", modality, code, ",".join(optional))
+        tool = "video_generate" if modality == "video" else "image_generate"
+        return (f"Riggen afviste de valgfri argumenter ({code}): {', '.join(optional)}. Der blev ikke startet et job. "
+                f"Kald {tool} igen uden dem — riggen vælger selv profil og størrelse.")
+    return _unavailable(code, modality)
 
 
 # ---------------------------------------------------------------------------
@@ -227,10 +265,14 @@ def _submit_media_job(clean: dict, *, service_getter: Callable[[], object] | Non
     except MediaJobsUnavailable as exc:
         return _unavailable(str(exc) or "media_jobs_unavailable", modality)
 
+    # What the model chose beyond the prompt, in a fixed order. Only names: never a value.
+    # ``input_asset_id`` is resolved by the tool from a source job, not something the model passed.
+    optional = [key for key in ("profile_id", *params_keys)
+                if key != "input_asset_id" and clean.get(key) is not None]
     profile_id, code = _choose_profile(service, clean["profile_id"], env, modality=modality, profile_env=profile_env,
                                        task=task)
     if code is not None:
-        return _unavailable(code, modality)
+        return _refused(code, modality, optional)
 
     try:
         body = SubmitRequest(profile_id=profile_id, prompt=clean["prompt"], task=task,
@@ -240,7 +282,7 @@ def _submit_media_job(clean: dict, *, service_getter: Callable[[], object] | Non
     try:
         profile, generation = service.request_for(body)
     except HTTPException as exc:
-        return _unavailable(str(exc.detail), modality)
+        return _refused(str(exc.detail), modality, optional)
 
     params = {key: clean[key] for key in params_keys if clean.get(key) is not None}
     # The task follows the job. Without it the executor falls back to the profile's
@@ -275,9 +317,9 @@ def _run_image_generate(args: dict, *, service_getter: Callable[[], object] | No
         profile_env=IMAGE_TOOL_PROFILE_ENV, schema=JOB_REFERENCE_SCHEMA, kind="image",
         params_keys=_INT_ARGS,
         text=lambda job_id, profile_id: (
-            f"Billedjob {job_id} er sat i kø på riggen (profil {profile_id}). "
+            f"Billedjobbet er sat i kø på riggen (profil {profile_id}). "
             "Billedet vises i samtalen, når det er klar. Sig til brugeren, at det er på vej — "
-            "påstå ikke, at det er færdigt, og gentag ikke prompten."
+            "påstå ikke, at det er færdigt, gentag ikke prompten, og nævn ikke job-id'et."
         ),
     )
 
