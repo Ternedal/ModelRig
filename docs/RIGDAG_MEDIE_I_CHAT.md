@@ -5,7 +5,7 @@ i chat-turen, boblerne i Android og desktop, og billede-til-video. Trin for trin
 og i den rækkefølge, der afslører mest tidligst. Udskiftede værdier står som `<…>`.
 
 > **Status:** samlet 20/11-2026. **Intet her er kørt på riggen.** Koden ligger
-> som drafts (#2448, #2449, #2457–#2461) og er samlet i grenen
+> som drafts (#2448, #2449, #2457–#2461, #2463, #2464) og er samlet i grenen
 > `integration/media-chat` (#2462, må ikke merges), hvor CI kører på helheden.
 > Udviklingskanalen er **ikke evidens**: ingen gate læser noget herfra.
 
@@ -212,6 +212,7 @@ billede; 20–30 s pr. billede, hvis kortet er ledigt (17/11-tal fra Medier-skæ
 - [ ] **Del** → Androids delingsark åbner med billedet.
 - [ ] Luk appen helt, åbn samtalen igen → billedet kommer tilbage af sig selv.
 - [ ] Wi-Fi fra i 30 s under "Genererer …", til igen → boblen ender alligevel med billedet.
+- [ ] Wi-Fi fra i godt to minutter under "Genererer …" → boblen siger "Riggen svarer ikke …" og viser **Prøv igen**; Wi-Fi til, tryk → billedet kommer (#2464).
 - [ ] Stop executoren (Ctrl+C i vindue B), bed om et billede → boblen bliver på "I kø på riggen"; start executoren igen → billedet kommer.
 
 ## 3. Desktop
