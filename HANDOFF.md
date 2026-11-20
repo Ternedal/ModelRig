@@ -910,6 +910,25 @@ en kø er en org-flytning (174 ikke-md-filer hardcoder `Ternedal/ModelRig`,
 heraf 2 i updater-stien; gate 10 og Stage B navngiver ejeren) — en halv dag
 plus én Stage B, efter V1.
 
+**Beslutninger samme aften (Anders, 19/11 22:15–22:33):** (1) *vent* —
+klassisk strict + landingsvinduer til V1-tag, org-flytning som beslutning
+efter V1; (2) fryset for 2.0.21 startes morgenen før rigdag 1, ikke før
+(hver dag mellem frys og rigdag er en dag uden landinger); (3) **"Kør
+#2419"** — billedgenerering *inde i chatten* bygges nu af
+vedligeholdssessionen **i brancher under fryset**, lander efter V1-tag.
+Afgørelser til #2419: `image_generate` er read-klasse uden
+bekræftelseskort, asynkront (jobbet i kø, boblen poller), bag egen
+kontakt `KALIV_IMAGE_TOOL_ENABLED` (ToolGate er deny-liste — registrering
+er beslutningen). Status 20/11 morgen: #2448 (worker: værktøj,
+`media_jobs` på turen, systemprompt-regel kun mens værktøjet er
+registreret) og #2449 (Android: boble, poll, fuldskærm m. pinch-zoom,
+persistens i ChatDb v4) er CI-grønne drafts. Riggen skal have
+`KALIV_IMAGE_TOOL_PROFILE=realvisxl-4-0`, fordi to billedprofiler er
+aktive. Rig-del af slice C (fem danske forespørgsler, send→billede målt)
+kan køres på dev-kanalen før landing — plan på #2419. **Rig-forberedelse
+19/11 aften:** `qwen3:14b` trukket (B2 afgjort), Logitech BRIO fundet
+(gate 3), 95 mergede branches slettet (`physical-proof/*` bevaret).
+
 ### 18/11: ADR-SYS-002-kæden er landet — og sådan lander en stak på `main`
 
 **[18/11 06:5x — main = `2653a581` (merge-commit af #2411, forældre `bd063d5` +
