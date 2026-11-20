@@ -32,3 +32,14 @@ object MediaRefusalNotice {
         return "$sentence (${last.code})"
     }
 }
+
+/** The media jobs of one user turn when a confirmation card sits in the middle of it (#2465). */
+object MediaTurnJobs {
+    /**
+     * Those queued before the card ([before], from the card's own turn) and those queued after
+     * the decision ([after]). The rig starts a new list for each call, so neither alone is the
+     * turn. Order kept, no duplicates.
+     */
+    fun across(before: List<MediaJobRef>, after: List<MediaJobRef>): List<MediaJobRef> =
+        (before + after).distinctBy { it.jobId }
+}

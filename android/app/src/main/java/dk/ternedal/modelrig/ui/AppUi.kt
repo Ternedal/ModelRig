@@ -2881,8 +2881,9 @@ private fun ChatScreen(
                                 // expiry; this just stops offering a dead button.
                                 if (pendingTool?.confirmationId == prop.confirmationId) {
                                     pendingTool = null
+                                    // A picture queued before the card is rendering regardless: keep its bubble.
                                     messages.add(Msg("assistant",
-                                        "Bekræftelsen udløb. Handlingen blev ikke udført."))
+                                        "Bekræftelsen udløb. Handlingen blev ikke udført.", mediaJobs = prop.mediaJobs))
                                 }
                             }
                             if (remaining > 0) {
@@ -2906,12 +2907,18 @@ private fun ChatScreen(
                                         }
                                         toolBusy = false
                                         val next = r.getOrNull()
+                                        // #2465: media the turn queued BEFORE the card rides on the card's
+                                        // turn; what it queued after the approval rides on the answer. The
+                                        // rig starts a new list per call, so the app keeps the union -- else
+                                        // a picture that is already rendering never gets its bubble.
+                                        val carried = dk.ternedal.modelrig.ui.chat.MediaTurnJobs
+                                            .across(prop.mediaJobs, next?.mediaJobs.orEmpty())
                                         if (next?.status == "confirmation_required") {
                                             // Agent v2: an approved write may continue the
                                             // chain, and the NEXT write comes back as its own
                                             // confirmation card. Show it instead of ending the
                                             // turn -- one approval never authorises the next write.
-                                            pendingTool = next
+                                            pendingTool = next?.copy(mediaJobs = carried)
                                         } else {
                                             pendingTool = null
                                             val text = next?.answer
@@ -2923,14 +2930,14 @@ private fun ChatScreen(
                                                     else friendlyError(e)
                                                 } ?: ""
                                             if (text.isNotBlank()) {
-                                                messages.add(Msg("assistant", text))
+                                                messages.add(Msg("assistant", text, mediaJobs = carried))
                                                 // Persist it. What you approved, and what
                                                 // Kaliv did about it, belongs in the
                                                 // conversation -- not only in RAM until the
                                                 // next app restart.
                                                 convId?.let { id ->
                                                     withContext(Dispatchers.IO) {
-                                                        db.addMessage(id, "assistant", text)
+                                                        db.addMessage(id, "assistant", text, carried)
                                                     }
                                                 }
                                             }

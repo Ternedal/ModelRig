@@ -54,4 +54,14 @@ class MediaRefusalNoticeTest {
         val text = MediaRefusalNotice.text(listOf(image("invalid_arguments"), image("owner_limit")), 0)!!
         assertTrue(text, text.endsWith("(owner_limit)"))
     }
+
+    @Test
+    fun `jobs queued before a confirmation card and after it are one turn`() {
+        val a = MediaJobRef("0123456789abcdef0123456789abcdef", MediaJobRef.Kind.IMAGE)
+        val b = MediaJobRef("fedcba9876543210fedcba9876543210", MediaJobRef.Kind.VIDEO)
+        assertEquals(listOf(a, b), MediaTurnJobs.across(listOf(a), listOf(b)))
+        assertEquals(listOf(a), MediaTurnJobs.across(listOf(a), listOf(a)))
+        assertEquals(listOf(a), MediaTurnJobs.across(listOf(a), emptyList()))
+        assertEquals(emptyList<MediaJobRef>(), MediaTurnJobs.across(emptyList(), emptyList()))
+    }
 }
