@@ -125,9 +125,37 @@ These steps change the rig and download about 10 GB of Apache-2.0 weights. Run t
 8. **Run the rig checks.** Everything in `docs/MEDIA_VIDEO_GENERATION.md`, "Must be proven on the rig before any activation". This includes the outbound-network firewall rule for ComfyUI, which is §2, Anders' decision.
 9. **Promote.** Only after 7 and 8 pass may a profile become `rig-qualified` [repo: profile schema]. Video stays off until Anders says otherwise.
 
-## 6. What this document does not do
+## 6. Image-to-video: what it adds (#2366, #2459)
+
+The entry point serves `image_to_video` under the same switch, and `video_generate` takes a picture from the conversation as the source (`docs/MEDIA_EXECUTOR.md`, "Image-to-video"). **Nothing of it has been run on the rig**, and the text-to-video model of §1 cannot do it: Wan 2.1 T2V 1.3B is text-only.
+
+**A second profile, not a second task on the first.** A ComfyUI template renders exactly one task, and the adapter refuses a request for any other [repo: `comfy_video_adapter`]. So image-to-video is its own profile with its own template (the one with the `__KALIV_VIDEO_IMAGE__` slot on `LoadImage`), listing `tasks: ["image_to_video"]` only, and the text-to-video profile lists `["text_to_video"]` only. `video_generate` picks the profile by task: with one profile per task, nothing needs configuring; `KALIV_VIDEO_TOOL_PROFILE` only settles a choice between two profiles for the same task [repo: `image_generate_tool._choose_profile`].
+
+**Model candidates for a 12 GB card:**
+
+| | Wan 2.2 TI2V **5B** | Wan 2.1 Fun InP **1.3B** | Wan 2.1 / 2.2 I2V **14B** |
+|---|---|---|---|
+| What it is | One model for both text-to-video and image-to-video; in the official workflow the start image is an optional `Load image` node feeding `Wan22ImageToVideoLatent` [source: docs.comfy.org Wan2.2 tutorial] | Video between a first and a last frame; the lightweight variant "with lower VRAM requirements" [source: docs.comfy.org Wan2.1 Fun InP tutorial]. Whether it runs from a first frame alone is not stated [measure] | Image-to-video, separate 480P and 720P models [source: Comfy blog, Wan2.1 native support] |
+| VRAM | "should fit well on 8GB vram with the ComfyUI native offloading" [source: docs.comfy.org] | no figure given [measure] | out of scope for 12 GB, as in §1 [estimate] |
+| Diffusion model file | `wan2.2_ti2v_5B_fp16.safetensors` [source] | `wan2.1_fun_inp_1.3B_bf16.safetensors` [source] | not listed here |
+| Other files | `wan2.2_vae.safetensors` (its own VAE, not §2's) and `umt5_xxl_fp8_e4m3fn_scaled.safetensors` (§2's text encoder) [source: docs.comfy.org Wan2.2 tutorial] | §2's text encoder and VAE, plus a CLIP vision file (`clip_vision_h.safetensors`) [source: the Fun tutorials' file listings; confirm against the workflow actually exported] | |
+| Repository | `Comfy-Org/Wan_2.2_ComfyUI_Repackaged` [source] | `Comfy-Org/Wan_2.1_ComfyUI_repackaged` [source] | |
+| License | Apache 2.0, commercial use allowed [source: docs.comfy.org Wan2.2 tutorial] | **confirm on the `alibaba-pai/Wan2.1-Fun-1.3B-InP` model card before use** | |
+
+- **Recommendation: Wan 2.2 TI2V 5B, after §5 has passed for 1.3B text-to-video.** It is the only candidate here with a stated VRAM figure under 12 GB and a confirmed license, and one set of weights can back both profiles (two templates). Its cost is the one §1 already names: it fits through offloading, so host RAM and time are the open numbers [estimate; measure].
+- **Fun InP 1.3B is the fallback** if 5B is too slow on a 3060: it is the size class already qualified in §5, but it is built for first-and-last-frame, it adds a fourth weight file to pin, and its license is not confirmed here.
+- **Every weight file is pinned as in §2**, including the CLIP vision file if the template loads one: a model file the template names without a pin refuses the start [repo: `comfy_weights`].
+
+**What the qualification adds to §5** (same steps, plus):
+
+1. Export the image-to-video workflow in API format, with the `Load image` node enabled (for the 5B workflow it is bypassed by default [source]), and put `__KALIV_VIDEO_IMAGE__` on `LoadImage`'s `image` input; the other seven markers as in §5 step 4. The text-to-video template is a second export of the same workflow without that node.
+2. A candidate image-to-video profile with its own `profile_id` and its own port: two video profiles on one port are refused with 78 [repo: `_check_comfy_ports`]. Two profiles on one GPU therefore mean two supervised ComfyUI instances taking turns on that card; whether that holds within the VRAM admission on a 3060 is not established [measure]. **The conservative start is one task per GPU**: text-to-video on `cuda:0`, image-to-video on `cuda:1`. Which arrangement to keep is Anders' decision after step 7's numbers.
+3. Source pictures: generate one picture per size the image profile serves, then ask for a clip from each. A source larger than 4096 px per side or 64 MiB is refused before anything touches disk [repo: `docs/MEDIA_VIDEO_GENERATION.md`].
+4. Negative cases, each must fail the job without stopping the executor: the source job of another owner, a source deleted from the gallery between submit and claim (`source_image_unavailable`), and a video job named as the source (`source_not_an_image`, refused at the tool).
+5. From the chat: "lav et billede af …", wait for the picture, then "lav en video af det billede" as the next message; the model is told to pass `source_image_job_id="latest"`, the reply must carry a video job reference, and the clip must start from that picture. Also once before any picture exists: the answer must be that there is no finished picture (`no_source_image`), not an invented clip. **Whether qwen3:14b reliably passes `latest` is a rig measurement** [measure].
+
+## 7. What this document does not do
 
 - It downloads nothing and changes no profile, environment file or supervisor default.
-- It does not cover image-to-video, which is not served by the entry point.
 - It does not touch cloud or egress settings. Media never leaves the rig.
 - It claims no measured time. All times above are tagged [source] or [estimate].

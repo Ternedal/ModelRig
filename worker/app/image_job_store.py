@@ -310,6 +310,25 @@ class ImageJobStore:
                 row = db.execute("SELECT * FROM image_jobs WHERE id=? AND owner=?", (job_id, owner)).fetchone()
         return dict(row) if row else None
 
+    def latest_completed_for(self, owner: str, profile_ids) -> dict | None:
+        """The owner's most recently completed job among ``profile_ids``, or None. Read-only.
+
+        For "animate the picture I just made" (#2459): the chat carries no job id from one
+        turn to the next, so the tool asks for the newest finished one. Owner-bound like
+        ``get``; ``updated`` is the completion time (nothing touches a completed row's
+        ``updated`` afterwards -- the prompt purge leaves it alone)."""
+        ids = sorted(set(profile_ids))
+        if any(not isinstance(p, str) or not _PROFILE_ID.fullmatch(p) for p in ids):
+            raise ImageJobError("invalid profile ids")
+        if not ids:
+            return None
+        marks = ",".join("?" * len(ids))
+        with self._db() as db:
+            row = db.execute(f"SELECT * FROM image_jobs WHERE owner=? AND state='completed' AND asset_id IS NOT NULL "
+                             f"AND profile_id IN ({marks}) ORDER BY updated DESC, id DESC LIMIT 1",
+                             (owner, *ids)).fetchone()
+        return dict(row) if row else None
+
     def expire_queued(self, *, max_age_s: float = QUEUED_MAX_AGE_S, now: float | None = None) -> int:
         """Expire every queued job submitted at least max_age_s ago: terminal state 'expired', error
         'expired_unclaimed'. Returns how many. Running and publishing jobs are never touched.
