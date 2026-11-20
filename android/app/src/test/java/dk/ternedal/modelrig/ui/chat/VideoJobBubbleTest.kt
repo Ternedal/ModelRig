@@ -81,10 +81,20 @@ class VideoJobBubbleTest {
     private class FakeGallery(
         private val items: List<MediaItem>,
         private val clip: ByteArray? = ByteArray(1_000) { 7 },
+        /** The first this-many page lookups fail as if the rig were away. */
+        private var pagesAway: Int = 0,
     ) : MediaGallerySource {
         val videoRequests = mutableListOf<String>()
         val downloads = mutableListOf<String>()
-        override fun page(limit: Int, cursor: String?): MediaPage = MediaPage(items, null, 0)
+        var pageLookups = 0
+        override fun page(limit: Int, cursor: String?): MediaPage {
+            pageLookups += 1
+            if (pagesAway > 0) {
+                pagesAway -= 1
+                throw MediaGalleryException(MediaGalleryException.Reason.NETWORK, "Riggen kan ikke nås")
+            }
+            return MediaPage(items, null, 0)
+        }
         override fun thumbnail(item: MediaItem): ByteArray = error("not used")
         override fun image(item: MediaItem): ByteArray = error("not used")
         override fun video(item: MediaItem): MediaVideoStream {
@@ -172,6 +182,32 @@ class VideoJobBubbleTest {
         show(FakeJobs(listOf({ job(MediaJobState.COMPLETED, assetId = "old-clip") })), FakeGallery(listOf(videoItem("other"))))
         waitForText(VideoJobBubbleLogic.IN_GALLERY_TEXT)
         assertTrue(compose.onAllNodesWithTag("video-job-player").fetchSemanticsNodes().isEmpty())
+        // It is in the gallery; asking again would say the same.
+        assertTrue(compose.onAllNodesWithTag("image-job-retry").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun `a finished clip the gallery could not be asked about can be tried again`() {
+        val jobs = FakeJobs(listOf({ job(MediaJobState.COMPLETED, assetId = "clip-1") }))
+        val gallery = FakeGallery(listOf(videoItem("clip-1")), pagesAway = 1)
+        show(jobs, gallery)
+        waitForTag("image-job-retry")
+        assertTrue(compose.onAllNodesWithTag("video-job-player").fetchSemanticsNodes().isEmpty())
+        compose.onNodeWithTag("image-job-retry").performClick()
+        waitForTag("video-job-player")
+        assertEquals(2, gallery.pageLookups)
+        assertEquals(listOf("clip-1"), gallery.videoRequests)
+    }
+
+    @Test
+    fun `a clip bubble that gave up says so about the clip and offers Prøv igen`() {
+        val away: () -> MediaJob = { throw dk.ternedal.modelrig.net.MediaJobException(dk.ternedal.modelrig.net.MediaJobException.Reason.TRANSIENT, "x") }
+        val jobs = FakeJobs(List(ImageJobBubbleLogic.MAX_FAILURES) { away } + listOf({ job(MediaJobState.COMPLETED, assetId = "clip-1") }))
+        show(jobs, FakeGallery(listOf(videoItem("clip-1"))))
+        waitForText(ImageJobBubbleLogic.GAVE_UP_TEXT_VIDEO)
+        compose.onNodeWithTag("image-job-retry").performClick()
+        waitForTag("video-job-player")
+        assertEquals(ImageJobBubbleLogic.MAX_FAILURES + 1, jobs.polled.size)
     }
 
     @Test
@@ -195,6 +231,12 @@ class VideoJobBubbleTest {
         assertTrue(playable is VideoJobOutcome.Playable)
         val refused = VideoJobBubbleLogic.resolved(completed, item, Result.failure(MediaGalleryException(MediaGalleryException.Reason.UNPLAYABLE, "Riggen kan ikke streame denne video")))
         assertEquals("Riggen kan ikke streame denne video", (refused as VideoJobOutcome.Ended).text)
+        // Only what may pass is offered again: a lookup that failed, a stream refused for the network.
+        assertEquals(false, refused.retryable)
+        assertEquals(false, (VideoJobBubbleLogic.resolved(completed, null, null) as VideoJobOutcome.Ended).retryable)
+        assertEquals(true, (VideoJobBubbleLogic.resolved(completed, null, null, lookupFailed = true) as VideoJobOutcome.Ended).retryable)
+        val away = VideoJobBubbleLogic.resolved(completed, item, Result.failure(MediaGalleryException(MediaGalleryException.Reason.NETWORK, "Riggen kan ikke nås")))
+        assertEquals(true, (away as VideoJobOutcome.Ended).retryable)
         assertNull(VideoJobBubbleLogic.findItem(listOf(videoItem("a")), "b"))
         assertNull(VideoJobBubbleLogic.findItem(listOf(videoItem("a").copy(kind = MediaKind.IMAGE)), "a"))
     }
