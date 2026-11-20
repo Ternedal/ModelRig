@@ -70,10 +70,13 @@ class KalivMediaJobPresentationTest {
     fun transientFailuresCountAndTheSixthStopsAskingButOffersRetry() {
         var phase: DesktopMediaPhase = DesktopMediaPhase.Following(job(DesktopMediaJobState.RUNNING), 0)
         repeat(KalivMediaJob.MAX_POLL_FAILURES - 1) { i ->
-            phase = KalivMediaJob.pollFailed(phase, failure(if (i % 2 == 0) Reason.NETWORK else Reason.TRANSIENT))
-            assertEquals(i + 1, (phase as DesktopMediaPhase.Following).failures)
+            val following = assertIs<DesktopMediaPhase.Following>(
+                KalivMediaJob.pollFailed(phase, failure(if (i % 2 == 0) Reason.NETWORK else Reason.TRANSIENT)),
+            )
+            phase = following
+            assertEquals(i + 1, following.failures)
             // The last good answer is kept, so the bubble keeps saying where the job was.
-            assertEquals(DesktopMediaJobState.RUNNING, (phase as DesktopMediaPhase.Following).job?.state)
+            assertEquals(DesktopMediaJobState.RUNNING, following.job?.state)
         }
         val gaveUp = KalivMediaJob.pollFailed(phase, failure(Reason.NETWORK))
         assertEquals(DesktopMediaPhase.Ended(KalivMediaJob.GAVE_UP_TEXT, retryable = true), gaveUp)
