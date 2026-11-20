@@ -139,6 +139,17 @@ class KalivMediaJobPresentationTest {
     }
 
     @Test
+    fun aFetchIsOnlyOfferedAgainWhenTheRigWasAwayForAMoment() {
+        assertTrue(KalivMediaJob.transferRetryable(failure(Reason.NETWORK)))
+        assertTrue(KalivMediaJob.transferRetryable(failure(Reason.TRANSIENT)))
+        for (reason in listOf(Reason.TOO_LARGE, Reason.PROTOCOL, Reason.NOT_FOUND, Reason.UNAUTHORIZED, Reason.REDIRECT_REFUSED, Reason.UNAVAILABLE, Reason.HTTP)) {
+            assertFalse(KalivMediaJob.transferRetryable(failure(reason)), reason.name)
+        }
+        assertFalse(KalivMediaJob.transferRetryable(IOException("disk full")))
+        assertFalse(KalivMediaJob.transferRetryable(null))
+    }
+
+    @Test
     fun zoomStaysBetweenFitAndEightTimes() {
         assertEquals(1f, KalivMediaJob.nextScale(1f, -1f))
         assertEquals(1.2f, KalivMediaJob.nextScale(1f, 1f), 0.0001f)

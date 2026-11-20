@@ -111,6 +111,7 @@ internal fun KalivMediaJobBubble(
     var phase by remember(ref.jobId, attempt) { mutableStateOf(KalivMediaJob.initial()) }
     var picture by remember(ref.jobId) { mutableStateOf(KalivMediaPictureCache.get(ref.jobId)) }
     var transferError by remember(ref.jobId, attempt) { mutableStateOf<String?>(null) }
+    var transferRetryable by remember(ref.jobId, attempt) { mutableStateOf(false) }
 
     LaunchedEffect(ref.jobId, attempt, source) {
         if (picture != null) return@LaunchedEffect
@@ -131,6 +132,7 @@ internal fun KalivMediaJobBubble(
             val fetched = withContext(Dispatchers.IO) { runCatching { source.image(assetId) } }
             val bytes = fetched.getOrNull()
             if (bytes == null) {
+                transferRetryable = KalivMediaJob.transferRetryable(fetched.exceptionOrNull())
                 transferError = KalivMediaJob.transferFailedText(fetched.exceptionOrNull(), ref.kind)
             } else {
                 val decoded = withContext(Dispatchers.Default) { runCatching { decodePicture(bytes) } }.getOrNull()
@@ -151,7 +153,7 @@ internal fun KalivMediaJobBubble(
     Column(Modifier.padding(top = 8.dp)) {
         when {
             shown != null -> PictureCard(shown, ref)
-            failed != null -> MediaStatusLine(failed, onRetry = { attempt += 1 })
+            failed != null -> MediaStatusLine(failed, onRetry = if (transferRetryable) ({ attempt += 1 }) else null)
             current is DesktopMediaPhase.Completed && ref.kind == DesktopMediaKind.VIDEO ->
                 ClipCard(ref, current.job, source)
             else -> MediaStatusLine(
