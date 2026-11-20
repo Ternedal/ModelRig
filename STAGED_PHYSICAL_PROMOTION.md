@@ -37,7 +37,7 @@ Kør først, når `v2.0.21` er publiceret og verificeret, og
 `physical-proof/2.0.21` findes på origin (#2275).
 
 ```powershell
-cd C:\Users\admin\Desktop\ModelRig-git
+cd C:\Users\an001\Desktop\ModelRig-git
 git fetch origin
 git fetch --force origin tag v2.0.21
 $RcSha = (git rev-parse "v2.0.21^{commit}").Trim()
@@ -319,7 +319,7 @@ derefter i tre døgn — usynligt, fordi kun backendens 401 blev verificeret.
 Dev-kanalen viste det på første kørsel 3/9. Begge linjer hører sammen:
 
     KALIV_AGENT4_OPERATOR_API=1
-    KALIV_AGENT4_DATA_ROOT=C:\Users\admin\Desktop\ModelRig-appliance\agent4-data
+    KALIV_AGENT4_DATA_ROOT=C:\Rig\ModelRig\agent4-data
 
 Roden skal være en absolut sti; mappen oprettes efter behov. Verificér altid
 BÅDE backend og worker efter en env-ændring: `/healthz` på 8080 er backendens;
@@ -340,7 +340,7 @@ Kampagnen gør det i tre trin og pauser selv mellem dem:
 2. `probe` kører **som en anden lokal Windows-konto** mod en staging-bundle i
    `C:\Users\Public`. Nemmest fra samme skrivebord, uden at logge ud:
 
-       runas /user:<ANDEN-BRUGER> "python \"C:\Users\admin\Desktop\ModelRig-git\scripts\proof_t033_current.py\" probe --campaign-id <ID>"
+       runas /user:<ANDEN-BRUGER> "python \"C:\Users\an001\Desktop\ModelRig-git\scripts\proof_t033_current.py\" probe --campaign-id <ID>"
 
    Campaign-id'et står i kampagnens output. Kontoen skal findes på forhånd —
    en almindelig lokal standardbruger rækker, den behøver ikke admin.
