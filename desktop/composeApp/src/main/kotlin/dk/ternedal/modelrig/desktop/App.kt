@@ -1426,10 +1426,15 @@ private fun SettingsCard(
  */
 @Composable
 private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, onApply: (String) -> Unit) {
-    var presets by remember { mutableStateOf(runCatching { db.listPresets(source) }.getOrElse { emptyList() }) }
+    // Same rule as the conversation browser (#973): a failed load is said, not shown
+    // as "no presets"; failures use fixed copy, never the exception's text.
+    val initialPresets = remember { runCatching { db.listPresets(source) } }
+    var presets by remember { mutableStateOf(initialPresets.getOrElse { emptyList() }) }
     var saving by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
-    var presetError by remember { mutableStateOf<String?>(null) }
+    var presetError by remember {
+        mutableStateOf(if (initialPresets.isFailure) presentPresetStoreError(PresetStoreOperation.LOAD) else null)
+    }
 
     Spacer(Modifier.height(4.dp))
     Row(
@@ -1450,7 +1455,8 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
                             runCatching {
                                 db.deletePreset(p.id)
                                 presets = db.listPresets(source)
-                            }.onFailure { presetError = "Kunne ikke slette: ${it.message}" }
+                                presetError = null
+                            }.onFailure { presetError = presentPresetStoreError(PresetStoreOperation.DELETE) }
                         },
                         contentPadding = PaddingValues(start = 4.dp, end = 12.dp),
                     ) { Text("✕", color = KalivTheme.colors.TextMuted, fontSize = 11.sp) }
@@ -1486,8 +1492,9 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
                     runCatching {
                         db.savePreset(source, newName.trim(), currentPrompt)
                         presets = db.listPresets(source)
+                        presetError = null
                         newName = ""; saving = false
-                    }.onFailure { presetError = "Kunne ikke gemme: ${it.message}" }
+                    }.onFailure { presetError = presentPresetStoreError(PresetStoreOperation.SAVE) }
                 },
             ) { Text("Gem", color = if (newName.isNotBlank()) KalivTheme.colors.Signal else KalivTheme.colors.TextMuted, fontWeight = FontWeight.Bold) }
         }
