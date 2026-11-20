@@ -44,6 +44,13 @@ VIDEO_TASK = "text_to_video"
 _ALLOWED_ARGS = frozenset({"prompt", "profile_id", "width", "height", "frames", "seed", "source_image_job_id"})
 I2V_TASK = "image_to_video"
 LATEST_SOURCE = "latest"
+UNREADABLE_SOURCE = "\x00unreadable"  # never a value a model can send: JSON strings reach us decoded, ids are hex
+
+
+def _unreadable_source() -> str:
+    return ("Videogenerering blev ikke startet (source_not_understood): source_image_job_id skal være "
+            "ordet latest eller det 32-tegns job-id, image_generate gav. Kald værktøjet igen med "
+            "source_image_job_id='latest' for det seneste færdige billede, eller sig det til brugeren.")
 _INT_ARGS = ("width", "height", "frames", "seed")
 _MAX_PROMPT_CHARS = 4000
 
@@ -127,7 +134,10 @@ def _validate_args(args: object) -> dict:
         if source.strip().lower() == LATEST_SOURCE:
             source = LATEST_SOURCE
         elif len(source) != 32 or any(c not in "0123456789abcdef" for c in source):
-            raise ToolDenied("video_generate: source_image_job_id skal være et 32-tegns job-id eller ordet latest")
+            # Not ToolDenied: that ends the whole turn with an HTTP error, and a small model
+            # writing "det billede" or an id it made up is the likeliest mistake here. It gets
+            # a text result it can act on (call again with "latest") or relay.
+            source = UNREADABLE_SOURCE
     clean["source_image_job_id"] = source
     for key in _INT_ARGS:
         value = args.get(key)
@@ -146,6 +156,8 @@ def _run_video_generate(args: dict, *, service_getter: Callable[[], object] | No
     clean = _validate_args(args)
     task = VIDEO_TASK
     params_keys: tuple[str, ...] = _INT_ARGS
+    if clean["source_image_job_id"] == UNREADABLE_SOURCE:
+        return _unreadable_source()
     if clean["source_image_job_id"] is not None:
         asset_id, refusal = _resolve_source(clean["source_image_job_id"], service_getter)
         if refusal is not None:
