@@ -143,7 +143,7 @@ The loop does not survive the Stage-B reboot. Either start it again within the
 policy's gap after logging in, or let Windows run single probes instead:
 
 ```powershell
-schtasks /Create /F /TN KalivSoakProbe /SC MINUTE /MO 5 /TR "cmd /c cd /d C:\Users\admin\Desktop\ModelRig-git && python scripts\kaliv_recovery_soak_collector.py sample --once"
+schtasks /Create /F /TN KalivSoakProbe /SC MINUTE /MO 5 /TR "cmd /c cd /d C:\Users\an001\Desktop\ModelRig-git && python scripts\kaliv_recovery_soak_collector.py sample --once"
 ```
 
 Remove the task when the soak is over:

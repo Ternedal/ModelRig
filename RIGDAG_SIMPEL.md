@@ -29,7 +29,7 @@ Kør først, når `v2.0.21` er publiceret og verificeret, og
 `physical-proof/2.0.21` findes på origin (#2275).
 
 ```powershell
-cd C:\Users\admin\Desktop\ModelRig-git
+cd C:\Users\an001\Desktop\ModelRig-git
 git fetch origin
 git fetch --force origin tag v2.0.21
 $RcSha = (git rev-parse "v2.0.21^{commit}").Trim()
