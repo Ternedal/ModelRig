@@ -62,7 +62,8 @@ tmp = tempfile.mkdtemp(prefix="kaliv-chain-")
 lease_dir = os.path.join(tmp, "lease")
 os.mkdir(lease_dir, 0o700)
 store = ImageJobStore(os.path.join(tmp, "jobs.sqlite3"))
-IMG = parse_profile(image_profile(profile_id="sdxl-a", resources={"min_usable_gib": 8, "reserve_gib": 2,
+# Lists image_to_image too, as a real SDXL profile may: alphabetically it comes before text_to_image.
+IMG = parse_profile(image_profile(profile_id="sdxl-a", tasks=["text_to_image", "image_to_image"], resources={"min_usable_gib": 8, "reserve_gib": 2,
                                                                    "devices": ["cuda:0"], "cpu_offload": False}))
 I2V = parse_profile(video_profile(profile_id="wan-i2v", tasks=["image_to_video"]))
 service = MediaJobService(store, {p.profile_id: p for p in (IMG, I2V)}, "s" * 40, video_enabled=True)
@@ -82,6 +83,8 @@ try:
     check(row is not None and row["state"] == "queued" and row["prompt"] == PROMPT, "it is the installation owner's, queued")
     params = json.loads(row["params"])
     check(params.get("width") == 1024 and params.get("seed") == 7, f"the size and seed are stored: {sorted(params)}")
+    check(params.get("task") == "text_to_image",
+          "and the resolved task: without it the executor would take the profile's alphabetically first task")
     request = executor._request(row, IMG)
     check(request.task == "text_to_image" and request.prompt == PROMPT and request.width == 1024,
           "the executor's own request builder accepts what the tool stored")
