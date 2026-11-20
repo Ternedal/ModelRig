@@ -245,8 +245,12 @@ good = {"schema": JOB_REFERENCE_SCHEMA, "job_id": "a" * 32, "state": "queued", "
 check(parse_job_reference(tools.wrap_as_data(json.dumps(good) + "\ntext")) is not None,
       "reference is read through the wrap_as_data envelope")
 check(parse_job_reference(json.dumps(good)) is not None, "reference is read bare")
+check((parse_job_reference(json.dumps(good)) or {}).get("kind") == "image", "an image reference carries kind=image")
+check((parse_job_reference(json.dumps({**good, "schema": "kaliv-video-job-ref/v1", "kind": "video"})) or {}).get("kind") == "video",
+      "a video reference carries kind=video")
 for mutated, label in (
     ({**good, "schema": "kaliv-media-job/v1"}, "other schema"),
+    ({**good, "schema": "kaliv-audio-job-ref/v1"}, "unknown job-ref schema"),
     ({**good, "job_id": "a" * 31}, "short job id"),
     ({**good, "job_id": "Z" * 32}, "non-hex job id"),
     ({**good, "status_url": "/api/v1/media/jobs/" + "b" * 32}, "status_url for another job"),

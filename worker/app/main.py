@@ -116,6 +116,13 @@ if _os.getenv("KALIV_IMAGE_TOOL_ENABLED", "0").strip() == "1":
 
     _register_image_generate_tool()
 
+# Same seam for short clips: `video_generate` behind its own switch. Text-to-video only until
+# the executor serves image-to-video (#2366).
+if _os.getenv("KALIV_VIDEO_TOOL_ENABLED", "0").strip() == "1":
+    from .video_generate_tool import register_video_generate_tool as _register_video_generate_tool
+
+    _register_video_generate_tool()
+
 # Return the implementation module for every import of app.main. This preserves
 # module-global monkeypatching and private helper access instead of copying names
 # into a wrapper namespace whose functions would still close over main_impl.
