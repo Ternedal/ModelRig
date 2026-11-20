@@ -329,7 +329,13 @@ matchede nogen fil).
 - **Skeln verificeret / kvalificeret antagelse / gæt.** Sig hvad der ikke er
   testet. Standard-forbehold på UI: "verificeret ved build, ikke med øjne".
 - **"kør" / "kør videre"** = fuld autonom eksekvering uden check-ins, med
-  fuld commit-autoritet. **"test jeg"** = Anders tester på hardware.
+  fuld commit-autoritet **på grene og PR'er — ikke landing.** Landing på
+  `main` sker kun på Anders' eksplicitte ord: **"`Kør merge <fuld sha>`"**
+  på PR'ens aktuelle head. Sessionen slår altid headet op via API, før den
+  skriver en sha — aldrig fra hukommelsen (19/11: en sha skrevet fra
+  hukommelsen var forkert). Når/hvis repoet får en merge-kø (ADR-SYS-003,
+  kræver organisationsejerskab — se §9 19/11), bliver ordet "sæt i kø #N".
+  **"test jeg"** = Anders tester på hardware.
 - **Anders kører FLERE parallelle Claude-sessioner.** Derfor: `git pull
   --rebase` før alt arbejde, tjek version-sites for kollisioner, og forvent
   at en anden session kan have tilføjet det samme (skete med
@@ -371,17 +377,26 @@ halv release og lignede en hel. Flowet nu:
    `python3 tests/workflow_*.py` · `ruff check --select E9,F63,F7,F82`.
    **Kotlin kan IKKE kompileres her — CI er den eneste verifikation.**
 3. **Alt landes gennem CI — ikke ved push til main.** Arbejdet ligger paa
-   en gren, får sin PR, og landingen er et fast-forward af
-   `refs/heads/main` EFTER grønt run paa den NYESTE sha. Verdiktet er en
-   HAARD betingelse INDE i landingsscriptet: check-runs paa præcis den sha,
-   alle `completed`, nul `failure` — ellers exit FØR patch. Verdikter
-   håndhæves, aldrig kun rapporteres (#315 landede paa rød CI med en falsk
-   grøn kommentar). **CHECK-RUNS ≠ WORKFLOW-RUNS:** fire grønne workflows
-   kan staa ved siden af et rødt CodeQL-check-run. Gate paa BEGGE.
-   Bekræft ad TO veje (`ls-remote` + REST med retry) FØR PR'en lukkes, og
-   lad lukningen ligge INDE i den bekræftede gren af scriptet — en
-   ';'-kædet lukning fyrer på falsk bekræftelse. `scripts/stale_check.py`
-   før enhver merge. Først når main står paa din sha gælder resten:
+   en gren, får sin PR, kvalificeres på sit exact head (14 required checks,
+   strict: branchen skal indeholde `main`s tip), og lander på Anders'
+   "`Kør merge <fuld sha>`" som **merge-commit via API på præcis den sha**
+   (træet er identisk med det testede head; ADR-SYS-002 D4 bekræfter det).
+   Prisen på strict er, at enhver anden landing sender PR'en tilbage til
+   `behind` og ~3,5 t rekvalifikation (#2436: syv gange 19/11). Derfor
+   **landingsvinduer**: ingen lander noget, mens en PR er grøn og venter på
+   sit "Kør merge". Merge-kø (ADR-SYS-003) ville fjerne det, men GitHub
+   tilbyder kun merge queue i organisationsejede repos — se §9 19/11.
+   `freeze-guard` kører som signal på alle PR'er mod `main`; med
+   `KALIV_FREEZE=1` er det rødt på alt, der ikke er docs-only.
+   *Historik:* før 17/11 var landingen et fast-forward af `refs/heads/main`,
+   som branch protection siden nægtede (GH006). Scripts, der stadig
+   fast-forwarder, er forældede.
+   Verdikter håndhæves, aldrig kun rapporteres (#315 landede paa rød CI med
+   en falsk grøn kommentar). **CHECK-RUNS ≠ WORKFLOW-RUNS:** fire grønne
+   workflows kan staa ved siden af et rødt CodeQL-check-run. Gate paa BEGGE.
+   Bekræft ad TO veje (`ls-remote` + REST med retry) FØR noget bygger videre
+   på "det er landet". `scripts/stale_check.py` før enhver merge. Først når
+   main indeholder din sha (`git merge-base --is-ancestor`) gælder resten:
 
    `git add -A && git -c commit.gpgsign=false commit -q -F /tmp/m.txt` →
    `git fetch -q origin main && git rebase origin/main` → **STRAM PROTOKOL
@@ -837,11 +852,27 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 
 ### 19/11: merge-queue-sporet er på main; freeze har fået en kontakt
 
-**[19/11 07:xx — ADR-SYS-003 rev. 3 (`14562e7`), trin 1 (`33f43bf`) og trin 2
-(`df04a2a`) er landet. Alt er inert, indtil Anders kører trin 3 (runbook på
-#2415) den dag V1 er tagget. Gate 10's klassiske dom er uændret.]**
+**[19/11 22:07 — ADR-SYS-003 rev. 3 (`14562e7`), trin 1 (`33f43bf`), trin 2
+(`df04a2a`) og trin 4 (`ef0473d`, #2436) er landet. Trin 3 blev forsøgt
+samme aften og **afvist af GitHub: `422 Invalid rule 'merge_queue'`** —
+merge queue findes kun i organisationsejede repos, og `Ternedal/ModelRig`
+ejes af en brugerkonto. Intet blev ændret (0 rulesets, klassisk protection
+intakt). Alt fra trin 1/2/4 er korrekt og inert; gate 10's klassiske dom er
+uændret. Beslutning udestår (#2415): flyt repoet til en organisation efter
+V1, eller bliv på strict med landingsvinduer. Review-miss: tre reviews
+tjekkede `workflows`-reglens org-krav, ingen tjekkede `merge_queue`s.]**
 
-**Freeze-kontakten (ADR-SYS-003 D7, trin 4 — foreslået i #2436, ikke landet):**
+**Hvad det kostede at lande trin 4 i strict mode (målt 19/11):** #2436
+rekvalificerede **syv gange** for byte-identisk indhold (`git range-diff` mod
+den ACCEPTede head: 4/4 `=`), fordi en anden PR landede, hver gang de 14
+required checks var grønne — heraf to af Anders' egne docs-/release-landinger
+om aftenen. Strict mode gør det umuligt at lande to PR'er inden for samme
+CI-cyklus; det er ikke en fejl, det er det, trin 3 fjerner. Landingen skete
+på required checks + ChatGPT's SHA-bundne kode-ACCEPT (som #2421), uden at
+vente på Stage B-slices — Anders' beslutning 17:04, fordi slices er ~3,5 t og
+blev slået tilbage af hver main-flytning.
+
+**Freeze-kontakten (ADR-SYS-003 D7, trin 4 — landet i #2436 → `ef0473d`):**
 repository-variablen `KALIV_FREEZE` (Settings → Secrets and variables →
 Actions → Variables, eller `gh variable set KALIV_FREEZE --body 1 -R
 Ternedal/ModelRig`). **Ejer: Anders.** `1` = kampagne-freeze på; alt andet =
@@ -863,7 +894,40 @@ køen. Push til `main` og dispatch rammes ikke. Freeze betyder altså ikke
 længere "main står stille", men "kun dokumentation lander"; evidensen
 overlever det (ADR-SYS-002 D3). **Indtil trin 3 er kørt, er checket ikke
 required** (klassisk protection kender det ikke) — det er et signal, og
-aftalen på #2275 gælder.
+aftalen på #2275 gælder. Første rigtige kørsel af `freeze-guard` på en PR
+mod `main` (19/11, #2436 selv, `KALIV_FREEZE` ikke sat): grøn med
+"nothing to enforce" — kontakten er af, indtil Anders sætter den.
+
+**Trin 3 — forsøgt 19/11 22:07 på riggen:** `verify` PASS (klassisk),
+dry-run PASS (offline gate 10, 16 kontekster, ingen bypass), `-Apply` →
+scriptets generiske fejl; samme payload sendt direkte med `gh api` gav
+`422 Validation Failed: Invalid rule 'merge_queue'`. Token var ejerens med
+`repo`-scope, så det er ikke rettigheder. GitHub-docs ("Managing a merge
+queue"): kun public repos **ejet af en organisation** (private kun på
+Enterprise Cloud). Lærestreg: `configure-…-ruleset.ps1` skjulte API-svaret
+(`| Out-Null`) og kostede en ekstra kørsel — den skal vise det. Vejen til
+en kø er en org-flytning (174 ikke-md-filer hardcoder `Ternedal/ModelRig`,
+heraf 2 i updater-stien; gate 10 og Stage B navngiver ejeren) — en halv dag
+plus én Stage B, efter V1.
+
+**Beslutninger samme aften (Anders, 19/11 22:15–22:33):** (1) *vent* —
+klassisk strict + landingsvinduer til V1-tag, org-flytning som beslutning
+efter V1; (2) fryset for 2.0.21 startes morgenen før rigdag 1, ikke før
+(hver dag mellem frys og rigdag er en dag uden landinger); (3) **"Kør
+#2419"** — billedgenerering *inde i chatten* bygges nu af
+vedligeholdssessionen **i brancher under fryset**, lander efter V1-tag.
+Afgørelser til #2419: `image_generate` er read-klasse uden
+bekræftelseskort, asynkront (jobbet i kø, boblen poller), bag egen
+kontakt `KALIV_IMAGE_TOOL_ENABLED` (ToolGate er deny-liste — registrering
+er beslutningen). Status 20/11 morgen: #2448 (worker: værktøj,
+`media_jobs` på turen, systemprompt-regel kun mens værktøjet er
+registreret) og #2449 (Android: boble, poll, fuldskærm m. pinch-zoom,
+persistens i ChatDb v4) er CI-grønne drafts. Riggen skal have
+`KALIV_IMAGE_TOOL_PROFILE=realvisxl-4-0`, fordi to billedprofiler er
+aktive. Rig-del af slice C (fem danske forespørgsler, send→billede målt)
+kan køres på dev-kanalen før landing — plan på #2419. **Rig-forberedelse
+19/11 aften:** `qwen3:14b` trukket (B2 afgjort), Logitech BRIO fundet
+(gate 3), 95 mergede branches slettet (`physical-proof/*` bevaret).
 
 ### 18/11: ADR-SYS-002-kæden er landet — og sådan lander en stak på `main`
 
@@ -899,8 +963,8 @@ præcis det, ADR'en er lavet til.]**
   træet var identisk, men det flyttede toppen).
 - **Branches:** sessionens proxy tillader hverken `DELETE git/refs` eller
   `git push --delete`; oprydning er Anders'.
-- Rest-kø: Anders' triage-paste på #2275; #2415 merge queue efter V1-tag;
-  rig-simulator slice 2 (gate 2-operator, `-WhatIf` for Stage A/B-ops).
+- Rest-kø: Anders' triage-paste på #2275; #2415 trin 3 (20/11);
+  rig-simulator slice 2 landede 18/11 (#2421).
 
 ### 16/11: bumpet til 2.0.21 er klar, men lander først efter freezen
 
