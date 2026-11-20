@@ -260,7 +260,7 @@ for bad, label in (
     ({"prompt": PROMPT, "steps": 5}, "unknown argument"),
     ({"prompt": PROMPT, "width": "1024"}, "width not an int"),
     ({"prompt": PROMPT, "seed": True}, "bool is not an int"),
-    ({"prompt": PROMPT, "profile_id": ""}, "empty profile_id"),
+    ({"prompt": PROMPT, "profile_id": 7}, "profile_id not a string"),
 ):
     try:
         _run_image_generate(bad, service_getter=lambda: svc, env={})
@@ -268,6 +268,11 @@ for bad, label in (
     except tools.ToolDenied:
         check(True, f"{label}: ToolDenied")
 check(svc.store.get(ref["job_id"], OWNER) is not None, "denied arguments queued nothing new (store intact)")
+for blank in ("", "   "):
+    ref_blank = parse_job_reference(_run_image_generate({"prompt": PROMPT, "profile_id": blank},
+                                                        service_getter=lambda: service_with(IMG_A), env={}))
+    check(ref_blank is not None and ref_blank["profile_id"] == "sdxl-a",
+          f"profile_id={blank!r} means the rig's default, not a dead turn")
 
 # ---------------------------------------------------------------------------
 # 5. The lift through the envelope
