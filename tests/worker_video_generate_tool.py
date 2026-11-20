@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import sys
 import tempfile
 import time
@@ -155,10 +156,19 @@ for bad, label in (({"prompt": PROMPT, "input_asset_id": "x"}, "asset ids are ne
                    ({"prompt": PROMPT, "source_image_job_id": 7}, "source must be a string"),
                    ({"prompt": PROMPT, "frames": "33"}, "frames must be an int"),
                    ({}, "prompt missing")):
-    try:
-        vgt._run_video_generate(bad, service_getter=lambda: svc, env={}); check(False, f"{label}: ToolDenied")
-    except tools.ToolDenied:
-        check(True, f"{label}: ToolDenied")
+    # Refused as text, not ToolDenied: that would end the turn with HTTP 400 for the
+    # likeliest mistake a small model makes. Nothing is queued either way.
+    svc_bad = service_with(VID)
+    o_bad = vgt._run_video_generate(bad, service_getter=lambda: svc_bad, env={})
+    check("invalid_arguments" in o_bad and parse_job_reference(o_bad) is None
+          and "video_generate igen" in o_bad,
+          f"{label}: refused as text, call again")
+    with sqlite3.connect(svc_bad.store.path) as _db:
+        check(_db.execute("SELECT COUNT(*) FROM image_jobs").fetchone()[0] == 0, f"{label}: nothing queued")
+try:
+    vgt._run_video_generate("not a dict", service_getter=lambda: svc, env={}); check(False, "args not an object: ToolDenied")
+except tools.ToolDenied:
+    check(True, "args not an object: ToolDenied")
 
 # 4b. image-to-video from a picture of this conversation
 print("== 4b. image-to-video ==")

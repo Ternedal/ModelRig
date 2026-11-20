@@ -38,6 +38,14 @@ sit eget worktree.
    modellen på GPU 1, udskyder executoren jobbet, til der er plads — i værste fald
    til Ollama har sluppet modellen (5 min som standard) eller `gpu_unavailable` efter 10 min.
    **Mål det i trin 0.4, før noget andet.** Hvad der gøres ved det, er din afgørelse.
+   **Målt 20/11 (integration @ `076b9addf4`, dev-kanal):** `qwen3:14b` indlæses med
+   context 40960 som 17 GB delt over begge kort (GPU 0 9,8 GB, GPU 1 8,1 GB). Job blev
+   *ikke* udskudt: GPU 1 stod på 11,8–11,9 af 12,3 GB før og under hvert job, job
+   startede med det samme og tog 15–20 s (17/11 alene på kortet: ca. 21 s varm).
+   Prisen faldt på chatten: en tur med værktøj tog 13–16 s uden resident billedmodel
+   og 37–59 s med (kontrol uden værktøj: 5–6 s). Hvorfor executoren lod jobbet starte
+   med ca. 4 GB ledigt, er ikke forklaret — gem dens output (1.2), så det kan læses.
+   Mulighederne står i 1.7.
 2. **Kalder modellen værktøjet?** Om `qwen3:14b` pålideligt vælger
    `image_generate` på en dansk bøn, er en egenskab ved modellen og systemreglen,
    ikke noget der kan rettes på riggen. Mål raten; justér ikke undervejs.
@@ -110,7 +118,7 @@ installér ikke pakker om i riggens Python, før V1 er færdig (kandidaten bruge
 $GenPy = "C:\Kaliv\media-venv\Scripts\python.exe"; $Repo = "C:\Users\an001\Desktop\ModelRig-media"; $EnvFile = "C:\Rig\ModelRig\modelrig.env"
 Get-Content $EnvFile | Where-Object { $_ -match '^(KALIV_MEDIA|KALIV_GPU|CUDA_)' } | ForEach-Object { $k,$v = (($_ -split '#')[0]) -split '=',2; [Environment]::SetEnvironmentVariable($k.Trim(), $v.Trim(), 'Process') }
 $env:KALIV_MEDIA_EXECUTOR = "1"; $env:HF_HUB_OFFLINE = "1"; $env:TRANSFORMERS_OFFLINE = "1"
-Push-Location "$Repo\worker"; & $GenPy -u -m app.media_executor_main --device cuda:1; "exit=$LASTEXITCODE"; Pop-Location
+Push-Location "$Repo\worker"; & $GenPy -u -m app.media_executor_main --device cuda:1 2>&1 | Tee-Object "$env:TEMP\media-executor.log"; "exit=$LASTEXITCODE"; Pop-Location
 ```
 
 Exit 73 = en gammel executor lever stadig; 78 = konfiguration (teksten siger hvad); 75 = mediavolumen.
@@ -135,7 +143,7 @@ $body = @{ message = 'lav et billede af en rød cykel ved en sø'; model = 'qwen
 $t0 = Get-Date
 $r = Invoke-RestMethod "$B/api/v1/tools/chat" -Method Post -Headers $H -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
 "tur: {0:n1} s  status={1}  tools={2}" -f ((Get-Date) - $t0).TotalSeconds, $r.status, ($r.tools_used -join ',')
-$r.answer; $r.media_jobs | Format-List
+$r.answer; $r.media_jobs | Format-List; $r.media_refusals | Format-Table
 ```
 
 ```powershell
@@ -167,9 +175,71 @@ det er risiko 1 i tal. Den laver otte rigtige billeder (regn med 8–12 minutter
 og taler kun med loopback. Rapporten indeholder hverken token eller modellens tekst.
 Exit 0 = alt som forventet, 1 = mindst ét tilfælde afveg.
 
+**1.5b Samme beskeder som én samtale** [repo] — det er sådan, telefonen sender dem:
+
+```powershell
+python scripts\media_chat_probe.py --suite conversation --rounds 2 --report "$env:TEMP\media-chat-conversation.json"
+```
+
+De fire billedbeskeder og kontrollen sendes med historikken fra de foregående ture.
+20/11 gik 19 af 19 igennem uden historik, mens telefonen fik "der er tekniske problemer
+med billedgenerering" midt i en samtale. Afviser riggen et kald, står koden nu i
+tabellen (`afvist:<kode>`) og i workerens log:
+
+```powershell
+Get-ChildItem C:\Rig\ModelRig -Recurse -Filter *.log -ErrorAction SilentlyContinue | Select-String 'media_tool=refused' | Select-Object -Last 20
+```
+
+[antagelse: workerens log ligger under appliance-mappen; ellers står linjen i workerens konsolvindue]
+
+| Kode | Betyder |
+|---|---|
+| `invalid_arguments` | modellen sendte et felt, værktøjet ikke har, eller et tal som tekst |
+| `invalid_request` | en størrelse, profilen ikke tillader |
+| `profile_not_enabled` | et `profile_id`, riggen ikke kender |
+| `owner_limit` / `queue_full` | tre job er allerede i gang / køen er fuld |
+
 **1.6 Kontrol: slukket værktøj** [repo] — valgfri. Sæt `KALIV_IMAGE_TOOL_ENABLED=0`
 i env-filen, genstart vindue A, gentag 1.3: `image_generate` må ikke stå på
 listen, og 1.4 skal give et rent tekstsvar. Sæt den tilbage til 1 bagefter.
+
+**1.7 Chat og billeder på hvert sit kort** — valgfri, og **din afgørelse**: det ændrer
+riggens Ollama-opsætning, ikke repoet, og dermed hvad V1-kandidaten kører på.
+
+Målet er `qwen3:14b` på GPU 0 alene og GPU 1 fri til medie. Det kræver en mindre
+kontekst end 40960, ellers kan modellen ikke være på ét 12 GB-kort.
+[antagelse: Ollama på riggen læser `OLLAMA_CONTEXT_LENGTH` og `CUDA_VISIBLE_DEVICES`
+fra brugerens miljø og skal genstartes fra bakken; ikke afprøvet på riggen]
+
+```powershell
+nvidia-smi --query-gpu=index,uuid,memory.used --format=csv,noheader
+[Environment]::GetEnvironmentVariable('OLLAMA_CONTEXT_LENGTH','User'); [Environment]::GetEnvironmentVariable('CUDA_VISIBLE_DEVICES','User')
+```
+
+Notér de to nuværende værdier (tomme = ikke sat). Sæt derefter, med UUID'en for GPU 0:
+
+```powershell
+[Environment]::SetEnvironmentVariable('CUDA_VISIBLE_DEVICES','<GPU-uuid for index 0>','User')
+[Environment]::SetEnvironmentVariable('OLLAMA_CONTEXT_LENGTH','16384','User')
+```
+
+Afslut Ollama fra bakken, start den igen, og mål:
+
+```powershell
+ollama run qwen3:14b "hej" *> $null; ollama ps; nvidia-smi --query-gpu=index,memory.used --format=csv,noheader
+python scripts\media_chat_probe.py --suite conversation --rounds 2 --report "$env:TEMP\media-chat-split.json"
+```
+
+Bestået, når `ollama ps` viser 100% GPU, GPU 1 står på ca. 0 MiB før første job, og
+median tur falder mærkbart fra de ca. 45 s. Viser `ollama ps` en CPU-andel, er
+konteksten stadig for stor til ét kort: prøv 8192. Tilbage til før:
+
+```powershell
+[Environment]::SetEnvironmentVariable('CUDA_VISIBLE_DEVICES',$null,'User'); [Environment]::SetEnvironmentVariable('OLLAMA_CONTEXT_LENGTH',$null,'User')
+```
+
+Prisen er kortere hukommelse i lange samtaler og dokumenttunge RAG-ture. Det er en
+produktafgørelse, ikke en teknisk detalje.
 
 ## 2. Android
 

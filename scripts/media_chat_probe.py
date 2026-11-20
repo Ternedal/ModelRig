@@ -154,6 +154,23 @@ def job_refs(turn: object) -> list[dict]:
     return out
 
 
+_REFUSAL_CODE = re.compile(r"[a-z0-9_]{1,64}")
+
+
+def refusal_codes(turn: object) -> list[str]:
+    """The codes of the media tool calls this turn that queued nothing (``media_refusals``).
+
+    An older worker does not send the field: that is an empty list, not an error.
+    """
+    listed = turn.get("media_refusals") if isinstance(turn, dict) else None
+    out = []
+    for item in listed if isinstance(listed, list) else []:
+        if (isinstance(item, dict) and item.get("tool") in TOOL_KIND and isinstance(item.get("code"), str)
+                and _REFUSAL_CODE.fullmatch(item["code"])):
+            out.append(item["code"])
+    return out[:8]
+
+
 def vram_sampler():
     """``() -> {gpu_index: MiB used}`` through nvidia-smi, or None where there is none."""
     exe = shutil.which("nvidia-smi")
@@ -233,7 +250,8 @@ def run_case(http: Http, case: dict, *, model: str, turn_timeout: float, job_tim
     status, turn = http.call(CHAT_ROUTE, body, timeout=turn_timeout)
     turn_seconds = round(clock() - started, 1)
     out = {"case": case["id"], "expect": case["expect"], "http": status, "turn_seconds": turn_seconds,
-           "status": None, "tools_used": [], "jobs": [], "answer_chars": 0,
+           "status": None, "tools_used": [], "jobs": [], "refusals": [], "answer_chars": 0,
+           "history_turns": len(case.get("history") or []) // 2,
            "vram_before_mib": {str(k): v for k, v in sorted(before.items())} if before is not None else None}
     if status != 200 or not isinstance(turn, dict):
         out.update(ok=False, why="turn_failed")
@@ -242,7 +260,7 @@ def run_case(http: Http, case: dict, *, model: str, turn_timeout: float, job_tim
     answer = turn.get("answer") if isinstance(turn.get("answer"), str) else ""
     refs = job_refs(turn)
     out.update(status=turn.get("status") if isinstance(turn.get("status"), str) else None, tools_used=used,
-               answer_chars=len(answer), _answer=answer)
+               answer_chars=len(answer), _answer=answer, refusals=refusal_codes(turn))
     for ref in refs:
         followed = follow_job(http, ref["job_id"], timeout_s=job_timeout, poll_s=poll_s, clock=clock, sleep=sleep, vram=vram)
         followed["kind"] = ref["kind"]
@@ -269,6 +287,12 @@ def suite_cases(suite: str, rounds: int) -> list[dict]:
         if suite == "image":
             cases += [{"id": f"image-{i}.r{r}", "message": m, "expect": "image_generate"}
                       for i, m in enumerate(IMAGE_MESSAGES, 1)]
+        elif suite == "conversation":
+            # The four picture messages and the control as ONE conversation, the way a phone
+            # sends them. Rig 20/11: 19/19 without history, and a refusal on the phone with it.
+            cases += [{"id": f"conv-{i}.r{r}", "message": m, "expect": "image_generate", "thread": f"r{r}"}
+                      for i, m in enumerate(IMAGE_MESSAGES, 1)]
+            cases.append({"id": f"conv-control.r{r}", "message": CONTROL_MESSAGE, "expect": None, "thread": f"r{r}"})
         elif suite == "video":
             cases.append({"id": f"video-1.r{r}", "message": VIDEO_MESSAGE, "expect": "video_generate"})
         elif suite == "i2v":
@@ -286,14 +310,18 @@ def run_suite(http: Http, suite: str, *, model: str, rounds: int = 1, turn_timeo
               vram=None) -> dict:
     results: list[dict] = []
     by_id: dict[str, dict] = {}
+    threads: dict[str, list[dict]] = {}
     for case in suite_cases(suite, rounds):
+        thread = case.get("thread")
+        if thread is not None and threads.get(thread):
+            case = dict(case, history=list(threads[thread]))
         source = by_id.get(case.get("history_from", ""))
         if "history_from" in case:
             if source is None or not source.get("ok"):
                 # No finished picture to animate: asking would measure something else.
                 skipped = {"case": case["id"], "expect": case["expect"], "ok": False, "why": "skipped_no_picture",
                            "http": None, "turn_seconds": None, "status": None, "tools_used": [], "jobs": [],
-                           "answer_chars": 0, "vram_before_mib": None}
+                           "refusals": [], "history_turns": 0, "answer_chars": 0, "vram_before_mib": None}
                 results.append(skipped)
                 by_id[case["id"]] = skipped
                 continue
@@ -303,6 +331,10 @@ def run_suite(http: Http, suite: str, *, model: str, rounds: int = 1, turn_timeo
                           clock=clock, sleep=sleep, vram=vram)
         results.append(result)
         by_id[case["id"]] = result
+        if thread is not None and result.get("http") == 200:
+            # What a client keeps: the user's words and the model's answer. Never a tool result.
+            threads.setdefault(thread, []).extend([{"role": "user", "content": case["message"]},
+                                                   {"role": "assistant", "content": result.get("_answer", "")}])
     for result in results:
         result.pop("_answer", None)  # used for the next turn's history only; never reported
     return {"schema": SCHEMA, "evidence": False, "suite": suite, "model": model, "rounds": rounds,
@@ -325,6 +357,7 @@ def summarize(results: list[dict]) -> dict:
         "job_seconds_median": round(statistics.median(done), 1) if done else None,
         "job_seconds_max": max(done) if done else None,
         "turn_seconds_median": round(statistics.median(turns), 1) if turns else None,
+        "refusals": sorted({code for r in results for code in r.get("refusals") or []}),
         "control_ok": all(r["ok"] for r in controls) if controls else None,
         "all_ok": all(r["ok"] for r in results),
     }
@@ -337,6 +370,8 @@ def render(report: dict) -> str:
         job = r["jobs"][0] if r["jobs"] else None
         tools = ",".join(t for t in r["tools_used"] if t in TOOL_KIND) or "-"
         note = r["why"] or ""
+        if r.get("refusals"):
+            note = (note + " afvist:" + ",".join(r["refusals"])).strip()
         if job and job.get("error"):
             note = (note + " " + job["error"]).strip()
         if job and job.get("profile_id"):
@@ -348,6 +383,8 @@ def render(report: dict) -> str:
     lines += ["", f"værktøj kaldt: {s['tool_called']}/{s['tool_cases']}   job færdige: {s['jobs_completed']}/{s['jobs']}   "
                   f"median job: {s['job_seconds_median']} s   median tur: {s['turn_seconds_median']} s   "
                   f"kontrol: {'ok' if s['control_ok'] else 'FEJL'}"]
+    if s.get("refusals"):
+        lines.append("afvisninger: " + ", ".join(s["refusals"]))
     return "\n".join(lines)
 
 
@@ -355,7 +392,7 @@ def main(argv=None, env=None) -> int:
     parser = argparse.ArgumentParser(description="Measure media-in-chat on a running appliance (dev channel, not evidence).")
     parser.add_argument("--base", default="http://127.0.0.1:8080")
     parser.add_argument("--model", default="qwen3:14b")
-    parser.add_argument("--suite", choices=("image", "video", "i2v"), default="image")
+    parser.add_argument("--suite", choices=("image", "conversation", "video", "i2v"), default="image")
     parser.add_argument("--rounds", type=int, default=1)
     parser.add_argument("--turn-timeout", type=float, default=300.0)
     parser.add_argument("--job-timeout", type=float, default=1800.0)
