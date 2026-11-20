@@ -1094,7 +1094,25 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
         personName = o.optJSONObject("person")?.optString("display_name")?.takeIf { it.isNotBlank() },
         personRevision = o.optJSONObject("person")?.optString("person_revision")?.takeIf { it.isNotBlank() },
         mediaJobs = parseMediaJobs(o.optJSONArray("media_jobs")),
+        mediaRefusals = parseMediaRefusals(o.optJSONArray("media_refusals")),
     )
+
+    /**
+     * The media tool calls this turn that queued nothing (`media_refusals`, additive;
+     * absent on older rigs -> empty). Only a known tool with a well-formed code counts;
+     * the code is the rig's, shown as given and never interpreted beyond
+     * [dk.ternedal.modelrig.ui.chat.MediaRefusalNotice].
+     */
+    private fun parseMediaRefusals(a: JSONArray?): List<MediaRefusal> {
+        if (a == null) return emptyList()
+        return (0 until minOf(a.length(), MediaRefusal.MAX)).mapNotNull { i ->
+            val item = a.optJSONObject(i) ?: return@mapNotNull null
+            val kind = MediaRefusal.kindOf(item.optString("tool")) ?: return@mapNotNull null
+            val code = item.optString("code")
+            if (!MediaRefusal.isCode(code)) return@mapNotNull null
+            MediaRefusal(kind, code)
+        }
+    }
 
     /**
      * #2419: the image jobs the turn queued (`media_jobs`, additive on newer rigs;
@@ -1304,7 +1322,31 @@ data class ToolTurn(
      * Empty on older rigs and on turns without an image.
      */
     val mediaJobs: List<MediaJobRef> = emptyList(),
+    /**
+     * Media tool calls this turn that the rig refused (nothing was queued), with the
+     * rig's code. Rig 20/11: a refused picture reached the user only as the model's
+     * paraphrase ("der er tekniske problemer"); this is the reason itself. Empty on
+     * older rigs and when nothing was refused.
+     */
+    val mediaRefusals: List<MediaRefusal> = emptyList(),
 )
+
+/** One refused media tool call: what was asked for and the rig's code for why not. */
+data class MediaRefusal(val kind: MediaJobRef.Kind, val code: String) {
+    companion object {
+        const val MAX = 8
+        private val CODE = Regex("[a-z0-9_]{1,64}")
+
+        fun isCode(raw: String): Boolean = CODE.matches(raw)
+
+        /** The two media tools; anything else is not a media refusal. */
+        fun kindOf(tool: String): MediaJobRef.Kind? = when (tool) {
+            "image_generate" -> MediaJobRef.Kind.IMAGE
+            "video_generate" -> MediaJobRef.Kind.VIDEO
+            else -> null
+        }
+    }
+}
 
 /**
  * #2419: one media job the rig queued for a turn. [kind] decides the bubble:
