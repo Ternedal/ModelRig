@@ -72,9 +72,16 @@ data class ToolTurn(
     // malformed entry must never make the whole turn undecodable -- the answer
     // stands, and DesktopMediaContract.refs() keeps only well-formed references.
     val media_jobs: JsonElement? = null,
+    // Media tool calls the rig refused this turn, with its code. Raw JSON for the same
+    // reason as media_jobs: a malformed entry never costs the answer.
+    val media_refusals: JsonElement? = null,
 ) {
     /** The well-formed job references of this turn, for the chat's media bubbles. */
     fun mediaJobRefs(): List<DesktopMediaJobRef> = DesktopMediaContract.refs(media_jobs)
+
+    /** The line under the answer when the rig refused and nothing was queued; else null. */
+    fun mediaRefusalNotice(): String? =
+        DesktopMediaContract.refusalNotice(DesktopMediaContract.refusals(media_refusals), mediaJobRefs().size)
 }
 
 @Serializable

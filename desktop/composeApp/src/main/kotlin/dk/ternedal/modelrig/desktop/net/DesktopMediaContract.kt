@@ -45,6 +45,9 @@ enum class DesktopMediaKind(val wire: String) {
 
 data class DesktopMediaJobRef(val jobId: String, val kind: DesktopMediaKind)
 
+/** One media tool call the rig refused (nothing was queued): what was asked for, and the rig's code. */
+data class DesktopMediaRefusal(val kind: DesktopMediaKind, val code: String)
+
 enum class DesktopMediaJobState(val wire: String, val terminal: Boolean) {
     QUEUED("queued", false),
     RUNNING("running", false),
@@ -136,6 +139,51 @@ object DesktopMediaContract {
             }
             DesktopMediaJobRef(id, kind)
         }.distinctBy { it.jobId }
+    }
+
+    private val REFUSAL_CODE = Regex("[a-z0-9_]{1,64}")
+    private const val MAX_REFUSALS = 8
+
+    /**
+     * The media tool calls of a turn that queued nothing (`media_refusals`, additive; absent on
+     * older rigs). Only the two media tools with a well-formed code count; the rest is dropped.
+     */
+    fun refusals(mediaRefusals: JsonElement?): List<DesktopMediaRefusal> {
+        val array = mediaRefusals as? JsonArray ?: return emptyList()
+        return array.take(MAX_REFUSALS).mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            val kind = when (stringOf(obj["tool"])) {
+                "image_generate" -> DesktopMediaKind.IMAGE
+                "video_generate" -> DesktopMediaKind.VIDEO
+                else -> return@mapNotNull null
+            }
+            val code = stringOf(obj["code"]) ?: return@mapNotNull null
+            if (!REFUSAL_CODE.matches(code)) return@mapNotNull null
+            DesktopMediaRefusal(kind, code)
+        }
+    }
+
+    /**
+     * The line under an answer when the rig refused a picture or a clip. Rig 20/11: the refusal
+     * reached the user only in the model's words ("der er tekniske problemer"). This says why
+     * and what to do, from the rig's own code, and keeps the code visible. Null when nothing
+     * was refused, or when the turn queued a job after all -- then the bubble is the answer.
+     */
+    fun refusalNotice(refusals: List<DesktopMediaRefusal>, queuedJobs: Int): String? {
+        if (queuedJobs > 0) return null
+        val last = refusals.lastOrNull() ?: return null
+        val what = if (last.kind == DesktopMediaKind.VIDEO) "videoen" else "billedet"
+        val sentence = when (last.code) {
+            "owner_limit", "queue_full" ->
+                "Riggen er optaget med andre job. Bed om $what igen, når et af dem er færdigt."
+            "invalid_arguments", "invalid_request", "profile_not_enabled", "source_not_understood" ->
+                "Riggen kunne ikke bruge det, modellen bad om. Prøv at bede om $what igen."
+            "no_source_image", "source_job_not_found", "source_job_not_completed", "source_not_found",
+            "source_not_an_image", "source_profile_not_enabled" ->
+                "Der er ikke et færdigt billede at lave video af endnu."
+            else -> "Riggen lavede ikke $what."
+        }
+        return "$sentence (${last.code})"
     }
 
     /**

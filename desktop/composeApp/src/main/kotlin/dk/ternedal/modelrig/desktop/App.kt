@@ -127,6 +127,9 @@ private data class UiMessage(
     // #2419: the picture/clip jobs this assistant message queued on the rig;
     // each gets a media bubble under the text. Job ids only, never the prompt.
     val mediaJobs: List<DesktopMediaJobRef> = emptyList(),
+    // The rig refused a picture/clip in this turn and queued nothing: one line saying why.
+    // Not stored -- it describes the turn, not the conversation.
+    val mediaNotice: String? = null,
 )
 
 
@@ -364,6 +367,7 @@ fun App() {
                                 val jobs = turn.mediaJobRefs()
                                 messages[assistantIdxT] = messages[assistantIdxT].copy(
                                     text = ans, streaming = false, mediaJobs = jobs,
+                                    mediaNotice = turn.mediaRefusalNotice(),
                                 )
                                 withContext(Dispatchers.IO) {
                                     db.addMessage(cid, "assistant", ans, DesktopMediaContract.encodeRefs(jobs))
@@ -945,7 +949,7 @@ fun App() {
                             val text = next.answer.ifBlank { if (approve) "Udført." else "Afvist." }
                             // A turn that continued after the approval may have queued media too.
                             val jobs = next.mediaJobRefs()
-                            messages.add(UiMessage("assistant", text, mediaJobs = jobs))
+                            messages.add(UiMessage("assistant", text, mediaJobs = jobs, mediaNotice = next.mediaRefusalNotice()))
                             val cid = convId
                             if (cid != null) withContext(Dispatchers.IO) {
                                 db.addMessage(cid, "assistant", text, DesktopMediaContract.encodeRefs(jobs))
@@ -1312,6 +1316,12 @@ private fun MessageBubble(m: UiMessage, mediaSource: DesktopMediaSource? = null)
             }
             // #2419: what the turn asked the rig to generate, under the message it belongs to.
             if (!isUser && !m.streaming) {
+                m.mediaNotice?.let { notice ->
+                    Text(
+                        notice, color = KalivTheme.colors.TextMuted, fontSize = 13.sp, lineHeight = 19.sp,
+                        modifier = Modifier.padding(top = 6.dp, start = 4.dp),
+                    )
+                }
                 m.mediaJobs.forEach { ref -> KalivMediaJobBubble(ref, mediaSource) }
             }
         }
