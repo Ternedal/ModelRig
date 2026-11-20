@@ -52,6 +52,7 @@ from fastapi import HTTPException
 from .tools import Tool, ToolDenied
 
 TOOL_NAME = "image_generate"
+IMAGE_TASK = "text_to_image"
 IMAGE_TOOL_FLAG = "KALIV_IMAGE_TOOL_ENABLED"
 IMAGE_TOOL_PROFILE_ENV = "KALIV_IMAGE_TOOL_PROFILE"
 JOB_REFERENCE_SCHEMA = "kaliv-image-job-ref/v1"
@@ -242,9 +243,11 @@ def _submit_media_job(clean: dict, *, service_getter: Callable[[], object] | Non
         return _unavailable(str(exc.detail), modality)
 
     params = {key: clean[key] for key in params_keys if clean.get(key) is not None}
-    # The task the API resolved, always: a job without one makes the executor fall back to the
-    # profile's alphabetically first task, which for an image profile that also lists
-    # image_to_image is the wrong one for a text request. Same as the submit route stores.
+    params = {key: clean[key] for key in params_keys if clean.get(key) is not None}
+    # The task follows the job. Without it the executor falls back to the profile's
+    # alphabetically first task, and for a profile that also lists image_to_image that
+    # is the wrong one: the job would fail with "input_asset_id required for this task".
+    params["task"] = generation.task
     params["task"] = generation.task
     try:
         created = service.store.submit(OWNER, clean["prompt"], profile_id=profile.profile_id, params=params)
@@ -270,7 +273,7 @@ def _run_image_generate(args: dict, *, service_getter: Callable[[], object] | No
     """Queue one image job. Returns a job reference line followed by text for the model."""
     clean = _validate_args(args)
     return _submit_media_job(
-        clean, service_getter=service_getter, env=env, modality="image", task=None,
+        clean, service_getter=service_getter, env=env, modality="image", task=IMAGE_TASK,
         profile_env=IMAGE_TOOL_PROFILE_ENV, schema=JOB_REFERENCE_SCHEMA, kind="image",
         params_keys=_INT_ARGS,
         text=lambda job_id, profile_id: (
