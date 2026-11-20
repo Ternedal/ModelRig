@@ -138,9 +138,23 @@ def _production_service_getter() -> Callable[[], object] | None:
     return _production_service[0]
 
 
+# Refusals that are about load, not about the rig being off. Measured on the rig
+# 20/11: the model relayed the generic sentence as "der er tekniske problemer",
+# which tells the user nothing they can act on. These say what to do: wait.
+_BUSY_CODES = frozenset({"owner_limit", "queue_full"})
+
+
 def _unavailable(code: str, modality: str = "image") -> str:
     """The text result for a rig-side refusal; names what was asked for, so a
-    refused clip is not relayed to the user as "billedgenerering"."""
+    refused clip is not relayed to the user as "billedgenerering".
+
+    A busy rig is its own sentence: nothing is wrong, the earlier jobs are still
+    being made, and the user can ask again when one of them is done.
+    """
+    if code in _BUSY_CODES:
+        what = "videoer" if modality == "video" else "billeder"
+        return (f"Riggen er optaget: der er allerede flere {what} på vej ({code}). Der blev ikke startet et nyt job. "
+                "Det er ikke en fejl. Sig til brugeren, at de kan bede om det igen, når et af dem er færdigt.")
     what = "Videogenerering" if modality == "video" else "Billedgenerering"
     return (f"{what} er ikke tilgængelig lige nu ({code}). "
             "Fortsæt samtalen som tekst og sig det til brugeren.")
@@ -275,9 +289,9 @@ def _run_image_generate(args: dict, *, service_getter: Callable[[], object] | No
         profile_env=IMAGE_TOOL_PROFILE_ENV, schema=JOB_REFERENCE_SCHEMA, kind="image",
         params_keys=_INT_ARGS,
         text=lambda job_id, profile_id: (
-            f"Billedjob {job_id} er sat i kø på riggen (profil {profile_id}). "
+            f"Billedjobbet er sat i kø på riggen (profil {profile_id}). "
             "Billedet vises i samtalen, når det er klar. Sig til brugeren, at det er på vej — "
-            "påstå ikke, at det er færdigt, og gentag ikke prompten."
+            "påstå ikke, at det er færdigt, gentag ikke prompten, og nævn ikke job-id'et."
         ),
     )
 

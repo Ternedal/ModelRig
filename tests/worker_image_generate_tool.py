@@ -152,6 +152,8 @@ ref = parse_job_reference(out)
 check(ref is not None, "result starts with a parseable job reference")
 check(ref and ref["profile_id"] == "sdxl-a", "sole image profile chosen without configuration")
 check(ref and ref["status_url"] == f"/api/v1/media/jobs/{ref['job_id']}", "status_url points at the job route")
+check(ref and ref["job_id"] not in out.split("\n", 1)[1] and "nævn ikke job-id" in out,
+      "the sentence the model relays carries no job id (rig 20/11: an answer printed it to the user)")
 job = svc.store.get(ref["job_id"], OWNER) if ref else None
 check(job is not None and job["state"] == "queued", "job is queued for OWNER=installation")
 check(job is not None and job["prompt"] == PROMPT, "the store holds the prompt as written (translation is the executor's)")
@@ -187,7 +189,8 @@ def text_result(fn, label):
     except Exception as exc:  # noqa: BLE001
         check(False, f"{label}: raised {type(exc).__name__} instead of returning text")
         return ""
-    check(isinstance(out, str) and "ikke tilgængelig" in out and parse_job_reference(out) is None,
+    refusal = isinstance(out, str) and ("ikke tilgængelig" in out or out.startswith("Riggen er optaget"))
+    check(refusal and parse_job_reference(out) is None,
           f"{label}: text result, no job reference")
     return out
 
@@ -227,6 +230,9 @@ for _ in range(3):
 o = text_result(lambda: _run_image_generate({"prompt": PROMPT}, service_getter=lambda: svc_full, env={}),
                 "owner limit reached")
 check("owner_limit" in o, "quota is relayed as a code")
+check(o.startswith("Riggen er optaget") and "ikke en fejl" in o and "ikke tilgængelig" not in o,
+      "a full owner quota says wait, not unavailable (rig 20/11: relayed as 'tekniske problemer')")
+check(parse_job_reference(o) is None, "a busy text is not a job reference")
 
 for bad, label in (
     ("not a dict", "args not an object"),

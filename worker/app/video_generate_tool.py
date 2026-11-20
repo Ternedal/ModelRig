@@ -170,9 +170,9 @@ def _run_video_generate(args: dict, *, service_getter: Callable[[], object] | No
         profile_env=VIDEO_TOOL_PROFILE_ENV, schema=VIDEO_JOB_REFERENCE_SCHEMA, kind="video",
         params_keys=params_keys,
         text=lambda job_id, profile_id: (
-            f"Videojob {job_id} er sat i kø på riggen (profil {profile_id}). "
+            f"Videojobbet er sat i kø på riggen (profil {profile_id}). "
             "Klippet tager nogle minutter og vises i samtalen, når det er klar. Sig til brugeren, "
-            "at det er på vej — påstå ikke, at det er færdigt, og gentag ikke prompten."
+            "at det er på vej — påstå ikke, at det er færdigt, gentag ikke prompten, og nævn ikke job-id'et."
         ),
     )
 
