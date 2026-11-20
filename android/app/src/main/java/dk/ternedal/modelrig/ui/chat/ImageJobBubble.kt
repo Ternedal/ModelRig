@@ -183,7 +183,7 @@ fun ImageJobBubble(
     val shown = phase as? ImageJobPhase.Shown
     ImageJobBubbleContent(phase, modifier, onOpen = if (shown != null) ({ viewing = true }) else null)
     if (viewing && shown != null) {
-        ZoomableImageDialog(bytes = shown.bytes, onDismiss = { viewing = false })
+        ZoomableImageDialog(bytes = shown.bytes, onDismiss = { viewing = false }, jobId = jobId)
     }
 }
 
