@@ -340,9 +340,12 @@ fun App() {
                         lastSource = ChatResult.Source.LOCAL
                         when (turn.status) {
                             "confirmation_required" -> {
+                                // #966: the bubble carries the same source truth as the
+                                // toolbar -- a Tools reply is the rig's, visibly.
                                 messages[assistantIdxT] = messages[assistantIdxT].copy(
                                     text = "⚙ Kaliv foreslår: ${turn.summary.ifBlank { turn.tool }}",
                                     streaming = false,
+                                    source = toolsReplySource(),
                                 )
                                 pendingCardError = null
                                 pendingCardTurnConfig = turnConfig
@@ -350,7 +353,9 @@ fun App() {
                             }
                             else -> {
                                 val ans = turn.answer.ifBlank { "(tomt svar, status: ${turn.status})" }
-                                messages[assistantIdxT] = messages[assistantIdxT].copy(text = ans, streaming = false)
+                                messages[assistantIdxT] = messages[assistantIdxT].copy(
+                                    text = ans, streaming = false, source = toolsReplySource(),
+                                )
                                 withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", ans) }
                             }
                         }
@@ -917,7 +922,7 @@ fun App() {
                             pendingCardTurnConfig = null
                             pendingCardError = null
                             val text = next.answer.ifBlank { if (approve) "Udført." else "Afvist." }
-                            messages.add(UiMessage("assistant", text))
+                            messages.add(UiMessage("assistant", text, source = toolsReplySource()))
                             val cid = convId
                             if (cid != null) withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", text) }
                         }
