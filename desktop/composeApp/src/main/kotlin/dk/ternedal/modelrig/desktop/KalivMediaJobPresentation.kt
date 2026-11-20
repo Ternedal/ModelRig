@@ -117,6 +117,16 @@ object KalivMediaJob {
         else -> fallbackTransferText(kind)
     }
 
+    /**
+     * Whether "Prøv igen" is worth offering after a failed fetch: only when the rig
+     * was away for a moment. Too large, the wrong type, gone or not ours would fail
+     * the same way again, and a button that cannot help is not offered.
+     */
+    fun transferRetryable(error: Throwable?): Boolean = when ((error as? DesktopMediaException)?.reason) {
+        DesktopMediaException.Reason.NETWORK, DesktopMediaException.Reason.TRANSIENT -> true
+        else -> false
+    }
+
     private fun fallbackTransferText(kind: DesktopMediaKind): String =
         if (kind == DesktopMediaKind.VIDEO) "Klippet kunne ikke hentes fra riggen" else "Billedet kunne ikke hentes fra riggen"
 
