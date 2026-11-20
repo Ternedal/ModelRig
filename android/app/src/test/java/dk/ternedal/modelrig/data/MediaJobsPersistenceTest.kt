@@ -13,9 +13,11 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 /**
- * #2419: an assistant turn's image-job ids survive an app restart (schema v4,
- * `message.media_jobs`). Real SQLite under Robolectric; includes the v3 -> v4
- * upgrade of an existing database, which must keep every old row.
+ * #2419: an assistant turn's image-job ids survive an app restart
+ * (`message.media_jobs`). Real SQLite under Robolectric. The column is added to
+ * an existing database in place and **without a schema version bump**, so the
+ * app version before it can still open the same file: a test here plays that
+ * older app against a database this one has written.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -65,7 +67,7 @@ class MediaJobsPersistenceTest {
     }
 
     @Test
-    fun upgradeFromV3KeepsOldRowsAndAddsTheColumn() {
+    fun aDatabaseFromBeforeTheColumnKeepsItsRowsAndItsVersion() {
         chatDb.close()
         context.deleteDatabase("modelrig.db")
         // A v3 database as the app wrote it before #2419: no media_jobs column.
@@ -94,5 +96,37 @@ class MediaJobsPersistenceTest {
         assertEquals(listOf(emptyList<MediaJobRef>(), emptyList()), rows.map { it.mediaJobs })
         chatDb.addMessage(1L, "assistant", "nyt billede", listOf(img(a)))
         assertEquals(listOf(img(a)), chatDb.loadMessagesWithMedia(1L).last().mediaJobs)
+        assertEquals(3, chatDb.readableDatabase.version)
+        // Opening it again finds the column and does not try to add it twice.
+        chatDb.close()
+        chatDb = ChatDb(context)
+        assertEquals(3, chatDb.loadMessagesWithMedia(1L).size)
+    }
+
+    @Test
+    fun theAppBeforeMediaBubblesCanStillOpenAndUseTheDatabase() {
+        val conv = chatDb.newConversation("rig", "local", "billeder")
+        chatDb.addMessage(conv, "assistant", "Det er på vej.", listOf(img(a), vid(b)))
+        // The released app refuses any database newer than the version it knows.
+        assertEquals(3, ChatDb.SCHEMA_VERSION)
+        assertEquals(ChatDb.SCHEMA_VERSION, chatDb.readableDatabase.version)
+        chatDb.close()
+
+        // That app's own statements, against the file this one wrote: an INSERT that
+        // does not know the column, and its SELECT.
+        val older = SQLiteDatabase.openDatabase(
+            context.getDatabasePath("modelrig.db").path, null, SQLiteDatabase.OPEN_READWRITE,
+        )
+        older.execSQL("INSERT INTO message(conv_id, role, content, created_at) VALUES ($conv, 'user', 'fra den gamle app', 5)")
+        val contents = older.rawQuery("SELECT role, content FROM message WHERE conv_id=? ORDER BY id ASC", arrayOf(conv.toString())).use { c ->
+            buildList { while (c.moveToNext()) add(c.getString(0) to c.getString(1)) }
+        }
+        older.close()
+        assertEquals(listOf("assistant" to "Det er på vej.", "user" to "fra den gamle app"), contents)
+
+        // And back in this app, the row the older one wrote simply has no jobs.
+        chatDb = ChatDb(context)
+        val rows = chatDb.loadMessagesWithMedia(conv)
+        assertEquals(listOf(listOf(img(a), vid(b)), emptyList()), rows.map { it.mediaJobs })
     }
 }
