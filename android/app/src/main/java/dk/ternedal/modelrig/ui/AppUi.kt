@@ -720,6 +720,10 @@ private data class Msg(
     // Epoch-ms for turens oprettelse (capslinjens klokkeslaet). null for
     // indlaest historik, hvor DB'en ikke gemmer tid pr. besked.
     val at: Long? = System.currentTimeMillis(),
+    // #2419: billedjob turen satte i koe via image_generate (job-id'er fra
+    // riggens `media_jobs`). Én boble pr. id under svaret; persisteret paa
+    // message.media_jobs, saa boblen kommer igen efter genstart.
+    val mediaJobs: List<dk.ternedal.modelrig.net.MediaJobRef> = emptyList(),
 )
 
 /**
@@ -1517,14 +1521,20 @@ private fun ChatScreen(
         convId = openConvId
         if (openConvId != null) {
             val loaded = withContext(Dispatchers.IO) {
-                db.conversationMeta(openConvId) to db.loadMessages(openConvId)
+                db.conversationMeta(openConvId) to db.loadMessagesWithMedia(openConvId)
             }
             val (meta, msgs) = loaded
             // Strip emojis from OLD assistant replies on load too. The finalize-time
             // strip only cleans new replies; without this, opening a conversation
             // made before the persona/strip landed still shows the old 🌟✨ filler.
-            msgs.forEach { (role, content) ->
-                messages.add(Msg(role, if (role == "assistant") stripEmojis(content) else content, at = null))
+            // #2419: stored image-job ids come back as bubbles, which re-poll the rig.
+            msgs.forEach { m ->
+                messages.add(
+                    Msg(
+                        m.role, if (m.role == "assistant") stripEmojis(m.content) else m.content,
+                        at = null, mediaJobs = m.mediaJobs,
+                    ),
+                )
             }
             if (meta != null) {
                 // NB: for cloud we deliberately do NOT restore the model from
@@ -1610,6 +1620,12 @@ private fun ChatScreen(
                     messages[idx] = cur.copy(personLabel = label)
                 }
             }
+            val onMediaJobs: (List<dk.ternedal.modelrig.net.MediaJobRef>) -> Unit = { ids ->
+                scope.launch {
+                    val cur = messages.getOrNull(idx) ?: return@launch
+                    messages[idx] = cur.copy(mediaJobs = ids)
+                }
+            }
             // Riggens egen fase erstatter startgaettet fra TurnStatus.forPlan.
             // Ukendt fase -> null -> statussen staar; en nyere worker maa ikke
             // kunne blanke indikatoren.
@@ -1686,6 +1702,7 @@ private fun ChatScreen(
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.context.isNotEmpty()) onContext(turn.context)
+                            if (turn.mediaJobs.isNotEmpty()) onMediaJobs(turn.mediaJobs)
                             turn.personName?.let { name ->
                                 onPerson(if (turn.personRevision != null) "$name \u00b7 ${turn.personRevision}" else name)
                             }
@@ -1754,7 +1771,8 @@ private fun ChatScreen(
             // screen and nothing has run. Persisting an empty assistant turn
             // would leave a blank bubble in the history forever.
             if ((err == null || cancelled) && finalText.isNotBlank()) {
-                withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText) }
+                val jobs = messages[idx].mediaJobs
+                withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText, jobs) }
             }
             if (proposal != null) messages.removeAt(idx)
             busy = false
@@ -1807,6 +1825,9 @@ private fun ChatScreen(
             val onPersonRetry: (String) -> Unit = { label ->
                 scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(personLabel = label) }
             }
+            val onMediaJobsRetry: (List<dk.ternedal.modelrig.net.MediaJobRef>) -> Unit = { ids ->
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(mediaJobs = ids) }
+            }
             val onPhase: (String) -> Unit = { name ->
                 TurnStatus.forPhase(name)?.let { label ->
                     scope.launch {
@@ -1842,6 +1863,7 @@ private fun ChatScreen(
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.context.isNotEmpty()) onContext(turn.context)
+                            if (turn.mediaJobs.isNotEmpty()) onMediaJobsRetry(turn.mediaJobs)
                             turn.personName?.let { name ->
                                 onPersonRetry(if (turn.personRevision != null) "$name \u00b7 ${turn.personRevision}" else name)
                             }
@@ -1897,7 +1919,8 @@ private fun ChatScreen(
             // Mirror the main path: a parked proposal has no answer yet --
             // never persist a blank assistant turn.
             if (cidNow != null && (err == null || cancelled) && finalText.isNotBlank()) {
-                withContext(Dispatchers.IO) { db.addMessage(cidNow, "assistant", finalText) }
+                val jobs = messages[i].mediaJobs
+                withContext(Dispatchers.IO) { db.addMessage(cidNow, "assistant", finalText, jobs) }
             }
             busy = false
         }
@@ -2616,6 +2639,42 @@ private fun ChatScreen(
                             body = { MarkdownText(m.text, color = KalivTheme.colors.textBody) },
                             onRetry = if (m.error) ({ retry(i) }) else null,
                         )
+                        if (m.mediaJobs.isNotEmpty()) {
+                            // #2419: én boble pr. billedjob. Klienterne bygges mod den parrede
+                            // oprindelse; kan de ikke (ikke parret, afvist oprindelse), siger
+                            // boblen det i stedet for at gaette.
+                            val mediaClients = remember(store.baseUrl, store.token) {
+                                runCatching {
+                                    dk.ternedal.modelrig.net.MediaJobClient(store.baseUrl, store.token) to
+                                        dk.ternedal.modelrig.net.MediaGalleryClient(store.baseUrl, store.token)
+                                }
+                            }
+                            m.mediaJobs.forEach { ref ->
+                                mediaClients.fold(
+                                    onSuccess = { (jobs, gallery) ->
+                                        if (ref.kind == dk.ternedal.modelrig.net.MediaJobRef.Kind.VIDEO) {
+                                            dk.ternedal.modelrig.ui.chat.VideoJobBubble(
+                                                jobId = ref.jobId, jobs = jobs, gallery = gallery,
+                                                modifier = Modifier.padding(start = 15.dp),
+                                            )
+                                        } else {
+                                            dk.ternedal.modelrig.ui.chat.ImageJobBubble(
+                                                jobId = ref.jobId, jobs = jobs, gallery = gallery,
+                                                modifier = Modifier.padding(start = 15.dp),
+                                            )
+                                        }
+                                    },
+                                    onFailure = {
+                                        dk.ternedal.modelrig.ui.chat.ImageJobBubbleContent(
+                                            dk.ternedal.modelrig.ui.chat.ImageJobPhase.Ended(
+                                                "Billedet ligger i galleriet, n\u00e5r det er klar",
+                                            ),
+                                            modifier = Modifier.padding(start = 15.dp),
+                                        )
+                                    },
+                                )
+                            }
+                        }
                         if (m.context.isNotEmpty() && !m.streaming) {
                             var showCitations by remember(m.at) { mutableStateOf(false) }
                             Text(
