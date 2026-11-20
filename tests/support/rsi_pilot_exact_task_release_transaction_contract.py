@@ -79,14 +79,16 @@ _CONTRACT_FILES = (
 )
 
 _CONTRACT_SHARD_ENV = "MODELRIG_STAGE_B_CONTRACT_SHARD"
-_REQUIRED_SHARD_COUNT = 3
+_REQUIRED_SHARD_COUNT = 4
 
 # Measured wall seconds per contract (#1682): exact-head run 44609234933 on main
 # `ef0473d`, 20/11/2026, two contracts in flight per hosted shard. Equal file
 # counts were not equal work -- the strided partition gave 158 / 81 / 116 min of
 # shard wall time, because the late contracts rebuild deeper provenance. These
-# costs decide membership (longest first onto the least-loaded shard), so the
-# three shards carry ~228 / 226 / 235 CPU-minutes. Refresh from the
+# costs decide membership (longest first onto the least-loaded shard). With four
+# hosted shards (the chain's critical path was downstream, so one more runner
+# buys ~30 min of wall time) they carry ~167 / 176 / 176 / 172 CPU-minutes,
+# i.e. under 90 min of wall each with two in flight. Refresh from the
 # "PASS: <file> (<s>s)" lines of a green run when it drifts; the coverage gate
 # refuses a table that does not name exactly the contracts above, and a
 # partition more than 15 % apart.
@@ -161,11 +163,11 @@ def _selected_contract_files() -> tuple[str, ...]:
         total = int(total_text)
     except (ValueError, TypeError) as exc:
         raise AssertionError(
-            f"invalid Stage-B contract shard {raw!r}; expected 1/3, 2/3, or 3/3"
+            f"invalid Stage-B contract shard {raw!r}; expected 1/4 … 4/4"
         ) from exc
     if total != _REQUIRED_SHARD_COUNT or not 1 <= index <= total:
         raise AssertionError(
-            f"invalid Stage-B contract shard {raw!r}; expected 1/3, 2/3, or 3/3"
+            f"invalid Stage-B contract shard {raw!r}; expected 1/4 … 4/4"
         )
     selected = _shard_assignment(total)[index]
     if not selected:
