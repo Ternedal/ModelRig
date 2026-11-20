@@ -242,8 +242,10 @@ def _submit_media_job(clean: dict, *, service_getter: Callable[[], object] | Non
         return _unavailable(str(exc.detail), modality)
 
     params = {key: clean[key] for key in params_keys if clean.get(key) is not None}
-    if task is not None:
-        params["task"] = task
+    # The task the API resolved, always: a job without one makes the executor fall back to the
+    # profile's alphabetically first task, which for an image profile that also lists
+    # image_to_image is the wrong one for a text request. Same as the submit route stores.
+    params["task"] = generation.task
     try:
         created = service.store.submit(OWNER, clean["prompt"], profile_id=profile.profile_id, params=params)
     except ImageJobError as exc:
