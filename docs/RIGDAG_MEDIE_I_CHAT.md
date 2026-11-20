@@ -57,7 +57,7 @@ Nyt, **ikke-elevated** PowerShell 7-vindue.
 ```powershell
 $Main = "C:\Users\an001\Desktop\ModelRig-git"; $Repo = "C:\Users\an001\Desktop\ModelRig-media"
 git -C $Main fetch origin
-git -C $Main worktree add $Repo origin/integration/media-chat
+git -C $Main worktree add --detach $Repo origin/integration/media-chat
 git -C $Repo log --oneline -1
 ```
 
@@ -101,7 +101,8 @@ delt over begge kort** — notér tallene; trin 1 viser så, hvad det koster i v
 & "C:\Users\an001\Desktop\ModelRig-media\START_DEV_APPLIANCE.cmd" -ApplianceDir C:\Rig\ModelRig -SkipVisionRig
 ```
 
-Vent på "Dev-appliancen koerer".
+Vent på "Dev-appliancen koerer". Starter workeren ikke: kopiér fejlen og stop —
+installér ikke pakker om i riggens Python, før V1 er færdig (kandidaten bruger samme installation).
 
 **1.2 Vindue B: executoren** [kørt 17/11] — samme ikke-elevated vindue som 0.1
 
