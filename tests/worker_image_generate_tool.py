@@ -167,6 +167,15 @@ params2 = json.loads(job2["params"]) if job2 and isinstance(job2.get("params"), 
 check(ref2 is not None and ref2["job_id"] != ref["job_id"], "second run is a second job (not replayed)")
 check(isinstance(params2, dict) and params2.get("width") == 832 and params2.get("seed") == 7,
       "optional size/seed reach the job parameters")
+check(params2.get("task") == "text_to_image", "the task is stored with the job")
+# A profile that also lists image_to_image: alphabetically first, and the wrong default for a text request.
+DUAL = parse_profile(image_profile(profile_id="sdxl-dual", tasks=["text_to_image", "image_to_image"]))
+svc_dual = service_with(DUAL)
+out_dual = _run_image_generate({"prompt": PROMPT}, service_getter=lambda: svc_dual, env={})
+ref_dual = parse_job_reference(out_dual)
+job_dual = svc_dual.store.get(ref_dual["job_id"], OWNER) if ref_dual else None
+check(job_dual is not None and json.loads(job_dual["params"]).get("task") == "text_to_image",
+      "a profile listing both tasks still gets a text_to_image job (the executor would otherwise default to image_to_image)")
 
 # ---------------------------------------------------------------------------
 # 4. Fail-closed as text
