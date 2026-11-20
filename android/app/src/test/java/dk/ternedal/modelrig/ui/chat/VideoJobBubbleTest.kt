@@ -9,6 +9,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.media3.datasource.DataSource
 import dk.ternedal.modelrig.net.MediaGalleryException
 import dk.ternedal.modelrig.net.MediaGallerySource
@@ -31,6 +32,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.time.Instant
@@ -39,7 +42,10 @@ import java.time.Instant
  * The video bubble: polls like the image bubble, then resolves the finished clip
  * through the gallery's newest page and plays it with the gallery's player; a
  * clip not on that page is said to be in the gallery. Pure resolution logic is
- * checked directly.
+ * checked directly. The "Fuld skærm" chip opens [VideoViewerDialog]; its Gem/Del
+ * stream the clip through the gallery's `videoInto` (a fake here), so a copy that
+ * the fake refuses is reported in the fake's words and a successful share starts
+ * the chooser.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -72,14 +78,22 @@ class VideoJobBubbleTest {
         override fun cancel(id: String): MediaJobCancel = error("not used")
     }
 
-    private class FakeGallery(private val items: List<MediaItem>) : MediaGallerySource {
+    private class FakeGallery(
+        private val items: List<MediaItem>,
+        private val clip: ByteArray? = ByteArray(1_000) { 7 },
+    ) : MediaGallerySource {
         val videoRequests = mutableListOf<String>()
+        val downloads = mutableListOf<String>()
         override fun page(limit: Int, cursor: String?): MediaPage = MediaPage(items, null, 0)
         override fun thumbnail(item: MediaItem): ByteArray = error("not used")
         override fun image(item: MediaItem): ByteArray = error("not used")
         override fun video(item: MediaItem): MediaVideoStream {
             videoRequests += item.id
             return MediaVideoStream("http://127.0.0.1/${item.id}", DataSource.Factory { error("no network in UI tests") })
+        }
+        override fun videoInto(item: MediaItem, out: java.io.OutputStream) {
+            downloads += item.id
+            out.write(clip ?: throw MediaGalleryException(MediaGalleryException.Reason.TOO_LARGE, "For stort til at blive vist på telefonen"))
         }
     }
 
@@ -110,6 +124,47 @@ class VideoJobBubbleTest {
         compose.onNodeWithTag("video-job-player").assertIsDisplayed()
         assertEquals(listOf("clip-1"), gallery.videoRequests)
         assertEquals(2, jobs.polled.size)
+    }
+
+    private fun showPlayable(gallery: FakeGallery) {
+        show(FakeJobs(listOf({ job(MediaJobState.COMPLETED, assetId = "clip-1") })), gallery)
+        waitForTag("video-job-open")
+    }
+
+    @Test
+    fun `the full-screen chip opens the viewer with the same player, and close dismisses it`() {
+        showPlayable(FakeGallery(listOf(videoItem("clip-1"))))
+        compose.onNodeWithTag("video-job-open").performClick()
+        waitForTag("video-viewer")
+        compose.onNodeWithTag("video-viewer-player").assertIsDisplayed()
+        compose.onNodeWithTag("video-viewer-save").assertIsDisplayed()
+        compose.onNodeWithTag("video-viewer-share").assertIsDisplayed()
+        compose.onNodeWithTag("video-viewer-close").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("video-viewer").fetchSemanticsNodes().isEmpty() }
+    }
+
+    @Test
+    fun `Del streams the clip once through the gallery and starts a chooser`() {
+        val gallery = FakeGallery(listOf(videoItem("clip-1")))
+        showPlayable(gallery)
+        compose.onNodeWithTag("video-job-open").performClick()
+        waitForTag("video-viewer-share")
+        compose.onNodeWithTag("video-viewer-share").performClick()
+        compose.waitUntil(5_000) { shadowOf(RuntimeEnvironment.getApplication()).peekNextStartedActivity() != null }
+        assertEquals(listOf("clip-1"), gallery.downloads)
+        assertEquals("video/mp4", shadowOf(RuntimeEnvironment.getApplication()).nextStartedActivity
+            .getParcelableExtra<android.content.Intent>(android.content.Intent.EXTRA_INTENT)!!.type)
+    }
+
+    @Test
+    fun `a copy the gallery refuses is reported in its words and nothing is started`() {
+        val gallery = FakeGallery(listOf(videoItem("clip-1")), clip = null)
+        showPlayable(gallery)
+        compose.onNodeWithTag("video-job-open").performClick()
+        waitForTag("video-viewer-share")
+        compose.onNodeWithTag("video-viewer-share").performClick()
+        waitForText("For stort til at blive vist på telefonen")
+        assertNull(shadowOf(RuntimeEnvironment.getApplication()).nextStartedActivity)
     }
 
     @Test

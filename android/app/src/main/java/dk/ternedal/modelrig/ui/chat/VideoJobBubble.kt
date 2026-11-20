@@ -1,6 +1,8 @@
 package dk.ternedal.modelrig.ui.chat
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -18,8 +20,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
@@ -56,7 +60,10 @@ import kotlinx.coroutines.withContext
  * gallery's own [MediaVideoPlayer] -- bearer-authenticated range requests to the
  * paired origin, exactly as the Medier screen does. A clip not on the first page
  * (older than the newest page) is said to be in the gallery rather than fetched
- * blindly. Save/share for video is V1.
+ * blindly. A "Fuld skærm" chip over the player opens [VideoViewerDialog], which
+ * carries Gem/Del (the clip streamed once more into the gallery row or the share
+ * copy); the chip sits in a corner so the player's own tap-to-show-controls is
+ * left alone.
  */
 sealed class VideoJobOutcome {
     data class Playable(val job: MediaJob, val item: MediaItem, val stream: MediaVideoStream) : VideoJobOutcome()
@@ -133,7 +140,11 @@ fun VideoJobBubble(
 
     val playable = outcome as? VideoJobOutcome.Playable
     if (playable != null) {
-        VideoJobBubblePlayer(playable, modifier, player)
+        var viewerOpen by remember(playable.item.id) { mutableStateOf(false) }
+        VideoJobBubblePlayer(playable, modifier, player, onOpen = { viewerOpen = true })
+        if (viewerOpen) {
+            VideoViewerDialog(playable, gallery, onDismiss = { viewerOpen = false }, io = io, player = player)
+        }
     } else {
         ImageJobBubbleContent(phase, modifier, modality = MediaModality.VIDEO)
     }
@@ -144,6 +155,7 @@ private fun VideoJobBubblePlayer(
     playable: VideoJobOutcome.Playable,
     modifier: Modifier,
     player: @Composable (MediaVideoStream, MediaItem, (MediaGalleryException.Reason) -> Unit) -> Unit,
+    onOpen: () -> Unit,
 ) {
     val maxWidth = (LocalConfiguration.current.screenWidthDp * 0.78f).dp
     var playbackError by remember(playable.item.id) { mutableStateOf<String?>(null) }
@@ -172,6 +184,19 @@ private fun VideoJobBubblePlayer(
                     .testTag("video-job-player"),
             ) {
                 player(playable.stream, playable.item) { reason -> playbackError = mediaGalleryMessage(reason) }
+                Text(
+                    "Fuld skærm",
+                    color = Color.White,
+                    style = TextStyle(fontFamily = KalivType.Inter, fontSize = 12.sp),
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.Black.copy(alpha = 0.45f))
+                        .clickable(onClick = onOpen)
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                        .testTag("video-job-open"),
+                )
             }
         }
         Spacer(Modifier.height(2.dp))
