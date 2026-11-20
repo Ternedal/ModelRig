@@ -192,7 +192,7 @@ class MediaGalleryClient(
     /**
      * The clip copied once, in full, to [out]. The size the gallery listed is the
      * bound (plus the global cap); a body that disagrees with it -- longer, shorter,
-     * or not `video/*` -- is refused, and the caller discards what it got.
+     * or not a video type -- is refused, and the caller discards what it got.
      */
     override fun videoInto(item: MediaItem, out: java.io.OutputStream) {
         require(item.kind == MediaKind.VIDEO) { "not a video" }
