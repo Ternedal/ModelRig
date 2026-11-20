@@ -61,7 +61,6 @@ import kotlinx.coroutines.withContext
 object VideoViewer {
     const val SAVED_TEXT = "Gemt i Film/Kaliv"
     const val BUSY_TEXT = "Henter videoen fra riggen …"
-    const val SHARE_FAILED_TEXT = "Videoen kan ikke deles"
 }
 
 @Composable
@@ -132,7 +131,12 @@ fun VideoViewerDialog(
                     }
                 }
                 ViewerChip("Del", null, "video-viewer-share") {
-                    run { if (VideoExport.share(context, playable.job.id, ::copy)) null else VideoViewer.SHARE_FAILED_TEXT }
+                    run {
+                        when (val r = VideoExport.share(context, playable.job.id, ::copy)) {
+                            is VideoExport.ShareResult.Shared -> null
+                            is VideoExport.ShareResult.Refused -> r.reason
+                        }
+                    }
                 }
             }
             notice?.let {

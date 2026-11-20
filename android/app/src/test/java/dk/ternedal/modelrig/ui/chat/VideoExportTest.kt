@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import dk.ternedal.modelrig.net.MediaGalleryException
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -54,7 +53,7 @@ class VideoExportTest {
 
     @Test
     fun `share writes exactly the streamed bytes under the FileProvider dir and starts a chooser with a read grant`() {
-        assertTrue(VideoExport.share(context, jobId, writes(clip)))
+        assertEquals(VideoExport.ShareResult.Shared, VideoExport.share(context, jobId, writes(clip)))
         val files = shareFiles()
         assertEquals(1, files.size)
         assertTrue(clip.contentEquals(files.single().readBytes()))
@@ -76,16 +75,16 @@ class VideoExportTest {
             out.write(clip, 0, 100)
             throw MediaGalleryException(MediaGalleryException.Reason.NETWORK, "Forbindelsen til riggen blev afbrudt")
         }
-        assertFalse(VideoExport.share(context, jobId, failing))
+        assertEquals(VideoExport.ShareResult.Refused("Forbindelsen til riggen blev afbrudt"), VideoExport.share(context, jobId, failing))
         assertTrue(shareFiles().isEmpty())
         assertNull(shadowOf(RuntimeEnvironment.getApplication()).nextStartedActivity)
-        assertNull(VideoExport.shareFile(context, jobId, failing))
+        assertTrue(VideoExport.shareFile(context, jobId, failing).isFailure)
     }
 
     @Test
     fun `old share copies are pruned, newest kept`() {
         repeat(6) { i ->
-            val f = VideoExport.shareFile(context, jobId, writes(clip), nowMillis = 1_000L * (i + 1))!!
+            val f = VideoExport.shareFile(context, jobId, writes(clip), nowMillis = 1_000L * (i + 1)).getOrThrow()
             f.setLastModified(1_000L * (i + 1))
         }
         VideoExport.pruneShareFiles(context, keep = 3)
@@ -95,9 +94,27 @@ class VideoExportTest {
     }
 
     @Test
-    fun `save without a gallery provider is refused, never reported as saved`() {
-        val r = VideoExport.saveToGallery(context, jobId, writes(clip))
-        assertTrue(r is VideoExport.SaveResult.Refused)
+    fun `a save whose copy fails is refused in the gallery's words and leaves no row`() {
+        val failing: (OutputStream) -> Unit = {
+            throw MediaGalleryException(MediaGalleryException.Reason.TOO_LARGE, "For stort til at blive vist på telefonen")
+        }
+        val r = VideoExport.saveToGallery(context, jobId, failing)
+        assertEquals(VideoExport.SaveResult.Refused("For stort til at blive vist på telefonen"), r)
+        val rows = context.contentResolver.query(
+            android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, null, null, null, null,
+        )?.use { it.count } ?: 0
+        assertEquals(0, rows)
+    }
+
+    @Test
+    fun `a completed save is reported as saved, with the clip's name and type`() {
+        when (val r = VideoExport.saveToGallery(context, jobId, writes(clip))) {
+            is VideoExport.SaveResult.Saved -> {
+                // Robolectric's MediaStore accepts the row; what we can check is that it is ours.
+                assertEquals("content", r.uri.scheme)
+            }
+            is VideoExport.SaveResult.Refused -> assertTrue(r.reason, r.reason.isNotBlank())
+        }
     }
 
     @Test

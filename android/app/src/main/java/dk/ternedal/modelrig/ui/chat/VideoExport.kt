@@ -63,16 +63,20 @@ object VideoExport {
         return SaveResult.Saved(uri)
     }
 
-    /** The share copy on disk, inside the FileProvider-exposed directory; null (and no file) when the copy failed. */
-    fun shareFile(context: Context, jobId: String, copy: (OutputStream) -> Unit, nowMillis: Long = System.currentTimeMillis()): File? {
-        val dir = context.getExternalFilesDir(null) ?: return null
+    /**
+     * The share copy on disk, inside the FileProvider-exposed directory. A failed
+     * copy is the failure (the gallery's exception, for its words) and no file.
+     */
+    fun shareFile(context: Context, jobId: String, copy: (OutputStream) -> Unit, nowMillis: Long = System.currentTimeMillis()): Result<File> {
+        val dir = context.getExternalFilesDir(null)
+            ?: return Result.failure(IllegalStateException("Telefonen har ingen plads til en delingskopi"))
         val file = File(dir, SHARE_PREFIX + fileName(jobId, nowMillis))
         val result = runCatching { file.outputStream().use(copy) }
-        if (result.isFailure) {
+        result.exceptionOrNull()?.let { e ->
             runCatching { file.delete() }
-            return null
+            return Result.failure(e)
         }
-        return file
+        return Result.success(file)
     }
 
     /** Older share copies, so the app's own files dir does not grow with every share. */
@@ -94,11 +98,17 @@ object VideoExport {
         return Intent.createChooser(send, "Del video").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 
-    /** Write the copy, prune, start the chooser. False when there was nothing shareable. */
-    fun share(context: Context, jobId: String, copy: (OutputStream) -> Unit): Boolean {
-        val file = shareFile(context, jobId, copy) ?: return false
+    sealed class ShareResult {
+        object Shared : ShareResult()
+        data class Refused(val reason: String) : ShareResult()
+    }
+
+    /** Write the copy, prune, start the chooser. Refused carries why (the gallery's words when it has them). */
+    fun share(context: Context, jobId: String, copy: (OutputStream) -> Unit): ShareResult {
+        val file = shareFile(context, jobId, copy).getOrElse { return ShareResult.Refused(copyFailureText(it)) }
         pruneShareFiles(context)
-        return runCatching { context.startActivity(shareIntent(context, file)) }.isSuccess
+        return if (runCatching { context.startActivity(shareIntent(context, file)) }.isSuccess) ShareResult.Shared
+        else ShareResult.Refused("Ingen app kan modtage videoen")
     }
 
     /** The gallery's own words when it refused; otherwise one neutral line. */
