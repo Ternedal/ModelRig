@@ -721,8 +721,8 @@ private data class Msg(
     // indlaest historik, hvor DB'en ikke gemmer tid pr. besked.
     val at: Long? = System.currentTimeMillis(),
     // #2419: billedjob turen satte i koe via image_generate (job-id'er fra
-    // riggens `media_jobs`). Én boble pr. id under svaret. Ikke persisteret i
-    // denne slice: efter genstart ligger billedet i galleriet, ikke i samtalen.
+    // riggens `media_jobs`). Én boble pr. id under svaret; persisteret paa
+    // message.media_jobs, saa boblen kommer igen efter genstart.
     val mediaJobs: List<String> = emptyList(),
 )
 
@@ -1521,14 +1521,20 @@ private fun ChatScreen(
         convId = openConvId
         if (openConvId != null) {
             val loaded = withContext(Dispatchers.IO) {
-                db.conversationMeta(openConvId) to db.loadMessages(openConvId)
+                db.conversationMeta(openConvId) to db.loadMessagesWithMedia(openConvId)
             }
             val (meta, msgs) = loaded
             // Strip emojis from OLD assistant replies on load too. The finalize-time
             // strip only cleans new replies; without this, opening a conversation
             // made before the persona/strip landed still shows the old 🌟✨ filler.
-            msgs.forEach { (role, content) ->
-                messages.add(Msg(role, if (role == "assistant") stripEmojis(content) else content, at = null))
+            // #2419: stored image-job ids come back as bubbles, which re-poll the rig.
+            msgs.forEach { m ->
+                messages.add(
+                    Msg(
+                        m.role, if (m.role == "assistant") stripEmojis(m.content) else m.content,
+                        at = null, mediaJobs = m.mediaJobs,
+                    ),
+                )
             }
             if (meta != null) {
                 // NB: for cloud we deliberately do NOT restore the model from
@@ -1765,7 +1771,8 @@ private fun ChatScreen(
             // screen and nothing has run. Persisting an empty assistant turn
             // would leave a blank bubble in the history forever.
             if ((err == null || cancelled) && finalText.isNotBlank()) {
-                withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText) }
+                val jobs = messages[idx].mediaJobs
+                withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText, jobs) }
             }
             if (proposal != null) messages.removeAt(idx)
             busy = false
@@ -1912,7 +1919,8 @@ private fun ChatScreen(
             // Mirror the main path: a parked proposal has no answer yet --
             // never persist a blank assistant turn.
             if (cidNow != null && (err == null || cancelled) && finalText.isNotBlank()) {
-                withContext(Dispatchers.IO) { db.addMessage(cidNow, "assistant", finalText) }
+                val jobs = messages[i].mediaJobs
+                withContext(Dispatchers.IO) { db.addMessage(cidNow, "assistant", finalText, jobs) }
             }
             busy = false
         }

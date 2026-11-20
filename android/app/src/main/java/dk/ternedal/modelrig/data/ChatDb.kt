@@ -13,7 +13,7 @@ import dk.ternedal.modelrig.logic.RigProfileTokenResolver
  * (streaming deltas are not persisted per-token — an in-flight reply is lost on a
  * crash; accepted V1 tradeoff).
  */
-class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 3) {
+class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 4) {
 
     data class ConvMeta(
         val id: Long,
@@ -46,7 +46,8 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
                  conv_id INTEGER NOT NULL REFERENCES conversation(id) ON DELETE CASCADE,
                  role TEXT NOT NULL,
                  content TEXT NOT NULL,
-                 created_at INTEGER NOT NULL)""",
+                 created_at INTEGER NOT NULL,
+                 media_jobs TEXT NOT NULL DEFAULT '')""",
         )
         db.execSQL("CREATE INDEX idx_message_conv ON message(conv_id)")
         db.execSQL(PRESET_TABLE_SQL)
@@ -55,9 +56,11 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
 
     override fun onUpgrade(db: SQLiteDatabase, oldV: Int, newV: Int) {
         // v1 -> v2: added the preset table. v2 -> v3: added rig_profile.
-        // Never drops existing data.
+        // v3 -> v4 (#2419): message.media_jobs, the image jobs an assistant turn
+        // queued, so the bubble survives an app restart. Never drops existing data.
         if (oldV < 2) db.execSQL(PRESET_TABLE_SQL)
         if (oldV < 3) db.execSQL(RIG_PROFILE_TABLE_SQL)
+        if (oldV < 4) db.execSQL(MEDIA_JOBS_COLUMN_SQL)
     }
 
     override fun onOpen(db: SQLiteDatabase) {
@@ -76,7 +79,11 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
         })
     }
 
-    fun addMessage(convId: Long, role: String, content: String) {
+    /**
+     * #2419: [mediaJobs] are the 32-hex ids of image jobs the turn queued; stored
+     * comma-separated, only well-formed ids, so a restart redraws the bubbles.
+     */
+    fun addMessage(convId: Long, role: String, content: String, mediaJobs: List<String> = emptyList()) {
         val now = System.currentTimeMillis()
         val db = writableDatabase
         // If the conversation was deleted mid-send, skip rather than insert an
@@ -90,8 +97,23 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
             put("role", role)
             put("content", content)
             put("created_at", now)
+            put("media_jobs", encodeMediaJobs(mediaJobs))
         })
         db.execSQL("UPDATE conversation SET updated_at=? WHERE id=?", arrayOf(now, convId))
+    }
+
+    /** One stored message with what the bubble needs; [loadMessages] is the text-only view of the same rows. */
+    data class StoredMessage(val role: String, val content: String, val mediaJobs: List<String>)
+
+    fun loadMessagesWithMedia(convId: Long): List<StoredMessage> {
+        val out = mutableListOf<StoredMessage>()
+        readableDatabase.rawQuery(
+            "SELECT role, content, media_jobs FROM message WHERE conv_id=? ORDER BY id ASC",
+            arrayOf(convId.toString()),
+        ).use { c ->
+            while (c.moveToNext()) out.add(StoredMessage(c.getString(0), c.getString(1), decodeMediaJobs(c.getString(2))))
+        }
+        return out
     }
 
     /**
@@ -299,6 +321,15 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
     }
 
     companion object {
+        private const val MEDIA_JOBS_COLUMN_SQL =
+            "ALTER TABLE message ADD COLUMN media_jobs TEXT NOT NULL DEFAULT ''"
+        private val JOB_ID = Regex("^[0-9a-f]{32}$")
+
+        /** Comma-separated, well-formed ids only; anything else is dropped on write. */
+        fun encodeMediaJobs(ids: List<String>): String = ids.filter { JOB_ID.matches(it) }.distinct().joinToString(",")
+
+        fun decodeMediaJobs(stored: String?): List<String> =
+            stored.orEmpty().split(',').filter { JOB_ID.matches(it) }.distinct()
         private const val PRESET_TABLE_SQL =
             """CREATE TABLE IF NOT EXISTS preset(
                  id INTEGER PRIMARY KEY AUTOINCREMENT,
