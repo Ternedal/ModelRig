@@ -189,7 +189,7 @@ def text_result(fn, label):
     except Exception as exc:  # noqa: BLE001
         check(False, f"{label}: raised {type(exc).__name__} instead of returning text")
         return ""
-    refusal = isinstance(out, str) and ("ikke tilgængelig" in out or out.startswith("Riggen er optaget"))
+    refusal = isinstance(out, str) and ("ikke tilgængelig" in out or out.startswith(("Riggen er optaget", "Riggen afviste")))
     check(refusal and parse_job_reference(out) is None,
           f"{label}: text result, no job reference")
     return out
@@ -223,6 +223,24 @@ o = text_result(lambda: _run_image_generate({"prompt": PROMPT, "width": 640, "he
                                             service_getter=lambda: svc, env={}),
                 "size the profile refuses")
 check("invalid_request" in o, "executor's own validation rule applies at submit")
+check(o.startswith("Riggen afviste") and "width, height" in o and "image_generate igen uden dem" in o,
+      "a refused size names the arguments and says to call again without them (the model cannot know the allowed sizes)")
+check("640" not in o and "480" not in o, "only argument names are echoed, never values")
+
+import logging as _logging
+class _Seen(_logging.Handler):
+    def __init__(self):
+        super().__init__(); self.lines = []
+    def emit(self, record):
+        self.lines.append(record.getMessage())
+_seen = _Seen(); _wlog = _logging.getLogger("modelrig.worker"); _wlog.addHandler(_seen); _prev = _wlog.level; _wlog.setLevel(_logging.INFO)
+_run_image_generate({"prompt": PROMPT, "width": 640, "height": 480}, service_getter=lambda: svc, env={})
+_run_image_generate({"prompt": PROMPT}, service_getter=None, env={})
+_wlog.removeHandler(_seen); _wlog.setLevel(_prev)
+check(_seen.lines == ["media_tool=refused modality=image code=invalid_request optional=width,height",
+                      "media_tool=refused modality=image code=media_jobs_api_off"],
+      "each refusal is one worker log line with its code (and argument names, never the prompt)")
+check(not any(PROMPT in line for line in _seen.lines), "the prompt is not logged")
 
 svc_full = service_with(IMG_A)
 for _ in range(3):
