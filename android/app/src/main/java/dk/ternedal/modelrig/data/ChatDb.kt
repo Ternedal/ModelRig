@@ -6,6 +6,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import dk.ternedal.modelrig.logic.RigProfileTokenResolution
 import dk.ternedal.modelrig.logic.RigProfileTokenResolver
+import dk.ternedal.modelrig.net.MediaJobRef
 
 /**
  * Conversation persistence. Uses Android's built-in SQLite (no new dependency),
@@ -83,7 +84,7 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
      * #2419: [mediaJobs] are the 32-hex ids of image jobs the turn queued; stored
      * comma-separated, only well-formed ids, so a restart redraws the bubbles.
      */
-    fun addMessage(convId: Long, role: String, content: String, mediaJobs: List<String> = emptyList()) {
+    fun addMessage(convId: Long, role: String, content: String, mediaJobs: List<MediaJobRef> = emptyList()) {
         val now = System.currentTimeMillis()
         val db = writableDatabase
         // If the conversation was deleted mid-send, skip rather than insert an
@@ -103,7 +104,7 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
     }
 
     /** One stored message with what the bubble needs; [loadMessages] is the text-only view of the same rows. */
-    data class StoredMessage(val role: String, val content: String, val mediaJobs: List<String>)
+    data class StoredMessage(val role: String, val content: String, val mediaJobs: List<MediaJobRef>)
 
     fun loadMessagesWithMedia(convId: Long): List<StoredMessage> {
         val out = mutableListOf<StoredMessage>()
@@ -325,11 +326,22 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
             "ALTER TABLE message ADD COLUMN media_jobs TEXT NOT NULL DEFAULT ''"
         private val JOB_ID = Regex("^[0-9a-f]{32}$")
 
-        /** Comma-separated, well-formed ids only; anything else is dropped on write. */
-        fun encodeMediaJobs(ids: List<String>): String = ids.filter { JOB_ID.matches(it) }.distinct().joinToString(",")
+        /**
+         * Comma-separated; an image job is its bare id, a video job is `video:<id>`.
+         * Only well-formed entries are written or read back; anything else is dropped.
+         */
+        fun encodeMediaJobs(refs: List<MediaJobRef>): String = refs
+            .filter { JOB_ID.matches(it.jobId) }
+            .distinctBy { it.jobId }
+            .joinToString(",") { if (it.kind == MediaJobRef.Kind.VIDEO) "video:" + it.jobId else it.jobId }
 
-        fun decodeMediaJobs(stored: String?): List<String> =
-            stored.orEmpty().split(',').filter { JOB_ID.matches(it) }.distinct()
+        fun decodeMediaJobs(stored: String?): List<MediaJobRef> = stored.orEmpty().split(',')
+            .mapNotNull { entry ->
+                val (kind, id) = if (entry.startsWith("video:")) MediaJobRef.Kind.VIDEO to entry.removePrefix("video:")
+                else MediaJobRef.Kind.IMAGE to entry
+                if (JOB_ID.matches(id)) MediaJobRef(id, kind) else null
+            }
+            .distinctBy { it.jobId }
         private const val PRESET_TABLE_SQL =
             """CREATE TABLE IF NOT EXISTS preset(
                  id INTEGER PRIMARY KEY AUTOINCREMENT,

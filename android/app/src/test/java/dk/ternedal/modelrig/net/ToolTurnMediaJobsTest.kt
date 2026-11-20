@@ -52,13 +52,13 @@ class ToolTurnMediaJobsTest {
     fun `a well-formed reference is kept`() {
         val t = turn("[${ref(id)}]")
         assertEquals("answered", t.status)
-        assertEquals(listOf(id), t.mediaJobs)
+        assertEquals(listOf(MediaJobRef(id, MediaJobRef.Kind.IMAGE)), t.mediaJobs)
     }
 
     @Test
     fun `an older rig without the field gives an empty list`() {
-        assertEquals(emptyList<String>(), turn(null).mediaJobs)
-        assertEquals(emptyList<String>(), turn("[]").mediaJobs)
+        assertEquals(emptyList<MediaJobRef>(), turn(null).mediaJobs)
+        assertEquals(emptyList<MediaJobRef>(), turn("[]").mediaJobs)
     }
 
     @Test
@@ -74,7 +74,15 @@ class ToolTurnMediaJobsTest {
                 "\"$other\"",                                   // not an object
             ).joinToString(",") + "]",
         )
-        assertEquals(listOf(id), t.mediaJobs)
+        assertEquals(listOf(MediaJobRef(id, MediaJobRef.Kind.IMAGE)), t.mediaJobs)
+    }
+
+    @Test
+    fun `kind video is kept, unknown kinds are dropped`() {
+        val video = """{"job_id":"$other","kind":"video","state":"queued","profile_id":"wan","status_url":"/api/v1/media/jobs/$other"}"""
+        val audio = """{"job_id":"$id","kind":"audio","state":"queued","profile_id":"x","status_url":"/api/v1/media/jobs/$id"}"""
+        val t = turn("[$video,$audio]")
+        assertEquals(listOf(MediaJobRef(other, MediaJobRef.Kind.VIDEO)), t.mediaJobs)
     }
 
     @Test

@@ -723,7 +723,7 @@ private data class Msg(
     // #2419: billedjob turen satte i koe via image_generate (job-id'er fra
     // riggens `media_jobs`). Én boble pr. id under svaret; persisteret paa
     // message.media_jobs, saa boblen kommer igen efter genstart.
-    val mediaJobs: List<String> = emptyList(),
+    val mediaJobs: List<dk.ternedal.modelrig.net.MediaJobRef> = emptyList(),
 )
 
 /**
@@ -1620,7 +1620,7 @@ private fun ChatScreen(
                     messages[idx] = cur.copy(personLabel = label)
                 }
             }
-            val onMediaJobs: (List<String>) -> Unit = { ids ->
+            val onMediaJobs: (List<dk.ternedal.modelrig.net.MediaJobRef>) -> Unit = { ids ->
                 scope.launch {
                     val cur = messages.getOrNull(idx) ?: return@launch
                     messages[idx] = cur.copy(mediaJobs = ids)
@@ -1825,7 +1825,7 @@ private fun ChatScreen(
             val onPersonRetry: (String) -> Unit = { label ->
                 scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(personLabel = label) }
             }
-            val onMediaJobsRetry: (List<String>) -> Unit = { ids ->
+            val onMediaJobsRetry: (List<dk.ternedal.modelrig.net.MediaJobRef>) -> Unit = { ids ->
                 scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(mediaJobs = ids) }
             }
             val onPhase: (String) -> Unit = { name ->
@@ -2649,13 +2649,20 @@ private fun ChatScreen(
                                         dk.ternedal.modelrig.net.MediaGalleryClient(store.baseUrl, store.token)
                                 }
                             }
-                            m.mediaJobs.forEach { jobId ->
+                            m.mediaJobs.forEach { ref ->
                                 mediaClients.fold(
                                     onSuccess = { (jobs, gallery) ->
-                                        dk.ternedal.modelrig.ui.chat.ImageJobBubble(
-                                            jobId = jobId, jobs = jobs, gallery = gallery,
-                                            modifier = Modifier.padding(start = 15.dp),
-                                        )
+                                        if (ref.kind == dk.ternedal.modelrig.net.MediaJobRef.Kind.VIDEO) {
+                                            dk.ternedal.modelrig.ui.chat.VideoJobBubble(
+                                                jobId = ref.jobId, jobs = jobs, gallery = gallery,
+                                                modifier = Modifier.padding(start = 15.dp),
+                                            )
+                                        } else {
+                                            dk.ternedal.modelrig.ui.chat.ImageJobBubble(
+                                                jobId = ref.jobId, jobs = jobs, gallery = gallery,
+                                                modifier = Modifier.padding(start = 15.dp),
+                                            )
+                                        }
                                     },
                                     onFailure = {
                                         dk.ternedal.modelrig.ui.chat.ImageJobBubbleContent(

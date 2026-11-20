@@ -38,6 +38,7 @@ import dk.ternedal.modelrig.net.MediaJob
 import dk.ternedal.modelrig.net.MediaJobException
 import dk.ternedal.modelrig.net.MediaJobSource
 import dk.ternedal.modelrig.net.MediaJobState
+import dk.ternedal.modelrig.net.MediaModality
 import dk.ternedal.modelrig.ui.MediaGenerate
 import dk.ternedal.modelrig.ui.components.StreamingCursor
 import dk.ternedal.modelrig.ui.decodeBounded
@@ -127,8 +128,8 @@ object ImageJobBubbleLogic {
     fun toFetch(phase: ImageJobPhase): MediaJob? =
         (phase as? ImageJobPhase.Following)?.job?.takeIf { it.state == MediaJobState.COMPLETED && it.assetId != null }
 
-    fun label(phase: ImageJobPhase): String = when (phase) {
-        is ImageJobPhase.Following -> phase.job?.let { MediaGenerate.stateLabel(it) } ?: "I kø på riggen"
+    fun label(phase: ImageJobPhase, modality: MediaModality = MediaModality.IMAGE): String = when (phase) {
+        is ImageJobPhase.Following -> phase.job?.let { MediaGenerate.stateLabel(it, modality) } ?: "I kø på riggen"
         is ImageJobPhase.Shown -> "Billede"
         is ImageJobPhase.Ended -> phase.text
     }
@@ -189,7 +190,12 @@ fun ImageJobBubble(
 
 /** Stateless renderer, so the three phases can be screenshot-tested without a rig. */
 @Composable
-fun ImageJobBubbleContent(phase: ImageJobPhase, modifier: Modifier = Modifier, onOpen: (() -> Unit)? = null) {
+fun ImageJobBubbleContent(
+    phase: ImageJobPhase,
+    modifier: Modifier = Modifier,
+    onOpen: (() -> Unit)? = null,
+    modality: MediaModality = MediaModality.IMAGE,
+) {
     val maxWidth = (LocalConfiguration.current.screenWidthDp * 0.78f).dp
     Column(
         modifier = modifier.widthIn(max = maxWidth).padding(top = 8.dp).testTag("image-job-bubble"),
@@ -217,7 +223,7 @@ fun ImageJobBubbleContent(phase: ImageJobPhase, modifier: Modifier = Modifier, o
                         StreamingCursor()
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            ImageJobBubbleLogic.label(phase),
+                            ImageJobBubbleLogic.label(phase, modality),
                             color = KalivTheme.colors.textMuted,
                             style = TextStyle(fontFamily = KalivType.Inter, fontSize = 14.sp),
                             modifier = Modifier.testTag("image-job-status"),
