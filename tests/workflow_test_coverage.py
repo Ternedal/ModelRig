@@ -313,10 +313,37 @@ check(
     and 'stage_b_slice in ("midchain", "downstream")' in stage_b_driver,
     "midchain/downstream consume only a validated preloaded proof+ledger root",
 )
+# #1682 slice 3: midchain cohorts are cost-weighted within their parallelism
+# class. The deep cohort (2/3 = 2a ∪ 2b) must stay exactly the strided second
+# third, so serial execution and deep timeouts keep covering the same contracts.
 check(
     "_REQUIRED_SHARD_COUNT = 3" in midchain_driver
-    and "_CONTRACT_FILES[index - 1 :: total]" in midchain_driver,
-    "midchain uses the locked three-way strided shard partition",
+    and "_CONTRACT_COST_SECONDS = {" in midchain_driver
+    and "_DEEP_CONTRACT_FILES = _CONTRACT_FILES[1::_REQUIRED_SHARD_COUNT]" in midchain_driver
+    and "_CONTRACT_FILES[index - 1 :: total]" not in midchain_driver,
+    "midchain uses cost-weighted cohorts with the deep set pinned to the strided second third",
+)
+check(
+    set(_partitions["2/3"]) == set(_midchain_module._CONTRACT_FILES[1::3])
+    and set(_midchain_module._CONTRACT_COST_SECONDS) == set(_midchain_module._CONTRACT_FILES)
+    and all(isinstance(v, int) and v > 0 for v in _midchain_module._CONTRACT_COST_SECONDS.values()),
+    "midchain deep cohort is exactly the historical second third; cost table names exactly the contracts",
+)
+_mc_cost = _midchain_module._CONTRACT_COST_SECONDS
+_mc_deep_loads = [sum(_mc_cost[f] for f in _partitions[s]) for s in ("2a/3", "2b/3")]
+_mc_shallow_loads = [sum(_mc_cost[f] for f in _partitions[s]) for s in ("1/3", "3/3")]
+check(
+    max(_mc_deep_loads) <= min(_mc_deep_loads) * 1.15
+    and max(_mc_shallow_loads) <= min(_mc_shallow_loads) * 1.15,
+    f"midchain cohorts are balanced within 15 % (deep CPU-min {[round(l / 60) for l in _mc_deep_loads]}, "
+    f"shallow {[round(l / 60) for l in _mc_shallow_loads]})",
+)
+check(
+    all(
+        list(_partitions[s]) == [f for f in _midchain_module._CONTRACT_FILES if f in _partitions[s]]
+        for s in ("1/3", "2a/3", "2b/3", "3/3")
+    ),
+    "each midchain cohort keeps the original contract order",
 )
 # #1682: downstream shards are cost-weighted. The table must name exactly the
 # contracts, every contract must land in exactly one shard, each shard must be
