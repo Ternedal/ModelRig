@@ -30,6 +30,8 @@ import os
 from typing import Callable, Mapping
 
 from .image_generate_tool import (
+    ArgMistake,
+    _arg_name,
     STATUS_URL_PREFIX,
     VIDEO_JOB_REFERENCE_SCHEMA,
     _submit_media_job,
@@ -118,22 +120,22 @@ def _validate_args(args: object) -> dict:
         raise ToolDenied("video_generate: args skal være et objekt")
     unknown = set(args) - _ALLOWED_ARGS
     if unknown:
-        raise ToolDenied("video_generate: ukendte argumenter afvises: " + ", ".join(sorted(unknown)))
+        raise ArgMistake("ukendte argumenter: " + ", ".join(sorted(_arg_name(k) for k in unknown)))
     prompt = args.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
-        raise ToolDenied("video_generate: prompt mangler")
+        raise ArgMistake("prompt mangler")
     if len(prompt) > _MAX_PROMPT_CHARS:
-        raise ToolDenied("video_generate: prompt er for lang")
+        raise ArgMistake("prompt er for lang")
     profile_id = args.get("profile_id")
     if profile_id is not None and not isinstance(profile_id, str):
-        raise ToolDenied("video_generate: profile_id skal være en streng")
+        raise ArgMistake("profile_id skal være en streng")
     # An empty string is how a model leaves an optional argument out; it means "the rig's default",
     # not a refusal that ends the turn.
     clean: dict = {"prompt": prompt, "profile_id": (profile_id.strip() or None) if isinstance(profile_id, str) else None}
     source = args.get("source_image_job_id")
     if source is not None:
         if not isinstance(source, str):
-            raise ToolDenied("video_generate: source_image_job_id skal være et job-id eller ordet latest")
+            raise ArgMistake("source_image_job_id skal være et job-id eller ordet latest")
         if source.strip().lower() == LATEST_SOURCE:
             source = LATEST_SOURCE
         elif len(source) != 32 or any(c not in "0123456789abcdef" for c in source):
@@ -148,7 +150,7 @@ def _validate_args(args: object) -> dict:
             clean[key] = None
             continue
         if isinstance(value, bool) or not isinstance(value, int):
-            raise ToolDenied(f"video_generate: {key} skal være et heltal")
+            raise ArgMistake(f"{key} skal være et heltal (et tal, ikke en tekst)")
         clean[key] = value
     return clean
 
@@ -156,7 +158,11 @@ def _validate_args(args: object) -> dict:
 def _run_video_generate(args: dict, *, service_getter: Callable[[], object] | None = None,
                         env: Mapping[str, str] | None = None) -> str:
     """Queue one text-to-video job. Returns a job reference line followed by text for the model."""
-    clean = _validate_args(args)
+    from .image_generate_tool import _arg_mistake
+    try:
+        clean = _validate_args(args)
+    except ArgMistake as mistake:
+        return _arg_mistake(TOOL_NAME, "video", mistake)
     task = VIDEO_TASK
     params_keys: tuple[str, ...] = _INT_ARGS
     if clean["source_image_job_id"] == UNREADABLE_SOURCE:

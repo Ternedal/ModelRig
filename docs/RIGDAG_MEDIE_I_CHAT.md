@@ -135,7 +135,7 @@ $body = @{ message = 'lav et billede af en rød cykel ved en sø'; model = 'qwen
 $t0 = Get-Date
 $r = Invoke-RestMethod "$B/api/v1/tools/chat" -Method Post -Headers $H -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
 "tur: {0:n1} s  status={1}  tools={2}" -f ((Get-Date) - $t0).TotalSeconds, $r.status, ($r.tools_used -join ',')
-$r.answer; $r.media_jobs | Format-List
+$r.answer; $r.media_jobs | Format-List; $r.media_refusals | Format-Table
 ```
 
 ```powershell
@@ -166,6 +166,30 @@ på maskinen noterer den også VRAM pr. kort før hvert job og toppen under det 
 det er risiko 1 i tal. Den laver otte rigtige billeder (regn med 8–12 minutter)
 og taler kun med loopback. Rapporten indeholder hverken token eller modellens tekst.
 Exit 0 = alt som forventet, 1 = mindst ét tilfælde afveg.
+
+**1.5b Samme beskeder som én samtale** [repo] — det er sådan, telefonen sender dem:
+
+```powershell
+python scripts\media_chat_probe.py --suite conversation --rounds 2 --report "$env:TEMP\media-chat-conversation.json"
+```
+
+De fire billedbeskeder og kontrollen sendes med historikken fra de foregående ture.
+20/11 gik 19 af 19 igennem uden historik, mens telefonen fik "der er tekniske problemer
+med billedgenerering" midt i en samtale. Afviser riggen et kald, står koden nu i
+tabellen (`afvist:<kode>`) og i workerens log:
+
+```powershell
+Get-ChildItem C:\Rig\ModelRig -Recurse -Filter *.log -ErrorAction SilentlyContinue | Select-String 'media_tool=refused' | Select-Object -Last 20
+```
+
+[antagelse: workerens log ligger under appliance-mappen; ellers står linjen i workerens konsolvindue]
+
+| Kode | Betyder |
+|---|---|
+| `invalid_arguments` | modellen sendte et felt, værktøjet ikke har, eller et tal som tekst |
+| `invalid_request` | en størrelse, profilen ikke tillader |
+| `profile_not_enabled` | et `profile_id`, riggen ikke kender |
+| `owner_limit` / `queue_full` | tre job er allerede i gang / køen er fuld |
 
 **1.6 Kontrol: slukket værktøj** [repo] — valgfri. Sæt `KALIV_IMAGE_TOOL_ENABLED=0`
 i env-filen, genstart vindue A, gentag 1.3: `image_generate` må ikke stå på

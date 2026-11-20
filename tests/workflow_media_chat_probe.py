@@ -301,6 +301,39 @@ with appliance([turn(None), turn(None)], {}) as fake:
           and len(fake.chats) == 2, "no finished picture: the animate question is not asked")
     check(report["summary"]["tool_cases"] == 1 and report["summary"]["all_ok"] is False, "a skipped case is not in the rate, and the run is not ok")
 
+# 6b. the four pictures and the control as one conversation; refusals by code
+print("== 6b. conversation suite, refusals ==")
+refused = turn("image_generate", media_refusals=[{"tool": "image_generate", "code": "profile_not_enabled"}])
+retried = turn("image_generate", C, tools_used=["image_generate", "image_generate"],
+               media_refusals=[{"tool": "image_generate", "code": "invalid_arguments"},
+                               {"tool": "note_append", "code": "x"}, {"tool": "image_generate", "code": "Not A Code"}, "junk"])
+turns = [turn("image_generate", A, answer="svar 1"), refused, retried, turn("image_generate", D), turn(None), turn(None)]
+with appliance(turns, {A: lifecycle(A), C: lifecycle(C), D: lifecycle(D)}) as fake:
+    report = run(fake, "conversation")
+    cases = report["cases"]
+    check([c["case"] for c in cases] == ["conv-1.r1", "conv-2.r1", "conv-3.r1", "conv-4.r1", "conv-control.r1", "control"],
+          "four pictures and a control in the thread, then the plain control")
+    check("history" not in fake.chats[0]["body"] and [len(c["body"].get("history", [])) for c in fake.chats] == [0, 2, 4, 6, 8, 0],
+          "every turn carries the conversation so far; the plain control carries none")
+    check(fake.chats[1]["body"]["history"] == [{"role": "user", "content": probe.IMAGE_MESSAGES[0]},
+                                               {"role": "assistant", "content": "svar 1"}],
+          "history is the user's words and the model's answer, in order")
+    check([c["history_turns"] for c in cases] == [0, 1, 2, 3, 4, 0], "the report says how deep in the conversation each case was")
+    check(cases[1]["ok"] is False and cases[1]["why"] == "no_job_reference" and cases[1]["refusals"] == ["profile_not_enabled"],
+          "a refused picture is reported with the rig's code, not only as 'no job'")
+    check(cases[2]["ok"] is True and cases[2]["refusals"] == ["invalid_arguments"],
+          "a refusal the model recovered from in the same turn: ok, and the code is kept (other tools and non-codes dropped)")
+    text = probe.render(report)
+    check("afvist:profile_not_enabled" in text and "afvisninger: invalid_arguments, profile_not_enabled" in text,
+          "the table and the summary name the codes")
+    check(report["summary"]["refusals"] == ["invalid_arguments", "profile_not_enabled"] and "svar 1" not in json.dumps(report),
+          "codes are in the report; the model's text still is not")
+
+with appliance([turn("image_generate", A)] * 1 + [turn(None)], {A: lifecycle(A)}) as fake:
+    report = run(fake, "image")
+    check(all(c["refusals"] == [] for c in report["cases"]) and "afvisninger" not in probe.render(report),
+          "a worker without media_refusals: no refusals, no line")
+
 # 7. VRAM sampling
 print("== 7. vram ==")
 samples = iter([{0: 9000, 1: 900}, {0: 9100, 1: 4000}, {0: 9100, 1: 11000}, {0: 9050, 1: 7700}] + [{0: 9000, 1: 7700}] * 10)

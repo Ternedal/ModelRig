@@ -46,6 +46,7 @@ import dataclasses
 import json
 import logging
 import os
+import re
 from typing import Callable, Mapping
 
 from fastapi import HTTPException
@@ -185,6 +186,50 @@ def _refused(code: str, modality: str, optional: list[str]) -> str:
     return _unavailable(code, modality)
 
 
+class ArgMistake(ValueError):
+    """An argument the model got wrong: a made-up field, a number as a string, no prompt.
+
+    Not ``ToolDenied``. That ends the whole turn with an HTTP 400, and the user sees an
+    error instead of an answer for what is the likeliest mistake a small model makes
+    (``"width": "1024"``, ``"style": "photo"``). The call is still refused and nothing is
+    queued; the model gets a text result naming the argument, and can call again.
+    The message carries argument names only, never a value.
+    """
+
+
+def _arg_name(key: object) -> str:
+    """A made-up argument's name as it may be repeated: an identifier, else ``?``. The name
+    came from the model and goes into a log line and back into its context."""
+    return key if isinstance(key, str) and re.fullmatch(r"[A-Za-z0-9_]{1,32}", key) else "?"
+
+
+# The code of a refusal, read back out of its text: every refusal sentence starts with one
+# of these and carries its code in the first parentheses. ``parse_refusal`` is how the turn
+# result can say *why* without the model's paraphrase in between.
+_REFUSAL_RE = re.compile(r"^(?:Billedgenerering|Videogenerering|Riggen) [^\n()]{0,120}\(([a-z0-9_]{1,64})\)")
+
+
+def parse_refusal(result: str) -> str | None:
+    """The code of a media tool refusal, or None for anything else (a job reference included).
+
+    Accepts the ``wrap_as_data`` envelope the same way ``parse_job_reference`` does: the
+    sentence is the first or the second line, nothing deeper.
+    """
+    if not isinstance(result, str) or not result:
+        return None
+    for line in result.split("\n", 2)[:2]:
+        match = _REFUSAL_RE.match(line.strip())
+        if match:
+            return match.group(1)
+    return None
+
+
+def _arg_mistake(tool: str, modality: str, mistake: ArgMistake) -> str:
+    _logger.info("media_tool=refused modality=%s code=invalid_arguments detail=%s", modality, mistake)
+    return (f"Riggen afviste kaldet (invalid_arguments): {mistake}. Der blev ikke startet et job. "
+            f"Kald {tool} igen med rettede argumenter — kun prompt er nødvendig.")
+
+
 # ---------------------------------------------------------------------------
 # The tool
 # ---------------------------------------------------------------------------
@@ -193,15 +238,15 @@ def _validate_args(args: object) -> dict:
         raise ToolDenied("image_generate: args skal være et objekt")
     unknown = set(args) - _ALLOWED_ARGS
     if unknown:
-        raise ToolDenied("image_generate: ukendte argumenter afvises: " + ", ".join(sorted(unknown)))
+        raise ArgMistake("ukendte argumenter: " + ", ".join(sorted(_arg_name(k) for k in unknown)))
     prompt = args.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
-        raise ToolDenied("image_generate: prompt mangler")
+        raise ArgMistake("prompt mangler")
     if len(prompt) > _MAX_PROMPT_CHARS:
-        raise ToolDenied("image_generate: prompt er for lang")
+        raise ArgMistake("prompt er for lang")
     profile_id = args.get("profile_id")
     if profile_id is not None and not isinstance(profile_id, str):
-        raise ToolDenied("image_generate: profile_id skal være en streng")
+        raise ArgMistake("profile_id skal være en streng")
     # An empty string is how a model leaves an optional argument out; it means "the rig's default",
     # not a refusal that ends the turn.
     clean: dict = {"prompt": prompt, "profile_id": (profile_id.strip() or None) if isinstance(profile_id, str) else None}
@@ -211,7 +256,7 @@ def _validate_args(args: object) -> dict:
             clean[key] = None
             continue
         if isinstance(value, bool) or not isinstance(value, int):
-            raise ToolDenied(f"image_generate: {key} skal være et heltal")
+            raise ArgMistake(f"{key} skal være et heltal (et tal, ikke en tekst)")
         clean[key] = value
     return clean
 
@@ -314,7 +359,10 @@ def _submit_media_job(clean: dict, *, service_getter: Callable[[], object] | Non
 def _run_image_generate(args: dict, *, service_getter: Callable[[], object] | None = None,
                         env: Mapping[str, str] | None = None) -> str:
     """Queue one image job. Returns a job reference line followed by text for the model."""
-    clean = _validate_args(args)
+    try:
+        clean = _validate_args(args)
+    except ArgMistake as mistake:
+        return _arg_mistake(TOOL_NAME, "image", mistake)
     return _submit_media_job(
         clean, service_getter=service_getter, env=env, modality="image", task=IMAGE_TASK,
         profile_env=IMAGE_TOOL_PROFILE_ENV, schema=JOB_REFERENCE_SCHEMA, kind="image",
