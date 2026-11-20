@@ -23,10 +23,13 @@ internal fun presentConversationStoreError(operation: ConversationStoreOperation
 
 /** The browser's list state: loaded (possibly empty) or failed -- never an empty list standing in for a failure. */
 sealed class ConversationListState {
-    data class Loaded(val conversations: List<DesktopChatDb.ConvMeta>) : ConversationListState()
-    data object Failed : ConversationListState()
+    abstract val conversations: List<DesktopChatDb.ConvMeta>
 
-    val conversations get() = (this as? Loaded)?.conversations ?: emptyList()
+    data class Loaded(override val conversations: List<DesktopChatDb.ConvMeta>) : ConversationListState()
+
+    data object Failed : ConversationListState() {
+        override val conversations: List<DesktopChatDb.ConvMeta> get() = emptyList()
+    }
 }
 
 /** Wraps a load so that a storage failure is a state, not an empty list. */
