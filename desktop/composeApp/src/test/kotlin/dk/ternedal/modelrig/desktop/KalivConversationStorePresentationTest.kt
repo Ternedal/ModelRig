@@ -23,6 +23,14 @@ class KalivConversationStorePresentationTest {
     }
 
     @Test
+    fun presetOperationsHaveFixedDanishCopyToo() {
+        val all = PresetStoreOperation.values().map { presentPresetStoreError(it) }
+        assertEquals(all.size, all.toSet().size)
+        for (text in all) assertFalse(text.contains("Exception") || text.contains("/") || text.contains(":"), text)
+        assertEquals("Forudindstillingen kunne ikke gemmes", presentPresetStoreError(PresetStoreOperation.SAVE))
+    }
+
+    @Test
     fun everyOperationHasFixedDanishCopyWithoutTechnicalDetail() {
         val all = ConversationStoreOperation.values().map { presentConversationStoreError(it) }
         assertEquals(all.size, all.toSet().size, "each operation names itself")

@@ -21,6 +21,15 @@ internal fun presentConversationStoreError(operation: ConversationStoreOperation
     ConversationStoreOperation.DELETE -> "Samtalen kunne ikke slettes"
 }
 
+/** Same rule for the system-instruction presets (follow-up noted on #2451). */
+enum class PresetStoreOperation { LOAD, SAVE, DELETE }
+
+internal fun presentPresetStoreError(operation: PresetStoreOperation): String = when (operation) {
+    PresetStoreOperation.LOAD -> "Forudindstillingerne kunne ikke indlæses fra den lokale database"
+    PresetStoreOperation.SAVE -> "Forudindstillingen kunne ikke gemmes"
+    PresetStoreOperation.DELETE -> "Forudindstillingen kunne ikke slettes"
+}
+
 /** The browser's list state: loaded (possibly empty) or failed -- never an empty list standing in for a failure. */
 sealed class ConversationListState {
     abstract val conversations: List<DesktopChatDb.ConvMeta>
