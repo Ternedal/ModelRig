@@ -152,8 +152,6 @@ check(o_src.startswith("Videogenerering er ikke tilgængelig") and "no_source_im
       "and so is a refused source")
 for bad, label in (({"prompt": PROMPT, "input_asset_id": "x"}, "asset ids are never a model argument"),
                    ({"prompt": PROMPT, "task": "image_to_video"}, "task cannot be chosen by the model"),
-                   ({"prompt": PROMPT, "source_image_job_id": "x"}, "source must be a 32-hex job id or 'latest'"),
-                   ({"prompt": PROMPT, "source_image_job_id": "newest"}, "no other word than 'latest' is a source"),
                    ({"prompt": PROMPT, "source_image_job_id": 7}, "source must be a string"),
                    ({"prompt": PROMPT, "frames": "33"}, "frames must be an int"),
                    ({}, "prompt missing")):
@@ -277,6 +275,14 @@ o = vgt._run_video_generate({"prompt": PROMPT}, service_getter=lambda: svc5, env
 check("profile_required" in o and parse_job_reference(o) is None, "two profiles for one task: ambiguity is refused, not guessed")
 o = vgt._run_video_generate({"prompt": PROMPT}, service_getter=lambda: svc5, env={"KALIV_VIDEO_TOOL_PROFILE": "wan-t2v-b"})
 check((parse_job_reference(o) or {}).get("profile_id") == "wan-t2v-b", "the configured default resolves it")
+
+# A source the model wrote badly is a text result it can act on, never a turn that dies with HTTP 400.
+for bad_source in ("det billede", "newest", "x", "A" * 32, "\x00unreadable"):
+    svc_bad = service_with(VID, IMG)
+    o = vgt._run_video_generate({"prompt": PROMPT, "source_image_job_id": bad_source}, service_getter=lambda: svc_bad, env={})
+    check("source_not_understood" in o and "latest" in o and parse_job_reference(o) is None
+          and svc_bad.store.latest_completed_for(OWNER, ["sdxl-a", "wan-t2v"]) is None,
+          f"unreadable source {bad_source!r} -> told to use 'latest', nothing queued")
 
 # 5. through the turn
 print("== 5. turn ==")
