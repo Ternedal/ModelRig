@@ -13,6 +13,8 @@ Proves what differs from ``image_generate`` (everything shared is proven in
    stored params carry the task and frames; an image profile is never chosen.
 4. Rig-side refusals as text: ``KALIV_MEDIA_VIDEO`` off -> ``video_not_enabled``;
    no video profile -> ``no_video_profile``; the task is never a model argument.
+4c. Two video profiles, one per task: the profile is chosen among those that
+   list the task; a default configured for the other task does not capture it.
 4b. Image-to-video: ``source_image_job_id`` naming OWNER's completed image job is
    queued as ``image_to_video`` with ``input_asset_id``; unknown / unfinished /
    non-image / foreign jobs are text codes, never a queued job; a profile that
@@ -192,6 +194,42 @@ svc3 = service_with(T2V_ONLY, IMG)
 mine3 = finish_image(svc3, OWNER, "img_3")
 o = vgt._run_video_generate({"prompt": PROMPT, "source_image_job_id": mine3}, service_getter=lambda: svc3, env={})
 check("task_not_served" in o and parse_job_reference(o) is None, "profile without image_to_video -> task_not_served as text")
+
+# 4c. two video profiles, one per task (a template renders exactly one task)
+print("== 4c. profile by task ==")
+T2V = parse_profile(video_profile(profile_id="wan-t2v", tasks=["text_to_video"]))
+I2V = parse_profile(video_profile(profile_id="wan-i2v", tasks=["image_to_video"]))
+
+
+def chosen(args: dict, env: dict) -> tuple[str | None, str]:
+    # A fresh service per case: the owner's active-job limit must not decide these.
+    service = service_with(T2V, I2V, IMG)
+    if "source_image_job_id" in args:
+        args = {**args, "source_image_job_id": finish_image(service, OWNER, "img_4")}
+    text = vgt._run_video_generate({"prompt": PROMPT, **args}, service_getter=lambda: service, env=env)
+    reference = parse_job_reference(text)
+    return (reference["profile_id"] if reference else None), text
+
+
+src4 = "0" * 32  # replaced per case by a finished image job of that case's service
+
+
+check(chosen({}, {})[0] == "wan-t2v", "text request -> the one profile that lists text_to_video")
+check(chosen({"source_image_job_id": src4}, {})[0] == "wan-i2v", "source request -> the one profile that lists image_to_video")
+check(chosen({"source_image_job_id": src4}, {"KALIV_VIDEO_TOOL_PROFILE": "wan-t2v"})[0] == "wan-i2v",
+      "a default configured for the other task does not capture the request")
+check(chosen({}, {"KALIV_VIDEO_TOOL_PROFILE": "wan-i2v"})[0] == "wan-t2v", "and the same the other way round")
+check(chosen({}, {"KALIV_VIDEO_TOOL_PROFILE": "wan-t2v"})[0] == "wan-t2v", "the configured default wins for its own task")
+check("configured_profile_not_enabled" in chosen({}, {"KALIV_VIDEO_TOOL_PROFILE": "sdxl-a"})[1],
+      "a configured image profile is still refused for video")
+check("task_not_served" in chosen({"source_image_job_id": src4, "profile_id": "wan-t2v"}, {})[1],
+      "an explicit profile is not second-guessed: the API says task_not_served")
+T2V_B = parse_profile(video_profile(profile_id="wan-t2v-b", tasks=["text_to_video"]))
+svc5 = service_with(T2V, T2V_B, I2V)
+o = vgt._run_video_generate({"prompt": PROMPT}, service_getter=lambda: svc5, env={})
+check("profile_required" in o and parse_job_reference(o) is None, "two profiles for one task: ambiguity is refused, not guessed")
+o = vgt._run_video_generate({"prompt": PROMPT}, service_getter=lambda: svc5, env={"KALIV_VIDEO_TOOL_PROFILE": "wan-t2v-b"})
+check((parse_job_reference(o) or {}).get("profile_id") == "wan-t2v-b", "the configured default resolves it")
 
 # 5. through the turn
 print("== 5. turn ==")

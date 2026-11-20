@@ -172,17 +172,33 @@ def _validate_args(args: object) -> dict:
 
 
 def _choose_profile(service, requested: str | None, env: Mapping[str, str], *,
-                    modality: str = "image", profile_env: str = IMAGE_TOOL_PROFILE_ENV) -> tuple[str | None, str | None]:
-    """(profile_id, error_code). Explicit > configured default > the sole enabled profile of the modality."""
+                    modality: str = "image", profile_env: str = IMAGE_TOOL_PROFILE_ENV,
+                    task: str | None = None) -> tuple[str | None, str | None]:
+    """(profile_id, error_code). Explicit > configured default > the sole enabled profile of the modality.
+
+    With ``task`` the choice is among the profiles that list it. That matters for
+    video: a ComfyUI template renders exactly one task, so text-to-video and
+    image-to-video are two profiles on the rig, and "the sole video profile" or
+    one configured default cannot serve both. The configured default wins for the
+    task it lists; for the other task the sole profile that lists it is used. An
+    explicitly requested profile is never second-guessed here -- the job API
+    answers ``task_not_served`` for it.
+    """
     enabled = {pid: p for pid, p in service.profiles.items() if getattr(p, "modality", None) == modality}
     if requested is not None:
         return (requested, None) if requested in enabled else (None, "profile_not_enabled")
+    serving = enabled if task is None else {pid: p for pid, p in enabled.items() if task in getattr(p, "tasks", ())}
     configured = env.get(profile_env, "").strip()
     if configured:
-        return (configured, None) if configured in enabled else (None, "configured_profile_not_enabled")
-    if len(enabled) == 1:
-        return next(iter(enabled)), None
-    return None, (f"no_{modality}_profile" if not enabled else "profile_required")
+        if configured not in enabled:
+            return None, "configured_profile_not_enabled"
+        if configured in serving:
+            return configured, None
+    if len(serving) == 1:
+        return next(iter(serving)), None
+    if not enabled:
+        return None, f"no_{modality}_profile"
+    return None, ("task_not_served" if not serving else "profile_required")
 
 
 def _submit_media_job(clean: dict, *, service_getter: Callable[[], object] | None, env: Mapping[str, str] | None,
@@ -207,7 +223,8 @@ def _submit_media_job(clean: dict, *, service_getter: Callable[[], object] | Non
     except MediaJobsUnavailable as exc:
         return _unavailable(str(exc) or "media_jobs_unavailable")
 
-    profile_id, code = _choose_profile(service, clean["profile_id"], env, modality=modality, profile_env=profile_env)
+    profile_id, code = _choose_profile(service, clean["profile_id"], env, modality=modality, profile_env=profile_env,
+                                       task=task)
     if code is not None:
         return _unavailable(code)
 
