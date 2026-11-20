@@ -182,11 +182,11 @@ def _resolve_source(job_id: str, service_getter: Callable[[], object] | None) ->
 
     getter = service_getter if service_getter is not None else _production_service_getter()
     if getter is None:
-        return None, _unavailable("media_jobs_api_off")
+        return None, _unavailable("media_jobs_api_off", "video")
     try:
         service = getter()
     except MediaJobsUnavailable as exc:
-        return None, _unavailable(str(exc) or "media_jobs_unavailable")
+        return None, _unavailable(str(exc) or "media_jobs_unavailable", "video")
     try:
         if job_id == LATEST_SOURCE:
             image_profiles = [pid for pid, p in service.profiles.items() if getattr(p, "modality", None) == "image"]
@@ -194,18 +194,18 @@ def _resolve_source(job_id: str, service_getter: Callable[[], object] | None) ->
         else:
             job = service.store.get(job_id, OWNER)
     except Exception:  # noqa: BLE001 -- a store that cannot be reached: a code, never a path
-        return None, _unavailable("media_jobs_store_unavailable")
+        return None, _unavailable("media_jobs_store_unavailable", "video")
     if job is None:
-        return None, _unavailable("no_source_image" if job_id == LATEST_SOURCE else "source_job_not_found")
+        return None, _unavailable("no_source_image" if job_id == LATEST_SOURCE else "source_job_not_found", "video")
     if job.get("state") != "completed" or not job.get("asset_id"):
-        return None, _unavailable("source_job_not_completed")
+        return None, _unavailable("source_job_not_completed", "video")
     source_profile = service.profiles.get(job.get("profile_id"))
     if source_profile is None:
-        return None, _unavailable("source_profile_not_enabled")
+        return None, _unavailable("source_profile_not_enabled", "video")
     if getattr(source_profile, "modality", None) != "image":
-        return None, _unavailable("source_not_an_image")
+        return None, _unavailable("source_not_an_image", "video")
     if not service.store.owns_completed_asset(OWNER, job["asset_id"]):
-        return None, _unavailable("source_not_found")
+        return None, _unavailable("source_not_found", "video")
     return job["asset_id"], None
 
 
