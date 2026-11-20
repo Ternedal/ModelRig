@@ -52,6 +52,7 @@ from fastapi import HTTPException
 from .tools import Tool, ToolDenied
 
 TOOL_NAME = "image_generate"
+IMAGE_TASK = "text_to_image"
 IMAGE_TOOL_FLAG = "KALIV_IMAGE_TOOL_ENABLED"
 IMAGE_TOOL_PROFILE_ENV = "KALIV_IMAGE_TOOL_PROFILE"
 JOB_REFERENCE_SCHEMA = "kaliv-image-job-ref/v1"
@@ -202,8 +203,9 @@ def _run_image_generate(args: dict, *, service_getter: Callable[[], object] | No
         return _unavailable(code)
 
     try:
-        body = SubmitRequest(profile_id=profile_id, prompt=clean["prompt"], width=clean["width"],
-                             height=clean["height"], seed=clean["seed"])
+        # The task is named, not left to a default: the tool only ever means a picture from text.
+        body = SubmitRequest(profile_id=profile_id, prompt=clean["prompt"], task=IMAGE_TASK,
+                             width=clean["width"], height=clean["height"], seed=clean["seed"])
     except ValueError:
         return _unavailable("invalid_request")
     try:
@@ -212,6 +214,10 @@ def _run_image_generate(args: dict, *, service_getter: Callable[[], object] | No
         return _unavailable(str(exc.detail))
 
     params = {key: clean[key] for key in _INT_ARGS if clean[key] is not None}
+    # The task follows the job. Without it the executor falls back to the profile's
+    # alphabetically first task, and for a profile that also lists image_to_image that
+    # is the wrong one: the job would fail with "input_asset_id required for this task".
+    params["task"] = generation.task
     try:
         created = service.store.submit(OWNER, clean["prompt"], profile_id=profile.profile_id, params=params)
     except ImageJobError as exc:
