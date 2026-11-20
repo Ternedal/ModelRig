@@ -29,8 +29,10 @@ configuration error (exit 78) unless all of this holds:
                                       cuda<N>/ in it, with existing input/, output/, temp/ and user/
   KALIV_COMFY_TEMPLATE_DIR            the operator's workflow template directory
   KALIV_COMFY_WEIGHTS_CACHE           optional: the weight-hash cache file, in the work area
-  and every served video profile is text_to_video only (image_to_video needs the owner-gated
-  source reader, not wired here), uses the comfyui backend, and pins comfyui_version and weights.
+  and every served video profile uses the comfyui backend and pins comfyui_version and weights.
+  A profile whose template carries the image slot renders image_to_video: the source is a completed
+  PNG of the job's owner, read through the owner-gated reader (media_source_image) from the verified
+  volume -- never a path, never another owner's asset.
 Images are published job-keyed through ExternalMediaSink; video through ExternalStagedVideoSink,
 with the pinned G1 volume verified before every staging and adoption. There is no bytes fallback.
 
@@ -60,6 +62,7 @@ from typing import Callable, Mapping
 from .gpu_lease import GpuLeaseError, check_lease_dir, device_uuid_map, lease_dir_from_env, parse_cuda_device
 from .image_job_store import ImageJobError, ImageJobStore
 from .media_executor import EXIT_CONFIG, EXIT_SINK_UNAVAILABLE, ExecutorConfigError, MediaExecutor
+from .media_source_image import read_owned_source_png
 from .media_gallery_store import ExternalMediaSink
 from .media_generation_contract import MAX_ARTIFACT_BYTES, ArtifactSinkUnavailable, GenerationError
 from .media_generation_profiles import ModelProfile, enabled_profiles, load_profile_dir
@@ -163,9 +166,6 @@ def _video_config(env: Mapping[str, str], video: Mapping[str, ModelProfile], wor
         options = profile.backend_options
         if profile.backend != "comfyui" or options is None:
             raise ExecutorConfigError(f"{profile_id}: video is served through the supervised ComfyUI only")
-        if "image_to_video" in profile.tasks:
-            raise ExecutorConfigError(f"{profile_id}: image_to_video is not served yet (the owner-gated source "
-                                      "reader is not wired); a served video profile lists text_to_video only")
         if options.comfyui_version is None or not options.weights:
             raise ExecutorConfigError(f"{profile_id}: a served video profile must pin comfyui_version and weights")
     python = _absolute(env, COMFY_PYTHON_ENV)
@@ -398,9 +398,16 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
         translator = translator_from_env(env)
     except PromptTranslationConfigError as exc:
         raise ExecutorConfigError(str(exc)) from None
+    # image_to_video (#2366 follow-up, 20/11): the owner-gated source reader. The owner is the
+    # claimed row's (the routes took it from the authenticated pairing); the asset must be a
+    # completed PNG of that owner, read from the verified volume without following links. Wired
+    # for every executor -- a profile whose template renders text_to_video never calls it.
+    def source_reader(owner: str, asset_id: str) -> bytes:
+        return read_owned_source_png(sink, store, owner, asset_id)
+
     return MediaExecutor(store, gpu_uuid=gpu_uuid, lease_dir=lease_dir, profiles=mine, adapter_factory=factory,
                          image_sink=published_through, video_sink=video_sink, idle_unload_s=idle,
-                         volume_root=str(volume.root),
+                         volume_root=str(volume.root), source_reader=source_reader,
                          prompt_rewriter=translator.rewrite if translator is not None else None)
 
 

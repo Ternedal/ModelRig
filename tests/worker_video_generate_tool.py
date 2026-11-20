@@ -6,14 +6,17 @@ Proves what differs from ``image_generate`` (everything shared is proven in
 
 1. Own gate ``KALIV_VIDEO_TOOL_ENABLED`` (literal ``1``), own registration, own
    system rule that follows REGISTRY.
-2. Contract: read, not idempotent, not schedulable, network none; ``frames`` is
-   an accepted argument; the description says text-to-video only.
+2. Contract: read, not idempotent, not schedulable, network none; ``frames`` and
+   ``source_image_job_id`` are accepted arguments; the description names both ways.
 3. Run: with ``video_enabled`` the job is queued as ``text_to_video`` for OWNER
    with a ``kaliv-video-job-ref/v1`` reference carrying ``kind=video``; the
    stored params carry the task and frames; an image profile is never chosen.
 4. Rig-side refusals as text: ``KALIV_MEDIA_VIDEO`` off -> ``video_not_enabled``;
-   no video profile -> ``no_video_profile``; image-to-video is not offered (no
-   argument for it; task fixed).
+   no video profile -> ``no_video_profile``; the task is never a model argument.
+4b. Image-to-video: ``source_image_job_id`` naming OWNER's completed image job is
+   queued as ``image_to_video`` with ``input_asset_id``; unknown / unfinished /
+   non-image / foreign jobs are text codes, never a queued job; a profile that
+   does not list the task is refused by the API (``task_not_served``).
 5. The lift: ``parse_job_reference`` reads a video reference with kind=video,
    and the turn result's ``media_jobs`` carries it (through /tools/chat).
 
@@ -104,10 +107,11 @@ print("== 2. contract ==")
 cap = vgt.VIDEO_GENERATE_CAPABILITY
 check(cap.risk == "read" and cap.impact == "read" and cap.idempotent is False, "read, not idempotent")
 check(cap.schedulable is False and cap.network == "none" and cap.sensitivity == "private", "not schedulable, local, private")
-check(set(cap.params["properties"]) == {"prompt", "profile_id", "width", "height", "frames", "seed"}
-      and cap.params["required"] == ["prompt"], "argument surface incl. frames; prompt required")
-check("text-to-video only" in cap.description and "Never claim it is finished" in cap.description,
-      "description: t2v only, on-its-way rule")
+check(set(cap.params["properties"]) == {"prompt", "profile_id", "width", "height", "frames", "seed", "source_image_job_id"}
+      and cap.params["required"] == ["prompt"], "argument surface incl. frames + source_image_job_id; prompt required")
+check("source_image_job_id" in cap.description and "Never claim it is finished" in cap.description
+      and "cannot animate" not in cap.description, "description: both ways, on-its-way rule, no stale refusal")
+check("source_image_job_id" in vgt.SYSTEM_RULE and "cannot animate" not in vgt.SYSTEM_RULE, "system rule names i2v")
 check(tools.requires_confirmation(cap, origin="model") is False, "no confirmation card")
 
 # 3. run
@@ -137,14 +141,57 @@ o = vgt._run_video_generate({"prompt": PROMPT, "profile_id": "sdxl-a"}, service_
 check("profile_not_enabled" in o, "an explicit image profile is refused for video")
 o = vgt._run_video_generate({"prompt": PROMPT}, service_getter=None, env={})
 check("media_jobs_api_off" in o, "job API off -> text")
-for bad, label in (({"prompt": PROMPT, "input_asset_id": "x"}, "image-to-video is not an argument"),
+for bad, label in (({"prompt": PROMPT, "input_asset_id": "x"}, "asset ids are never a model argument"),
                    ({"prompt": PROMPT, "task": "image_to_video"}, "task cannot be chosen by the model"),
+                   ({"prompt": PROMPT, "source_image_job_id": "x"}, "source must be a 32-hex job id"),
+                   ({"prompt": PROMPT, "source_image_job_id": 7}, "source must be a string"),
                    ({"prompt": PROMPT, "frames": "33"}, "frames must be an int"),
                    ({}, "prompt missing")):
     try:
         vgt._run_video_generate(bad, service_getter=lambda: svc, env={}); check(False, f"{label}: ToolDenied")
     except tools.ToolDenied:
         check(True, f"{label}: ToolDenied")
+
+# 4b. image-to-video from a picture of this conversation
+print("== 4b. image-to-video ==")
+EXECUTOR = "GPU-" + "0" * 8 + "-0000-0000-0000-" + "0" * 12 + ":" + "a" * 16
+
+
+def finish_image(service: MediaJobService, owner: str, asset_id: str) -> str:
+    jid = service.store.submit(owner, "a paper boat", profile_id="sdxl-a", params={})["job_id"]
+    assert service.store.claim_for(["sdxl-a"], EXECUTOR)["id"] == jid
+    assert service.store.begin_publish(jid, EXECUTOR) and service.store.complete(jid, EXECUTOR, asset_id)
+    return jid
+
+
+svc2 = service_with(VID, IMG)
+mine = finish_image(svc2, OWNER, "img_mine")
+o = vgt._run_video_generate({"prompt": PROMPT, "source_image_job_id": mine}, service_getter=lambda: svc2, env={})
+ref2 = parse_job_reference(o)
+check(ref2 is not None and ref2["kind"] == "video" and ref2["profile_id"] == "wan-t2v", "own completed image -> video job queued")
+job2 = svc2.store.get(ref2["job_id"], OWNER) if ref2 else None
+p2 = json.loads(job2["params"]) if job2 and isinstance(job2.get("params"), str) else (job2 or {}).get("params") or {}
+check(p2.get("task") == "image_to_video" and p2.get("input_asset_id") == "img_mine", "stored params: task=image_to_video, input_asset_id")
+check("img_mine" not in o and mine not in o.split("\n", 1)[1], "text never repeats asset or source ids")
+theirs = finish_image(svc2, "someone-else", "img_theirs")
+o = vgt._run_video_generate({"prompt": PROMPT, "source_image_job_id": theirs}, service_getter=lambda: svc2, env={})
+check("source_job_not_found" in o and parse_job_reference(o) is None, "another owner's job -> source_job_not_found")
+o = vgt._run_video_generate({"prompt": PROMPT, "source_image_job_id": "f" * 32}, service_getter=lambda: svc2, env={})
+check("source_job_not_found" in o, "unknown job -> source_job_not_found")
+queued = svc2.store.submit(OWNER, "x", profile_id="sdxl-a", params={})["job_id"]
+o = vgt._run_video_generate({"prompt": PROMPT, "source_image_job_id": queued}, service_getter=lambda: svc2, env={})
+check("source_job_not_completed" in o, "unfinished job -> source_job_not_completed")
+vid_job = svc2.store.submit(OWNER, "x", profile_id="wan-t2v", params={})["job_id"]
+while svc2.store.claim_for(["wan-t2v"], EXECUTOR)["id"] != vid_job:  # the earlier i2v job is queued ahead of it
+    pass
+assert svc2.store.begin_publish(vid_job, EXECUTOR) and svc2.store.complete(vid_job, EXECUTOR, "vid_1")
+o = vgt._run_video_generate({"prompt": PROMPT, "source_image_job_id": vid_job}, service_getter=lambda: svc2, env={})
+check("source_not_an_image" in o, "a finished video job is not a source picture")
+T2V_ONLY = parse_profile(video_profile(profile_id="wan-t2v-only", tasks=["text_to_video"]))
+svc3 = service_with(T2V_ONLY, IMG)
+mine3 = finish_image(svc3, OWNER, "img_3")
+o = vgt._run_video_generate({"prompt": PROMPT, "source_image_job_id": mine3}, service_getter=lambda: svc3, env={})
+check("task_not_served" in o and parse_job_reference(o) is None, "profile without image_to_video -> task_not_served as text")
 
 # 5. through the turn
 print("== 5. turn ==")

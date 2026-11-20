@@ -4,7 +4,7 @@
 - The API worker never imports `worker/app/media_executor.py` (boundary test).
 - With G2b the appliance's Go `modelrig-supervisor` can start one executor per GPU, but only when `KALIV_MEDIA_EXECUTOR=1` and the configuration below is complete. Off by default; a refused configuration starts nothing.
 - Images are published job-keyed through `ExternalMediaSink`.
-- Text-to-video is wired but **default-off** behind its own switch, `KALIV_MEDIA_VIDEO=1` (see "Video" below). Without that switch, an enabled video profile is still exit 78. Image-to-video is still exit 78 in every case.
+- Text-to-video is wired but **default-off** behind its own switch, `KALIV_MEDIA_VIDEO=1` (see "Video" below). Without that switch, an enabled video profile is still exit 78. Image-to-video is served through the same switch when the profile lists it (see "Image-to-video"); nothing of it has been proven on the rig.
 - Activation on the rig needs the rig pack (#2296 6509723614) and Anders' go.
 
 Sources:
@@ -134,7 +134,8 @@ The entry point checks the configuration before it touches anything, including t
   | `ArtifactSinkUnavailable` (the volume) | stays `running`, then recovery fails it as `interrupted_by_restart` | exit 75 |
 
 - **The bytes** go to `ComfyVideoAdapter.render_to(source_png=...)`. See `docs/MEDIA_VIDEO_GENERATION.md` for the bounded decode, the exclusive staging and the cleanup.
-- **Not served by the entry point.** `media_executor_main` refuses a profile that lists `image_to_video` with exit 78, because the owner-gated source reader is not wired there. Text-to-video is wired; see "Video" below.
+- **Through the entry point (#2366).** `media_executor_main` wires `read_owned_source_png(sink, store, owner, asset_id)` as the `source_reader`, so a video profile that lists `image_to_video` is served under `KALIV_MEDIA_VIDEO=1` like text-to-video. The reader checks `owns_completed_asset` for the claimed row's owner before any gallery I/O; the job API checked the same at submit (`source_not_found`). Default-off with the rest of video; not proven on the rig.
+- **From the chat.** `video_generate` takes `source_image_job_id` (the id `image_generate` returned in this conversation), resolves it through the store for the installation owner to the completed asset, and queues `image_to_video` with `input_asset_id`. Unknown, unfinished, foreign or non-image jobs are text codes (`source_job_not_found`, `source_job_not_completed`, `source_not_an_image`); a profile without the task is `task_not_served`.
 
 ## Video (text-to-video, default-off)
 
@@ -190,7 +191,6 @@ Every restartable code doubles its delay for each exit in a row, capped at 5 min
 
 ## Not in this slice
 
-- Image-to-video through the entry point. It needs the owner-gated source reader wired.
 - A public "verify the volume" method on `ExternalMediaSink`: the entry point calls its `_root()` at start so a missing volume is exit 75 before anything is opened (ChatGPT owns the sink).
 - Routes for submit/get/cancel (ChatGPT).
 - Reconciliation itself: ChatGPT's read-only `inspect_generation_consistency` (#2313) classifies the recovered job. There is no automatic completion from file presence, and no inference retry.
