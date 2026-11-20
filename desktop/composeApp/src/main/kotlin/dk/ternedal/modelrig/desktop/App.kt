@@ -184,6 +184,9 @@ fun App() {
         // In-memory only: a confirmation continues under the exact endpoint/auth
         // snapshot that minted it. This is never persisted or rendered.
         var pendingCardTurnConfig by remember { mutableStateOf<KalivChatTurnConfig?>(null) }
+        // #2465: media the turn queued before the card (and before earlier cards of the same
+        // chain). The rig starts a new list per call; the answer after the decision gets the union.
+        var pendingCardJobs by remember { mutableStateOf<List<DesktopMediaJobRef>>(emptyList()) }
         var pendingCardError by remember { mutableStateOf<String?>(null) }
         var showAudit by remember { mutableStateOf(false) }
         var showControlCenter by remember { mutableStateOf(false) }
@@ -358,6 +361,7 @@ fun App() {
                                 )
                                 pendingCardError = null
                                 pendingCardTurnConfig = turnConfig
+                                pendingCardJobs = turn.mediaJobRefs()
                                 pendingCard = turn
                             }
                             else -> {
@@ -940,6 +944,7 @@ fun App() {
                             // A chained write gets its own authoritative card. One
                             // approval never authorises the next write.
                             pendingCard = next
+                            pendingCardJobs = DesktopMediaContract.across(pendingCardJobs, next.mediaJobRefs())
                             pendingCardError = null
                         } else {
                             // Only a successful worker acknowledgement may clear the card.
@@ -947,8 +952,10 @@ fun App() {
                             pendingCardTurnConfig = null
                             pendingCardError = null
                             val text = next.answer.ifBlank { if (approve) "Udført." else "Afvist." }
-                            // A turn that continued after the approval may have queued media too.
-                            val jobs = next.mediaJobRefs()
+                            // A turn that continued after the approval may have queued media too,
+                            // and what it queued before the card is already rendering.
+                            val jobs = DesktopMediaContract.across(pendingCardJobs, next.mediaJobRefs())
+                            pendingCardJobs = emptyList()
                             messages.add(UiMessage("assistant", text, mediaJobs = jobs, mediaNotice = next.mediaRefusalNotice()))
                             val cid = convId
                             if (cid != null) withContext(Dispatchers.IO) {

@@ -225,4 +225,13 @@ class DesktopMediaContractTest {
         assertNull(refused(""""not an array"""").mediaRefusalNotice())
         assertNull(refused("""[{"tool":"image_generate","code":"invalid_arguments"}]""", "[${ref(id)}]").mediaRefusalNotice())
     }
+
+    @Test
+    fun `jobs queued before a confirmation card and after it are one turn`() {
+        val a = DesktopMediaJobRef(id, DesktopMediaKind.IMAGE)
+        val b = DesktopMediaJobRef(other, DesktopMediaKind.VIDEO)
+        assertEquals(listOf(a, b), DesktopMediaContract.across(listOf(a), listOf(b)))
+        assertEquals(listOf(a), DesktopMediaContract.across(listOf(a), listOf(a)))
+        assertEquals(emptyList<DesktopMediaJobRef>(), DesktopMediaContract.across(emptyList(), emptyList()))
+    }
 }

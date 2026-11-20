@@ -141,6 +141,13 @@ object DesktopMediaContract {
         }.distinctBy { it.jobId }
     }
 
+    /**
+     * The media jobs of one user turn across a confirmation card: queued before it and after the
+     * decision. Neither list alone is the turn. Order kept, no duplicates.
+     */
+    fun across(before: List<DesktopMediaJobRef>, after: List<DesktopMediaJobRef>): List<DesktopMediaJobRef> =
+        (before + after).distinctBy { it.jobId }
+
     private val REFUSAL_CODE = Regex("[a-z0-9_]{1,64}")
     private const val MAX_REFUSALS = 8
 
