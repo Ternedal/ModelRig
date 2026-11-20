@@ -130,7 +130,8 @@ try:
     jobs = d.get("media_jobs")
     check(isinstance(jobs, list) and len(jobs) == 1, f"media_jobs carries exactly one job (got {jobs!r})")
     job = (jobs or [{}])[0]
-    check(set(job) == {"job_id", "state", "profile_id", "status_url"}, "media_jobs entry has the four fields")
+    check(set(job) == {"job_id", "kind", "state", "profile_id", "status_url"} and job.get("kind") == "image",
+          "media_jobs entry has the five fields, kind=image")
     check(job.get("profile_id") == "sdxl-a" and job.get("state") == "queued", "entry names profile and state")
     check(job.get("status_url") == f"/api/v1/media/jobs/{job.get('job_id')}", "status_url is the job route")
     stored = store.get(job.get("job_id", ""), OWNER) if job.get("job_id") else None

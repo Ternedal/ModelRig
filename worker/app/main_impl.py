@@ -719,6 +719,8 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
     """
     from . import tools as t
     from .image_generate_tool import TOOL_NAME as _IMAGE_TOOL, parse_job_reference as _image_job_ref
+    from .video_generate_tool import TOOL_NAME as _VIDEO_TOOL
+    _MEDIA_TOOLS = {_IMAGE_TOOL, _VIDEO_TOOL}
     _schema = t.ollama_tool_schema(t.GATE)
     last_result = None
     # #2419: image jobs the turn queued, lifted out of the tool result so the app
@@ -797,7 +799,7 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
                     "context": context or []}
         tools_used.append(name)
         last_result = result["result"]
-        if name == _IMAGE_TOOL:
+        if name in _MEDIA_TOOLS:
             ref = _image_job_ref(result["result"])
             if ref is not None:
                 media_jobs.append(ref)
@@ -846,11 +848,12 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
         "action. If no tool fits, answer normally."
     )
     messages.append({"role": "system", "content": _tool_nudge})
-    # #2419 slice C: one more line, only while image_generate is registered.
+    # #2419 slice C: one more line per media tool, only while it is registered.
     from .image_generate_tool import system_rule_if_registered as _image_rule
-    _rule = _image_rule()
-    if _rule:
-        messages.append({"role": "system", "content": _rule})
+    from .video_generate_tool import system_rule_if_registered as _video_rule
+    for _rule in (_image_rule(), _video_rule()):
+        if _rule:
+            messages.append({"role": "system", "content": _rule})
     # Person Profile binding (#752): a selected person's active personality
     # takes precedence over the client's persona text; with no person
     # selected the client's prompt is used exactly as before.

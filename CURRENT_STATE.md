@@ -80,6 +80,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_TOOLS_DIR` | `(unset)` |
 | `KALIV_TOOLS_ENABLED` | `0` |
 | `KALIV_TOOL_ISOLATION` | `` |
+| `KALIV_VIDEO_TOOL_ENABLED` | `0` |
 | `KALIV_VISIONRIG_SENSOR_CONTROL` | `0` |
 | `KALIV_VISIONRIG_URL` | `http://127.0.0.1:8110` |
 | `KALIV_VISION_MODEL` | `(unset)` |
@@ -486,6 +487,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_tools_guardrail.py`
 - `tests/worker_tools_readtools.py`
 - `tests/worker_unit.py`
+- `tests/worker_video_generate_tool.py`
 - `tests/worker_vision.py`
 - `tests/worker_voice_asr_startup_race.py`
 - `tests/worker_voice_baseline.py`

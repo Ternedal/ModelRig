@@ -5,7 +5,7 @@
 
 **Version på main:** `2.0.21`
 **Kørende appliance:** ingen fundet på 127.0.0.1:8080 — dommen bygger på dette miljøs rapportstier (CI-fallback)
-**Genereret:** 2026-11-19 21:43 UTC
+**Genereret:** 2026-11-20 09:03 UTC
 
 ---
 
@@ -71,7 +71,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 41 feature-switches er tændt som default.** (36 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 42 feature-switches er tændt som default.** (36 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
@@ -130,6 +130,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_TOOLS_DIR` | `(unset)` | indstilling |
 | `KALIV_TOOLS_ENABLED` | `0` | slukket |
 | `KALIV_TOOL_ISOLATION` | `(tom)` | indstilling |
+| `KALIV_VIDEO_TOOL_ENABLED` | `0` | slukket |
 | `KALIV_VISIONRIG_SENSOR_CONTROL` | `0` | slukket |
 | `KALIV_VISIONRIG_URL` | `http://127.0.0.1:8110` | indstilling |
 | `KALIV_VISION_MODEL` | `(tom)` | indstilling |

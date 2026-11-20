@@ -56,6 +56,10 @@ IMAGE_TASK = "text_to_image"
 IMAGE_TOOL_FLAG = "KALIV_IMAGE_TOOL_ENABLED"
 IMAGE_TOOL_PROFILE_ENV = "KALIV_IMAGE_TOOL_PROFILE"
 JOB_REFERENCE_SCHEMA = "kaliv-image-job-ref/v1"
+VIDEO_JOB_REFERENCE_SCHEMA = "kaliv-video-job-ref/v1"
+# schema -> kind. ``parse_job_reference`` accepts exactly these; the app's bubble
+# reads ``kind`` to know whether to show a picture or a player.
+JOB_REFERENCE_SCHEMAS = {JOB_REFERENCE_SCHEMA: "image", VIDEO_JOB_REFERENCE_SCHEMA: "video"}
 STATUS_URL_PREFIX = "/api/v1/media/jobs/"
 
 _ALLOWED_ARGS = frozenset({"prompt", "profile_id", "width", "height", "seed"})
@@ -168,28 +172,34 @@ def _validate_args(args: object) -> dict:
     return clean
 
 
-def _choose_profile(service, requested: str | None, env: Mapping[str, str]) -> tuple[str | None, str | None]:
-    """(profile_id, error_code). Explicit > KALIV_IMAGE_TOOL_PROFILE > the sole enabled image profile."""
-    images = {pid: p for pid, p in service.profiles.items() if getattr(p, "modality", None) == "image"}
+def _choose_profile(service, requested: str | None, env: Mapping[str, str], *,
+                    modality: str = "image", profile_env: str = IMAGE_TOOL_PROFILE_ENV) -> tuple[str | None, str | None]:
+    """(profile_id, error_code). Explicit > configured default > the sole enabled profile of the modality."""
+    enabled = {pid: p for pid, p in service.profiles.items() if getattr(p, "modality", None) == modality}
     if requested is not None:
-        return (requested, None) if requested in images else (None, "profile_not_enabled")
-    configured = env.get(IMAGE_TOOL_PROFILE_ENV, "").strip()
+        return (requested, None) if requested in enabled else (None, "profile_not_enabled")
+    configured = env.get(profile_env, "").strip()
     if configured:
-        return (configured, None) if configured in images else (None, "configured_profile_not_enabled")
-    if len(images) == 1:
-        return next(iter(images)), None
-    return None, ("no_image_profile" if not images else "profile_required")
+        return (configured, None) if configured in enabled else (None, "configured_profile_not_enabled")
+    if len(enabled) == 1:
+        return next(iter(enabled)), None
+    return None, (f"no_{modality}_profile" if not enabled else "profile_required")
 
 
-def _run_image_generate(args: dict, *, service_getter: Callable[[], object] | None = None,
-                        env: Mapping[str, str] | None = None) -> str:
-    """Queue one image job. Returns a job reference line followed by text for the model."""
+def _submit_media_job(clean: dict, *, service_getter: Callable[[], object] | None, env: Mapping[str, str] | None,
+                      modality: str, task: str | None, profile_env: str, schema: str, kind: str,
+                      params_keys: tuple[str, ...], text: Callable[[str, str], str]) -> str:
+    """The shared path for image_generate and video_generate: queue one job, answer as text.
+
+    Every rig-side condition is a text result with a code; only the caller's
+    argument validation raises. ``text(job_id, profile_id)`` is the sentence the
+    model relays; the first line is the machine-readable job reference the app
+    turns into a bubble.
+    """
     from .image_job_store import ImageJobError
     from .media_job_api import OWNER, MediaJobsUnavailable, SubmitRequest
 
-    clean = _validate_args(args)
     env = os.environ if env is None else env
-
     getter = service_getter if service_getter is not None else _production_service_getter()
     if getter is None:
         return _unavailable("media_jobs_api_off")
@@ -198,14 +208,13 @@ def _run_image_generate(args: dict, *, service_getter: Callable[[], object] | No
     except MediaJobsUnavailable as exc:
         return _unavailable(str(exc) or "media_jobs_unavailable")
 
-    profile_id, code = _choose_profile(service, clean["profile_id"], env)
+    profile_id, code = _choose_profile(service, clean["profile_id"], env, modality=modality, profile_env=profile_env)
     if code is not None:
         return _unavailable(code)
 
     try:
-        # The task is named, not left to a default: the tool only ever means a picture from text.
-        body = SubmitRequest(profile_id=profile_id, prompt=clean["prompt"], task=IMAGE_TASK,
-                             width=clean["width"], height=clean["height"], seed=clean["seed"])
+        body = SubmitRequest(profile_id=profile_id, prompt=clean["prompt"], task=task,
+                             **{key: clean.get(key) for key in params_keys})
     except ValueError:
         return _unavailable("invalid_request")
     try:
@@ -213,7 +222,7 @@ def _run_image_generate(args: dict, *, service_getter: Callable[[], object] | No
     except HTTPException as exc:
         return _unavailable(str(exc.detail))
 
-    params = {key: clean[key] for key in _INT_ARGS if clean[key] is not None}
+    params = {key: clean[key] for key in params_keys if clean.get(key) is not None}
     # The task follows the job. Without it the executor falls back to the profile's
     # alphabetically first task, and for a profile that also lists image_to_image that
     # is the wrong one: the job would fail with "input_asset_id required for this task".
@@ -227,18 +236,29 @@ def _run_image_generate(args: dict, *, service_getter: Callable[[], object] | No
 
     job_id = created["job_id"]
     reference = {
-        "schema": JOB_REFERENCE_SCHEMA,
+        "schema": schema,
+        "kind": kind,
         "job_id": job_id,
         "state": created.get("state", "queued"),
         "profile_id": profile.profile_id,
         "status_url": STATUS_URL_PREFIX + job_id,
     }
-    return (
-        json.dumps(reference, ensure_ascii=False, sort_keys=True)
-        + "\n"
-        + f"Billedjob {job_id} er sat i kø på riggen (profil {profile.profile_id}). "
-        "Billedet vises i samtalen, når det er klar. Sig til brugeren, at det er på vej — "
-        "påstå ikke, at det er færdigt, og gentag ikke prompten."
+    return json.dumps(reference, ensure_ascii=False, sort_keys=True) + "\n" + text(job_id, profile.profile_id)
+
+
+def _run_image_generate(args: dict, *, service_getter: Callable[[], object] | None = None,
+                        env: Mapping[str, str] | None = None) -> str:
+    """Queue one image job. Returns a job reference line followed by text for the model."""
+    clean = _validate_args(args)
+    return _submit_media_job(
+        clean, service_getter=service_getter, env=env, modality="image", task=IMAGE_TASK,
+        profile_env=IMAGE_TOOL_PROFILE_ENV, schema=JOB_REFERENCE_SCHEMA, kind="image",
+        params_keys=_INT_ARGS,
+        text=lambda job_id, profile_id: (
+            f"Billedjob {job_id} er sat i kø på riggen (profil {profile_id}). "
+            "Billedet vises i samtalen, når det er klar. Sig til brugeren, at det er på vej — "
+            "påstå ikke, at det er færdigt, og gentag ikke prompten."
+        ),
     )
 
 
@@ -266,14 +286,15 @@ def parse_job_reference(result: str) -> dict | None:
         data = json.loads(first)
     except ValueError:
         return None
-    if not isinstance(data, dict) or data.get("schema") != JOB_REFERENCE_SCHEMA:
+    if not isinstance(data, dict) or data.get("schema") not in JOB_REFERENCE_SCHEMAS:
         return None
     job_id = data.get("job_id")
     if not isinstance(job_id, str) or len(job_id) != 32 or any(c not in "0123456789abcdef" for c in job_id):
         return None
     if data.get("status_url") != STATUS_URL_PREFIX + job_id:
         return None
-    return {"job_id": job_id, "state": data.get("state"), "profile_id": data.get("profile_id"),
+    kind = data.get("kind") or JOB_REFERENCE_SCHEMAS[data["schema"]]
+    return {"job_id": job_id, "kind": kind, "state": data.get("state"), "profile_id": data.get("profile_id"),
             "status_url": data["status_url"]}
 
 
