@@ -74,6 +74,10 @@ import dk.ternedal.modelrig.desktop.data.DesktopSettingSaveResult
 import dk.ternedal.modelrig.desktop.net.ChatMessage
 import dk.ternedal.modelrig.desktop.net.ChatResult
 import dk.ternedal.modelrig.desktop.net.ChatRouter
+import dk.ternedal.modelrig.desktop.net.DesktopMediaClient
+import dk.ternedal.modelrig.desktop.net.DesktopMediaContract
+import dk.ternedal.modelrig.desktop.net.DesktopMediaJobRef
+import dk.ternedal.modelrig.desktop.net.DesktopMediaSource
 import dk.ternedal.modelrig.desktop.net.OllamaClient
 import dk.ternedal.modelrig.desktop.net.RagClient
 import dk.ternedal.modelrig.desktop.net.ToolsClient
@@ -120,6 +124,9 @@ private data class UiMessage(
     // For the guide's identity row ("Kaliv · 14:32"). Loaded messages carry the
     // stored created_at; new ones stamp now.
     val at: Long = System.currentTimeMillis(),
+    // #2419: the picture/clip jobs this assistant message queued on the rig;
+    // each gets a media bubble under the text. Job ids only, never the prompt.
+    val mediaJobs: List<DesktopMediaJobRef> = emptyList(),
 )
 
 
@@ -242,7 +249,9 @@ fun App() {
                     // to a conversation restored/replaced by this publication.
                     lastSource = null
                     messages.clear()
-                    loaded.forEach { (role, content, at) -> messages.add(UiMessage(role, content, at = at)) }
+                    loaded.forEach { (role, content, at, media) ->
+                        messages.add(UiMessage(role, content, at = at, mediaJobs = DesktopMediaContract.decodeRefs(media)))
+                    }
                     convId = latest
                 }
             }
@@ -350,8 +359,15 @@ fun App() {
                             }
                             else -> {
                                 val ans = turn.answer.ifBlank { "(tomt svar, status: ${turn.status})" }
-                                messages[assistantIdxT] = messages[assistantIdxT].copy(text = ans, streaming = false)
-                                withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", ans) }
+                                // #2419: jobs the turn queued (image_generate / video_generate)
+                                // follow the message, on screen and in the stored conversation.
+                                val jobs = turn.mediaJobRefs()
+                                messages[assistantIdxT] = messages[assistantIdxT].copy(
+                                    text = ans, streaming = false, mediaJobs = jobs,
+                                )
+                                withContext(Dispatchers.IO) {
+                                    db.addMessage(cid, "assistant", ans, DesktopMediaContract.encodeRefs(jobs))
+                                }
                             }
                         }
                     }.onFailure { e ->
@@ -740,7 +756,11 @@ fun App() {
                                             // reply-source badge; stale loads leave UI state alone.
                                             lastSource = null
                                             messages.clear()
-                                            loaded.forEach { (role, content, at) -> messages.add(UiMessage(role, content, at = at)) }
+                                            loaded.forEach { (role, content, at, media) ->
+                                                messages.add(
+                                                    UiMessage(role, content, at = at, mediaJobs = DesktopMediaContract.decodeRefs(media)),
+                                                )
+                                            }
                                             convId = id
                                             showConvos = false
                                         }
@@ -810,9 +830,15 @@ fun App() {
                 // Center the conversation in wide windows instead of letting it
                 // sprawl edge-to-edge -- the single biggest "designed vs form"
                 // signal at desktop sizes.
+                // #2419: the media bubbles ask the same rig, with the same device token, as
+                // the tools turn that queued the job. No usable address -> no client; the
+                // bubble says so instead of guessing.
+                val mediaSource: DesktopMediaSource? = remember(localUrl, deviceToken) {
+                    runCatching { DesktopMediaClient(localUrl, deviceToken.ifBlank { null }) }.getOrNull()
+                }
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                     LazyColumn(Modifier.fillMaxHeight().widthIn(max = 920.dp).fillMaxWidth()) {
-                        items(messages) { m -> MessageBubble(m) }
+                        items(messages) { m -> MessageBubble(m, mediaSource) }
                     }
                 }
             }
@@ -917,9 +943,13 @@ fun App() {
                             pendingCardTurnConfig = null
                             pendingCardError = null
                             val text = next.answer.ifBlank { if (approve) "Udført." else "Afvist." }
-                            messages.add(UiMessage("assistant", text))
+                            // A turn that continued after the approval may have queued media too.
+                            val jobs = next.mediaJobRefs()
+                            messages.add(UiMessage("assistant", text, mediaJobs = jobs))
                             val cid = convId
-                            if (cid != null) withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", text) }
+                            if (cid != null) withContext(Dispatchers.IO) {
+                                db.addMessage(cid, "assistant", text, DesktopMediaContract.encodeRefs(jobs))
+                            }
                         }
                     }.onFailure { e ->
                         // Worker authority is unresolved: keep the card visible for retry/deny.
@@ -1207,7 +1237,7 @@ private fun SendGlyphDesktop(color: Color) {
 }
 
 @Composable
-private fun MessageBubble(m: UiMessage) {
+private fun MessageBubble(m: UiMessage, mediaSource: DesktopMediaSource? = null) {
     val isUser = m.role == "user"
     // Design guide (assets/design/kaliv-ui-guide): assistant messages carry an
     // identity row ("ankh Kaliv · 14:32", meta 12sp muted) above a SURFACE
@@ -1279,6 +1309,10 @@ private fun MessageBubble(m: UiMessage) {
                         else -> MarkdownText(m.text, color = fg)
                     }
                 }
+            }
+            // #2419: what the turn asked the rig to generate, under the message it belongs to.
+            if (!isUser && !m.streaming) {
+                m.mediaJobs.forEach { ref -> KalivMediaJobBubble(ref, mediaSource) }
             }
         }
     }

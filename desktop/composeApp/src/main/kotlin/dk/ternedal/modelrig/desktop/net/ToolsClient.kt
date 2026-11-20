@@ -4,6 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -66,7 +67,15 @@ data class ToolTurn(
     // longer has to keep a tool-name table that goes stale.
     val risk: String = "",
     val impact: String = "",
-)
+    // #2419: the media jobs this turn queued (image_generate / video_generate),
+    // additive and absent on older rigs. Kept as raw JSON on purpose: a
+    // malformed entry must never make the whole turn undecodable -- the answer
+    // stands, and DesktopMediaContract.refs() keeps only well-formed references.
+    val media_jobs: JsonElement? = null,
+) {
+    /** The well-formed job references of this turn, for the chat's media bubbles. */
+    fun mediaJobRefs(): List<DesktopMediaJobRef> = DesktopMediaContract.refs(media_jobs)
+}
 
 @Serializable
 data class AuditEntry(
