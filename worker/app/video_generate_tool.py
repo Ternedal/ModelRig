@@ -89,10 +89,11 @@ VIDEO_GENERATE_CAPABILITY = Tool(
             "prompt": {"type": "string",
                        "description": "English, concrete, one subject, one motion; max 4000 chars"},
             "profile_id": {"type": "string",
-                           "description": "optional: an enabled video profile; default is configured on the rig"},
-            "width": {"type": "integer", "description": "optional, must be a size the profile allows"},
-            "height": {"type": "integer", "description": "optional, must be a size the profile allows"},
-            "frames": {"type": "integer", "description": "optional, within the profile's frame budget"},
+                           "description": "leave out: the rig has a default. Only when the user names a video "
+                                          "profile; never a person, persona or revision id"},
+            "width": {"type": "integer", "description": "leave out unless the user asks for a size; the rig's default always works"},
+            "height": {"type": "integer", "description": "leave out unless the user asks for a size; the rig's default always works"},
+            "frames": {"type": "integer", "description": "leave out unless the user asks for a length; within the profile's frame budget"},
             "seed": {"type": "integer", "description": "optional, for 'the same again but…'"},
             "source_image_job_id": {"type": "string",
                                     "description": "optional: animate a finished picture -- 'latest' for the most recent one, or the 32-hex id from image_generate"},
@@ -124,9 +125,11 @@ def _validate_args(args: object) -> dict:
     if len(prompt) > _MAX_PROMPT_CHARS:
         raise ToolDenied("video_generate: prompt er for lang")
     profile_id = args.get("profile_id")
-    if profile_id is not None and (not isinstance(profile_id, str) or not profile_id.strip()):
-        raise ToolDenied("video_generate: profile_id skal være en ikke-tom streng")
-    clean: dict = {"prompt": prompt, "profile_id": profile_id.strip() if isinstance(profile_id, str) else None}
+    if profile_id is not None and not isinstance(profile_id, str):
+        raise ToolDenied("video_generate: profile_id skal være en streng")
+    # An empty string is how a model leaves an optional argument out; it means "the rig's default",
+    # not a refusal that ends the turn.
+    clean: dict = {"prompt": prompt, "profile_id": (profile_id.strip() or None) if isinstance(profile_id, str) else None}
     source = args.get("source_image_job_id")
     if source is not None:
         if not isinstance(source, str):
