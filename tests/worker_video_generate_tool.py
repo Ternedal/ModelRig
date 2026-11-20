@@ -18,7 +18,8 @@ Proves what differs from ``image_generate`` (everything shared is proven in
 4b. Image-to-video: ``source_image_job_id`` naming OWNER's completed image job is
    queued as ``image_to_video`` with ``input_asset_id``; unknown / unfinished /
    non-image / foreign jobs are text codes, never a queued job; a profile that
-   does not list the task is refused by the API (``task_not_served``).
+   does not list the task is refused by the API (``task_not_served``). The word
+   ``latest`` names the owner's newest finished picture (what a later turn uses).
 5. The lift: ``parse_job_reference`` reads a video reference with kind=video,
    and the turn result's ``media_jobs`` carries it (through /tools/chat).
 
@@ -31,6 +32,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 _tmp = tempfile.mkdtemp(prefix="kaliv-vgt-")
@@ -145,7 +147,8 @@ o = vgt._run_video_generate({"prompt": PROMPT}, service_getter=None, env={})
 check("media_jobs_api_off" in o, "job API off -> text")
 for bad, label in (({"prompt": PROMPT, "input_asset_id": "x"}, "asset ids are never a model argument"),
                    ({"prompt": PROMPT, "task": "image_to_video"}, "task cannot be chosen by the model"),
-                   ({"prompt": PROMPT, "source_image_job_id": "x"}, "source must be a 32-hex job id"),
+                   ({"prompt": PROMPT, "source_image_job_id": "x"}, "source must be a 32-hex job id or 'latest'"),
+                   ({"prompt": PROMPT, "source_image_job_id": "newest"}, "no other word than 'latest' is a source"),
                    ({"prompt": PROMPT, "source_image_job_id": 7}, "source must be a string"),
                    ({"prompt": PROMPT, "frames": "33"}, "frames must be an int"),
                    ({}, "prompt missing")):
@@ -163,6 +166,7 @@ def finish_image(service: MediaJobService, owner: str, asset_id: str) -> str:
     jid = service.store.submit(owner, "a paper boat", profile_id="sdxl-a", params={})["job_id"]
     assert service.store.claim_for(["sdxl-a"], EXECUTOR)["id"] == jid
     assert service.store.begin_publish(jid, EXECUTOR) and service.store.complete(jid, EXECUTOR, asset_id)
+    time.sleep(0.02)  # completion times order "latest"; keep two of them apart on a coarse clock
     return jid
 
 
@@ -189,6 +193,44 @@ while svc2.store.claim_for(["wan-t2v"], EXECUTOR)["id"] != vid_job:  # the earli
 assert svc2.store.begin_publish(vid_job, EXECUTOR) and svc2.store.complete(vid_job, EXECUTOR, "vid_1")
 o = vgt._run_video_generate({"prompt": PROMPT, "source_image_job_id": vid_job}, service_getter=lambda: svc2, env={})
 check("source_not_an_image" in o, "a finished video job is not a source picture")
+svc_gone = service_with(VID, IMG)
+gone = finish_image(svc_gone, OWNER, "img_gone")
+del svc_gone.profiles["sdxl-a"]
+o = vgt._run_video_generate({"prompt": PROMPT, "source_image_job_id": gone}, service_getter=lambda: svc_gone, env={})
+check("source_profile_not_enabled" in o, "a picture from a profile no longer enabled is said to be that, not 'not an image'")
+
+# "latest": what a later turn uses -- the model no longer sees the id image_generate returned.
+svc6 = service_with(VID, IMG)
+o = vgt._run_video_generate({"prompt": PROMPT, "source_image_job_id": "latest"}, service_getter=lambda: svc6, env={})
+check("no_source_image" in o and parse_job_reference(o) is None, "latest with no finished picture -> no_source_image, nothing queued")
+finish_image(svc6, OWNER, "img_old")
+newest = finish_image(svc6, OWNER, "img_new")
+finish_image(svc6, "someone-else", "img_not_ours")  # finished later than ours, and still not ours
+clip = svc6.store.submit(OWNER, "x", profile_id="wan-t2v", params={})["job_id"]
+assert svc6.store.claim_for(["wan-t2v"], EXECUTOR)["id"] == clip
+assert svc6.store.begin_publish(clip, EXECUTOR) and svc6.store.complete(clip, EXECUTOR, "vid_newer")
+unfinished = svc6.store.submit(OWNER, "x", profile_id="sdxl-a", params={})["job_id"]
+for spelling in ("latest", " Latest "):
+    fresh = service_with(VID, IMG)  # the active-job limit must not decide this
+    finish_image(fresh, OWNER, "img_old")
+    finish_image(fresh, OWNER, "img_new")
+    o = vgt._run_video_generate({"prompt": PROMPT, "source_image_job_id": spelling}, service_getter=lambda: fresh, env={})
+    r = parse_job_reference(o)
+    j = fresh.store.get(r["job_id"], OWNER) if r else None
+    pj = json.loads(j["params"]) if j and isinstance(j.get("params"), str) else (j or {}).get("params") or {}
+    check(pj.get("task") == "image_to_video" and pj.get("input_asset_id") == "img_new",
+          f"{spelling!r} -> the most recently finished picture is the source")
+latest = svc6.store.latest_completed_for(OWNER, ["sdxl-a"])
+check(latest is not None and latest["id"] == newest and latest["asset_id"] == "img_new",
+      "store: newest completed image of this owner; a newer clip, another owner's picture and an unfinished job do not count")
+check(svc6.store.latest_completed_for(OWNER, []) is None and svc6.store.latest_completed_for("nobody", ["sdxl-a"]) is None,
+      "store: no profiles or an owner with nothing -> None")
+try:
+    svc6.store.latest_completed_for(OWNER, ["bad id!"]); check(False, "store: malformed profile ids are refused")
+except Exception:  # noqa: BLE001 -- ImageJobError
+    check(True, "store: malformed profile ids are refused")
+check("latest" in vgt.SYSTEM_RULE and "latest" in cap.description, "the model is told to use 'latest'")
+
 T2V_ONLY = parse_profile(video_profile(profile_id="wan-t2v-only", tasks=["text_to_video"]))
 svc3 = service_with(T2V_ONLY, IMG)
 mine3 = finish_image(svc3, OWNER, "img_3")

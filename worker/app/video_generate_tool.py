@@ -8,9 +8,10 @@ tool's; this module only states what differs for video:
 
 - **Gate** ``KALIV_VIDEO_TOOL_ENABLED=1``; default profile ``KALIV_VIDEO_TOOL_PROFILE``.
 - **Modality** ``video``; task ``text_to_video``, or ``image_to_video`` when the
-  model names ``source_image_job_id`` -- the job id of a picture made earlier in
-  this conversation (the model has it from image_generate's own result). The
-  tool resolves it to the completed asset *of this owner* through the store;
+  model names ``source_image_job_id`` -- the word ``latest`` (the newest finished
+  picture; what a later turn uses, since the model no longer sees the id then)
+  or the job id image_generate returned in this same turn. The tool resolves it
+  to the completed asset *of this owner* through the store;
   anything else (unknown job, not finished, not ours, not an image) is a text
   result. The executor's owner-gated reader checks ownership again at claim.
 - **Switches below the tool:** the job API refuses a video profile unless
@@ -42,6 +43,7 @@ VIDEO_TASK = "text_to_video"
 
 _ALLOWED_ARGS = frozenset({"prompt", "profile_id", "width", "height", "frames", "seed", "source_image_job_id"})
 I2V_TASK = "image_to_video"
+LATEST_SOURCE = "latest"
 _INT_ARGS = ("width", "height", "frames", "seed")
 _MAX_PROMPT_CHARS = 4000
 
@@ -68,8 +70,9 @@ VIDEO_GENERATE_CAPABILITY = Tool(
     description=(
         "Generate one short video clip on the rig and show it in this conversation: "
         "from a text prompt, or -- when the user wants a picture from this conversation "
-        "animated -- from that picture by passing its image job id as source_image_job_id "
-        "(the id image_generate returned). Write the prompt in English, concrete, ONE main "
+        "animated -- from that picture by passing source_image_job_id: the word latest for "
+        "the most recent finished picture, or the id image_generate returned. The picture "
+        "must be finished first. Write the prompt in English, concrete, ONE main "
         "subject and one simple motion; no names, text or logos. Rendering takes minutes: "
         "tell the user the clip is on its way. Never claim it is finished."
     ),
@@ -85,7 +88,7 @@ VIDEO_GENERATE_CAPABILITY = Tool(
             "frames": {"type": "integer", "description": "optional, within the profile's frame budget"},
             "seed": {"type": "integer", "description": "optional, for 'the same again but…'"},
             "source_image_job_id": {"type": "string",
-                                    "description": "optional: animate the picture this image job produced (32-hex id from image_generate)"},
+                                    "description": "optional: animate a finished picture -- 'latest' for the most recent one, or the 32-hex id from image_generate"},
         },
         "required": ["prompt"],
     },
@@ -96,8 +99,9 @@ SYSTEM_RULE = (
     "'lav en video af', 'animer'), call video_generate with an English, concrete prompt "
     "that has one subject and one motion; then tell the user the clip is on its way in "
     "this conversation and that it takes a few minutes. Never describe it as finished. "
-    "To animate a picture made earlier in this conversation, pass that image job's id as "
-    "source_image_job_id."
+    "To animate a picture made earlier ('lav en video af det billede'), pass "
+    "source_image_job_id='latest'; describe only the motion in the prompt. If the tool "
+    "answers that there is no finished picture, say so instead of inventing one."
 )
 
 
@@ -118,8 +122,12 @@ def _validate_args(args: object) -> dict:
     clean: dict = {"prompt": prompt, "profile_id": profile_id.strip() if isinstance(profile_id, str) else None}
     source = args.get("source_image_job_id")
     if source is not None:
-        if not isinstance(source, str) or len(source) != 32 or any(c not in "0123456789abcdef" for c in source):
-            raise ToolDenied("video_generate: source_image_job_id skal være et 32-tegns job-id")
+        if not isinstance(source, str):
+            raise ToolDenied("video_generate: source_image_job_id skal være et job-id eller ordet latest")
+        if source.strip().lower() == LATEST_SOURCE:
+            source = LATEST_SOURCE
+        elif len(source) != 32 or any(c not in "0123456789abcdef" for c in source):
+            raise ToolDenied("video_generate: source_image_job_id skal være et 32-tegns job-id eller ordet latest")
     clean["source_image_job_id"] = source
     for key in _INT_ARGS:
         value = args.get(key)
@@ -161,9 +169,13 @@ def _resolve_source(job_id: str, service_getter: Callable[[], object] | None) ->
     """``(asset_id, None)`` for a completed image job of this owner, else ``(None, unavailable-text)``.
 
     Looked up through the same store the job will be queued in, for OWNER only:
-    the model names a job id, never an asset or an owner. Not found / not ours /
-    not finished / not an image -> a code the model relays; the executor's reader
-    re-checks ownership at claim time regardless.
+    the model names a job id or the word ``latest``, never an asset or an owner.
+    ``latest`` is the newest completed job among the enabled image profiles -- the
+    way "make a video of that picture" works in a later turn, where the model no
+    longer sees the id ``image_generate`` returned (tool results are not part of
+    the history the clients send). Not found / not ours / not finished / not an
+    image -> a code the model relays; the executor's reader re-checks ownership at
+    claim time regardless.
     """
     from .image_generate_tool import _production_service_getter, _unavailable
     from .media_job_api import OWNER, MediaJobsUnavailable
@@ -176,15 +188,21 @@ def _resolve_source(job_id: str, service_getter: Callable[[], object] | None) ->
     except MediaJobsUnavailable as exc:
         return None, _unavailable(str(exc) or "media_jobs_unavailable")
     try:
-        job = service.store.get(job_id, OWNER)
+        if job_id == LATEST_SOURCE:
+            image_profiles = [pid for pid, p in service.profiles.items() if getattr(p, "modality", None) == "image"]
+            job = service.store.latest_completed_for(OWNER, image_profiles)
+        else:
+            job = service.store.get(job_id, OWNER)
     except Exception:  # noqa: BLE001 -- a store that cannot be reached: a code, never a path
         return None, _unavailable("media_jobs_store_unavailable")
     if job is None:
-        return None, _unavailable("source_job_not_found")
+        return None, _unavailable("no_source_image" if job_id == LATEST_SOURCE else "source_job_not_found")
     if job.get("state") != "completed" or not job.get("asset_id"):
         return None, _unavailable("source_job_not_completed")
     source_profile = service.profiles.get(job.get("profile_id"))
-    if source_profile is None or getattr(source_profile, "modality", None) != "image":
+    if source_profile is None:
+        return None, _unavailable("source_profile_not_enabled")
+    if getattr(source_profile, "modality", None) != "image":
         return None, _unavailable("source_not_an_image")
     if not service.store.owns_completed_asset(OWNER, job["asset_id"]):
         return None, _unavailable("source_not_found")
