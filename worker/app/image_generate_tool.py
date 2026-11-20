@@ -243,11 +243,9 @@ def _submit_media_job(clean: dict, *, service_getter: Callable[[], object] | Non
         return _unavailable(str(exc.detail), modality)
 
     params = {key: clean[key] for key in params_keys if clean.get(key) is not None}
-    params = {key: clean[key] for key in params_keys if clean.get(key) is not None}
     # The task follows the job. Without it the executor falls back to the profile's
     # alphabetically first task, and for a profile that also lists image_to_image that
     # is the wrong one: the job would fail with "input_asset_id required for this task".
-    params["task"] = generation.task
     params["task"] = generation.task
     try:
         created = service.store.submit(OWNER, clean["prompt"], profile_id=profile.profile_id, params=params)
