@@ -137,8 +137,11 @@ def _production_service_getter() -> Callable[[], object] | None:
     return _production_service[0]
 
 
-def _unavailable(code: str) -> str:
-    return (f"Billedgenerering er ikke tilgængelig lige nu ({code}). "
+def _unavailable(code: str, modality: str = "image") -> str:
+    """The text result for a rig-side refusal; names what was asked for, so a
+    refused clip is not relayed to the user as "billedgenerering"."""
+    what = "Videogenerering" if modality == "video" else "Billedgenerering"
+    return (f"{what} er ikke tilgængelig lige nu ({code}). "
             "Fortsæt samtalen som tekst og sig det til brugeren.")
 
 
@@ -217,26 +220,26 @@ def _submit_media_job(clean: dict, *, service_getter: Callable[[], object] | Non
     env = os.environ if env is None else env
     getter = service_getter if service_getter is not None else _production_service_getter()
     if getter is None:
-        return _unavailable("media_jobs_api_off")
+        return _unavailable("media_jobs_api_off", modality)
     try:
         service = getter()
     except MediaJobsUnavailable as exc:
-        return _unavailable(str(exc) or "media_jobs_unavailable")
+        return _unavailable(str(exc) or "media_jobs_unavailable", modality)
 
     profile_id, code = _choose_profile(service, clean["profile_id"], env, modality=modality, profile_env=profile_env,
                                        task=task)
     if code is not None:
-        return _unavailable(code)
+        return _unavailable(code, modality)
 
     try:
         body = SubmitRequest(profile_id=profile_id, prompt=clean["prompt"], task=task,
                              **{key: clean.get(key) for key in params_keys})
     except ValueError:
-        return _unavailable("invalid_request")
+        return _unavailable("invalid_request", modality)
     try:
         profile, generation = service.request_for(body)
     except HTTPException as exc:
-        return _unavailable(str(exc.detail))
+        return _unavailable(str(exc.detail), modality)
 
     params = {key: clean[key] for key in params_keys if clean.get(key) is not None}
     if task is not None:
@@ -244,9 +247,9 @@ def _submit_media_job(clean: dict, *, service_getter: Callable[[], object] | Non
     try:
         created = service.store.submit(OWNER, clean["prompt"], profile_id=profile.profile_id, params=params)
     except ImageJobError as exc:
-        return _unavailable(_STORE_ERRORS.get(str(exc), "invalid_request"))
+        return _unavailable(_STORE_ERRORS.get(str(exc), "invalid_request"), modality)
     except Exception:  # a store that cannot be reached: a code, never a path
-        return _unavailable("media_jobs_store_unavailable")
+        return _unavailable("media_jobs_store_unavailable", modality)
 
     job_id = created["job_id"]
     reference = {

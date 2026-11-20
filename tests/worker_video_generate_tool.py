@@ -145,6 +145,11 @@ o = vgt._run_video_generate({"prompt": PROMPT, "profile_id": "sdxl-a"}, service_
 check("profile_not_enabled" in o, "an explicit image profile is refused for video")
 o = vgt._run_video_generate({"prompt": PROMPT}, service_getter=None, env={})
 check("media_jobs_api_off" in o, "job API off -> text")
+check(o.startswith("Videogenerering er ikke tilgængelig") and "Billedgenerering" not in o,
+      "a refused clip is said to be video, not picture, generation")
+o_src = vgt._run_video_generate({"prompt": PROMPT, "source_image_job_id": "latest"}, service_getter=lambda: svc_img, env={})
+check(o_src.startswith("Videogenerering er ikke tilgængelig") and "no_source_image" in o_src,
+      "and so is a refused source")
 for bad, label in (({"prompt": PROMPT, "input_asset_id": "x"}, "asset ids are never a model argument"),
                    ({"prompt": PROMPT, "task": "image_to_video"}, "task cannot be chosen by the model"),
                    ({"prompt": PROMPT, "source_image_job_id": "x"}, "source must be a 32-hex job id or 'latest'"),
