@@ -13,7 +13,7 @@ import dk.ternedal.modelrig.logic.RigProfileTokenResolver
  * (streaming deltas are not persisted per-token — an in-flight reply is lost on a
  * crash; accepted V1 tradeoff).
  */
-class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 4) {
+class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, SCHEMA_VERSION) {
 
     data class ConvMeta(
         val id: Long,
@@ -56,16 +56,40 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
 
     override fun onUpgrade(db: SQLiteDatabase, oldV: Int, newV: Int) {
         // v1 -> v2: added the preset table. v2 -> v3: added rig_profile.
-        // v3 -> v4 (#2419): message.media_jobs, the image jobs an assistant turn
-        // queued, so the bubble survives an app restart. Never drops existing data.
+        // message.media_jobs (#2419) is NOT a version step: see ensureMediaJobsColumn.
         if (oldV < 2) db.execSQL(PRESET_TABLE_SQL)
         if (oldV < 3) db.execSQL(RIG_PROFILE_TABLE_SQL)
-        if (oldV < 4) db.execSQL(MEDIA_JOBS_COLUMN_SQL)
     }
 
     override fun onOpen(db: SQLiteDatabase) {
         super.onOpen(db)
         db.execSQL("PRAGMA foreign_keys=ON")
+        ensureMediaJobsColumn(db)
+    }
+
+    /**
+     * #2419: `message.media_jobs` -- the image jobs an assistant turn queued, so the
+     * bubble survives an app restart -- is added here, when it is missing, and **not**
+     * through a schema version bump.
+     *
+     * A bump would make the database unreadable to the app version before it:
+     * SQLiteOpenHelper refuses to open a newer database ("Can't downgrade database
+     * from version 4 to 3"), and that app has no onDowngrade. So trying a build with
+     * media bubbles and going back to the released app -- or an updater rollback to
+     * it -- would crash on every start until the app's data, every stored
+     * conversation, was cleared. Without the bump the older app opens the same file
+     * and never notices the extra column: its INSERT gets the default, its SELECT
+     * names its own columns.
+     */
+    private fun ensureMediaJobsColumn(db: SQLiteDatabase) {
+        if (db.isReadOnly) return
+        val present = db.rawQuery("PRAGMA table_info(message)", null).use { c ->
+            val name = c.getColumnIndex("name")
+            var found = false
+            while (name >= 0 && c.moveToNext()) if (c.getString(name) == "media_jobs") found = true
+            found
+        }
+        if (!present) db.execSQL(MEDIA_JOBS_COLUMN_SQL)
     }
 
     fun newConversation(source: String, model: String, title: String): Long {
@@ -321,6 +345,12 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
     }
 
     companion object {
+        /**
+         * The schema version the released app (2.0.21) writes and can open. Raising it
+         * makes every older app version crash on this database; do that only together
+         * with a plan for going back (see [ensureMediaJobsColumn]).
+         */
+        const val SCHEMA_VERSION = 3
         private const val MEDIA_JOBS_COLUMN_SQL =
             "ALTER TABLE message ADD COLUMN media_jobs TEXT NOT NULL DEFAULT ''"
         private val JOB_ID = Regex("^[0-9a-f]{32}$")
