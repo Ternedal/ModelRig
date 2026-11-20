@@ -212,7 +212,7 @@ billede; 20–30 s pr. billede, hvis kortet er ledigt (17/11-tal fra Medier-skæ
 - [ ] **Del** → Androids delingsark åbner med billedet.
 - [ ] Luk appen helt, åbn samtalen igen → billedet kommer tilbage af sig selv.
 - [ ] Wi-Fi fra i 30 s under "Genererer …", til igen → boblen ender alligevel med billedet.
-- [ ] Wi-Fi fra i godt to minutter under "Genererer …" → boblen siger "Riggen svarer ikke …" og viser **Prøv igen**; Wi-Fi til, tryk → billedet kommer (#2464).
+- [ ] Wi-Fi fra under "Genererer …", og lad den være fra, til boblen siger "Riggen svarer ikke …" og viser **Prøv igen** (1½–3 minutter: seks forsøg med stigende pause); Wi-Fi til, tryk → billedet kommer (#2464).
 - [ ] Stop executoren (Ctrl+C i vindue B), bed om et billede → boblen bliver på "I kø på riggen"; start executoren igen → billedet kommer.
 
 ## 3. Desktop
