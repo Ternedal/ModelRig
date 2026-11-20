@@ -127,6 +127,9 @@ private data class UiMessage(
     // #2419: the picture/clip jobs this assistant message queued on the rig;
     // each gets a media bubble under the text. Job ids only, never the prompt.
     val mediaJobs: List<DesktopMediaJobRef> = emptyList(),
+    // The rig refused a picture/clip in this turn and queued nothing: one line saying why.
+    // Not stored -- it describes the turn, not the conversation.
+    val mediaNotice: String? = null,
 )
 
 
@@ -181,6 +184,9 @@ fun App() {
         // In-memory only: a confirmation continues under the exact endpoint/auth
         // snapshot that minted it. This is never persisted or rendered.
         var pendingCardTurnConfig by remember { mutableStateOf<KalivChatTurnConfig?>(null) }
+        // #2465: media the turn queued before the card (and before earlier cards of the same
+        // chain). The rig starts a new list per call; the answer after the decision gets the union.
+        var pendingCardJobs by remember { mutableStateOf<List<DesktopMediaJobRef>>(emptyList()) }
         var pendingCardError by remember { mutableStateOf<String?>(null) }
         var showAudit by remember { mutableStateOf(false) }
         var showControlCenter by remember { mutableStateOf(false) }
@@ -355,6 +361,7 @@ fun App() {
                                 )
                                 pendingCardError = null
                                 pendingCardTurnConfig = turnConfig
+                                pendingCardJobs = turn.mediaJobRefs()
                                 pendingCard = turn
                             }
                             else -> {
@@ -364,6 +371,7 @@ fun App() {
                                 val jobs = turn.mediaJobRefs()
                                 messages[assistantIdxT] = messages[assistantIdxT].copy(
                                     text = ans, streaming = false, mediaJobs = jobs,
+                                    mediaNotice = turn.mediaRefusalNotice(),
                                 )
                                 withContext(Dispatchers.IO) {
                                     db.addMessage(cid, "assistant", ans, DesktopMediaContract.encodeRefs(jobs))
@@ -936,6 +944,7 @@ fun App() {
                             // A chained write gets its own authoritative card. One
                             // approval never authorises the next write.
                             pendingCard = next
+                            pendingCardJobs = DesktopMediaContract.across(pendingCardJobs, next.mediaJobRefs())
                             pendingCardError = null
                         } else {
                             // Only a successful worker acknowledgement may clear the card.
@@ -943,9 +952,11 @@ fun App() {
                             pendingCardTurnConfig = null
                             pendingCardError = null
                             val text = next.answer.ifBlank { if (approve) "Udført." else "Afvist." }
-                            // A turn that continued after the approval may have queued media too.
-                            val jobs = next.mediaJobRefs()
-                            messages.add(UiMessage("assistant", text, mediaJobs = jobs))
+                            // A turn that continued after the approval may have queued media too,
+                            // and what it queued before the card is already rendering.
+                            val jobs = DesktopMediaContract.across(pendingCardJobs, next.mediaJobRefs())
+                            pendingCardJobs = emptyList()
+                            messages.add(UiMessage("assistant", text, mediaJobs = jobs, mediaNotice = next.mediaRefusalNotice()))
                             val cid = convId
                             if (cid != null) withContext(Dispatchers.IO) {
                                 db.addMessage(cid, "assistant", text, DesktopMediaContract.encodeRefs(jobs))
@@ -1312,6 +1323,12 @@ private fun MessageBubble(m: UiMessage, mediaSource: DesktopMediaSource? = null)
             }
             // #2419: what the turn asked the rig to generate, under the message it belongs to.
             if (!isUser && !m.streaming) {
+                m.mediaNotice?.let { notice ->
+                    Text(
+                        notice, color = KalivTheme.colors.TextMuted, fontSize = 13.sp, lineHeight = 19.sp,
+                        modifier = Modifier.padding(top = 6.dp, start = 4.dp),
+                    )
+                }
                 m.mediaJobs.forEach { ref -> KalivMediaJobBubble(ref, mediaSource) }
             }
         }
