@@ -184,13 +184,10 @@ python scripts\media_chat_probe.py --suite conversation --rounds 2 --report "$en
 De fire billedbeskeder og kontrollen sendes med historikken fra de foregående ture.
 20/11 gik 19 af 19 igennem uden historik, mens telefonen fik "der er tekniske problemer
 med billedgenerering" midt i en samtale. Afviser riggen et kald, står koden nu i
-tabellen (`afvist:<kode>`) og i workerens log:
-
-```powershell
-Get-ChildItem C:\Rig\ModelRig -Recurse -Filter *.log -ErrorAction SilentlyContinue | Select-String 'media_tool=refused' | Select-Object -Last 20
-```
-
-[antagelse: workerens log ligger under appliance-mappen; ellers står linjen i workerens konsolvindue]
+tabellen (`afvist:<kode>`), i turens `media_refusals` (1.4) og som én linje i
+konsolvinduet **Kaliv DEV worker**: `media_tool=refused modality=… code=…`.
+Dev-appliancen skriver ingen logfil [repo: `scripts/start-dev-appliance.ps1` starter
+workeren i et `cmd /k`-vindue], så kopiér linjen derfra, hvis den skal med hjem.
 
 | Kode | Betyder |
 |---|---|
