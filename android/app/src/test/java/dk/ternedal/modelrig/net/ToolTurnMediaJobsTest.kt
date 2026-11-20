@@ -91,6 +91,23 @@ class ToolTurnMediaJobsTest {
     }
 
     @Test
+    fun `refusals are read with the rig's code, and only for the media tools`() {
+        val t = turn(
+            "[]" + ""","media_refusals":[{"tool":"image_generate","code":"profile_not_enabled"},""" +
+                """{"tool":"video_generate","code":"no_source_image"},{"tool":"note_append","code":"x"},""" +
+                """{"tool":"image_generate","code":"Not A Code"},{"tool":"image_generate"},"junk"]""",
+        )
+        assertEquals(
+            listOf(
+                MediaRefusal(MediaJobRef.Kind.IMAGE, "profile_not_enabled"),
+                MediaRefusal(MediaJobRef.Kind.VIDEO, "no_source_image"),
+            ),
+            t.mediaRefusals,
+        )
+        assertEquals(emptyList<MediaRefusal>(), turn(null).mediaRefusals)
+    }
+
+    @Test
     fun `the prompt is never in the parsed turn`() {
         val t = turn("[${ref(id)}]")
         assertTrue(t.toString().contains("image_generate"))
