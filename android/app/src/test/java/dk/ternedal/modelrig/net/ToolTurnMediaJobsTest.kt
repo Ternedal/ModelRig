@@ -87,7 +87,7 @@ class ToolTurnMediaJobsTest {
 
     @Test
     fun `duplicates collapse to one bubble`() {
-        assertEquals(listOf(id), turn("[${ref(id)},${ref(id)}]").mediaJobs)
+        assertEquals(listOf(MediaJobRef(id, MediaJobRef.Kind.IMAGE)), turn("[${ref(id)},${ref(id)}]").mediaJobs)
     }
 
     @Test
