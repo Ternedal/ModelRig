@@ -261,16 +261,16 @@ class MediaExecutor:
             self.adapter = adapter
             self.events.append(f"loaded:{profile.profile_id}")
             self._budget_event("admitted", getattr(adapter, "admitted_budget", None),
-                               getattr(adapter, "admitted_smi_used_mib", None))
+                               getattr(adapter, "admitted_nvml_used_mib", None))
         return self.adapter
 
-    def _budget_event(self, verdict: str, budget: object, smi_used: object = None) -> None:
+    def _budget_event(self, verdict: str, budget: object, nvml_used: object = None) -> None:
         """What the admission probe measured, as one diagnostics event: ``gpu_budget:admitted,cuda1,
-        free_mib=…`` with nvidia-smi's ``smi_used_mib`` beside it when it could be read. Only for
+        free_mib=…`` with NVML's ``nvml_used_mib`` beside it when it could be read. Only for
         an adapter that measures (the in-process image adapter); never required, never able to
         fail a job."""
         try:
-            detail = budget_detail(budget, smi_used)
+            detail = budget_detail(budget, nvml_used)
         except Exception:
             detail = None
         if detail is not None:
@@ -449,7 +449,7 @@ class MediaExecutor:
         except _VRAM_SHORTAGE as shortage:  # before anything was submitted; a failed load proved its release
             outcome = self.store.defer(job_id, self.instance, max_wait_s=VRAM_MAX_WAIT_S, error=GPU_UNAVAILABLE)
             self.events.append(f"vram_short:{outcome}")
-            self._budget_event("short", getattr(shortage, "budget", None), getattr(shortage, "smi_used_mib", None))
+            self._budget_event("short", getattr(shortage, "budget", None), getattr(shortage, "nvml_used_mib", None))
             if self.adapter is not None:
                 # The shortage came from a resident model's pre-job check: chat first means media
                 # gives the GPU back while it waits, not only when idle_unload_s expires (which

@@ -844,15 +844,15 @@ class VramWaitTests(unittest.TestCase):
             error = (GpuMemoryShortage("insufficient free VRAM after reservation", GpuBudget(1, 12 * gib, 4 * gib, gib, 3 * gib))
                      if short[0] else None)
             if error is not None:
-                error.smi_used_mib = 8149
+                error.nvml_used_mib = 8149
             adapter = FakeImageAdapter(profile, lease_dir=self.lease_dir, gpu_uuid=GPU_A, load_error=error, log=self.log)
             adapter.admitted_budget = GpuBudget(1, 12 * gib, 11 * gib, gib, 10 * gib)
             return adapter
         ex = ExecutorTests.executor(self, [self.image()], factory=factory)
         self.submit("sdxl-a")
         self.assertEqual(ex.step(), "deferred")
-        self.assertIn("gpu_budget:short,cuda1,free_mib=4096,reserved_mib=1024,usable_mib=3072,total_mib=12288,smi_used_mib=8149",
-                      list(ex.events), "nvidia-smi's reading rides beside the probe's when it was taken")
+        self.assertIn("gpu_budget:short,cuda1,free_mib=4096,reserved_mib=1024,usable_mib=3072,total_mib=12288,nvml_used_mib=8149",
+                      list(ex.events), "NVML's reading rides beside the probe's when it was taken")
         short[0] = False
         self.clock.now += 30
         self.assertEqual(ex.step(), "completed")
