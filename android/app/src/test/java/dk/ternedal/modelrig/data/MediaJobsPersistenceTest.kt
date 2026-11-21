@@ -2,6 +2,7 @@ package dk.ternedal.modelrig.data
 
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
+import dk.ternedal.modelrig.net.MediaJobRef
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -25,6 +26,8 @@ class MediaJobsPersistenceTest {
     private lateinit var chatDb: ChatDb
     private val a = "0123456789abcdef0123456789abcdef"
     private val b = "fedcba9876543210fedcba9876543210"
+    private fun img(id: String) = MediaJobRef(id, MediaJobRef.Kind.IMAGE)
+    private fun vid(id: String) = MediaJobRef(id, MediaJobRef.Kind.VIDEO)
 
     @Before
     fun setUp() {
@@ -43,13 +46,13 @@ class MediaJobsPersistenceTest {
     fun jobIdsRoundTripOnTheAssistantTurnOnly() {
         val conv = chatDb.newConversation("rig", "local", "billeder")
         chatDb.addMessage(conv, "user", "lav et billede af en sø")
-        chatDb.addMessage(conv, "assistant", "Det er på vej.", listOf(a, b))
+        chatDb.addMessage(conv, "assistant", "Det er på vej.", listOf(img(a), vid(b)))
         chatDb.addMessage(conv, "assistant", "Noget andet.")
         val rows = chatDb.loadMessagesWithMedia(conv)
         assertEquals(3, rows.size)
-        assertEquals(emptyList<String>(), rows[0].mediaJobs)
-        assertEquals(listOf(a, b), rows[1].mediaJobs)
-        assertEquals(emptyList<String>(), rows[2].mediaJobs)
+        assertEquals(emptyList<MediaJobRef>(), rows[0].mediaJobs)
+        assertEquals(listOf(img(a), vid(b)), rows[1].mediaJobs)
+        assertEquals(emptyList<MediaJobRef>(), rows[2].mediaJobs)
         // The text-only view is unchanged for every caller that compares histories.
         assertEquals(listOf("user" to "lav et billede af en sø", "assistant" to "Det er på vej.", "assistant" to "Noget andet."),
             chatDb.loadMessages(conv))
@@ -57,10 +60,10 @@ class MediaJobsPersistenceTest {
 
     @Test
     fun malformedIdsAreDroppedOnWriteAndOnRead() {
-        assertEquals("$a,$b", ChatDb.encodeMediaJobs(listOf(a, "short", a, "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ", b)))
-        assertEquals(listOf(a), ChatDb.decodeMediaJobs("$a,garbage,,$a"))
-        assertEquals(emptyList<String>(), ChatDb.decodeMediaJobs(null))
-        assertEquals(emptyList<String>(), ChatDb.decodeMediaJobs(""))
+        assertEquals("$a,video:$b", ChatDb.encodeMediaJobs(listOf(img(a), img("short"), img(a), img("ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"), vid(b))))
+        assertEquals(listOf(img(a), vid(b)), ChatDb.decodeMediaJobs("$a,garbage,,$a,video:$b,video:short"))
+        assertEquals(emptyList<MediaJobRef>(), ChatDb.decodeMediaJobs(null))
+        assertEquals(emptyList<MediaJobRef>(), ChatDb.decodeMediaJobs(""))
     }
 
     @Test
@@ -90,9 +93,9 @@ class MediaJobsPersistenceTest {
         chatDb = ChatDb(context)
         val rows = chatDb.loadMessagesWithMedia(1L)
         assertEquals(listOf("user" to "hej", "assistant" to "hej selv"), rows.map { it.role to it.content })
-        assertEquals(listOf(emptyList<String>(), emptyList()), rows.map { it.mediaJobs })
-        chatDb.addMessage(1L, "assistant", "nyt billede", listOf(a))
-        assertEquals(listOf(a), chatDb.loadMessagesWithMedia(1L).last().mediaJobs)
+        assertEquals(listOf(emptyList<MediaJobRef>(), emptyList()), rows.map { it.mediaJobs })
+        chatDb.addMessage(1L, "assistant", "nyt billede", listOf(img(a)))
+        assertEquals(listOf(img(a)), chatDb.loadMessagesWithMedia(1L).last().mediaJobs)
         assertEquals(3, chatDb.readableDatabase.version)
         // Opening it again finds the column and does not try to add it twice.
         chatDb.close()
@@ -103,7 +106,7 @@ class MediaJobsPersistenceTest {
     @Test
     fun theAppBeforeMediaBubblesCanStillOpenAndUseTheDatabase() {
         val conv = chatDb.newConversation("rig", "local", "billeder")
-        chatDb.addMessage(conv, "assistant", "Det er på vej.", listOf(a))
+        chatDb.addMessage(conv, "assistant", "Det er på vej.", listOf(img(a), vid(b)))
         // The released app refuses any database newer than the version it knows.
         assertEquals(3, ChatDb.SCHEMA_VERSION)
         assertEquals(ChatDb.SCHEMA_VERSION, chatDb.readableDatabase.version)
@@ -124,6 +127,6 @@ class MediaJobsPersistenceTest {
         // And back in this app, the row the older one wrote simply has no jobs.
         chatDb = ChatDb(context)
         val rows = chatDb.loadMessagesWithMedia(conv)
-        assertEquals(listOf(listOf(a), emptyList()), rows.map { it.mediaJobs })
+        assertEquals(listOf(listOf(img(a), vid(b)), emptyList()), rows.map { it.mediaJobs })
     }
 }

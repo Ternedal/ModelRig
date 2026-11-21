@@ -1102,15 +1102,17 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
      * job id whose `status_url` is exactly the job route for that id. Anything
      * else is dropped, never guessed at -- the bubble polls what the rig named.
      */
-    private fun parseMediaJobs(a: JSONArray?): List<String> {
+    private fun parseMediaJobs(a: JSONArray?): List<MediaJobRef> {
         if (a == null) return emptyList()
         return (0 until a.length()).mapNotNull { i ->
             val ref = a.optJSONObject(i) ?: return@mapNotNull null
             val id = ref.optString("job_id")
             if (!MediaJobContract.isJobId(id)) return@mapNotNull null
             if (ref.optString("status_url") != MediaJobContract.jobPath(id)) return@mapNotNull null
-            id
-        }.distinct()
+            // `kind` is additive (video_generate); a rig without it means an image job.
+            val kind = MediaJobRef.Kind.parse(ref.optString("kind")) ?: return@mapNotNull null
+            MediaJobRef(id, kind)
+        }.distinctBy { it.jobId }
     }
 
     fun ingestPdf(source: String, pdfBytes: ByteArray, chunkSize: Int = 800, overlap: Int = 150): IngestResult {
@@ -1301,8 +1303,27 @@ data class ToolTurn(
      * app draws one bubble per id and polls `GET /api/v1/media/jobs/{id}`.
      * Empty on older rigs and on turns without an image.
      */
-    val mediaJobs: List<String> = emptyList(),
+    val mediaJobs: List<MediaJobRef> = emptyList(),
 )
+
+/**
+ * #2419: one media job the rig queued for a turn. [kind] decides the bubble:
+ * a picture or a player. Unknown kinds are dropped at parse time, never guessed.
+ */
+data class MediaJobRef(val jobId: String, val kind: Kind) {
+    enum class Kind(val wire: String) {
+        IMAGE("image"), VIDEO("video");
+
+        companion object {
+            /** Absent/blank = image (rigs before video_generate); anything else unknown = null. */
+            fun parse(raw: String?): Kind? = when (raw?.trim().orEmpty()) {
+                "", "image" -> IMAGE
+                "video" -> VIDEO
+                else -> null
+            }
+        }
+    }
+}
 
 /**
  * Ét hentet udsnit: hvor det kom fra, hvor godt det matchede, og hvad der
