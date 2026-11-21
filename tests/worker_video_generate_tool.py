@@ -117,6 +117,9 @@ check(set(cap.params["properties"]) == {"prompt", "profile_id", "width", "height
 check("source_image_job_id" in cap.description and "Never claim it is finished" in cap.description
       and "cannot animate" not in cap.description, "description: both ways, on-its-way rule, no stale refusal")
 check("source_image_job_id" in vgt.SYSTEM_RULE and "cannot animate" not in vgt.SYSTEM_RULE, "system rule names i2v")
+# Rig 21/11: a video from words must not start with a picture (qwen3:14b + persona chose image_generate).
+check("do NOT call image_generate" in vgt.SYSTEM_RULE and "det billede" in vgt.SYSTEM_RULE,
+      "system rule: words alone need no picture; the source is only for an existing one")
 check(tools.requires_confirmation(cap, origin="model") is False, "no confirmation card")
 
 # 3. run
