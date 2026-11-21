@@ -160,6 +160,23 @@ try:
     script([answer("bare tekst")])
     d = chat("hej").json()
     check(d.get("media_jobs") == [], "a plain answer carries media_jobs: []")
+    check(d.get("media_refusals") == [], "and media_refusals: []")
+
+    # 3a: the model gets an argument wrong (a number as text, a made-up field), is told so,
+    # and calls again in the same turn. Before, the first call ended the turn with HTTP 400.
+    # Its own store: the owner's limit is three active jobs, and the cases around this one count.
+    retry_service = MediaJobService(ImageJobStore(os.path.join(_tmp, "retry.sqlite3")), dict(service.profiles), "s" * 40)
+    register(lambda args: igt._run_image_generate(args, service_getter=lambda: retry_service, env={}))
+    script([call("image_generate", {"prompt": PROMPT, "width": "bred", "style": "photo"}),
+            call("image_generate", {"prompt": PROMPT}), answer("Billedet er på vej.")])
+    r = chat()
+    d = r.json()
+    check(r.status_code == 200 and d.get("status") == "answered", f"an argument mistake does not end the turn (got {r.status_code})")
+    check(len(d.get("media_jobs") or []) == 1, "the corrected call queued the picture")
+    check(d.get("media_refusals") == [{"tool": "image_generate", "code": "invalid_arguments"}],
+          f"the refused call is listed with its code (got {d.get('media_refusals')!r})")
+    check(d.get("tools_used") == ["image_generate", "image_generate"], "both calls are in tools_used")
+    register(run_with_service)
 
     # 3b: a picture, then a write that needs approval, in one turn. The picture is
     # already rendering, so its reference must ride on the confirmation answer too.
@@ -178,6 +195,8 @@ try:
     d = r.json()
     check(r.status_code == 200 and d.get("status") == "answered", "unavailable: the turn still answers (no HTTP error)")
     check(d.get("media_jobs") == [], "unavailable: media_jobs is empty")
+    check(d.get("media_refusals") == [{"tool": "image_generate", "code": "media_jobs_api_off"}],
+          f"unavailable: the reason is on the wire, not only in the model's words (got {d.get('media_refusals')!r})")
     check(d.get("tools_used") == ["image_generate"], "unavailable: the tool ran and answered as text")
     check(before is not None, "unavailable: previously queued job untouched")
 

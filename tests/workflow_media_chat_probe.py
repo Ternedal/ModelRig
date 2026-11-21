@@ -110,6 +110,18 @@ class Appliance:
                 owner.chats.append({"path": self.path, "auth": self.headers.get("Authorization"),
                                     "body": json.loads(self.rfile.read(length).decode("utf-8"))})
                 status, body = owner.turns.popleft() if owner.turns else (200, turn(None))
+                if self.path.endswith("/stream") and status == 200:
+                    # The worker's stream: phases, then one result line. A str body is sent as written.
+                    text = body if isinstance(body, str) else (
+                        json.dumps({"phase": "tænker"}) + "\n\n" + json.dumps({"phase": "værktøj"}) + "\n"
+                        + json.dumps({"result": body}, ensure_ascii=False) + "\n")
+                    raw = text.encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/x-ndjson")
+                    self.send_header("Content-Length", str(len(raw)))
+                    self.end_headers()
+                    self.wfile.write(raw)
+                    return
                 self._send(status, body)
 
             def do_GET(self):
@@ -292,6 +304,8 @@ with appliance(turns, {A: lifecycle(A), B: lifecycle(B, "queued", "running", "co
           "the animate turn carries the picture turn as history")
     check(fake.polls.index(B) > max(i for i, p in enumerate(fake.polls) if p == A),
           "the picture is finished before the clip is asked for")
+    check(fake.chats[1]["body"].get("conversation_image_jobs") == [A],
+          "the animate turn names the picture it follows, so 'latest' is that one and not the owner's newest anywhere")
     check(report["cases"][1]["jobs"][0]["profile_id"] == "wan22-i2v-gpu1" and "[wan22-i2v-gpu1]" in probe.render(report),
           "the clip's profile is shown: it tells which task ran")
 
@@ -300,6 +314,89 @@ with appliance([turn(None), turn(None)], {}) as fake:
     check([c["why"] for c in report["cases"]] == ["tool_not_called", "skipped_no_picture", None]
           and len(fake.chats) == 2, "no finished picture: the animate question is not asked")
     check(report["summary"]["tool_cases"] == 1 and report["summary"]["all_ok"] is False, "a skipped case is not in the rate, and the run is not ok")
+
+# 6b. the four pictures and the control as one conversation; refusals by code
+print("== 6b. conversation suite, refusals ==")
+refused = turn("image_generate", media_refusals=[{"tool": "image_generate", "code": "profile_not_enabled"}])
+retried = turn("image_generate", C, tools_used=["image_generate", "image_generate"],
+               media_refusals=[{"tool": "image_generate", "code": "invalid_arguments"},
+                               {"tool": "note_append", "code": "x"}, {"tool": "image_generate", "code": "Not A Code"}, "junk"])
+turns = [turn("image_generate", A, answer="svar 1"), refused, retried, turn("image_generate", D), turn(None), turn(None)]
+with appliance(turns, {A: lifecycle(A), C: lifecycle(C), D: lifecycle(D)}) as fake:
+    report = run(fake, "conversation")
+    cases = report["cases"]
+    check([c["case"] for c in cases] == ["conv-1.r1", "conv-2.r1", "conv-3.r1", "conv-4.r1", "conv-control.r1", "control"],
+          "four pictures and a control in the thread, then the plain control")
+    check("history" not in fake.chats[0]["body"] and [len(c["body"].get("history", [])) for c in fake.chats] == [0, 2, 4, 6, 8, 0],
+          "every turn carries the conversation so far; the plain control carries none")
+    check(fake.chats[1]["body"]["history"] == [{"role": "user", "content": probe.IMAGE_MESSAGES[0]},
+                                               {"role": "assistant", "content": "svar 1"}],
+          "history is the user's words and the model's answer, in order")
+    check([c["history_turns"] for c in cases] == [0, 1, 2, 3, 4, 0], "the report says how deep in the conversation each case was")
+    check([c["body"].get("conversation_image_jobs") for c in fake.chats] == [[], [A], [A], [A, C], [A, C, D], None],
+          "each turn names the pictures the conversation holds so far, as an app does; the plain control names none")
+    check(cases[1]["ok"] is False and cases[1]["why"] == "no_job_reference" and cases[1]["refusals"] == ["profile_not_enabled"],
+          "a refused picture is reported with the rig's code, not only as 'no job'")
+    check(cases[2]["ok"] is True and cases[2]["refusals"] == ["invalid_arguments"],
+          "a refusal the model recovered from in the same turn: ok, and the code is kept (other tools and non-codes dropped)")
+    text = probe.render(report)
+    check("afvist:profile_not_enabled" in text and "afvisninger: invalid_arguments, profile_not_enabled" in text,
+          "the table and the summary name the codes")
+    check(report["summary"]["refusals"] == ["invalid_arguments", "profile_not_enabled"] and "svar 1" not in json.dumps(report),
+          "codes are in the report; the model's text still is not")
+
+with appliance([turn("image_generate", A)] * 1 + [turn(None)], {A: lifecycle(A)}) as fake:
+    report = run(fake, "image")
+    check(all(c["refusals"] == [] for c in report["cases"]) and "afvisninger" not in probe.render(report),
+          "a worker without media_refusals: no refusals, no line")
+
+# 6c. the turn as the apps send it: streamed, with a system prompt
+print("== 6c. stream, system prompt ==")
+with appliance([turn("image_generate", A), turn(None)], {A: lifecycle(A)}) as fake:
+    report = run(fake, "image", stream=True, system="Du er Kaliv.")
+    report["cases"] = report["cases"][:1] + report["cases"][-1:]
+    check(fake.chats[0]["path"] == "/api/v1/tools/chat/stream" and fake.chats[0]["body"].get("system") == "Du er Kaliv.",
+          "--stream sends to the stream route, with the system prompt in its own field")
+    check(report["cases"][0]["ok"] is True and report["cases"][0]["jobs"][0]["state"] == "completed",
+          "the result line of the stream is read like the plain answer")
+    check(report["stream"] is True and report["system_chars"] == 12 and "Du er Kaliv" not in json.dumps(report),
+          "the report says how the turn was sent; the prompt's length, never its text")
+    check("via=stream system=12" in probe.render(report), "and so does the table's first line")
+
+error_line = json.dumps({"phase": "tænker"}) + "\n" + json.dumps({"error": "image_generate: args skal være et objekt", "status": 400}) + "\n"
+cut = json.dumps({"phase": "tænker"}) + "\n"
+with appliance([(200, error_line), (200, cut), (200, "not json\n" + json.dumps({"error": "boom"}) + "\n")], {}) as fake:
+    report = run(fake, "image", stream=True)
+    first, second, third = report["cases"][:3]
+    check(first["ok"] is False and first["http"] == 400 and first["why"] == "turn_failed"
+          and first["turn_error"] == "image_generate: args skal være et objekt",
+          "an error line is the turn's failure, with its status and the rig's reason")
+    check(second["ok"] is False and second["http"] == 0 and "turn_error" not in second,
+          "a stream with no result and no error was cut: an interrupted turn")
+    check(third["http"] == 500 and third["turn_error"] == "boom", "an error line without a status is a 500")
+    check("image_generate: args skal være et objekt" in probe.render(report), "the reason is in the table")
+
+with appliance([turn("image_generate", A), turn(None)], {A: lifecycle(A)}) as fake:
+    report = run(fake, "image")
+    check(fake.chats[0]["path"] == "/api/v1/tools/chat" and "system" not in fake.chats[0]["body"]
+          and report["stream"] is False and report["system_chars"] == 0 and "via=chat " in probe.render(report),
+          "without the flags nothing changes: the plain route, no system field")
+
+with tempfile.TemporaryDirectory() as tmp:
+    prompt = Path(tmp) / "system.txt"
+    prompt.write_text("\ufeffDu er Kaliv.\n", encoding="utf-8")
+    with appliance([turn(None)] * 3, {}) as fake:
+        probe.main(["--base", fake.base, "--suite", "video", "--no-vram", "--stream", "--system-file", str(prompt)],
+                   env={"MODELRIG_TOKEN": TOKEN})
+        check(fake.chats and fake.chats[0]["body"].get("system") == "Du er Kaliv."
+              and fake.chats[0]["path"].endswith("/stream"), "--system-file is read (BOM and trailing newline dropped) and sent")
+    empty = Path(tmp) / "empty.txt"
+    empty.write_text("  \n", encoding="utf-8")
+    with appliance([], {}) as fake:
+        check(probe.main(["--base", fake.base, "--system-file", str(empty)], env={"MODELRIG_TOKEN": TOKEN}) == 2
+              and probe.main(["--base", fake.base, "--system-file", str(Path(tmp) / "missing.txt")],
+                             env={"MODELRIG_TOKEN": TOKEN}) == 2 and not fake.chats,
+              "an empty or missing system file is a setup error: exit 2, nothing sent")
 
 # 7. VRAM sampling
 print("== 7. vram ==")

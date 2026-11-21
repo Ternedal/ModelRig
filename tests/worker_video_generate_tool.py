@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import sys
 import tempfile
 import time
@@ -153,12 +154,21 @@ check(o_src.startswith("Videogenerering blev ikke startet (no_source_image)") an
 for bad, label in (({"prompt": PROMPT, "input_asset_id": "x"}, "asset ids are never a model argument"),
                    ({"prompt": PROMPT, "task": "image_to_video"}, "task cannot be chosen by the model"),
                    ({"prompt": PROMPT, "source_image_job_id": 7}, "source must be a string"),
-                   ({"prompt": PROMPT, "frames": "33"}, "frames must be an int"),
+                   ({"prompt": PROMPT, "frames": "mange"}, "frames must be a number"),
                    ({}, "prompt missing")):
-    try:
-        vgt._run_video_generate(bad, service_getter=lambda: svc, env={}); check(False, f"{label}: ToolDenied")
-    except tools.ToolDenied:
-        check(True, f"{label}: ToolDenied")
+    # Refused as text, not ToolDenied: that would end the turn with HTTP 400 for the
+    # likeliest mistake a small model makes. Nothing is queued either way.
+    svc_bad = service_with(VID)
+    o_bad = vgt._run_video_generate(bad, service_getter=lambda: svc_bad, env={})
+    check("invalid_arguments" in o_bad and parse_job_reference(o_bad) is None
+          and "video_generate igen" in o_bad,
+          f"{label}: refused as text, call again")
+    with sqlite3.connect(svc_bad.store.path) as _db:
+        check(_db.execute("SELECT COUNT(*) FROM image_jobs").fetchone()[0] == 0, f"{label}: nothing queued")
+try:
+    vgt._run_video_generate("not a dict", service_getter=lambda: svc, env={}); check(False, "args not an object: ToolDenied")
+except tools.ToolDenied:
+    check(True, "args not an object: ToolDenied")
 
 # 4b. image-to-video from a picture of this conversation
 print("== 4b. image-to-video ==")
@@ -290,6 +300,9 @@ o = latest_in([foreign, "f" * 32], mixed)
 check("no_source_image" in o and "img_foreign" not in o and parse_job_reference(o) is None,
       "only foreign or unknown ids: no source -- naming another owner's job id gets nothing")
 
+from app.image_generate_tool import parse_refusal  # noqa: E402
+for code in ("no_source_image", "source_job_not_completed", "source_job_not_found", "source_not_an_image"):
+    check(parse_refusal(vgt._source_refusal(code)) == code, f"a source refusal carries its code for the turn's media_refusals ({code})")
 check(vgt.conversation_image_jobs(None) is None, "context: the field not sent stays None (an older client)")
 check(vgt.conversation_image_jobs([]) == () and vgt.conversation_image_jobs("x") == () and vgt.conversation_image_jobs({"a": 1}) == (),
       "context: an empty or unusable value is 'no pictures', not 'unknown'")

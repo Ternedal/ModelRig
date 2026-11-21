@@ -44,12 +44,18 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 import os
+import re
 from typing import Callable, Mapping
 
 from fastapi import HTTPException
 
 from .tools import Tool, ToolDenied
+
+# The worker's own logger: a refusal is one line with its code, so the cause can be read
+# on the rig afterwards. The model only relays a paraphrase ("tekniske problemer", 20/11).
+_logger = logging.getLogger("modelrig.worker")
 
 TOOL_NAME = "image_generate"
 IMAGE_TASK = "text_to_image"
@@ -107,9 +113,10 @@ IMAGE_GENERATE_CAPABILITY = Tool(
             "prompt": {"type": "string",
                        "description": "English, concrete, one main subject; max 4000 chars"},
             "profile_id": {"type": "string",
-                           "description": "optional: an enabled image profile; default is configured on the rig"},
-            "width": {"type": "integer", "description": "optional, must be a size the profile allows"},
-            "height": {"type": "integer", "description": "optional, must be a size the profile allows"},
+                           "description": "leave out: the rig has a default. Only when the user names an image "
+                                          "profile; never a person, persona or revision id"},
+            "width": {"type": "integer", "description": "leave out unless the user asks for a size; the rig's default always works"},
+            "height": {"type": "integer", "description": "leave out unless the user asks for a size; the rig's default always works"},
             "seed": {"type": "integer", "description": "optional, for 'the same again but…'"},
         },
         "required": ["prompt"],
@@ -138,12 +145,112 @@ def _production_service_getter() -> Callable[[], object] | None:
     return _production_service[0]
 
 
+# Refusals that are about load, not about the rig being off. Measured on the rig
+# 20/11: the model relayed the generic sentence as "der er tekniske problemer",
+# which tells the user nothing they can act on. These say what to do: wait.
+_BUSY_CODES = frozenset({"owner_limit", "queue_full"})
+
+
 def _unavailable(code: str, modality: str = "image") -> str:
     """The text result for a rig-side refusal; names what was asked for, so a
-    refused clip is not relayed to the user as "billedgenerering"."""
+    refused clip is not relayed to the user as "billedgenerering".
+
+    A busy rig is its own sentence: nothing is wrong, the earlier jobs are still
+    being made, and the user can ask again when one of them is done.
+    """
+    _logger.info("media_tool=refused modality=%s code=%s", modality, code)
+    if code in _BUSY_CODES:
+        what = "videoer" if modality == "video" else "billeder"
+        return (f"Riggen er optaget: der er allerede flere {what} på vej ({code}). Der blev ikke startet et nyt job. "
+                "Det er ikke en fejl. Sig til brugeren, at de kan bede om det igen, når et af dem er færdigt.")
     what = "Videogenerering" if modality == "video" else "Billedgenerering"
     return (f"{what} er ikke tilgængelig lige nu ({code}). "
             "Fortsæt samtalen som tekst og sig det til brugeren.")
+
+
+# Refusals the model caused with an optional argument it could not know the allowed
+# values of: no size or profile id is named in the tool's description. The rig's
+# own defaults always work, so the result says how to get the picture, not that
+# it failed.
+_RETRY_PLAIN_CODES = frozenset({"invalid_request", "profile_not_enabled"})
+
+
+def _refused(code: str, modality: str, optional: list[str]) -> str:
+    """A refusal as text. With optional arguments in play and a code they can cause:
+    name them and say to call again without them. Otherwise the plain refusal."""
+    if code in _RETRY_PLAIN_CODES and optional:
+        _logger.info("media_tool=refused modality=%s code=%s optional=%s", modality, code, ",".join(optional))
+        tool = "video_generate" if modality == "video" else "image_generate"
+        return (f"Riggen afviste de valgfri argumenter ({code}): {', '.join(optional)}. Der blev ikke startet et job. "
+                f"Kald {tool} igen uden dem — riggen vælger selv profil og størrelse.")
+    return _unavailable(code, modality)
+
+
+class ArgMistake(ValueError):
+    """An argument the model got wrong: a made-up field, a number as a string, no prompt.
+
+    Not ``ToolDenied``. That ends the whole turn with an HTTP 400, and the user sees an
+    error instead of an answer for a mistake a small model makes easily
+    (``"style": "photo"``, ``"width": "bred"``). The call is still refused and nothing is
+    queued; the model gets a text result naming the argument, and can call again.
+    The message carries argument names only, never a value.
+    """
+
+
+def _arg_name(key: object) -> str:
+    """A made-up argument's name as it may be repeated: an identifier, else ``?``. The name
+    came from the model and goes into a log line and back into its context."""
+    return key if isinstance(key, str) and re.fullmatch(r"[A-Za-z0-9_]{1,32}", key) else "?"
+
+
+# The code of a refusal, read back out of its text: every refusal sentence starts with one
+# of these and carries its code in the first parentheses. ``parse_refusal`` is how the turn
+# result can say *why* without the model's paraphrase in between.
+_REFUSAL_RE = re.compile(r"^(?:Billedgenerering|Videogenerering|Riggen) [^\n()]{0,120}\(([a-z0-9_]{1,64})\)")
+
+
+def parse_refusal(result: str) -> str | None:
+    """The code of a media tool refusal, or None for anything else (a job reference included).
+
+    Accepts the ``wrap_as_data`` envelope the same way ``parse_job_reference`` does: the
+    sentence is the first or the second line, nothing deeper.
+    """
+    if not isinstance(result, str) or not result:
+        return None
+    for line in result.split("\n", 2)[:2]:
+        match = _REFUSAL_RE.match(line.strip())
+        if match:
+            return match.group(1)
+    return None
+
+
+_INT_TEXT = re.compile(r"-?[0-9]{1,10}")
+
+
+def int_arg(key: str, value: object) -> int | None:
+    """A whole-number argument as the model sent it. ``1024``, ``"1024"`` and ``1024.0`` are
+    the same wish, and ``""`` is how a model leaves a field out; anything else is a mistake.
+
+    Reading these costs nothing: the value is still checked against what the profile allows.
+    Refusing them costs the user a model round trip for a difference they cannot see.
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if isinstance(value, bool):
+        raise ArgMistake(f"{key} skal være et heltal")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer() and abs(value) < 1e10:
+        return int(value)
+    if isinstance(value, str) and _INT_TEXT.fullmatch(value.strip()):
+        return int(value.strip())
+    raise ArgMistake(f"{key} skal være et heltal")
+
+
+def _arg_mistake(tool: str, modality: str, mistake: ArgMistake) -> str:
+    _logger.info("media_tool=refused modality=%s code=invalid_arguments detail=%s", modality, mistake)
+    return (f"Riggen afviste kaldet (invalid_arguments): {mistake}. Der blev ikke startet et job. "
+            f"Kald {tool} igen med rettede argumenter — kun prompt er nødvendig.")
 
 
 # ---------------------------------------------------------------------------
@@ -154,24 +261,20 @@ def _validate_args(args: object) -> dict:
         raise ToolDenied("image_generate: args skal være et objekt")
     unknown = set(args) - _ALLOWED_ARGS
     if unknown:
-        raise ToolDenied("image_generate: ukendte argumenter afvises: " + ", ".join(sorted(unknown)))
+        raise ArgMistake("ukendte argumenter: " + ", ".join(sorted(_arg_name(k) for k in unknown)))
     prompt = args.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
-        raise ToolDenied("image_generate: prompt mangler")
+        raise ArgMistake("prompt mangler")
     if len(prompt) > _MAX_PROMPT_CHARS:
-        raise ToolDenied("image_generate: prompt er for lang")
+        raise ArgMistake("prompt er for lang")
     profile_id = args.get("profile_id")
-    if profile_id is not None and (not isinstance(profile_id, str) or not profile_id.strip()):
-        raise ToolDenied("image_generate: profile_id skal være en ikke-tom streng")
-    clean: dict = {"prompt": prompt, "profile_id": profile_id.strip() if isinstance(profile_id, str) else None}
+    if profile_id is not None and not isinstance(profile_id, str):
+        raise ArgMistake("profile_id skal være en streng")
+    # An empty string is how a model leaves an optional argument out; it means "the rig's default",
+    # not a refusal that ends the turn.
+    clean: dict = {"prompt": prompt, "profile_id": (profile_id.strip() or None) if isinstance(profile_id, str) else None}
     for key in _INT_ARGS:
-        value = args.get(key)
-        if value is None:
-            clean[key] = None
-            continue
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ToolDenied(f"image_generate: {key} skal være et heltal")
-        clean[key] = value
+        clean[key] = int_arg(key, args.get(key))
     return clean
 
 
@@ -227,10 +330,14 @@ def _submit_media_job(clean: dict, *, service_getter: Callable[[], object] | Non
     except MediaJobsUnavailable as exc:
         return _unavailable(str(exc) or "media_jobs_unavailable", modality)
 
+    # What the model chose beyond the prompt, in a fixed order. Only names: never a value.
+    # ``input_asset_id`` is resolved by the tool from a source job, not something the model passed.
+    optional = [key for key in ("profile_id", *params_keys)
+                if key != "input_asset_id" and clean.get(key) is not None]
     profile_id, code = _choose_profile(service, clean["profile_id"], env, modality=modality, profile_env=profile_env,
                                        task=task)
     if code is not None:
-        return _unavailable(code, modality)
+        return _refused(code, modality, optional)
 
     try:
         body = SubmitRequest(profile_id=profile_id, prompt=clean["prompt"], task=task,
@@ -240,7 +347,7 @@ def _submit_media_job(clean: dict, *, service_getter: Callable[[], object] | Non
     try:
         profile, generation = service.request_for(body)
     except HTTPException as exc:
-        return _unavailable(str(exc.detail), modality)
+        return _refused(str(exc.detail), modality, optional)
 
     params = {key: clean[key] for key in params_keys if clean.get(key) is not None}
     # The task follows the job. Without it the executor falls back to the profile's
@@ -269,15 +376,18 @@ def _submit_media_job(clean: dict, *, service_getter: Callable[[], object] | Non
 def _run_image_generate(args: dict, *, service_getter: Callable[[], object] | None = None,
                         env: Mapping[str, str] | None = None) -> str:
     """Queue one image job. Returns a job reference line followed by text for the model."""
-    clean = _validate_args(args)
+    try:
+        clean = _validate_args(args)
+    except ArgMistake as mistake:
+        return _arg_mistake(TOOL_NAME, "image", mistake)
     return _submit_media_job(
         clean, service_getter=service_getter, env=env, modality="image", task=IMAGE_TASK,
         profile_env=IMAGE_TOOL_PROFILE_ENV, schema=JOB_REFERENCE_SCHEMA, kind="image",
         params_keys=_INT_ARGS,
         text=lambda job_id, profile_id: (
-            f"Billedjob {job_id} er sat i kø på riggen (profil {profile_id}). "
+            f"Billedjobbet er sat i kø på riggen (profil {profile_id}). "
             "Billedet vises i samtalen, når det er klar. Sig til brugeren, at det er på vej — "
-            "påstå ikke, at det er færdigt, og gentag ikke prompten."
+            "påstå ikke, at det er færdigt, gentag ikke prompten, og nævn ikke job-id'et."
         ),
     )
 

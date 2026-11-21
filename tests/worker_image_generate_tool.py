@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import sys
 import tempfile
 from pathlib import Path
@@ -152,6 +153,8 @@ ref = parse_job_reference(out)
 check(ref is not None, "result starts with a parseable job reference")
 check(ref and ref["profile_id"] == "sdxl-a", "sole image profile chosen without configuration")
 check(ref and ref["status_url"] == f"/api/v1/media/jobs/{ref['job_id']}", "status_url points at the job route")
+check(ref and ref["job_id"] not in out.split("\n", 1)[1] and "nævn ikke job-id" in out,
+      "the sentence the model relays carries no job id (rig 20/11: an answer printed it to the user)")
 job = svc.store.get(ref["job_id"], OWNER) if ref else None
 check(job is not None and job["state"] == "queued", "job is queued for OWNER=installation")
 check(job is not None and job["prompt"] == PROMPT, "the store holds the prompt as written (translation is the executor's)")
@@ -187,7 +190,8 @@ def text_result(fn, label):
     except Exception as exc:  # noqa: BLE001
         check(False, f"{label}: raised {type(exc).__name__} instead of returning text")
         return ""
-    check(isinstance(out, str) and "ikke tilgængelig" in out and parse_job_reference(out) is None,
+    refusal = isinstance(out, str) and ("ikke tilgængelig" in out or out.startswith(("Riggen er optaget", "Riggen afviste")))
+    check(refusal and parse_job_reference(out) is None,
           f"{label}: text result, no job reference")
     return out
 
@@ -220,6 +224,24 @@ o = text_result(lambda: _run_image_generate({"prompt": PROMPT, "width": 640, "he
                                             service_getter=lambda: svc, env={}),
                 "size the profile refuses")
 check("invalid_request" in o, "executor's own validation rule applies at submit")
+check(o.startswith("Riggen afviste") and "width, height" in o and "image_generate igen uden dem" in o,
+      "a refused size names the arguments and says to call again without them (the model cannot know the allowed sizes)")
+check("640" not in o and "480" not in o, "only argument names are echoed, never values")
+
+import logging as _logging
+class _Seen(_logging.Handler):
+    def __init__(self):
+        super().__init__(); self.lines = []
+    def emit(self, record):
+        self.lines.append(record.getMessage())
+_seen = _Seen(); _wlog = _logging.getLogger("modelrig.worker"); _wlog.addHandler(_seen); _prev = _wlog.level; _wlog.setLevel(_logging.INFO)
+_run_image_generate({"prompt": PROMPT, "width": 640, "height": 480}, service_getter=lambda: svc, env={})
+_run_image_generate({"prompt": PROMPT}, service_getter=None, env={})
+_wlog.removeHandler(_seen); _wlog.setLevel(_prev)
+check(_seen.lines == ["media_tool=refused modality=image code=invalid_request optional=width,height",
+                      "media_tool=refused modality=image code=media_jobs_api_off"],
+      "each refusal is one worker log line with its code (and argument names, never the prompt)")
+check(not any(PROMPT in line for line in _seen.lines), "the prompt is not logged")
 
 svc_full = service_with(IMG_A)
 for _ in range(3):
@@ -227,23 +249,55 @@ for _ in range(3):
 o = text_result(lambda: _run_image_generate({"prompt": PROMPT}, service_getter=lambda: svc_full, env={}),
                 "owner limit reached")
 check("owner_limit" in o, "quota is relayed as a code")
+check(o.startswith("Riggen er optaget") and "ikke en fejl" in o and "ikke tilgængelig" not in o,
+      "a full owner quota says wait, not unavailable (rig 20/11: relayed as 'tekniske problemer')")
+check(parse_job_reference(o) is None, "a busy text is not a job reference")
 
-for bad, label in (
-    ("not a dict", "args not an object"),
-    ({}, "prompt missing"),
-    ({"prompt": ""}, "prompt empty"),
-    ({"prompt": "x" * 4001}, "prompt too long"),
-    ({"prompt": PROMPT, "steps": 5}, "unknown argument"),
-    ({"prompt": PROMPT, "width": "1024"}, "width not an int"),
-    ({"prompt": PROMPT, "seed": True}, "bool is not an int"),
-    ({"prompt": PROMPT, "profile_id": ""}, "empty profile_id"),
+try:
+    _run_image_generate("not a dict", service_getter=lambda: svc, env={})
+    check(False, "args not an object: ToolDenied")
+except tools.ToolDenied:
+    check(True, "args not an object: ToolDenied")
+# A model's argument mistake is refused as text, not ToolDenied: that would end the turn
+# with HTTP 400 for a mistake a small model makes easily (a made-up field, a word for a number).
+for bad, label, names in (
+    ({}, "prompt missing", "prompt"),
+    ({"prompt": ""}, "prompt empty", "prompt"),
+    ({"prompt": "x" * 4001}, "prompt too long", "prompt"),
+    ({"prompt": PROMPT, "steps": 5, "style": "photo"}, "unknown argument", "steps, style"),
+    ({"prompt": PROMPT, "width": "bred"}, "width not a number", "width"),
+    ({"prompt": PROMPT, "height": 10.5}, "height not a whole number", "height"),
+    ({"prompt": PROMPT, "width": [1024]}, "width a list", "width"),
+    ({"prompt": PROMPT, "seed": True}, "bool is not an int", "seed"),
+    ({"prompt": PROMPT, "profile_id": 7}, "profile_id not a string", "profile_id"),
 ):
-    try:
-        _run_image_generate(bad, service_getter=lambda: svc, env={})
-        check(False, f"{label}: ToolDenied")
-    except tools.ToolDenied:
-        check(True, f"{label}: ToolDenied")
+    svc_bad = service_with(IMG_A)
+    o_bad = _run_image_generate(bad, service_getter=lambda: svc_bad, env={})
+    check("invalid_arguments" in o_bad and names in o_bad and parse_job_reference(o_bad) is None
+          and "image_generate igen" in o_bad, f"{label}: refused as text, names the argument, call again")
+    check("photo" not in o_bad and "1024" not in o_bad and "bred" not in o_bad and "10.5" not in o_bad
+          and "xxxx" not in o_bad, f"{label}: no value is echoed")
+    with sqlite3.connect(svc_bad.store.path) as _db:
+        check(_db.execute("SELECT COUNT(*) FROM image_jobs").fetchone()[0] == 0, f"{label}: nothing queued")
 check(svc.store.get(ref["job_id"], OWNER) is not None, "denied arguments queued nothing new (store intact)")
+from app.image_generate_tool import ArgMistake, int_arg  # noqa: E402
+check([int_arg("width", v) for v in (1024, "1024", " 1024 ", 1024.0, None, "", "  ", -5, "-5")]
+      == [1024, 1024, 1024, 1024, None, None, None, -5, -5],
+      "1024, '1024' and 1024.0 are the same wish; '' and None are 'left out'")
+for bad_int in (True, False, "10.5", 10.5, "1e3", "bred", [1], {}, float("inf"), float("nan"), "1" * 11):
+    try:
+        int_arg("width", bad_int); check(False, f"int_arg refuses {bad_int!r}")
+    except ArgMistake as mistake:
+        check(str(mistake) == "width skal være et heltal", f"int_arg refuses {bad_int!r} naming the argument only")
+ref_text = parse_job_reference(_run_image_generate({"prompt": PROMPT, "width": "1024", "height": 1024.0, "seed": ""},
+                                                   service_getter=lambda: service_with(IMG_A), env={}))
+check(ref_text is not None, "a size sent as text and as a float queues the picture: no round trip for a difference the user cannot see")
+
+for blank in ("", "   "):
+    ref_blank = parse_job_reference(_run_image_generate({"prompt": PROMPT, "profile_id": blank},
+                                                        service_getter=lambda: service_with(IMG_A), env={}))
+    check(ref_blank is not None and ref_blank["profile_id"] == "sdxl-a",
+          f"profile_id={blank!r} means the rig's default, not a dead turn")
 
 # ---------------------------------------------------------------------------
 # 5. The lift through the envelope
@@ -267,6 +321,16 @@ for mutated, label in (
 ):
     check(parse_job_reference(json.dumps(mutated)) is None, f"{label}: rejected")
 check(parse_job_reference("Billedgenerering er ikke tilgængelig lige nu (x).") is None, "text result: None")
+from app.image_generate_tool import _unavailable, parse_refusal  # noqa: E402
+for code, modality in (("owner_limit", "image"), ("queue_full", "video"), ("no_source_image", "video"),
+                       ("media_jobs_api_off", "image")):
+    text = _unavailable(code, modality)
+    check(parse_refusal(text) == code and parse_refusal(tools.wrap_as_data(text)) == code,
+          f"parse_refusal reads {code} back, with and without the envelope")
+check(parse_refusal(out) is None and parse_refusal(tools.wrap_as_data(out)) is None,
+      "a queued job is not a refusal")
+check(parse_refusal("noget andet (owner_limit)") is None and parse_refusal("") is None and parse_refusal(None) is None,
+      "parse_refusal: only a refusal sentence, at the start of a line")
 check(parse_job_reference("{not json") is None and parse_job_reference("") is None, "garbage: None")
 
 # ---------------------------------------------------------------------------

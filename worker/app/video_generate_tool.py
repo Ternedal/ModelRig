@@ -32,6 +32,9 @@ import re
 from typing import Callable, Mapping
 
 from .image_generate_tool import (
+    ArgMistake,
+    _arg_name,
+    int_arg,
     STATUS_URL_PREFIX,
     VIDEO_JOB_REFERENCE_SCHEMA,
     _submit_media_job,
@@ -121,10 +124,11 @@ VIDEO_GENERATE_CAPABILITY = Tool(
             "prompt": {"type": "string",
                        "description": "English, concrete, one subject, one motion; max 4000 chars"},
             "profile_id": {"type": "string",
-                           "description": "optional: an enabled video profile; default is configured on the rig"},
-            "width": {"type": "integer", "description": "optional, must be a size the profile allows"},
-            "height": {"type": "integer", "description": "optional, must be a size the profile allows"},
-            "frames": {"type": "integer", "description": "optional, within the profile's frame budget"},
+                           "description": "leave out: the rig has a default. Only when the user names a video "
+                                          "profile; never a person, persona or revision id"},
+            "width": {"type": "integer", "description": "leave out unless the user asks for a size; the rig's default always works"},
+            "height": {"type": "integer", "description": "leave out unless the user asks for a size; the rig's default always works"},
+            "frames": {"type": "integer", "description": "leave out unless the user asks for a length; within the profile's frame budget"},
             "seed": {"type": "integer", "description": "optional, for 'the same again but…'"},
             "source_image_job_id": {"type": "string",
                                     "description": "optional: animate a finished picture -- 'latest' for the newest one of this conversation, or the 32-hex id from image_generate"},
@@ -150,20 +154,22 @@ def _validate_args(args: object) -> dict:
         raise ToolDenied("video_generate: args skal være et objekt")
     unknown = set(args) - _ALLOWED_ARGS
     if unknown:
-        raise ToolDenied("video_generate: ukendte argumenter afvises: " + ", ".join(sorted(unknown)))
+        raise ArgMistake("ukendte argumenter: " + ", ".join(sorted(_arg_name(k) for k in unknown)))
     prompt = args.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
-        raise ToolDenied("video_generate: prompt mangler")
+        raise ArgMistake("prompt mangler")
     if len(prompt) > _MAX_PROMPT_CHARS:
-        raise ToolDenied("video_generate: prompt er for lang")
+        raise ArgMistake("prompt er for lang")
     profile_id = args.get("profile_id")
-    if profile_id is not None and (not isinstance(profile_id, str) or not profile_id.strip()):
-        raise ToolDenied("video_generate: profile_id skal være en ikke-tom streng")
-    clean: dict = {"prompt": prompt, "profile_id": profile_id.strip() if isinstance(profile_id, str) else None}
+    if profile_id is not None and not isinstance(profile_id, str):
+        raise ArgMistake("profile_id skal være en streng")
+    # An empty string is how a model leaves an optional argument out; it means "the rig's default",
+    # not a refusal that ends the turn.
+    clean: dict = {"prompt": prompt, "profile_id": (profile_id.strip() or None) if isinstance(profile_id, str) else None}
     source = args.get("source_image_job_id")
     if source is not None:
         if not isinstance(source, str):
-            raise ToolDenied("video_generate: source_image_job_id skal være et job-id eller ordet latest")
+            raise ArgMistake("source_image_job_id skal være et job-id eller ordet latest")
         if source.strip().lower() == LATEST_SOURCE:
             source = LATEST_SOURCE
         elif len(source) != 32 or any(c not in "0123456789abcdef" for c in source):
@@ -173,20 +179,18 @@ def _validate_args(args: object) -> dict:
             source = UNREADABLE_SOURCE
     clean["source_image_job_id"] = source
     for key in _INT_ARGS:
-        value = args.get(key)
-        if value is None:
-            clean[key] = None
-            continue
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ToolDenied(f"video_generate: {key} skal være et heltal")
-        clean[key] = value
+        clean[key] = int_arg(key, args.get(key))
     return clean
 
 
 def _run_video_generate(args: dict, *, service_getter: Callable[[], object] | None = None,
                         env: Mapping[str, str] | None = None) -> str:
     """Queue one text-to-video job. Returns a job reference line followed by text for the model."""
-    clean = _validate_args(args)
+    from .image_generate_tool import _arg_mistake
+    try:
+        clean = _validate_args(args)
+    except ArgMistake as mistake:
+        return _arg_mistake(TOOL_NAME, "video", mistake)
     task = VIDEO_TASK
     params_keys: tuple[str, ...] = _INT_ARGS
     if clean["source_image_job_id"] == UNREADABLE_SOURCE:
@@ -203,9 +207,9 @@ def _run_video_generate(args: dict, *, service_getter: Callable[[], object] | No
         profile_env=VIDEO_TOOL_PROFILE_ENV, schema=VIDEO_JOB_REFERENCE_SCHEMA, kind="video",
         params_keys=params_keys,
         text=lambda job_id, profile_id: (
-            f"Videojob {job_id} er sat i kø på riggen (profil {profile_id}). "
+            f"Videojobbet er sat i kø på riggen (profil {profile_id}). "
             "Klippet tager nogle minutter og vises i samtalen, når det er klar. Sig til brugeren, "
-            "at det er på vej — påstå ikke, at det er færdigt, og gentag ikke prompten."
+            "at det er på vej — påstå ikke, at det er færdigt, gentag ikke prompten, og nævn ikke job-id'et."
         ),
     )
 

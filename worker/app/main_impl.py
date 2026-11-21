@@ -725,7 +725,8 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
     what ran.
     """
     from . import tools as t
-    from .image_generate_tool import TOOL_NAME as _IMAGE_TOOL, parse_job_reference as _image_job_ref
+    from .image_generate_tool import (TOOL_NAME as _IMAGE_TOOL, parse_job_reference as _image_job_ref,
+                                      parse_refusal as _media_refusal)
     from .video_generate_tool import TOOL_NAME as _VIDEO_TOOL
     _MEDIA_TOOLS = {_IMAGE_TOOL, _VIDEO_TOOL}
     _schema = t.ollama_tool_schema(t.GATE)
@@ -734,6 +735,11 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
     # can draw a bubble that polls GET /api/v1/media/jobs/{id}. Additive wire
     # field, always present on an answered turn; empty when no image was asked for.
     media_jobs: list[dict] = []
+    # Rig 20/11: a refused picture reached the user only as the model's paraphrase ("der er
+    # tekniske problemer"), and the reason could be read nowhere. A media tool call that
+    # queued nothing is listed here with its code -- the tool's name and a code, never an
+    # argument. Additive, like media_jobs; empty when nothing was refused.
+    media_refusals: list[dict] = []
 
     _BODY_STATES = {"generating": "thinking", "tool_run": "waiting_for_tool"}
 
@@ -765,7 +771,7 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
             return {"status": "answered", "answer": msg.get("content", ""),
                     "tool": tools_used[-1] if tools_used else None,
                     "tools_used": tools_used, "sources": sources,
-                    "media_jobs": media_jobs,
+                    "media_jobs": media_jobs, "media_refusals": media_refusals,
                     # De udsnit der FAKTISK laa i konteksten. "sources" er
                     # navnene; dette er hvad der blev laest. Vi paastaar IKKE
                     # hvilken saetning i svaret der brugte hvilket udsnit --
@@ -805,13 +811,17 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
             # and without its reference here the client could never show its bubble.
             return {**result, "extra_tool_calls_ignored": len(calls) - 1,
                     "tools_used": tools_used, "sources": sources,
-                    "context": context or [], "media_jobs": media_jobs}
+                    "context": context or [], "media_jobs": media_jobs, "media_refusals": media_refusals}
         tools_used.append(name)
         last_result = result["result"]
         if name in _MEDIA_TOOLS:
             ref = _image_job_ref(result["result"])
             if ref is not None:
                 media_jobs.append(ref)
+            else:
+                code = _media_refusal(result["result"])
+                if code is not None and len(media_refusals) < TOOL_MAX_STEPS:
+                    media_refusals.append({"tool": name, "code": code})
         messages.append({"role": "tool", "content": result["result"]})
     try:
         answer = await _final_answer(messages, model, cloud_base_url, cloud_key)
@@ -820,7 +830,7 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
     return {"status": "answered", "tool": tools_used[-1] if tools_used else None,
             "tools_used": tools_used, "answer": answer, "origin": origin,
             "tool_result": last_result, "steps_exhausted": True,
-            "media_jobs": media_jobs}
+            "media_jobs": media_jobs, "media_refusals": media_refusals}
 
 
 async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
