@@ -254,7 +254,21 @@ class ComfySupervisor:
             return False
         token, pid = proof["token"], proof["pid"]
         return (isinstance(token, str) and hmac.compare_digest(token, self._token)
-                and type(pid) is int and self._proc is not None and pid == self._proc.pid)
+                and type(pid) is int and self._proc is not None and pid in self._launched_pids())
+
+    def _launched_pids(self) -> frozenset[int]:
+        """The pids that are provably the launched child: the one spawned, and on Windows every
+        process in the Job Object it was started in.
+
+        Rig 21/11: with ComfyUI's own venv, ``Scripts\\python.exe`` is a starter and the interpreter
+        that takes the resident lock is its child (proof pid 1904, spawned pid 5372), so every
+        start was refused. A process is in the job only by being created inside it; nothing
+        outside the launched tree can be on this list."""
+        pids = {self._proc.pid} if self._proc is not None else set()
+        if self._proc is not None and _WINDOWS:
+            from .windows_job import attached_job_process_ids
+            pids |= attached_job_process_ids(self._proc)
+        return frozenset(pids)
 
     def require_work_area(self) -> None:
         """Every ComfyUI directory must be in the verified private work area, now (Anders, 6 Nov)."""
