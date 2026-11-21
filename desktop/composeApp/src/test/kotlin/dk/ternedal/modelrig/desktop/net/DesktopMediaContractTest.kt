@@ -248,4 +248,12 @@ class DesktopMediaContractTest {
         assertEquals(DesktopMediaContract.MAX_CONVERSATION_IMAGE_JOBS, kept.size)
         assertEquals("%032x".format(39), kept.last())
     }
+
+    /** #2462 review: references queued before a confirmation card are saved when they arrive. */
+    @Test
+    fun aTurnParkedOnACardSavesItsReferencesWithWordsAndTheCardCarriesNone() {
+        assertTrue(DesktopMediaContract.QUEUED_BEFORE_CARD_TEXT.isNotBlank(), "stored turns are sent to the model as history")
+        val after = listOf(DesktopMediaJobRef("b".repeat(32), DesktopMediaKind.VIDEO))
+        assertEquals(after, DesktopMediaContract.across(emptyList(), after), "the answer's union is what came after the decision")
+    }
 }

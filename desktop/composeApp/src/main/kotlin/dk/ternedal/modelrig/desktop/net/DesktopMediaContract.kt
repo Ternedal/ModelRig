@@ -148,6 +148,14 @@ object DesktopMediaContract {
     fun across(before: List<DesktopMediaJobRef>, after: List<DesktopMediaJobRef>): List<DesktopMediaJobRef> =
         (before + after).distinctBy { it.jobId }
 
+    /**
+     * The stored text of a turn that queued media and then stopped on a confirmation card
+     * (#2462 review, ChatGPT P2). The job is rendering whatever happens to the card, and a card
+     * lives in memory only, so the references are saved the moment they arrive -- with words,
+     * because this client sends every stored assistant turn to the model as history.
+     */
+    const val QUEUED_BEFORE_CARD_TEXT = "Sat i kø på riggen."
+
     /** At most this many picture ids ride on a turn; the rig keeps the newest of them anyway. */
     const val MAX_CONVERSATION_IMAGE_JOBS = 32
 
