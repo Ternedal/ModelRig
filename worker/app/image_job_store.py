@@ -310,6 +310,30 @@ class ImageJobStore:
                 row = db.execute("SELECT * FROM image_jobs WHERE id=? AND owner=?", (job_id, owner)).fetchone()
         return dict(row) if row else None
 
+    def newest_picture_for(self, owner: str, profile_ids) -> dict | None:
+        """The owner's most recently REQUESTED job among ``profile_ids`` that is finished or still
+        on its way, or None. Read-only.
+
+        For "animate that picture" when nothing names which one (#2459). It is deliberately not
+        "the most recently completed": a picture asked for after it and still rendering is the
+        one the user most likely means, and the caller must be able to see that and say so
+        instead of animating an older one (review 6004386187). Jobs that never produced a
+        picture -- failed, cancelled, expired -- are skipped. Owner-bound like ``get``; ordered
+        by ``created``, the time the job was asked for.
+        """
+        ids = sorted(set(profile_ids))
+        if any(not isinstance(p, str) or not _PROFILE_ID.fullmatch(p) for p in ids):
+            raise ImageJobError("invalid profile ids")
+        if not ids:
+            return None
+        states = ("completed", *ACTIVE_STATES)
+        with self._db() as db:
+            row = db.execute(
+                f"SELECT * FROM image_jobs WHERE owner=? AND state IN ({','.join('?' * len(states))}) "
+                f"AND profile_id IN ({','.join('?' * len(ids))}) ORDER BY created DESC, id DESC LIMIT 1",
+                (owner, *states, *ids)).fetchone()
+        return dict(row) if row else None
+
     def expire_queued(self, *, max_age_s: float = QUEUED_MAX_AGE_S, now: float | None = None) -> int:
         """Expire every queued job submitted at least max_age_s ago: terminal state 'expired', error
         'expired_unclaimed'. Returns how many. Running and publishing jobs are never touched.

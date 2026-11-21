@@ -71,6 +71,15 @@ class DesktopChatDb(
                      created_at INTEGER NOT NULL)""",
             )
             st.execute("CREATE INDEX IF NOT EXISTS idx_message_conv ON message(conv_id)")
+            // #2419: the media jobs an assistant message carries (see addMessage). The
+            // tables have no version number, so the column is added when it is not there;
+            // existing rows read back as "no jobs".
+            val hasMediaJobs = st.executeQuery("PRAGMA table_info(message)").use { rs ->
+                var found = false
+                while (rs.next()) if (rs.getString("name") == "media_jobs") found = true
+                found
+            }
+            if (!hasMediaJobs) st.execute("ALTER TABLE message ADD COLUMN media_jobs TEXT NOT NULL DEFAULT ''")
             st.execute(
                 """CREATE TABLE IF NOT EXISTS setting(
                     key   TEXT PRIMARY KEY,
@@ -113,7 +122,12 @@ class DesktopChatDb(
         }
     }
 
-    fun addMessage(convId: Long, role: String, content: String) {
+    /**
+     * [mediaJobs] is the stored form of the picture/clip jobs the message carries
+     * (`DesktopMediaContract.encodeRefs`): job ids only, never a prompt. Empty for
+     * every message that queued nothing.
+     */
+    fun addMessage(convId: Long, role: String, content: String, mediaJobs: String = "") {
         val now = System.currentTimeMillis()
         // Guard against a race: if the conversation was deleted between the send
         // starting and the reply finalizing, inserting would throw a FOREIGN KEY
@@ -123,8 +137,9 @@ class DesktopChatDb(
             ps.setLong(1, convId)
             ps.executeQuery().use { if (!it.next()) return }
         }
-        conn.prepareStatement("INSERT INTO message(conv_id, role, content, created_at) VALUES (?,?,?,?)").use { ps ->
+        conn.prepareStatement("INSERT INTO message(conv_id, role, content, created_at, media_jobs) VALUES (?,?,?,?,?)").use { ps ->
             ps.setLong(1, convId); ps.setString(2, role); ps.setString(3, content); ps.setLong(4, now)
+            ps.setString(5, mediaJobs)
             ps.executeUpdate()
         }
         conn.prepareStatement("UPDATE conversation SET updated_at=? WHERE id=?").use { ps ->
@@ -135,14 +150,14 @@ class DesktopChatDb(
     // Data class instead of Pair so existing two-way destructures
     // `(role, content)` keep compiling while the UI can also read the
     // timestamp for the guide's identity row ("Kaliv · 14:32").
-    data class MsgRow(val role: String, val content: String, val at: Long)
+    data class MsgRow(val role: String, val content: String, val at: Long, val mediaJobs: String = "")
 
     fun loadMessages(convId: Long): List<MsgRow> {
         val out = mutableListOf<MsgRow>()
-        conn.prepareStatement("SELECT role, content, created_at FROM message WHERE conv_id=? ORDER BY id ASC").use { ps ->
+        conn.prepareStatement("SELECT role, content, created_at, media_jobs FROM message WHERE conv_id=? ORDER BY id ASC").use { ps ->
             ps.setLong(1, convId)
             ps.executeQuery().use { rs ->
-                while (rs.next()) out.add(MsgRow(rs.getString(1), rs.getString(2), rs.getLong(3)))
+                while (rs.next()) out.add(MsgRow(rs.getString(1), rs.getString(2), rs.getLong(3), rs.getString(4).orEmpty()))
             }
         }
         return out

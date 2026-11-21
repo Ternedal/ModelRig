@@ -603,6 +603,13 @@ class ToolChatReq(BaseModel):
     model: str | None = None
     conversation_id: str | None = None
     system: str | None = None
+    # The image jobs shown in this conversation, oldest first (ids only). With it,
+    # "lav en video af det billede" means the newest picture of THIS conversation;
+    # without it the rig can only take the owner's newest picture anywhere, which
+    # may be another conversation's (#2459, review 6004386187). Optional and
+    # additive: an older client sends nothing and gets the fallback. Sanitised on
+    # use -- malformed entries are dropped, never a 422 for a whole turn.
+    conversation_image_jobs: list | None = None
     # Cloud may propose tools (Anders 2026-07-10). Writes still need the card;
     # reads run either way. The key is never persisted -- per request only.
     cloud_base_url: str | None = None
@@ -718,8 +725,21 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
     what ran.
     """
     from . import tools as t
+    from .image_generate_tool import (TOOL_NAME as _IMAGE_TOOL, parse_job_reference as _image_job_ref,
+                                      parse_refusal as _media_refusal)
+    from .video_generate_tool import TOOL_NAME as _VIDEO_TOOL
+    _MEDIA_TOOLS = {_IMAGE_TOOL, _VIDEO_TOOL}
     _schema = t.ollama_tool_schema(t.GATE)
     last_result = None
+    # #2419: image jobs the turn queued, lifted out of the tool result so the app
+    # can draw a bubble that polls GET /api/v1/media/jobs/{id}. Additive wire
+    # field, always present on an answered turn; empty when no image was asked for.
+    media_jobs: list[dict] = []
+    # Rig 20/11: a refused picture reached the user only as the model's paraphrase ("der er
+    # tekniske problemer"), and the reason could be read nowhere. A media tool call that
+    # queued nothing is listed here with its code -- the tool's name and a code, never an
+    # argument. Additive, like media_jobs; empty when nothing was refused.
+    media_refusals: list[dict] = []
 
     _BODY_STATES = {"generating": "thinking", "tool_run": "waiting_for_tool"}
 
@@ -751,6 +771,7 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
             return {"status": "answered", "answer": msg.get("content", ""),
                     "tool": tools_used[-1] if tools_used else None,
                     "tools_used": tools_used, "sources": sources,
+                    "media_jobs": media_jobs, "media_refusals": media_refusals,
                     # De udsnit der FAKTISK laa i konteksten. "sources" er
                     # navnene; dette er hvad der blev laest. Vi paastaar IKKE
                     # hvilken saetning i svaret der brugte hvilket udsnit --
@@ -786,11 +807,21 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
         except t.ToolError as e:
             raise HTTPException(status_code=503, detail=str(e))
         if result["status"] == "confirmation_required":
+            # media_jobs too: a picture queued earlier in this turn is already rendering,
+            # and without its reference here the client could never show its bubble.
             return {**result, "extra_tool_calls_ignored": len(calls) - 1,
                     "tools_used": tools_used, "sources": sources,
-                    "context": context or []}
+                    "context": context or [], "media_jobs": media_jobs, "media_refusals": media_refusals}
         tools_used.append(name)
         last_result = result["result"]
+        if name in _MEDIA_TOOLS:
+            ref = _image_job_ref(result["result"])
+            if ref is not None:
+                media_jobs.append(ref)
+            else:
+                code = _media_refusal(result["result"])
+                if code is not None and len(media_refusals) < TOOL_MAX_STEPS:
+                    media_refusals.append({"tool": name, "code": code})
         messages.append({"role": "tool", "content": result["result"]})
     try:
         answer = await _final_answer(messages, model, cloud_base_url, cloud_key)
@@ -798,7 +829,8 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
         raise HTTPException(status_code=502, detail=str(e))
     return {"status": "answered", "tool": tools_used[-1] if tools_used else None,
             "tools_used": tools_used, "answer": answer, "origin": origin,
-            "tool_result": last_result, "steps_exhausted": True}
+            "tool_result": last_result, "steps_exhausted": True,
+            "media_jobs": media_jobs, "media_refusals": media_refusals}
 
 
 async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
@@ -835,6 +867,12 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
         "action. If no tool fits, answer normally."
     )
     messages.append({"role": "system", "content": _tool_nudge})
+    # #2419 slice C: one more line per media tool, only while it is registered.
+    from .image_generate_tool import system_rule_if_registered as _image_rule
+    from .video_generate_tool import system_rule_if_registered as _video_rule
+    for _rule in (_image_rule(), _video_rule()):
+        if _rule:
+            messages.append({"role": "system", "content": _rule})
     # Person Profile binding (#752): a selected person's active personality
     # takes precedence over the client's persona text; with no person
     # selected the client's prompt is used exactly as before.
@@ -926,11 +964,19 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
     messages.append(user_msg)
 
     origin = "cloud" if _cloud_upstream(req) else "local"
-    result = await _run_tool_loop(
-        messages, req.model, req.cloud_base_url, req.cloud_key,
-        req.conversation_id, origin, sources, [], on_phase=on_phase,
-        context=context_used,
-    )
+    # Which pictures this conversation holds, for video_generate's "latest" (#2459). Set for
+    # exactly this turn's tool calls and taken away again: a parked confirmation continues in
+    # another request, without it, and falls back like an older client.
+    from .video_generate_tool import CONVERSATION_IMAGE_JOBS, conversation_image_jobs
+    shown = CONVERSATION_IMAGE_JOBS.set(conversation_image_jobs(req.conversation_image_jobs))
+    try:
+        result = await _run_tool_loop(
+            messages, req.model, req.cloud_base_url, req.cloud_key,
+            req.conversation_id, origin, sources, [], on_phase=on_phase,
+            context=context_used,
+        )
+    finally:
+        CONVERSATION_IMAGE_JOBS.reset(shown)
     if person is not None and isinstance(result, dict):
         # Which person answered -- additive, so older clients ignore it and a
         # newer one can show it. Absent means "no person selected".

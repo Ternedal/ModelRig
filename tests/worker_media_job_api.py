@@ -30,6 +30,7 @@ from app.media_job_api import (OWNER, MediaJobService, MediaJobsUnavailable, bui
 from worker_media_generation_profiles import image_profile, video_profile  # noqa: E402
 
 SECRET = "s" * 40
+EXECUTOR = "GPU-" + "0" * 8 + "-0000-0000-0000-" + "0" * 12 + ":" + "a" * 16  # a valid executor instance
 INSTANCE = "GPU-6a7f0c2e-1b2d-4c3e-8f9a-0123456789ab:0123456789abcdef"
 HEADERS = {"X-Internal-Media-Secret": SECRET}
 PROMPT = "a red bicycle under a streetlight"
@@ -66,7 +67,8 @@ class RouteTests(unittest.TestCase):
         self.assertNotIn("prompt", job)
         row = self.store.get(job["id"], OWNER)
         self.assertEqual((row["owner"], row["prompt"]), ("installation", PROMPT), "the gallery's owner (#2365)")
-        self.assertEqual(json.loads(row["params"]), {"width": 1024, "height": 1024, "steps": 20})
+        # The resolved task is stored with the parameters (20/11), so the executor never re-derives it.
+        self.assertEqual(json.loads(row["params"]), {"width": 1024, "height": 1024, "steps": 20, "task": "text_to_image"})
 
     def test_profiles_are_filtered_versioned_and_do_not_expose_model_details(self):
         response = self.client.get("/internal/media/jobs/profiles", headers=HEADERS)
@@ -87,7 +89,9 @@ class RouteTests(unittest.TestCase):
         enabled = client_for(video_service).get("/internal/media/jobs/profiles", headers=HEADERS)
         self.assertEqual(enabled.status_code, 200)
         self.assertEqual([p["profile_id"] for p in enabled.json()["profiles"]], ["sdxl-a", "wan-t2v"])
-        self.assertNotIn("image_to_video", enabled.text)
+        # image_to_video is served since the owner-gated reader was wired (20/11): advertised as the
+        # profile lists it.
+        self.assertEqual(enabled.json()["profiles"][1]["tasks"], ["image_to_video", "text_to_video"])
 
     def test_profiles_never_advertise_a_prompt_longer_than_submit_accepts(self):
         from dataclasses import replace
@@ -147,7 +151,7 @@ class RouteTests(unittest.TestCase):
             ({"steps": 41}, "invalid_request"),
             ({"seed": -1}, "invalid_request"),
             ({"frames": 10}, "invalid_request"),
-            ({"task": "image_to_image"}, "invalid_request"),
+            ({"task": "image_to_image"}, "task_not_served"),
             ({"prompt": "x" * 501}, "invalid_request"),
             ({"input_asset_id": "abc"}, "invalid_request"),
         ]
@@ -162,16 +166,42 @@ class RouteTests(unittest.TestCase):
         with self.store._db() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM image_jobs").fetchone()[0], 0)
 
-    def test_video_needs_its_switch_and_image_to_video_is_not_served(self):
+    def test_video_needs_its_switch_and_image_to_video_needs_an_owned_source(self):
         response = self.submit(profile_id="wan-t2v")
         self.assertEqual((response.status_code, response.json()["detail"]), (400, "video_not_enabled"))
         video = client_for(MediaJobService(self.store, self.profiles, SECRET, video_enabled=True))
         ok = video.post("/internal/media/jobs", json={"profile_id": "wan-t2v", "prompt": PROMPT, "task": "text_to_video"},
                         headers=HEADERS)
         self.assertEqual(ok.status_code, 202, ok.text)
+        # No task named and no source: the text task, never the alphabetical first (image_to_video).
+        default = video.post("/internal/media/jobs", json={"profile_id": "wan-t2v", "prompt": PROMPT}, headers=HEADERS)
+        self.assertEqual(default.status_code, 202, default.text)
+        # image_to_video: the source must be a completed asset of THIS owner -- checked at submit.
+        refused = video.post("/internal/media/jobs", headers=HEADERS, json={
+            "profile_id": "wan-t2v", "prompt": PROMPT, "task": "image_to_video"})
+        self.assertEqual((refused.status_code, refused.json()["detail"]), (400, "invalid_request"), "no source")
         refused = video.post("/internal/media/jobs", headers=HEADERS, json={
             "profile_id": "wan-t2v", "prompt": PROMPT, "task": "image_to_video", "input_asset_id": "a" * 24})
-        self.assertEqual((refused.status_code, refused.json()["detail"]), (400, "task_not_served"))
+        self.assertEqual((refused.status_code, refused.json()["detail"]), (400, "source_not_found"), "unknown source")
+        # Another owner's completed asset is not ours either.
+        theirs = self.store.submit("someone-else", PROMPT, profile_id="sdxl-a")["job_id"]
+        self.assertEqual(self.store.claim_for(["sdxl-a"], EXECUTOR)["id"], theirs)
+        self.assertTrue(self.store.begin_publish(theirs, EXECUTOR))
+        self.assertTrue(self.store.complete(theirs, EXECUTOR, "img_theirs"))
+        refused = video.post("/internal/media/jobs", headers=HEADERS, json={
+            "profile_id": "wan-t2v", "prompt": PROMPT, "task": "image_to_video", "input_asset_id": "img_theirs"})
+        self.assertEqual((refused.status_code, refused.json()["detail"]), (400, "source_not_found"))
+        # Our own completed asset: accepted, and a missing task defaults to image_to_video when a source is given.
+        mine = self.store.submit(OWNER, PROMPT, profile_id="sdxl-a")["job_id"]
+        self.assertEqual(self.store.claim_for(["sdxl-a"], EXECUTOR)["id"], mine)
+        self.assertTrue(self.store.begin_publish(mine, EXECUTOR))
+        self.assertTrue(self.store.complete(mine, EXECUTOR, "img_mine"))
+        accepted = video.post("/internal/media/jobs", headers=HEADERS, json={
+            "profile_id": "wan-t2v", "prompt": PROMPT, "input_asset_id": "img_mine"})
+        self.assertEqual(accepted.status_code, 202, accepted.text)
+        row = self.store.get(accepted.json()["id"], OWNER)
+        params = json.loads(row["params"]) if isinstance(row.get("params"), str) else row["params"]
+        self.assertEqual((params.get("task"), params.get("input_asset_id")), ("image_to_video", "img_mine"))
 
     def test_queue_and_active_limits_are_429_codes(self):
         for _ in range(3):

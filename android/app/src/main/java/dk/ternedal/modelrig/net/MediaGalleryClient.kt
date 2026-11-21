@@ -19,6 +19,25 @@ interface MediaGallerySource {
     fun thumbnail(item: MediaItem): ByteArray
     fun image(item: MediaItem): ByteArray
     fun video(item: MediaItem): MediaVideoStream
+
+    /**
+     * #2419: one completed image by the asset id a job reported (`asset_id` on
+     * `kaliv-media-job/v1`), for the chat bubble, which has no [MediaItem] yet.
+     * Same route and bounds as [image]. Default refuses, so a fake that does
+     * not know about images stays honest.
+     */
+    fun asset(assetId: String): ByteArray =
+        throw MediaGalleryException(MediaGalleryException.Reason.NOT_FOUND, "Billedet kan ikke hentes her")
+
+    /**
+     * Video follow-up to #2419: the whole clip, streamed into [out] for "Gem"/"Del"
+     * from the chat. Bounded by [MediaGalleryClient.VIDEO_MAX_BYTES] and the
+     * item's own size; nothing is kept in memory and nothing is written anywhere
+     * but [out], which the caller owns (a MediaStore row or the share copy).
+     * Default refuses, so a fake that cannot download stays honest.
+     */
+    fun videoInto(item: MediaItem, out: java.io.OutputStream): Unit =
+        throw MediaGalleryException(MediaGalleryException.Reason.NOT_FOUND, "Videoen kan ikke hentes her")
 }
 
 /**
@@ -147,6 +166,13 @@ class MediaGalleryClient(
         return execute(origin.resolveExact(item.mediaPath), IMAGE_MAX_BYTES, requireImage = true)
     }
 
+    override fun asset(assetId: String): ByteArray {
+        if (!MediaGalleryContract.isSafeId(assetId)) {
+            throw MediaGalleryException(MediaGalleryException.Reason.NOT_FOUND, "Ugyldigt billed-id")
+        }
+        return execute(origin.resolveExact(MediaGalleryContract.mediaPath(assetId)), IMAGE_MAX_BYTES, requireImage = true)
+    }
+
     /**
      * Video is streamed, never downloaded whole: the player issues Range
      * requests through [http]. A video the server cannot serve in ranges is
@@ -161,6 +187,55 @@ class MediaGalleryClient(
         val factory = OkHttpDataSource.Factory(http)
             .setDefaultRequestProperties(mapOf("Authorization" to "Bearer $token"))
         return MediaVideoStream(origin.resolveExact(item.mediaPath).toString(), factory)
+    }
+
+    /**
+     * The clip copied once, in full, to [out]. The size the gallery listed is the
+     * bound (plus the global cap); a body that disagrees with it -- longer, shorter,
+     * or not a video type -- is refused, and the caller discards what it got.
+     */
+    override fun videoInto(item: MediaItem, out: java.io.OutputStream) {
+        require(item.kind == MediaKind.VIDEO) { "not a video" }
+        if (item.sizeBytes <= 0 || item.sizeBytes > VIDEO_MAX_BYTES) throw tooLarge()
+        val request = Request.Builder().url(origin.resolveExact(item.mediaPath))
+            .header("Authorization", "Bearer $token")
+            .header("Accept", "video/*")
+            .get().build()
+        val response = try {
+            http.newCall(request).execute()
+        } catch (e: MediaOriginRefusedIOException) {
+            throw MediaGalleryException(MediaGalleryException.Reason.ORIGIN_REFUSED, "Forespørgsel uden for den parrede rig afvist")
+        } catch (e: IOException) {
+            throw MediaGalleryException(MediaGalleryException.Reason.NETWORK, "Riggen kan ikke nås")
+        }
+        response.use {
+            checkStatus(it)
+            val type = it.header("Content-Type").orEmpty().substringBefore(';').trim().lowercase()
+            if (!type.startsWith("video/")) {
+                throw MediaGalleryException(MediaGalleryException.Reason.PROTOCOL, "Uventet medietype")
+            }
+            val declared = it.body.contentLength()
+            if (declared > item.sizeBytes) throw tooLarge()
+            try {
+                it.body.byteStream().use { stream ->
+                    val buffer = ByteArray(64 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val n = stream.read(buffer)
+                        if (n < 0) break
+                        total += n
+                        if (total > item.sizeBytes) throw tooLarge()
+                        out.write(buffer, 0, n)
+                    }
+                    if (total != item.sizeBytes) {
+                        throw MediaGalleryException(MediaGalleryException.Reason.PROTOCOL, "Ufuldstændigt mediesvar")
+                    }
+                    out.flush()
+                }
+            } catch (e: IOException) {
+                throw MediaGalleryException(MediaGalleryException.Reason.NETWORK, "Forbindelsen til riggen blev afbrudt")
+            }
+        }
     }
 
     private fun HttpUrl.resolveExact(path: String): HttpUrl = newBuilder().encodedPath(path).build()
@@ -180,7 +255,7 @@ class MediaGalleryClient(
         response.use { return readBounded(it, maxBytes, requireImage) }
     }
 
-    private fun readBounded(response: Response, maxBytes: Long, requireImage: Boolean): ByteArray {
+    private fun checkStatus(response: Response) {
         if (response.isRedirect || response.code in 300..399) {
             throw MediaGalleryException(MediaGalleryException.Reason.REDIRECT_REFUSED, "Riggen forsøgte at viderestille; afvist")
         }
@@ -192,6 +267,10 @@ class MediaGalleryClient(
             503 -> throw MediaGalleryException(MediaGalleryException.Reason.STORAGE_UNAVAILABLE, "Medielageret på riggen er ikke tilgængeligt")
             else -> throw MediaGalleryException(MediaGalleryException.Reason.HTTP, "Mediebiblioteket svarede ${response.code}")
         }
+    }
+
+    private fun readBounded(response: Response, maxBytes: Long, requireImage: Boolean): ByteArray {
+        checkStatus(response)
         val type = response.header("Content-Type").orEmpty().substringBefore(';').trim().lowercase()
         if (requireImage && !type.startsWith("image/")) {
             throw MediaGalleryException(MediaGalleryException.Reason.PROTOCOL, "Uventet medietype")
@@ -232,6 +311,8 @@ class MediaGalleryClient(
         const val LIST_MAX_BYTES: Long = 1L * 1024 * 1024
         const val THUMBNAIL_MAX_BYTES: Long = 2L * 1024 * 1024
         const val IMAGE_MAX_BYTES: Long = 25L * 1024 * 1024
+        /** A saved/shared clip, whole. A short generated clip is tens of MB; this is the ceiling, not a target. */
+        const val VIDEO_MAX_BYTES: Long = 256L * 1024 * 1024
 
         fun defaultHttp(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(5, TimeUnit.SECONDS)
