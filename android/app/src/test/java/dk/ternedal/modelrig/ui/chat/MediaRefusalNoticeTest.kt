@@ -64,4 +64,18 @@ class MediaRefusalNoticeTest {
         assertEquals(listOf(a), MediaTurnJobs.across(listOf(a), emptyList()))
         assertEquals(emptyList<MediaJobRef>(), MediaTurnJobs.across(emptyList(), emptyList()))
     }
+
+    @Test
+    fun `the conversation's pictures are named oldest first, clips left out, a repeat at its latest place`() {
+        val a = MediaJobRef("0123456789abcdef0123456789abcdef", MediaJobRef.Kind.IMAGE)
+        val b = MediaJobRef("fedcba9876543210fedcba9876543210", MediaJobRef.Kind.IMAGE)
+        val clip = MediaJobRef("ffffffffffffffffffffffffffffffff", MediaJobRef.Kind.VIDEO)
+        assertEquals(listOf(a.jobId, b.jobId), MediaTurnJobs.pictures(listOf(emptyList(), listOf(a), listOf(clip), listOf(b))))
+        assertEquals(listOf(b.jobId, a.jobId), MediaTurnJobs.pictures(listOf(listOf(a), listOf(b), listOf(a))))
+        assertEquals(emptyList<String>(), MediaTurnJobs.pictures(listOf(listOf(clip), emptyList())))
+        val many = (0 until 40).map { listOf(MediaJobRef("%032x".format(it), MediaJobRef.Kind.IMAGE)) }
+        val kept = MediaTurnJobs.pictures(many)
+        assertEquals(MediaTurnJobs.MAX_PICTURES, kept.size)
+        assertEquals("%032x".format(39), kept.last())
+    }
 }
