@@ -47,6 +47,7 @@ import dk.ternedal.modelrig.ui.decodeBounded
 import dk.ternedal.modelrig.ui.theme.KalivTheme
 import dk.ternedal.modelrig.ui.theme.KalivTokens
 import dk.ternedal.modelrig.ui.theme.KalivType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -59,8 +60,9 @@ import kotlinx.coroutines.withContext
  * The bubble owns nothing but a job id. It polls `GET /api/v1/media/jobs/{id}`
  * through the existing [MediaJobSource] (bearer to the paired origin only, no
  * redirects, bounded bodies), with the generate screen's backoff, until the job
- * is terminal; a completed job's `asset_id` is fetched once through
- * [MediaGallerySource.asset] and decoded bounded; tapping the picture opens
+ * is terminal; a completed job's `asset_id` is fetched through
+ * [MediaGallerySource.asset] and decoded bounded (asked again, with the same
+ * backoff, when the rig was only away for a moment); tapping the picture opens
  * [ZoomableImageDialog] on the same bytes. Errors are the rig's codes
  * through [MediaGenerate.errorText], never free text from the rig, never a
  * crash. The prompt is nowhere in here: the bubble never sees it.
@@ -134,16 +136,89 @@ object ImageJobBubbleLogic {
         }
     }
 
-    /** The completed job's picture arrived (or did not). */
-    fun fetched(job: MediaJob, result: Result<Pair<ByteArray, Bitmap>>): ImageJobPhase = result.fold(
-        onSuccess = { (bytes, bitmap) -> ImageJobPhase.Shown(job, bitmap, bytes) },
-        onFailure = { e ->
-            ImageJobPhase.Ended(
-                (e as? MediaGalleryException)?.message ?: "Billedet kunne ikke hentes fra riggen",
-                retryable = transient(e),
+    /**
+     * The completed job's picture arrived (or did not). The job is finished either way, so a
+     * rig that was away for a moment ([transient]) is asked again -- with the poll's backoff,
+     * up to [MAX_FAILURES] in a row -- instead of ending a bubble whose picture exists
+     * (review 6004386757). Anything else would fail the same way again and ends at once.
+     */
+    fun fetched(phase: ImageJobPhase, job: MediaJob, result: Result<Pair<ByteArray, Bitmap>>): ImageJobPhase =
+        result.fold(
+            onSuccess = { (bytes, bitmap) -> ImageJobPhase.Shown(job, bitmap, bytes) },
+            onFailure = { e ->
+                val failures = ((phase as? ImageJobPhase.Following)?.failures ?: 0) + 1
+                if (transient(e) && failures < MAX_FAILURES) ImageJobPhase.Following(job, failures)
+                else ImageJobPhase.Ended(
+                    (e as? MediaGalleryException)?.message ?: "Billedet kunne ikke hentes fra riggen",
+                    // What the automatic tries could not get, a tap may: only where trying again can help.
+                    retryable = transient(e),
+                )
+            },
+        )
+
+    /**
+     * [runCatching] for code a coroutine runs: a cancellation is never a result. `runCatching`
+     * catches [CancellationException] like any other throwable, and a loop that turns it into
+     * "the rig failed" keeps asking after its composable is gone (review 6004386757).
+     */
+    inline fun <T> catching(block: () -> T): Result<T> = try {
+        Result.success(block())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        Result.failure(e)
+    }
+
+    /**
+     * Follows one job to its end and reports every phase through [onPhase]: first ask at
+     * once, then with backoff; a completed job's picture is fetched in the same loop. It
+     * returns when the phase is no longer [ImageJobPhase.Following], and stops at once --
+     * without another phase -- when its coroutine is cancelled, which is what leaving the
+     * composition does.
+     */
+    suspend fun follow(
+        jobId: String,
+        jobs: MediaJobSource,
+        gallery: MediaGallerySource,
+        io: CoroutineDispatcher,
+        pollMillis: Long,
+        decode: (ByteArray) -> Bitmap = { decodeBounded(it, IMAGE_SIDE_PX) },
+        onPhase: (ImageJobPhase) -> Unit,
+    ) {
+        var phase = initial()
+        var first = true
+        while (polling(phase)) {
+            val done = toFetch(phase)
+            if (done != null) {
+                val assetId = done.assetId ?: break
+                // Only a repeat waits: the first fetch follows the poll that found the job done.
+                if (((phase as? ImageJobPhase.Following)?.failures ?: 0) > 0) delay(delayMillis(phase, pollMillis))
+                val picture = withContext(io) {
+                    catching {
+                        val bytes = gallery.asset(assetId)
+                        bytes to decode(bytes)
+                    }
+                }
+                phase = fetched(phase, done, picture)
+                onPhase(phase)
+                continue
+            }
+            if (!first) delay(delayMillis(phase, pollMillis))
+            first = false
+            val result = withContext(io) { catching { jobs.status(jobId) } }
+            phase = result.fold(
+                onSuccess = { polled(it) },
+                onFailure = { e ->
+                    pollFailed(
+                        phase,
+                        e as? MediaJobException
+                            ?: MediaJobException(MediaJobException.Reason.UNAVAILABLE, "Uventet svar fra riggen"),
+                    )
+                },
             )
-        },
-    )
+            onPhase(phase)
+        }
+    }
 
     /** The rig was away for a moment (network, storage); everything else would fail the same way again. */
     fun transient(e: Throwable?): Boolean = when ((e as? MediaGalleryException)?.reason) {
@@ -179,36 +254,9 @@ fun ImageJobBubble(
     var phase by remember(jobId, attempt) { mutableStateOf(ImageJobBubbleLogic.initial()) }
 
     LaunchedEffect(jobId, attempt) {
-        // First ask at once, then with backoff; the picture is fetched once, in the
-        // same effect, so leaving the composition cancels everything.
-        var first = true
-        while (ImageJobBubbleLogic.polling(phase)) {
-            val toFetch = ImageJobBubbleLogic.toFetch(phase)
-            if (toFetch != null) {
-                val assetId = toFetch.assetId ?: break
-                val picture = withContext(io) {
-                    runCatching {
-                        val bytes = gallery.asset(assetId)
-                        bytes to decodeBounded(bytes, ImageJobBubbleLogic.IMAGE_SIDE_PX)
-                    }
-                }
-                phase = ImageJobBubbleLogic.fetched(toFetch, picture)
-                break
-            }
-            if (!first) delay(ImageJobBubbleLogic.delayMillis(phase, pollMillis))
-            first = false
-            val result = withContext(io) { runCatching { jobs.status(jobId) } }
-            phase = result.fold(
-                onSuccess = { ImageJobBubbleLogic.polled(it) },
-                onFailure = { e ->
-                    ImageJobBubbleLogic.pollFailed(
-                        phase,
-                        e as? MediaJobException
-                            ?: MediaJobException(MediaJobException.Reason.UNAVAILABLE, "Uventet svar fra riggen"),
-                    )
-                },
-            )
-        }
+        // One effect follows the job and fetches its picture, so leaving the composition
+        // cancels everything; the loop itself is ImageJobBubbleLogic.follow, tested without Compose.
+        ImageJobBubbleLogic.follow(jobId, jobs, gallery, io, pollMillis) { phase = it }
     }
 
     // Tap the picture -> full-size viewer with pinch-zoom (Anders 19/11 23:02).
