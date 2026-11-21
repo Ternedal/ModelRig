@@ -120,7 +120,7 @@ internal fun KalivMediaJobBubble(
         while (phase is DesktopMediaPhase.Following) {
             if (!first) delay(KalivMediaJob.delayMillis(phase, pollMillis))
             first = false
-            val answer = withContext(Dispatchers.IO) { runCatching { source.status(ref.jobId) } }
+            val answer = withContext(Dispatchers.IO) { KalivMediaJob.catching { source.status(ref.jobId) } }
             val before = phase
             phase = answer.fold(
                 onSuccess = { KalivMediaJob.polled(it, ref.kind) },
@@ -129,13 +129,22 @@ internal fun KalivMediaJobBubble(
         }
         val assetId = (phase as? DesktopMediaPhase.Completed)?.job?.assetId
         if (assetId != null && ref.kind == DesktopMediaKind.IMAGE) {
-            val fetched = withContext(Dispatchers.IO) { runCatching { source.image(assetId) } }
+            // The job is finished: a rig that was away for a moment is asked again, with the
+            // poll's backoff, before the bubble settles for "Prøv igen".
+            var failedFetches = 0
+            var fetched = withContext(Dispatchers.IO) { KalivMediaJob.catching { source.image(assetId) } }
+            while (fetched.isFailure) {
+                failedFetches += 1
+                val wait = KalivMediaJob.refetchDelayMillis(failedFetches, fetched.exceptionOrNull(), pollMillis) ?: break
+                delay(wait)
+                fetched = withContext(Dispatchers.IO) { KalivMediaJob.catching { source.image(assetId) } }
+            }
             val bytes = fetched.getOrNull()
             if (bytes == null) {
                 transferRetryable = KalivMediaJob.transferRetryable(fetched.exceptionOrNull())
                 transferError = KalivMediaJob.transferFailedText(fetched.exceptionOrNull(), ref.kind)
             } else {
-                val decoded = withContext(Dispatchers.Default) { runCatching { decodePicture(bytes) } }.getOrNull()
+                val decoded = withContext(Dispatchers.Default) { KalivMediaJob.catching { decodePicture(bytes) } }.getOrNull()
                 if (decoded == null || decoded.width <= 0 || decoded.height <= 0) {
                     transferError = "Billedet kan ikke vises"
                 } else {

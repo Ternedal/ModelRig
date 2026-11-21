@@ -5,6 +5,7 @@ import dk.ternedal.modelrig.desktop.net.DesktopMediaJob
 import dk.ternedal.modelrig.desktop.net.DesktopMediaJobState
 import dk.ternedal.modelrig.desktop.net.DesktopMediaKind
 import java.io.IOException
+import kotlin.coroutines.cancellation.CancellationException
 import java.io.OutputStream
 import java.nio.file.Files
 import java.nio.file.Path
@@ -44,6 +45,32 @@ object KalivMediaJob {
     const val NOT_FOUND_TEXT = "Jobbet findes ikke længere på riggen"
 
     fun initial(): DesktopMediaPhase = DesktopMediaPhase.Following(null, 0)
+
+    /**
+     * [runCatching] for code a coroutine runs: a cancellation is never a result. `runCatching`
+     * catches [CancellationException] like any other throwable, and a loop that turns it into
+     * "the rig failed" keeps asking after its composable is gone (the Android bubble's review,
+     * 6004386757; the same loop lives here).
+     */
+    inline fun <T> catching(block: () -> T): Result<T> = try {
+        Result.success(block())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        Result.failure(e)
+    }
+
+    /**
+     * How long to wait before fetching a finished picture again, after [failedFetches]
+     * failures in a row -- or null to stop and leave it to "Prøv igen". The job is done, so a
+     * rig that was away for a moment is asked again with the poll's backoff, up to
+     * [MAX_POLL_FAILURES]; anything that would fail the same way again is not.
+     */
+    fun refetchDelayMillis(failedFetches: Int, error: Throwable?, base: Long = POLL_MILLIS): Long? {
+        if (failedFetches < 1 || failedFetches >= MAX_POLL_FAILURES || !transferRetryable(error)) return null
+        val factor = 1L shl failedFetches.coerceAtMost(16)
+        return (base * factor).coerceAtMost(MAX_POLL_BACKOFF_MILLIS.coerceAtLeast(base))
+    }
 
     /** The wait before the next poll: [base], then doubled per failure in a row, capped (2, 4, 8, 16, 30, 30 s). */
     fun delayMillis(phase: DesktopMediaPhase, base: Long = POLL_MILLIS): Long {
