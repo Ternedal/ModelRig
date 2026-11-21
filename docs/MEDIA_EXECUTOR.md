@@ -218,6 +218,7 @@ kaliv-media-event {"detail": "<job id>:sdxl-a:completed:12.3", "event": "job", "
 | `purged` | prompts blanked by retention |
 | `loaded` and `closed` | a model was loaded or unloaded (with whether the GPU was proven free) |
 | `vram_short` | a job deferred for VRAM |
+| `gpu_budget` | what the admission probe measured, in MiB: `admitted,cuda1,free_mib=…,reserved_mib=…,usable_mib=…,total_mib=…` after a load, `short,…` when a job was deferred. Only from an adapter that measures (the in-process image adapter) |
 | `job` | job id, profile, outcome and seconds |
 | `sink_unavailable` | the reason code only, at exit 75: the part of the message before its first colon when that is a code, otherwise the exception type. The rest of a message (an OS error with a path, and so a user name; an ACL's SIDs) never reaches the log |
 | `exit` | the exit code |

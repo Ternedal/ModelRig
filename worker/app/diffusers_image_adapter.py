@@ -137,6 +137,7 @@ class DiffusersImageAdapter:
         self._env = os.environ if env is None else env
         self._lease = None
         self._pipeline = None
+        self.admitted_budget = None
         self._quarantine: _Quarantined | None = None
         self._baseline: int | None = None
         self._torch = None
@@ -172,9 +173,10 @@ class DiffusersImageAdapter:
         try:
             # Advisory: weights may still exceed what was free, but no process
             # that takes this lease can load onto this GPU while we hold it.
-            inspect_cuda_budget(self.index, reserve_gib=self.profile.resources.reserve_gib,
-                                min_usable_gib=self.profile.resources.min_usable_gib,
-                                expected_uuid=gpu_uuid)
+            # Kept for the executor's diagnostics: what the card looked like when the load was admitted.
+            self.admitted_budget = inspect_cuda_budget(
+                self.index, reserve_gib=self.profile.resources.reserve_gib,
+                min_usable_gib=self.profile.resources.min_usable_gib, expected_uuid=gpu_uuid)
             import torch
             import diffusers
             pipeline_class = getattr(diffusers, self.profile.pipeline)
