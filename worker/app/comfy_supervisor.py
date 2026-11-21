@@ -63,7 +63,7 @@ RESIDENT_LAUNCHER = Path(__file__).resolve().with_name("comfy_resident_launcher.
 
 _WINDOWS = os.name == "nt"
 MAX_LOG_BYTES = 8 * 1024 * 1024
-WARM_SLACK_BYTES = 512 * 1024 * 1024  # how much lower than its own idle reading a warm ComfyUI may read
+WARM_SLACK_BYTES = 256 * 1024 * 1024  # how much lower than its own idle reading a warm ComfyUI may read
 
 LOOPBACK = "127.0.0.1"
 MAX_RESPONSE_BYTES = 1024 * 1024
@@ -186,13 +186,21 @@ def parse_vram_budget(stats: object, *, reserve_gib: float, min_usable_gib: floa
                       idle_free_bytes: int | None = None) -> VramBudget:
     """Fail-closed reading of /system_stats: one CUDA device with enough free VRAM.
 
-    idle_free_bytes: what this same ComfyUI reported free when its last job had finished. A warm
-    ComfyUI keeps its models, so its own reading is low without anybody else having taken
-    anything. Rig 21/11: idle after a clip it reported 5.2 GiB free of 12 (torch_vram_total 64 MiB:
-    the models are not in torch's own figure), every second job read as a shortage, and ComfyUI
-    was closed and started again for every clip. If the reading is no lower than it was then
-    (within WARM_SLACK_BYTES), nothing outside has taken memory since a job last ran in it, and
-    that is enough. Lower than that is a shortage as before.
+    idle_free_bytes: what this same ComfyUI reported free when a job AT LEAST AS LARGE as the
+    one about to run had just succeeded in it (the supervisor decides that; see check_budget).
+    A warm ComfyUI keeps its models, so its own reading is low without anybody else having taken
+    anything. Rig 21/11: idle after a clip it reported 5.2 GiB free of 12 (torch_vram_total
+    64 MiB: the models are not in torch's own figure), every second job read as a shortage, and
+    ComfyUI was closed and started again for every clip.
+
+    With that reading, min_usable_gib is not asked of the free figure a second time: it was
+    proven by the job that ran. What is still asked, both of them:
+    - the reading is no lower than it was then, within WARM_SLACK_BYTES -- nothing outside has
+      taken memory since;
+    - the profile's reserve is free in full. The warm path never dips into the reserve, however
+      low the earlier reading was (#2462 review, ChatGPT P2: a baseline of 0.5 GiB must not
+      admit a job at 0.5 GiB).
+    Otherwise it is a shortage as before.
     """
     devices = stats.get("devices") if isinstance(stats, dict) else None
     if not isinstance(devices, list) or len(devices) != 1 or not isinstance(devices[0], dict):
@@ -203,10 +211,11 @@ def parse_vram_budget(stats: object, *, reserve_gib: float, min_usable_gib: floa
     total, free = device.get("vram_total"), device.get("vram_free")
     if type(total) is not int or type(free) is not int or not 0 <= free <= total or total == 0:
         raise ComfySupervisorError("ComfyUI reported unusable VRAM figures")
-    usable = max(0, free - int(reserve_gib * GIB))
+    reserve = int(reserve_gib * GIB)
+    usable = max(0, free - reserve)
     if usable < int(min_usable_gib * GIB):
         warm = type(idle_free_bytes) is int and 0 < idle_free_bytes <= total
-        if not warm or free + WARM_SLACK_BYTES < idle_free_bytes:
+        if not warm or free + WARM_SLACK_BYTES < idle_free_bytes or free < reserve:
             raise ComfyVramShortage("insufficient free VRAM after reservation")
     name = device.get("name")
     system = stats.get("system")
@@ -242,6 +251,7 @@ class ComfySupervisor:
         self.work_area = work_area
         self._lease: GpuLease | None = None
         self._idle_free_bytes: int | None = None  # see note_idle(); cleared with every start and stop
+        self._idle_job_cost = 0
         self._proc: subprocess.Popen | None = None
         self._token = secrets.token_hex(16)
         self._job_lock = threading.Lock()
@@ -323,7 +333,7 @@ class ComfySupervisor:
         resident = resident_lock_path(self.gpu_uuid, lease_dir=self.lease_dir)
         argv = self.launch.argv(str(resident))
         self.require_work_area()  # before the lease: no ComfyUI outside the private work area
-        self._idle_free_bytes = None
+        self._idle_free_bytes, self._idle_job_cost = None, 0
         self._token = secrets.token_hex(16)  # fresh per start
         self._proof = Path(str(resident) + ".proof")
         lease = acquire_gpu_lease(self.gpu_uuid, lease_dir=self.lease_dir)
@@ -395,23 +405,30 @@ class ComfySupervisor:
                 raise ComfySupervisorError("comfy_not_ready: ComfyUI did not become ready before the deadline")
             time.sleep(self.poll_s)
 
-    def check_budget(self) -> VramBudget:
-        """Re-read VRAM before each job: processes outside the lease may have taken VRAM."""
+    def check_budget(self, job_cost: int | None = None) -> VramBudget:
+        """Re-read VRAM before each job: processes outside the lease may have taken VRAM.
+
+        job_cost: the size of the job about to run (pixels x frames). The warm reading is used
+        only for a job no larger than the one it was taken after: that job is the proof that this
+        much free memory is enough. A larger job, or a caller that does not say, gets the strict
+        check."""
         if not self.running:
             raise ComfySupervisorError("ComfyUI is not running")
         try:
             stats = _get_json(self.port, "/system_stats", timeout_s=5.0)
         except (OSError, ValueError) as exc:
             raise ComfySupervisorError("ComfyUI /system_stats unavailable") from exc
+        proven = (type(job_cost) is int and job_cost > 0 and self._idle_free_bytes is not None
+                  and job_cost <= self._idle_job_cost)
         return parse_vram_budget(stats, reserve_gib=self.reserve_gib, min_usable_gib=self.min_usable_gib,
-                                 idle_free_bytes=self._idle_free_bytes)
+                                 idle_free_bytes=self._idle_free_bytes if proven else None)
 
-    def note_idle(self) -> None:
-        """Called when a job has finished: remember what this ComfyUI reports free while it keeps
-        its models, for the check before the next job. Never raises; an unreadable figure leaves
-        the strict check in place."""
-        self._idle_free_bytes = None
-        if not self.running:
+    def note_idle(self, job_cost: int | None = None) -> None:
+        """Called when a job has SUCCEEDED: remember what this ComfyUI reports free while it keeps
+        its models, and how large that job was, for the check before the next one. Never raises;
+        without a usable figure or a size the strict check stays in place."""
+        self._idle_free_bytes, self._idle_job_cost = None, 0
+        if not self.running or type(job_cost) is not int or job_cost <= 0:
             return
         try:
             stats = _get_json(self.port, "/system_stats", timeout_s=5.0)
@@ -419,7 +436,7 @@ class ComfySupervisor:
         except (OSError, ValueError, ComfySupervisorError, KeyError, IndexError, TypeError):
             return
         if type(free) is int and free > 0:
-            self._idle_free_bytes = free
+            self._idle_free_bytes, self._idle_job_cost = free, job_cost
 
     # --- the ComfyUI API the adapter needs; HTTP stays in this module -------
     def _api(self, path: str, *, method: str = "GET", payload: object | None = None,
@@ -463,7 +480,7 @@ class ComfySupervisor:
 
     def stop(self) -> None:
         """Interrupt, terminate, kill. The lease is released only after ComfyUI has exited."""
-        self._idle_free_bytes = None
+        self._idle_free_bytes, self._idle_job_cost = None, 0
         proc = self._proc
         if proc is not None and proc.poll() is None:
             try:

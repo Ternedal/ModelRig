@@ -414,14 +414,19 @@ class AdapterTests(unittest.TestCase):
         self.assertIsNone(adapter.supervisor._idle_free_bytes)
         Path(self.state, "vram_free_gib").write_text("5")  # what the fake reports from now on
         with self.assertRaises(ComfyVramShortage):
-            adapter.render_to(request(), io.BytesIO())  # no job has finished in it yet: strict
+            adapter.render_to(request(), io.BytesIO())  # no job has succeeded in it yet: strict
         Path(self.state, "vram_free_gib").unlink()
         self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
-        self.assertIsNotNone(adapter.supervisor._idle_free_bytes, "the reading is taken when the job has finished")
+        self.assertEqual(adapter.supervisor._idle_job_cost, 832 * 480 * 33, "the proof is taken when the job has succeeded, with its size")
         Path(self.state, "vram_free_gib").write_text("5")
-        adapter.supervisor.note_idle()  # as after a job whose models stayed loaded
+        adapter.supervisor.note_idle(832 * 480 * 33)  # as after a job whose models stayed loaded
         self.assertEqual(adapter.render_to(request(seed=8), io.BytesIO()), "video/mp4")
         self.assertEqual(adapter.supervisor.pid, pid, "the same ComfyUI rendered both")
+        # #2462 review: a job larger than the one that proved it does not lean on that proof
+        adapter.supervisor.note_idle(832 * 480 * 17)
+        with self.assertRaises(ComfyVramShortage):
+            adapter.render_to(request(seed=9), io.BytesIO())  # 33 frames after a 17-frame job
+        adapter.supervisor.note_idle(832 * 480 * 33)
         Path(self.state, "vram_free_gib").write_text("3")  # somebody else took 2 GiB since
         with self.assertRaises(ComfyVramShortage):
             adapter.render_to(request(seed=9), io.BytesIO())

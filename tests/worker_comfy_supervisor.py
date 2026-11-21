@@ -363,21 +363,52 @@ time.sleep(120)
         self.assertEqual(_event_code(caught.exception), "resident_proof_mismatch")
 
     def test_the_idle_reading_is_taken_after_a_job_and_dropped_with_the_process(self):
-        sup = self.supervisor()
+        COST = 832 * 480 * 33
+        sup = self.supervisor()  # reserve 2 GiB, min usable 8 GiB
         sup.start()
         self.assertIsNone(sup._idle_free_bytes)
-        sup.note_idle()
-        self.assertEqual(sup._idle_free_bytes, 20 * GIB, "what the fake reports free")
-        Path(self.state, "vram_free_gib").write_text("5")
-        sup.note_idle()
-        sup.check_budget()  # 5 GiB free is a shortage at a start, not for this warm ComfyUI
-        Path(self.state, "vram_free_gib").write_text("3")
-        with self.assertRaisesRegex(ComfySupervisorError, "insufficient"):
-            sup.check_budget()  # 2 GiB lower than its own idle reading: somebody took it
-        sup.stop()
-        self.assertIsNone(sup._idle_free_bytes, "a stopped ComfyUI holds nothing")
-        sup.note_idle()  # not running: no reading, no error
+        sup.note_idle()  # no size: nothing was proven
         self.assertIsNone(sup._idle_free_bytes)
+        sup.note_idle(COST)
+        self.assertEqual((sup._idle_free_bytes, sup._idle_job_cost), (20 * GIB, COST), "what the fake reports free")
+        Path(self.state, "vram_free_gib").write_text("5")
+        sup.note_idle(COST)
+        sup.check_budget(COST)  # 5 GiB free is a shortage at a start, not after a job this size succeeded at 5
+        sup.check_budget(COST - 1)  # a smaller job leans on the same proof
+        # a larger job, or a caller that does not say how large, gets the strict check
+        for cost in (COST + 1, None, 0, -1, True, float(COST)):
+            with self.subTest(cost=cost), self.assertRaisesRegex(ComfySupervisorError, "insufficient"):
+                sup.check_budget(cost)
+        Path(self.state, "vram_free_gib").write_text("4")
+        with self.assertRaisesRegex(ComfySupervisorError, "insufficient"):
+            sup.check_budget(COST)  # 1 GiB lower than its own idle reading: somebody took it
+        sup.stop()
+        self.assertEqual((sup._idle_free_bytes, sup._idle_job_cost), (None, 0), "a stopped ComfyUI has proven nothing")
+        sup.note_idle(COST)  # not running: no reading, no error
+        self.assertIsNone(sup._idle_free_bytes)
+
+    def test_a_warm_reading_never_admits_a_job_into_the_reserve(self):
+        # #2462 review (ChatGPT, P2): a baseline of 0.5 GiB must not admit the next job at 0.5 GiB.
+        COST = 832 * 480 * 33
+        sup = self.supervisor()  # reserve 2 GiB
+        sup.start()
+        for free in ("0.5", "1.9"):
+            Path(self.state, "vram_free_gib").write_text(free)
+            sup.note_idle(COST)
+            with self.subTest(free=free), self.assertRaisesRegex(ComfySupervisorError, "insufficient"):
+                sup.check_budget(COST)
+        Path(self.state, "vram_free_gib").write_text("2")
+        sup.note_idle(COST)
+        sup.check_budget(COST)  # the reserve is free in full: the earlier job is the proof for the rest
+        # competing load: the reading fell after the baseline was taken
+        Path(self.state, "vram_free_gib").write_text("6")
+        sup.note_idle(COST)
+        Path(self.state, "vram_free_gib").write_text("5.5")
+        with self.assertRaisesRegex(ComfySupervisorError, "insufficient"):
+            sup.check_budget(COST)  # 0.5 GiB went to somebody else: more than the 256 MiB slack
+        Path(self.state, "vram_free_gib").write_text("5.8")
+        sup.check_budget(COST)  # within the slack
+        sup.stop()
 
     def test_ready_deadline(self):
         self._assert_start_fails_and_cleans_up(
@@ -671,7 +702,7 @@ class VramParsingTests(unittest.TestCase):
             parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8)  # a start: nothing may be held
         budget = parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8, idle_free_bytes=5205 * MIB)
         self.assertEqual(budget.free_bytes, 5205 * MIB, "accepted, and the figures are reported as read")
-        parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8, idle_free_bytes=5493 * MIB)  # within the slack
+        parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8, idle_free_bytes=5205 * MIB + supervisor_module.WARM_SLACK_BYTES)
         # somebody else took memory since: lower than its own idle reading by more than the slack
         with self.assertRaisesRegex(ComfyVramShortage, "insufficient"):
             parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8, idle_free_bytes=5205 * MIB + supervisor_module.WARM_SLACK_BYTES + 1)
@@ -679,6 +710,14 @@ class VramParsingTests(unittest.TestCase):
         for bad in (None, 0, -1, True, 5205.0 * MIB, 12289 * MIB, "5205"):
             with self.subTest(bad=bad), self.assertRaisesRegex(ComfyVramShortage, "insufficient"):
                 parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8, idle_free_bytes=bad)
+        # the reserve is never part of the warm path (#2462 review): equal to its baseline is not enough
+        for free_mib, reserve in ((512, 1), (1023, 1), (5205, 6)):
+            low = self.stats(vram_free=free_mib * MIB, vram_total=12288 * MIB)
+            with self.subTest(free_mib=free_mib, reserve=reserve), self.assertRaisesRegex(ComfyVramShortage, "insufficient"):
+                parse_vram_budget(low, reserve_gib=reserve, min_usable_gib=8, idle_free_bytes=free_mib * MIB)
+        exactly = self.stats(vram_free=1024 * MIB, vram_total=12288 * MIB)
+        parse_vram_budget(exactly, reserve_gib=1, min_usable_gib=8, idle_free_bytes=1024 * MIB)  # the reserve, in full
+        self.assertEqual(supervisor_module.WARM_SLACK_BYTES, 256 * MIB)
 
     def test_edge_exactly_enough(self):
         self.assertEqual(parse_vram_budget(self.stats(vram_free=10 * GIB), reserve_gib=2,
