@@ -188,7 +188,11 @@ def job_refs(turn: object) -> list[dict]:
         if ref.get("status_url") != JOB_ROUTE + job_id or kind not in ("image", "video"):
             continue
         seen.add(job_id)
-        out.append({"job_id": job_id, "kind": kind})
+        entry = {"job_id": job_id, "kind": kind}
+        source = ref.get("source_job_id")
+        if isinstance(source, str) and _JOB_ID.fullmatch(source):
+            entry["source_job_id"] = source  # a clip made from a picture says which picture job
+        out.append(entry)
     return out
 
 
@@ -312,6 +316,8 @@ def run_case(http: Http, case: dict, *, model: str, turn_timeout: float, job_tim
     for ref in refs:
         followed = follow_job(http, ref["job_id"], timeout_s=job_timeout, poll_s=poll_s, clock=clock, sleep=sleep, vram=vram)
         followed["kind"] = ref["kind"]
+        if "source_job_id" in ref:
+            followed["source_job_id"] = ref["source_job_id"]
         out["jobs"].append(followed)
     media_tools = [t for t in used if t in TOOL_KIND]
     expect = case["expect"]
@@ -321,6 +327,12 @@ def run_case(http: Http, case: dict, *, model: str, turn_timeout: float, job_tim
         out.update(ok=False, why="tool_not_called")
     elif len(refs) != 1 or refs[0]["kind"] != TOOL_KIND[expect]:
         out.update(ok=False, why="no_job_reference")
+    elif case.get("expect_source") is not None and refs[0].get("source_job_id") is None:
+        # The rig did not say which picture it took: a worker before the reference named it.
+        out.update(ok=False, why="source_not_reported")
+    elif case.get("expect_source") is not None and refs[0]["source_job_id"] != case["expect_source"]:
+        # The clip starts from another picture than the one this conversation holds.
+        out.update(ok=False, why="wrong_source")
     elif out["jobs"][0]["state"] != "completed":
         out.update(ok=False, why="job_" + out["jobs"][0]["state"])
     else:
@@ -341,6 +353,13 @@ def suite_cases(suite: str, rounds: int) -> list[dict]:
             cases += [{"id": f"conv-{i}.r{r}", "message": m, "expect": "image_generate", "thread": f"r{r}"}
                       for i, m in enumerate(IMAGE_MESSAGES, 1)]
             cases.append({"id": f"conv-control.r{r}", "message": CONTROL_MESSAGE, "expect": None, "thread": f"r{r}"})
+        elif suite == "two-conversations":
+            # Review 6004675603: a picture in conversation A, then one in conversation B that
+            # finishes later, then "det billede" back in A. The clip must start from A's picture.
+            cases.append({"id": f"tc-a.r{r}", "message": IMAGE_MESSAGES[0], "expect": "image_generate", "thread": f"a{r}"})
+            cases.append({"id": f"tc-b.r{r}", "message": IMAGE_MESSAGES[1], "expect": "image_generate", "thread": f"b{r}"})
+            cases.append({"id": f"tc-animate.r{r}", "message": ANIMATE_MESSAGE, "expect": "video_generate",
+                          "thread": f"a{r}", "source_from": f"tc-a.r{r}", "needs": [f"tc-a.r{r}", f"tc-b.r{r}"]})
         elif suite == "video":
             cases.append({"id": f"video-1.r{r}", "message": VIDEO_MESSAGE, "expect": "video_generate"})
         elif suite == "i2v":
@@ -366,6 +385,18 @@ def run_suite(http: Http, suite: str, *, model: str, rounds: int = 1, turn_timeo
             case = dict(case, pictures=list(pictures.get(thread, [])))
             if threads.get(thread):
                 case["history"] = list(threads[thread])
+        if "source_from" in case:
+            needed = [by_id.get(name) for name in case.get("needs", [case["source_from"]])]
+            if any(n is None or not n.get("ok") for n in needed):
+                # Without both pictures finished there is nothing to tell apart.
+                skipped = {"case": case["id"], "expect": case["expect"], "ok": False, "why": "skipped_no_picture",
+                           "http": None, "turn_seconds": None, "status": None, "tools_used": [], "jobs": [],
+                           "refusals": [], "history_turns": 0, "answer_chars": 0, "vram_before_mib": None}
+                results.append(skipped)
+                by_id[case["id"]] = skipped
+                continue
+            wanted = [j["job_id"] for j in by_id[case["source_from"]].get("jobs", []) if j.get("kind") == "image"]
+            case = dict(case, expect_source=wanted[0] if wanted else "")
         source = by_id.get(case.get("history_from", ""))
         if "history_from" in case:
             if source is None or not source.get("ok"):
@@ -451,7 +482,7 @@ def main(argv=None, env=None) -> int:
     parser = argparse.ArgumentParser(description="Measure media-in-chat on a running appliance (dev channel, not evidence).")
     parser.add_argument("--base", default="http://127.0.0.1:8080")
     parser.add_argument("--model", default="qwen3:14b")
-    parser.add_argument("--suite", choices=("image", "conversation", "video", "i2v"), default="image")
+    parser.add_argument("--suite", choices=("image", "conversation", "video", "i2v", "two-conversations"), default="image")
     parser.add_argument("--rounds", type=int, default=1)
     parser.add_argument("--turn-timeout", type=float, default=300.0)
     parser.add_argument("--job-timeout", type=float, default=1800.0)

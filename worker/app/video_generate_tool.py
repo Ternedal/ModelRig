@@ -196,16 +196,18 @@ def _run_video_generate(args: dict, *, service_getter: Callable[[], object] | No
     if clean["source_image_job_id"] == UNREADABLE_SOURCE:
         return _unreadable_source()
     if clean["source_image_job_id"] is not None:
-        asset_id, refusal = _resolve_source(clean["source_image_job_id"], service_getter)
+        asset_id, source_job_id, refusal = _resolve_source(clean["source_image_job_id"], service_getter)
         if refusal is not None:
             return refusal  # an "unavailable" text with its code
         clean["input_asset_id"] = asset_id
         task = I2V_TASK
         params_keys = _INT_ARGS + ("input_asset_id",)
+    else:
+        source_job_id = None
     return _submit_media_job(
         clean, service_getter=service_getter, env=env, modality="video", task=task,
         profile_env=VIDEO_TOOL_PROFILE_ENV, schema=VIDEO_JOB_REFERENCE_SCHEMA, kind="video",
-        params_keys=params_keys,
+        params_keys=params_keys, source_job_id=source_job_id,
         text=lambda job_id, profile_id: (
             f"Videojobbet er sat i kø på riggen (profil {profile_id}). "
             "Klippet tager nogle minutter og vises i samtalen, når det er klar. Sig til brugeren, "
@@ -263,8 +265,11 @@ def _newest_picture(service, image_profiles: list[str]) -> tuple[dict | None, st
     return job, None
 
 
-def _resolve_source(job_id: str, service_getter: Callable[[], object] | None) -> tuple[str | None, str | None]:
-    """``(asset_id, None)`` for a completed image job of this owner, else ``(None, refusal-text)``.
+def _resolve_source(job_id: str, service_getter: Callable[[], object] | None
+                    ) -> tuple[str | None, str | None, str | None]:
+    """``(asset_id, source_job_id, None)`` for a completed image job of this owner, else
+    ``(None, None, refusal-text)``. The job id is the one that was actually resolved -- for
+    ``latest``, the picture that word turned out to mean -- and rides on the clip's reference.
 
     Looked up through the same store the job will be queued in, for OWNER only:
     the model names a job id or the word ``latest``, never an asset or an owner.
@@ -281,33 +286,33 @@ def _resolve_source(job_id: str, service_getter: Callable[[], object] | None) ->
 
     getter = service_getter if service_getter is not None else _production_service_getter()
     if getter is None:
-        return None, _unavailable("media_jobs_api_off", "video")
+        return None, None, _unavailable("media_jobs_api_off", "video")
     try:
         service = getter()
     except MediaJobsUnavailable as exc:
-        return None, _unavailable(str(exc) or "media_jobs_unavailable", "video")
+        return None, None, _unavailable(str(exc) or "media_jobs_unavailable", "video")
     try:
         if job_id == LATEST_SOURCE:
             image_profiles = [pid for pid, p in service.profiles.items() if getattr(p, "modality", None) == "image"]
             job, code = _newest_picture(service, image_profiles)
             if code is not None:
-                return None, _source_refusal(code)
+                return None, None, _source_refusal(code)
         else:
             job = service.store.get(job_id, OWNER)
     except Exception:  # noqa: BLE001 -- a store that cannot be reached: a code, never a path
-        return None, _unavailable("media_jobs_store_unavailable", "video")
+        return None, None, _unavailable("media_jobs_store_unavailable", "video")
     if job is None:
-        return None, _source_refusal("source_job_not_found")
+        return None, None, _source_refusal("source_job_not_found")
     if job.get("state") != "completed" or not job.get("asset_id"):
-        return None, _source_refusal("source_job_not_completed")
+        return None, None, _source_refusal("source_job_not_completed")
     source_profile = service.profiles.get(job.get("profile_id"))
     if source_profile is None:
-        return None, _unavailable("source_profile_not_enabled", "video")
+        return None, None, _unavailable("source_profile_not_enabled", "video")
     if getattr(source_profile, "modality", None) != "image":
-        return None, _unavailable("source_not_an_image", "video")
+        return None, None, _unavailable("source_not_an_image", "video")
     if not service.store.owns_completed_asset(OWNER, job["asset_id"]):
-        return None, _unavailable("source_not_found", "video")
-    return job["asset_id"], None
+        return None, None, _unavailable("source_not_found", "video")
+    return job["asset_id"], job["id"], None
 
 
 def system_rule_if_registered() -> str | None:
