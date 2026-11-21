@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -164,7 +165,10 @@ fun VideoJobBubble(
     val playable = outcome as? VideoJobOutcome.Playable
     if (playable != null) {
         var viewerOpen by remember(playable.item.id) { mutableStateOf(false) }
-        VideoJobBubblePlayer(playable, modifier, player, onOpen = { viewerOpen = true })
+        // While the viewer is open the bubble holds no player of its own (#2462 review, Codex P2):
+        // the viewer has a second one, and the first went on playing behind it -- two sound
+        // tracks at once for a clip with sound. Leaving the composition releases it.
+        VideoJobBubblePlayer(playable, modifier, player, held = viewerOpen, onOpen = { viewerOpen = true })
         if (viewerOpen) {
             VideoViewerDialog(playable, gallery, onDismiss = { viewerOpen = false }, io = io, player = player)
         }
@@ -178,6 +182,7 @@ private fun VideoJobBubblePlayer(
     playable: VideoJobOutcome.Playable,
     modifier: Modifier,
     player: @Composable (MediaVideoStream, MediaItem, (MediaGalleryException.Reason) -> Unit) -> Unit,
+    held: Boolean = false,
     onOpen: () -> Unit,
 ) {
     val maxWidth = (LocalConfiguration.current.screenWidthDp * 0.78f).dp
@@ -206,7 +211,11 @@ private fun VideoJobBubblePlayer(
                     .clip(RoundedCornerShape(14.dp))
                     .testTag("video-job-player"),
             ) {
-                player(playable.stream, playable.item) { reason -> playbackError = mediaGalleryMessage(reason) }
+                if (held) {
+                    Box(Modifier.fillMaxSize().background(Color.Black).testTag("video-job-player-held"))
+                } else {
+                    player(playable.stream, playable.item) { reason -> playbackError = mediaGalleryMessage(reason) }
+                }
                 Text(
                     "Fuld skærm",
                     color = Color.White,

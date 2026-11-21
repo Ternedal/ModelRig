@@ -153,6 +153,21 @@ class VideoJobBubbleTest {
         compose.waitUntil(5_000) { compose.onAllNodesWithTag("video-viewer").fetchSemanticsNodes().isEmpty() }
     }
 
+    /** #2462 review: the bubble's player went on playing behind the viewer's -- two sound tracks. */
+    @Test
+    fun `while the viewer is open the bubble holds no player of its own`() {
+        showPlayable(FakeGallery(listOf(videoItem("clip-1"))))
+        assertEquals(1, compose.onAllNodesWithTag("fake-player").fetchSemanticsNodes().size)
+        compose.onNodeWithTag("video-job-open").performClick()
+        waitForTag("video-viewer")
+        waitForTag("video-job-player-held")
+        assertEquals("only the viewer plays", 1, compose.onAllNodesWithTag("fake-player").fetchSemanticsNodes().size)
+        compose.onNodeWithTag("video-viewer-close").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("video-viewer").fetchSemanticsNodes().isEmpty() }
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("video-job-player-held").fetchSemanticsNodes().isEmpty() }
+        assertEquals("the bubble has its player back", 1, compose.onAllNodesWithTag("fake-player").fetchSemanticsNodes().size)
+    }
+
     @Test
     fun `Del streams the clip once through the gallery and starts a chooser`() {
         val gallery = FakeGallery(listOf(videoItem("clip-1")))
