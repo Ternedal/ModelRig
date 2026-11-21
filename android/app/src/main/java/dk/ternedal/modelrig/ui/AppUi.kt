@@ -1762,8 +1762,9 @@ private fun ChatScreen(
                 }.exceptionOrNull()
             }
             activeCall = null
-            // A parked write proposal: surface the card. Nothing has executed.
-            proposal?.let { pendingTool = it }
+            // A parked write proposal: surface the card. Nothing has executed. The card carries no
+            // media references: what the turn queued before it is saved with this turn, below.
+            proposal?.let { pendingTool = it.copy(mediaJobs = emptyList()) }
             // The list can have been replaced mid-stream (a real conversation
             // switch). Then there is nothing on screen to finish; bail rather
             // than index past the end. The reply is not persisted in that
@@ -1782,12 +1783,20 @@ private fun ChatScreen(
             // would leave a blank bubble in the history forever.
             // ...but a turn that queued a picture or a clip is kept even without words: its
             // bubble is on screen, and the row is what makes the job this conversation's.
-            val jobs = messages[idx].mediaJobs
-            if ((err == null || cancelled) &&
-                dk.ternedal.modelrig.ui.chat.MediaTurnJobs.worthSaving(finalText, jobs, parked = proposal != null)) {
+            // A parked turn's references come from the proposal itself: they must not depend on
+            // the bubble update having run, because a card that expires or an app that is closed
+            // would otherwise take a rendering job out of the conversation.
+            val jobs = proposal?.mediaJobs ?: messages[idx].mediaJobs
+            val saved = (err == null || cancelled) &&
+                dk.ternedal.modelrig.ui.chat.MediaTurnJobs.worthSaving(finalText, jobs)
+            if (saved) {
                 withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText, jobs) }
             }
-            if (proposal != null) messages.removeAt(idx)
+            if (proposal != null) {
+                // Nothing to show yet -- unless the turn queued media: then its bubble stays.
+                if (saved && jobs.isNotEmpty()) messages[idx] = messages[idx].copy(mediaJobs = jobs)
+                else messages.removeAt(idx)
+            }
             busy = false
         }
     }
@@ -1926,8 +1935,8 @@ private fun ChatScreen(
                 }.exceptionOrNull()
             }
             activeCall = null
-            // Same as the main path: a parked write proposal surfaces the card.
-            proposal?.let { pendingTool = it }
+            // Same as the main path: a parked write proposal surfaces the card, without references.
+            proposal?.let { pendingTool = it.copy(mediaJobs = emptyList()) }
             val cur = messages.getOrNull(i) ?: run { busy = false; return@launch }
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[i] = when {
@@ -1938,9 +1947,10 @@ private fun ChatScreen(
             val finalText = messages[i].text
             // Mirror the main path: a parked proposal has no answer yet --
             // never persist a blank assistant turn.
-            val jobs = messages[i].mediaJobs
+            val jobs = proposal?.mediaJobs ?: messages[i].mediaJobs
             if (cidNow != null && (err == null || cancelled) &&
-                dk.ternedal.modelrig.ui.chat.MediaTurnJobs.worthSaving(finalText, jobs, parked = proposal != null)) {
+                dk.ternedal.modelrig.ui.chat.MediaTurnJobs.worthSaving(finalText, jobs)) {
+                if (proposal != null) messages[i] = messages[i].copy(mediaJobs = jobs)
                 withContext(Dispatchers.IO) { db.addMessage(cidNow, "assistant", finalText, jobs) }
             }
             busy = false
@@ -2892,9 +2902,14 @@ private fun ChatScreen(
                                 // expiry; this just stops offering a dead button.
                                 if (pendingTool?.confirmationId == prop.confirmationId) {
                                     pendingTool = null
-                                    // A picture queued before the card is rendering regardless: keep its bubble.
-                                    messages.add(Msg("assistant",
-                                        "Bekræftelsen udløb. Handlingen blev ikke udført.", mediaJobs = prop.mediaJobs))
+                                    // Saved like any other answer: after a restart the conversation
+                                    // should still say that nothing was done. (A card carries no media
+                                    // references any more; they were saved when they arrived.)
+                                    val expired = "Bekræftelsen udløb. Handlingen blev ikke udført."
+                                    messages.add(Msg("assistant", expired, mediaJobs = prop.mediaJobs))
+                                    convId?.let { id ->
+                                        withContext(Dispatchers.IO) { db.addMessage(id, "assistant", expired, prop.mediaJobs) }
+                                    }
                                 }
                             }
                             if (remaining > 0) {
@@ -2929,7 +2944,15 @@ private fun ChatScreen(
                                             // chain, and the NEXT write comes back as its own
                                             // confirmation card. Show it instead of ending the
                                             // turn -- one approval never authorises the next write.
-                                            pendingTool = next?.copy(mediaJobs = carried)
+                                            // What was queued between the two cards is saved and
+                                            // shown now: the next card may expire, or never be seen.
+                                            if (carried.isNotEmpty()) {
+                                                messages.add(Msg("assistant", "", mediaJobs = carried))
+                                                convId?.let { id ->
+                                                    withContext(Dispatchers.IO) { db.addMessage(id, "assistant", "", carried) }
+                                                }
+                                            }
+                                            pendingTool = next?.copy(mediaJobs = emptyList())
                                         } else {
                                             pendingTool = null
                                             val text = next?.answer
@@ -2940,7 +2963,7 @@ private fun ChatScreen(
                                                         "Bekræftelsen udløb. Handlingen blev ikke udført."
                                                     else friendlyError(e)
                                                 } ?: ""
-                                            if (text.isNotBlank()) {
+                                            if (dk.ternedal.modelrig.ui.chat.MediaTurnJobs.worthSaving(text, carried)) {
                                                 messages.add(Msg("assistant", text, mediaJobs = carried))
                                                 // Persist it. What you approved, and what
                                                 // Kaliv did about it, belongs in the

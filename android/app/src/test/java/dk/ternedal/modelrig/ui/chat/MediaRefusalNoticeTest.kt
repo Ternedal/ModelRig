@@ -79,19 +79,30 @@ class MediaRefusalNoticeTest {
         assertEquals("%032x".format(39), kept.last())
     }
 
-    /** #2462 review: a turn that queued a picture but said nothing was shown and then forgotten. */
+    /**
+     * #2462 review: a turn that queued a picture but said nothing was shown and then forgotten;
+     * and a turn parked on a confirmation card kept its references on the card, in memory only.
+     */
     @Test
-    fun `a turn with a job and no words is still saved - unless it is parked on a card`() {
+    fun `a turn with a job is saved whether or not it has words`() {
         val job = listOf(MediaJobRef("a".repeat(32), MediaJobRef.Kind.IMAGE))
-        assertTrue(MediaTurnJobs.worthSaving("Billedet er på vej.", job, parked = false))
-        assertTrue(MediaTurnJobs.worthSaving("", job, parked = false))
-        assertTrue(MediaTurnJobs.worthSaving("  \n", job, parked = false))
-        assertTrue("words alone, as before", MediaTurnJobs.worthSaving("hej", emptyList(), parked = false))
-        assertTrue("words on a parked turn, as before", MediaTurnJobs.worthSaving("hej", emptyList(), parked = true))
-        // the card carries the references; saving them here would save them twice
-        assertTrue(!MediaTurnJobs.worthSaving("", job, parked = true))
+        assertTrue(MediaTurnJobs.worthSaving("Billedet er på vej.", job))
+        assertTrue(MediaTurnJobs.worthSaving("", job))
+        assertTrue(MediaTurnJobs.worthSaving("  \n", job))
+        assertTrue("words alone, as before", MediaTurnJobs.worthSaving("hej", emptyList()))
         // nothing to show is still nothing to save: no blank bubble in the history
-        assertTrue(!MediaTurnJobs.worthSaving("", emptyList(), parked = false))
-        assertTrue(!MediaTurnJobs.worthSaving("   ", emptyList(), parked = true))
+        assertTrue(!MediaTurnJobs.worthSaving("", emptyList()))
+        assertTrue(!MediaTurnJobs.worthSaving("   ", emptyList()))
+    }
+
+    @Test
+    fun `references saved with the parked turn are not saved again with the answer`() {
+        // The card carries none, so the answer's union is only what was queued after the decision.
+        val before = listOf(MediaJobRef("a".repeat(32), MediaJobRef.Kind.IMAGE))
+        val after = listOf(MediaJobRef("b".repeat(32), MediaJobRef.Kind.VIDEO))
+        assertEquals(after, MediaTurnJobs.across(emptyList(), after))
+        assertEquals(emptyList<MediaJobRef>(), MediaTurnJobs.across(emptyList(), emptyList()))
+        assertEquals("a card from an older build of this code still carries them", before + after,
+            MediaTurnJobs.across(before, after))
     }
 }
