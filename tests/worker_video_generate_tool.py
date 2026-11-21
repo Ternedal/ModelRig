@@ -149,8 +149,8 @@ check("media_jobs_api_off" in o, "job API off -> text")
 check(o.startswith("Videogenerering er ikke tilgængelig") and "Billedgenerering" not in o,
       "a refused clip is said to be video, not picture, generation")
 o_src = vgt._run_video_generate({"prompt": PROMPT, "source_image_job_id": "latest"}, service_getter=lambda: svc_img, env={})
-check(o_src.startswith("Videogenerering er ikke tilgængelig") and "no_source_image" in o_src,
-      "and so is a refused source")
+check(o_src.startswith("Videogenerering blev ikke startet (no_source_image)") and "Billedgenerering" not in o_src,
+      "and so is a refused source, which says what is missing")
 for bad, label in (({"prompt": PROMPT, "input_asset_id": "x"}, "asset ids are never a model argument"),
                    ({"prompt": PROMPT, "task": "image_to_video"}, "task cannot be chosen by the model"),
                    ({"prompt": PROMPT, "source_image_job_id": 7}, "source must be a string"),
@@ -179,7 +179,7 @@ def finish_image(service: MediaJobService, owner: str, asset_id: str) -> str:
     jid = service.store.submit(owner, "a paper boat", profile_id="sdxl-a", params={})["job_id"]
     assert service.store.claim_for(["sdxl-a"], EXECUTOR)["id"] == jid
     assert service.store.begin_publish(jid, EXECUTOR) and service.store.complete(jid, EXECUTOR, asset_id)
-    time.sleep(0.02)  # completion times order "latest"; keep two of them apart on a coarse clock
+    time.sleep(0.02)  # request times order "latest"; keep two of them apart on a coarse clock
     return jid
 
 
@@ -232,16 +232,87 @@ for spelling in ("latest", " Latest "):
     j = fresh.store.get(r["job_id"], OWNER) if r else None
     pj = json.loads(j["params"]) if j and isinstance(j.get("params"), str) else (j or {}).get("params") or {}
     check(pj.get("task") == "image_to_video" and pj.get("input_asset_id") == "img_new",
-          f"{spelling!r} -> the most recently finished picture is the source")
-latest = svc6.store.latest_completed_for(OWNER, ["sdxl-a"])
-check(latest is not None and latest["id"] == newest and latest["asset_id"] == "img_new",
-      "store: newest completed image of this owner; a newer clip, another owner's picture and an unfinished job do not count")
-check(svc6.store.latest_completed_for(OWNER, []) is None and svc6.store.latest_completed_for("nobody", ["sdxl-a"]) is None,
+          f"{spelling!r} -> the newest picture is the source")
+check(svc6.store.newest_picture_for(OWNER, ["sdxl-a"])["id"] == unfinished,
+      "store: the newest picture ASKED FOR, even while it renders; a newer clip and another owner's picture do not count")
+o = vgt._run_video_generate({"prompt": PROMPT, "source_image_job_id": "latest"}, service_getter=lambda: svc6, env={})
+check(o.startswith("Videogenerering blev ikke startet (source_job_not_completed)") and parse_job_reference(o) is None
+      and newest not in o,
+      "latest while a newer picture is still rendering -> said so; the older finished one is NOT animated in its place")
+assert svc6.store.cancel(unfinished, OWNER)
+check(svc6.store.newest_picture_for(OWNER, ["sdxl-a"])["id"] == newest,
+      "store: a job that never became a picture (cancelled) is skipped")
+check(svc6.store.newest_picture_for(OWNER, []) is None and svc6.store.newest_picture_for("nobody", ["sdxl-a"]) is None,
       "store: no profiles or an owner with nothing -> None")
 try:
-    svc6.store.latest_completed_for(OWNER, ["bad id!"]); check(False, "store: malformed profile ids are refused")
+    svc6.store.newest_picture_for(OWNER, ["bad id!"]); check(False, "store: malformed profile ids are refused")
 except Exception:  # noqa: BLE001 -- ImageJobError
     check(True, "store: malformed profile ids are refused")
+
+# Review 6004386187: several finished pictures, and "det billede" must not mean whichever finished last.
+print("== 4c. which picture 'latest' is ==")
+
+
+def source_of(output: str, service: MediaJobService) -> str | None:
+    r = parse_job_reference(output)
+    j = service.store.get(r["job_id"], OWNER) if r else None
+    pj = json.loads(j["params"]) if j and isinstance(j.get("params"), str) else (j or {}).get("params") or {}
+    return pj.get("input_asset_id")
+
+
+def latest_in(shown, service: MediaJobService) -> str:
+    token = vgt.CONVERSATION_IMAGE_JOBS.set(vgt.conversation_image_jobs(shown))
+    try:
+        return vgt._run_video_generate({"prompt": PROMPT, "source_image_job_id": "latest"},
+                                       service_getter=lambda: service, env={})
+    finally:
+        vgt.CONVERSATION_IMAGE_JOBS.reset(token)
+
+
+many = service_with(VID, IMG)
+here_old = finish_image(many, OWNER, "img_here_old")
+here_new = finish_image(many, OWNER, "img_here_new")
+elsewhere = finish_image(many, OWNER, "img_elsewhere")  # finished later, in ANOTHER conversation
+check(source_of(latest_in(None, many), many) == "img_elsewhere",
+      "no conversation context (older client): the owner's newest picture anywhere -- the documented fallback")
+check(source_of(latest_in([here_old, here_new], many), many) == "img_here_new",
+      "with the conversation's pictures: ITS newest one, not the one another conversation finished later")
+check(source_of(latest_in([here_new, here_old], many), many) == "img_here_old",
+      "the client's order decides which is newest in the conversation")
+o = latest_in([], many)
+check("no_source_image" in o and parse_job_reference(o) is None,
+      "a conversation the client says has no pictures: nothing to animate, another conversation's is not borrowed")
+
+mixed = service_with(VID, IMG)
+first = finish_image(mixed, OWNER, "img_first")
+rendering = mixed.store.submit(OWNER, "x", profile_id="sdxl-a", params={})["job_id"]
+o = latest_in([first, rendering], mixed)
+check("source_job_not_completed" in o and parse_job_reference(o) is None,
+      "the conversation's newest picture is still rendering: said so, the earlier one is not animated instead")
+assert mixed.store.cancel(rendering, OWNER)
+check(source_of(latest_in([first, rendering], mixed), mixed) == "img_first",
+      "a newest job that never became a picture is passed over for the one before it")
+foreign = finish_image(mixed, "someone-else", "img_foreign")
+clip_id = mixed.store.submit(OWNER, "x", profile_id="wan-t2v", params={})["job_id"]
+check(source_of(latest_in([first, foreign, "f" * 32, clip_id], mixed), mixed) == "img_first",
+      "ids that are another owner's, unknown, or a clip are not pictures of this conversation")
+o = latest_in([foreign, "f" * 32], mixed)
+check("no_source_image" in o and "img_foreign" not in o and parse_job_reference(o) is None,
+      "only foreign or unknown ids: no source -- naming another owner's job id gets nothing")
+
+from app.image_generate_tool import parse_refusal  # noqa: E402
+for code in ("no_source_image", "source_job_not_completed", "source_job_not_found", "source_not_an_image"):
+    check(parse_refusal(vgt._source_refusal(code)) == code, f"a source refusal carries its code for the turn's media_refusals ({code})")
+check(vgt.conversation_image_jobs(None) is None, "context: the field not sent stays None (an older client)")
+check(vgt.conversation_image_jobs([]) == () and vgt.conversation_image_jobs("x") == () and vgt.conversation_image_jobs({"a": 1}) == (),
+      "context: an empty or unusable value is 'no pictures', not 'unknown'")
+a32, b32 = "a" * 32, "b" * 32
+check(vgt.conversation_image_jobs([a32, "nope", 7, None, "A" * 32, b32, a32]) == (b32, a32),
+      "context: only well-formed ids, in order; a repeat counts at its latest position")
+long_list = [f"{i:032x}" for i in range(200)]
+kept = vgt.conversation_image_jobs(long_list)
+check(len(kept) == vgt.MAX_CONVERSATION_IMAGE_JOBS and kept[-1] == long_list[-1], "context: the newest 32 are kept")
+check(vgt.CONVERSATION_IMAGE_JOBS.get() is None, "context: nothing leaks out of a call")
 check("latest" in vgt.SYSTEM_RULE and "latest" in cap.description, "the model is told to use 'latest'")
 
 T2V_ONLY = parse_profile(video_profile(profile_id="wan-t2v-only", tasks=["text_to_video"]))
@@ -291,7 +362,7 @@ for bad_source in ("det billede", "newest", "x", "A" * 32, "\x00unreadable"):
     svc_bad = service_with(VID, IMG)
     o = vgt._run_video_generate({"prompt": PROMPT, "source_image_job_id": bad_source}, service_getter=lambda: svc_bad, env={})
     check("source_not_understood" in o and "latest" in o and parse_job_reference(o) is None
-          and svc_bad.store.latest_completed_for(OWNER, ["sdxl-a", "wan-t2v"]) is None,
+          and svc_bad.store.newest_picture_for(OWNER, ["sdxl-a", "wan-t2v"]) is None,
           f"unreadable source {bad_source!r} -> told to use 'latest', nothing queued")
 
 # 5. through the turn
@@ -320,6 +391,39 @@ try:
     sys_texts = [m["content"] for m in seen[-1] if m.get("role") == "system"]
     check(vgt.SYSTEM_RULE in sys_texts, "video system rule present while registered")
     check(PROMPT not in json.dumps(d, ensure_ascii=False), "result never repeats the prompt")
+
+    # Review 6004386187, through the real turn: the client says which pictures this conversation
+    # holds, and "latest" is the newest of those -- on the worker thread the tool runs on.
+    turn_svc = service_with(VID, IMG)
+    in_this_chat = finish_image(turn_svc, OWNER, "img_this_chat")
+    finish_image(turn_svc, OWNER, "img_other_chat")  # finished later, somewhere else
+    tools.REGISTRY[vgt.TOOL_NAME] = dataclasses.replace(
+        vgt.VIDEO_GENERATE_CAPABILITY, run=lambda a: vgt._run_video_generate(a, service_getter=lambda: turn_svc, env={}))
+    animate = {"tool_calls": [{"function": {"name": "video_generate",
+                                            "arguments": {"prompt": PROMPT, "source_image_job_id": "latest"}}}], "content": ""}
+
+    def animated(body: dict, route: str = "/tools/chat") -> str | None:
+        seq[:] = [dict(animate), {"tool_calls": [], "content": "Klippet er på vej."}]
+        response = client.post(route, json={"message": "lav en video af det billede", "model": "qwen3:14b", **body})
+        turn = (response.json() if route == "/tools/chat"
+                else [json.loads(line)["result"] for line in response.text.splitlines() if '"result"' in line][-1])
+        refs = turn.get("media_jobs") or []
+        job = turn_svc.store.get(refs[0]["job_id"], OWNER) if refs else None
+        params = json.loads(job["params"]) if job and isinstance(job.get("params"), str) else (job or {}).get("params") or {}
+        if refs:
+            assert turn_svc.store.cancel(refs[0]["job_id"], OWNER)  # keep the owner's active limit out of it
+        return params.get("input_asset_id")
+
+    check(animated({"conversation_image_jobs": [in_this_chat]}) == "img_this_chat",
+          "turn: with conversation_image_jobs, 'latest' animates this conversation's picture")
+    check(animated({"conversation_image_jobs": [in_this_chat]}, "/tools/chat/stream") == "img_this_chat",
+          "turn: the same through the stream route the apps use")
+    check(animated({}) == "img_other_chat", "turn: without the field (an older client), the owner's newest picture anywhere")
+    check(animated({"conversation_image_jobs": []}) is None,
+          "turn: a conversation with no pictures animates nothing")
+    check(animated({"conversation_image_jobs": ["junk", 7, None]}) is None and animated({"conversation_image_jobs": [in_this_chat]}) == "img_this_chat",
+          "turn: malformed entries are dropped, never a 422, and the next turn is unaffected")
+    check(vgt.CONVERSATION_IMAGE_JOBS.get() is None, "turn: the context does not outlive the turn")
 finally:
     tools.REGISTRY.pop(vgt.TOOL_NAME, None)
     if saved is not None:

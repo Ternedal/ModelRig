@@ -304,6 +304,8 @@ with appliance(turns, {A: lifecycle(A), B: lifecycle(B, "queued", "running", "co
           "the animate turn carries the picture turn as history")
     check(fake.polls.index(B) > max(i for i, p in enumerate(fake.polls) if p == A),
           "the picture is finished before the clip is asked for")
+    check(fake.chats[1]["body"].get("conversation_image_jobs") == [A],
+          "the animate turn names the picture it follows, so 'latest' is that one and not the owner's newest anywhere")
     check(report["cases"][1]["jobs"][0]["profile_id"] == "wan22-i2v-gpu1" and "[wan22-i2v-gpu1]" in probe.render(report),
           "the clip's profile is shown: it tells which task ran")
 
@@ -331,6 +333,8 @@ with appliance(turns, {A: lifecycle(A), C: lifecycle(C), D: lifecycle(D)}) as fa
                                                {"role": "assistant", "content": "svar 1"}],
           "history is the user's words and the model's answer, in order")
     check([c["history_turns"] for c in cases] == [0, 1, 2, 3, 4, 0], "the report says how deep in the conversation each case was")
+    check([c["body"].get("conversation_image_jobs") for c in fake.chats] == [[], [A], [A], [A, C], [A, C, D], None],
+          "each turn names the pictures the conversation holds so far, as an app does; the plain control names none")
     check(cases[1]["ok"] is False and cases[1]["why"] == "no_job_reference" and cases[1]["refusals"] == ["profile_not_enabled"],
           "a refused picture is reported with the rig's code, not only as 'no job'")
     check(cases[2]["ok"] is True and cases[2]["refusals"] == ["invalid_arguments"],

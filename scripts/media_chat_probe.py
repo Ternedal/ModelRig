@@ -286,6 +286,10 @@ def run_case(http: Http, case: dict, *, model: str, turn_timeout: float, job_tim
         body["system"] = system
     if case.get("history"):
         body["history"] = case["history"]
+    if case.get("pictures") is not None:
+        # The image jobs this conversation holds, oldest first: what an app sends so that
+        # "det billede" means this conversation's picture and not the owner's newest anywhere.
+        body["conversation_image_jobs"] = list(case["pictures"])
     started = clock()
     status, turn = http.call(STREAM_ROUTE if stream else CHAT_ROUTE, body, timeout=turn_timeout)
     turn_seconds = round(clock() - started, 1)
@@ -355,10 +359,13 @@ def run_suite(http: Http, suite: str, *, model: str, rounds: int = 1, turn_timeo
     results: list[dict] = []
     by_id: dict[str, dict] = {}
     threads: dict[str, list[dict]] = {}
+    pictures: dict[str, list[str]] = {}
     for case in suite_cases(suite, rounds):
         thread = case.get("thread")
-        if thread is not None and threads.get(thread):
-            case = dict(case, history=list(threads[thread]))
+        if thread is not None:
+            case = dict(case, pictures=list(pictures.get(thread, [])))
+            if threads.get(thread):
+                case["history"] = list(threads[thread])
         source = by_id.get(case.get("history_from", ""))
         if "history_from" in case:
             if source is None or not source.get("ok"):
@@ -370,7 +377,8 @@ def run_suite(http: Http, suite: str, *, model: str, rounds: int = 1, turn_timeo
                 by_id[case["id"]] = skipped
                 continue
             case = dict(case, history=[{"role": "user", "content": IMAGE_MESSAGES[0]},
-                                       {"role": "assistant", "content": source.get("_answer", "")}])
+                                       {"role": "assistant", "content": source.get("_answer", "")}],
+                        pictures=[j["job_id"] for j in source.get("jobs", []) if j.get("kind") == "image"])
         result = run_case(http, case, model=model, turn_timeout=turn_timeout, job_timeout=job_timeout, poll_s=poll_s,
                           clock=clock, sleep=sleep, vram=vram, stream=stream, system=system)
         results.append(result)
@@ -379,6 +387,7 @@ def run_suite(http: Http, suite: str, *, model: str, rounds: int = 1, turn_timeo
             # What a client keeps: the user's words and the model's answer. Never a tool result.
             threads.setdefault(thread, []).extend([{"role": "user", "content": case["message"]},
                                                    {"role": "assistant", "content": result.get("_answer", "")}])
+            pictures.setdefault(thread, []).extend(j["job_id"] for j in result.get("jobs", []) if j.get("kind") == "image")
     for result in results:
         result.pop("_answer", None)  # used for the next turn's history only; never reported
     return {"schema": SCHEMA, "evidence": False, "suite": suite, "model": model, "rounds": rounds,
