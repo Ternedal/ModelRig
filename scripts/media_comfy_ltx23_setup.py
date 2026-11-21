@@ -8,6 +8,7 @@ rig is a measurement, not a guess. Nothing here is evidence and no profile is pr
 
     python scripts/media_comfy_ltx23_setup.py download            # ~40 GB, into --download-dir
     python scripts/media_comfy_ltx23_setup.py run [--frames 49]   # needs ComfyUI on --url
+    python scripts/media_comfy_ltx23_setup.py run --task image_to_video
 
 `run` moves the downloaded files into ComfyUI's models folder, submits the graph, samples
 ComfyUI's own memory figures while it renders, checks that the MP4 has a sound track, and on
@@ -41,16 +42,47 @@ FILES = (
     ("Comfy-Org/ltx-2", f"split_files/text_encoders/{TEXT_ENCODER}", f"text_encoders/{TEXT_ENCODER}"),
     ("Comfy-Org/ltx-2.3", f"split_files/loras/{LORA}", f"loras/{LORA}"),
 )
-PROFILE_ID = "ltx23-t2v-av-gpu1"
-TEMPLATE_NAME = "ltx23-t2v-av.json"
+# task -> (profile id, template file, port, default size, the picture used for the direct test)
+TASKS = {
+    "text_to_video": ("ltx23-t2v-av-gpu1", "ltx23-t2v-av.json", 8191, (768, 512)),
+    # Pictures from the chat are square (1024x1024): a square clip keeps the whole motif.
+    "image_to_video": ("ltx23-i2v-av-gpu1", "ltx23-i2v-av.json", 8192, (640, 640)),
+}
+PROFILE_ID, TEMPLATE_NAME = TASKS["text_to_video"][:2]
+TEST_IMAGE = "example.png"  # ships in ComfyUI's input folder
 # The distilled schedule of ComfyUI's template: part of the graph, so the template has no steps slot.
 SIGMAS = "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
 NEGATIVE = "pc game, console game, video game, cartoon, childish, ugly"
 
 
-def graph() -> dict:
+def graph(task: str = "text_to_video") -> dict:
     """API-format graph with the Kaliv slot markers. Frames and fps sit on PrimitiveInt nodes
-    because several nodes need them (video latent, audio latent, conditioning, the muxer)."""
+    because several nodes need them (video latent, audio latent, conditioning, the muxer).
+
+    image_to_video adds the first-frame path of ComfyUI's own template: the picture is scaled to
+    the clip's size, prepared, and written into the empty video latent (strength 0.7). Width and
+    height then go to two nodes each, so they sit on PrimitiveInt nodes as well."""
+    nodes = _text_to_video()
+    if task == "image_to_video":
+        nodes["24"] = {"class_type": "PrimitiveInt", "inputs": {"value": M % "WIDTH"}}
+        nodes["25"] = {"class_type": "PrimitiveInt", "inputs": {"value": M % "HEIGHT"}}
+        nodes["7"]["inputs"].update(width=["24", 0], height=["25", 0])
+        nodes["26"] = {"class_type": "LoadImage", "inputs": {"image": M % "IMAGE"}}
+        nodes["27"] = {"class_type": "ResizeImageMaskNode",
+                       "inputs": {"input": ["26", 0], "resize_type": "scale dimensions",
+                                  "resize_type.width": ["24", 0], "resize_type.height": ["25", 0],
+                                  "resize_type.crop": "center", "scale_method": "lanczos"}}
+        nodes["28"] = {"class_type": "LTXVPreprocess", "inputs": {"image": ["27", 0], "img_compression": 18}}
+        nodes["29"] = {"class_type": "LTXVImgToVideoInplace",
+                       "inputs": {"vae": ["1", 2], "image": ["28", 0], "latent": ["7", 0], "strength": 0.7,
+                                  "bypass": False}}
+        nodes["10"]["inputs"]["video_latent"] = ["29", 0]
+    elif task != "text_to_video":
+        raise ValueError(f"unknown task {task!r}")
+    return nodes
+
+
+def _text_to_video() -> dict:
     return {
         "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": CHECKPOINT}},
         "2": {"class_type": "LTXAVTextEncoderLoader",
@@ -90,8 +122,8 @@ def graph() -> dict:
     }
 
 
-def bound(values: dict) -> dict:
-    out = json.loads(json.dumps(graph()))
+def bound(values: dict, task: str = "text_to_video") -> dict:
+    out = json.loads(json.dumps(graph(task)))
     for node in out.values():
         for key, value in node["inputs"].items():
             for name, filled in values.items():
@@ -100,22 +132,24 @@ def bound(values: dict) -> dict:
     return out
 
 
-def template_bytes() -> bytes:
-    return json.dumps(graph(), indent=1).encode("ascii")
+def template_bytes(task: str = "text_to_video") -> bytes:
+    return json.dumps(graph(task), indent=1).encode("ascii")
 
 
-def profile(pins: list, revision: str, template_sha: str, *, width: int, height: int, frames: int, fps: int) -> dict:
+def profile(pins: list, revision: str, template_sha: str, *, width: int, height: int, frames: int, fps: int,
+            task: str = "text_to_video") -> dict:
+    profile_id, template_name, port, _size = TASKS[task]
     return {
-        "schema": "kaliv-media-profile/v1", "profile_id": PROFILE_ID, "modality": "video",
-        "tasks": ["text_to_video"], "backend": "comfyui", "pipeline": None,
+        "schema": "kaliv-media-profile/v1", "profile_id": profile_id, "modality": "video",
+        "tasks": [task], "backend": "comfyui", "pipeline": None,
         "model_id": "Lightricks/LTX-2.3-fp8", "revision": revision,
         # max_steps is not used: the template carries its own schedule (no steps slot).
         "limits": {"max_prompt_chars": 2000, "sizes": [[width, height]], "max_steps": 8, "max_frames": frames},
         "outputs": ["video/mp4"],
         "resources": {"min_usable_gib": 9, "reserve_gib": 1.0, "devices": ["cuda:1"], "cpu_offload": True},
         "qualification": "candidate", "license": "ltx-2-community-license",
-        "backend_options": {"template_name": TEMPLATE_NAME, "template_sha256": template_sha, "fps": fps,
-                            "max_render_seconds": 3600, "max_output_bytes": 268435456, "port": 8191,
+        "backend_options": {"template_name": template_name, "template_sha256": template_sha, "fps": fps,
+                            "max_render_seconds": 3600, "max_output_bytes": 268435456, "port": port,
                             "comfyui_version": "0.46.2", "weights": pins},
     }
 
@@ -182,14 +216,15 @@ def run(args) -> int:
     if not _move_weights(args):
         print("STOP: vaegtene er ikke hentet (koer 'download' foerst)")
         return 1
+    profile_id, template_name, _port, _size = TASKS[args.task]
     values = {"PROMPT": args.prompt, "WIDTH": args.width, "HEIGHT": args.height, "FRAMES": args.frames,
-              "FPS": args.fps, "SEED": 1}
-    status, body = _call(args.url, "/prompt", {"prompt": bound(values)})
+              "FPS": args.fps, "SEED": 1, "IMAGE": TEST_IMAGE}
+    status, body = _call(args.url, "/prompt", {"prompt": bound(values, args.task)})
     if status != 200 or not body.get("prompt_id"):
         print("STOP: grafen blev afvist:", json.dumps(body.get("node_errors") or body.get("error"))[:3000])
         return 1
     prompt_id, started = body["prompt_id"], time.time()
-    print(f"GRAF ok, render startet: {args.width}x{args.height}, {args.frames} billeder, {args.fps} fps", flush=True)
+    print(f"GRAF ok, render startet ({args.task}): {args.width}x{args.height}, {args.frames} billeder, {args.fps} fps", flush=True)
     entry, low_vram, low_ram, last = None, None, None, 0.0
     while time.time() - started < args.timeout:
         try:
@@ -240,9 +275,10 @@ def run(args) -> int:
         print("PIN   ", target, pins[-1]["bytes"], pins[-1]["sha256"], flush=True)
     revision = _revision(args)
     print("REVISION", revision, "" if revision.strip("0") else "(IKKE FUNDET - sig til)")
-    raw = template_bytes()
+    raw = template_bytes(args.task)
     sha = hashlib.sha256(raw).hexdigest()
-    made = profile(pins, revision, sha, width=args.width, height=args.height, frames=args.frames, fps=args.fps)
+    made = profile(pins, revision, sha, width=args.width, height=args.height, frames=args.frames, fps=args.fps,
+                   task=args.task)
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "worker"))
     try:
         from app.comfy_workflow_template import load_template
@@ -254,10 +290,10 @@ def run(args) -> int:
         print("STOP: repoets kontrol afviste: %s: %s" % (type(exc).__name__, exc))
         return 1
     Path(args.template_dir).mkdir(parents=True, exist_ok=True)
-    Path(args.template_dir, TEMPLATE_NAME).write_bytes(raw)
-    with open(Path(args.profile_dir, PROFILE_ID + ".json"), "w", encoding="ascii", newline="\n") as handle:
+    Path(args.template_dir, template_name).write_bytes(raw)
+    with open(Path(args.profile_dir, profile_id + ".json"), "w", encoding="ascii", newline="\n") as handle:
         json.dump(made, handle, indent=1)
-    print("SKREVET skabelon", sha, "+ profil", PROFILE_ID)
+    print("SKREVET skabelon", sha, "+ profil", profile_id)
     print("TID: %d s for %.1f s klip (%dx%d)" % (elapsed, args.frames / args.fps, args.width, args.height))
     return 0
 
@@ -271,14 +307,19 @@ def main(argv=None) -> int:
     parser.add_argument("--template-dir", default=r"C:\ModelRig\comfy-templates")
     parser.add_argument("--profile-dir", default=r"C:\ModelRig\media-profiles")
     parser.add_argument("--url", default="http://127.0.0.1:8188")
-    parser.add_argument("--width", type=int, default=768)
-    parser.add_argument("--height", type=int, default=512)
+    parser.add_argument("--task", choices=sorted(TASKS), default="text_to_video")
+    parser.add_argument("--width", type=int, help="default: 768 (text) or 640 (image)")
+    parser.add_argument("--height", type=int, help="default: 512 (text) or 640 (image)")
     parser.add_argument("--frames", type=int, default=49, help="8n+1; 49 is about 2 s at 25 fps")
     parser.add_argument("--fps", type=int, default=25)
     parser.add_argument("--timeout", type=int, default=3600)
     parser.add_argument("--prompt", default="A paper boat drifts across a still pond in soft morning light, "
                         "small ripples spread from its bow; quiet water lapping and distant birdsong.")
     args = parser.parse_args(argv)
+    args.width = args.width or TASKS[args.task][3][0]
+    args.height = args.height or TASKS[args.task][3][1]
+    if args.task == "image_to_video" and args.prompt == parser.get_default("prompt"):
+        args.prompt = "The scene comes alive with gentle natural motion, slow camera push-in; soft ambient sound."
     if args.command == "run" and (args.width % 32 or args.height % 32 or args.frames % 8 != 1):
         parser.error("width and height must be multiples of 32, frames 8n+1")
     return download(args) if args.command == "download" else run(args)

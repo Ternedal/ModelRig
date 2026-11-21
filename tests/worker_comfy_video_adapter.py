@@ -122,6 +122,22 @@ class TemplateTests(unittest.TestCase):
                               width=768, height=512, frames=49, fps=25)
         parsed = parse_profile(made)
         self.assertEqual((parsed.qualification, parsed.license, sorted(parsed.tasks)), ("candidate", "ltx-2-community-license", ["text_to_video"]))
+        # image-to-video with sound: the same files, the picture written into the video latent
+        data = helper.template_bytes("image_to_video")
+        animated = load_template(data, sha(data), pinned_files=pins)
+        self.assertEqual(animated.task, "image_to_video")
+        self.assertEqual(animated.slots["__KALIV_VIDEO_IMAGE__"], ("26", "image"))
+        graph = animated.bind(request(profile_id="ltx23-i2v-av-gpu1", task="image_to_video", width=640, height=640,
+                                      frames=49, steps=8, input_asset_id="a" * 32),
+                              fps=25, source_file="kaliv-src-0123456789abcdef.png")
+        self.assertEqual((graph["24"]["inputs"]["value"], graph["25"]["inputs"]["value"]), (640, 640))
+        self.assertEqual(graph["26"]["inputs"]["image"], "kaliv-src-0123456789abcdef.png")
+        self.assertEqual(graph["10"]["inputs"]["video_latent"], ["29", 0], "the clip starts from the picture")
+        made = helper.profile([{"path": p, "sha256": "a" * 64, "bytes": 1} for p in pins], "b" * 40, sha(data),
+                              width=640, height=640, frames=49, fps=25, task="image_to_video")
+        parsed = parse_profile(made)
+        self.assertEqual((parsed.profile_id, sorted(parsed.tasks), parsed.backend_options.port),
+                         ("ltx23-i2v-av-gpu1", ["image_to_video"], 8192))
         # the sound-track check reads the MP4's handler boxes
         def hdlr(kind):
             return b"\x00\x00\x00\x21hdlr" + b"\x00" * 8 + kind + b"\x00" * 13
