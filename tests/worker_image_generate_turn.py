@@ -167,7 +167,7 @@ try:
     # Its own store: the owner's limit is three active jobs, and the cases around this one count.
     retry_service = MediaJobService(ImageJobStore(os.path.join(_tmp, "retry.sqlite3")), dict(service.profiles), "s" * 40)
     register(lambda args: igt._run_image_generate(args, service_getter=lambda: retry_service, env={}))
-    script([call("image_generate", {"prompt": PROMPT, "width": "1024", "style": "photo"}),
+    script([call("image_generate", {"prompt": PROMPT, "width": "bred", "style": "photo"}),
             call("image_generate", {"prompt": PROMPT}), answer("Billedet er på vej.")])
     r = chat()
     d = r.json()

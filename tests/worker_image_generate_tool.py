@@ -259,13 +259,15 @@ try:
 except tools.ToolDenied:
     check(True, "args not an object: ToolDenied")
 # A model's argument mistake is refused as text, not ToolDenied: that would end the turn
-# with HTTP 400 for the likeliest mistake a small model makes ("width": "1024").
+# with HTTP 400 for a mistake a small model makes easily (a made-up field, a word for a number).
 for bad, label, names in (
     ({}, "prompt missing", "prompt"),
     ({"prompt": ""}, "prompt empty", "prompt"),
     ({"prompt": "x" * 4001}, "prompt too long", "prompt"),
     ({"prompt": PROMPT, "steps": 5, "style": "photo"}, "unknown argument", "steps, style"),
-    ({"prompt": PROMPT, "width": "1024"}, "width not an int", "width"),
+    ({"prompt": PROMPT, "width": "bred"}, "width not a number", "width"),
+    ({"prompt": PROMPT, "height": 10.5}, "height not a whole number", "height"),
+    ({"prompt": PROMPT, "width": [1024]}, "width a list", "width"),
     ({"prompt": PROMPT, "seed": True}, "bool is not an int", "seed"),
     ({"prompt": PROMPT, "profile_id": 7}, "profile_id not a string", "profile_id"),
 ):
@@ -273,10 +275,24 @@ for bad, label, names in (
     o_bad = _run_image_generate(bad, service_getter=lambda: svc_bad, env={})
     check("invalid_arguments" in o_bad and names in o_bad and parse_job_reference(o_bad) is None
           and "image_generate igen" in o_bad, f"{label}: refused as text, names the argument, call again")
-    check("photo" not in o_bad and "1024" not in o_bad and "xxxx" not in o_bad, f"{label}: no value is echoed")
+    check("photo" not in o_bad and "1024" not in o_bad and "bred" not in o_bad and "10.5" not in o_bad
+          and "xxxx" not in o_bad, f"{label}: no value is echoed")
     with sqlite3.connect(svc_bad.store.path) as _db:
         check(_db.execute("SELECT COUNT(*) FROM image_jobs").fetchone()[0] == 0, f"{label}: nothing queued")
 check(svc.store.get(ref["job_id"], OWNER) is not None, "denied arguments queued nothing new (store intact)")
+from app.image_generate_tool import ArgMistake, int_arg  # noqa: E402
+check([int_arg("width", v) for v in (1024, "1024", " 1024 ", 1024.0, None, "", "  ", -5, "-5")]
+      == [1024, 1024, 1024, 1024, None, None, None, -5, -5],
+      "1024, '1024' and 1024.0 are the same wish; '' and None are 'left out'")
+for bad_int in (True, False, "10.5", 10.5, "1e3", "bred", [1], {}, float("inf"), float("nan"), "1" * 11):
+    try:
+        int_arg("width", bad_int); check(False, f"int_arg refuses {bad_int!r}")
+    except ArgMistake as mistake:
+        check(str(mistake) == "width skal være et heltal", f"int_arg refuses {bad_int!r} naming the argument only")
+ref_text = parse_job_reference(_run_image_generate({"prompt": PROMPT, "width": "1024", "height": 1024.0, "seed": ""},
+                                                   service_getter=lambda: service_with(IMG_A), env={}))
+check(ref_text is not None, "a size sent as text and as a float queues the picture: no round trip for a difference the user cannot see")
+
 for blank in ("", "   "):
     ref_blank = parse_job_reference(_run_image_generate({"prompt": PROMPT, "profile_id": blank},
                                                         service_getter=lambda: service_with(IMG_A), env={}))

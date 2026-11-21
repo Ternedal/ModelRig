@@ -20,6 +20,10 @@ What it is careful about:
 - **It generates for real.** Every tool call queues a job on the GPU; the probe
   runs the cases one at a time and waits for each job before the next.
 
+``--suite conversation`` sends the picture messages as one conversation with its
+history, ``--stream`` uses the route the apps use, and ``--system-file`` adds the
+system prompt the app sends: together they are a phone's turn without the phone.
+
 Exit 0 when every case met its expectation, 1 when one did not, 2 for a setup
 error (address, token).
 
@@ -37,6 +41,7 @@ import statistics
 import subprocess
 import sys
 import time
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
@@ -44,8 +49,12 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 SCHEMA = "kaliv-media-chat-probe/v1"
 TOKEN_ENV = "MODELRIG_TOKEN"
 CHAT_ROUTE = "/api/v1/tools/chat"
+# The same turn as a stream of NDJSON lines: phases, then one ``result`` (or ``error``).
+# It is the route the phone and the desktop app use.
+STREAM_ROUTE = CHAT_ROUTE + "/stream"
 JOB_ROUTE = "/api/v1/media/jobs/"
 MAX_REPLY = 1024 * 1024
+MAX_SYSTEM_CHARS = 8000
 TERMINAL = ("completed", "failed", "cancelled", "expired")
 STATES = ("queued", "running", "publishing") + TERMINAL
 TOOL_KIND = {"image_generate": "image", "video_generate": "video"}
@@ -107,7 +116,7 @@ class Http:
 
     def call(self, route: str, body: dict | None, timeout: float) -> tuple[int, object]:
         """``(status, json-or-None)``; status 0: the appliance could not be reached, -1: it redirected (refused)."""
-        if not (route == CHAT_ROUTE or (route.startswith(JOB_ROUTE) and _JOB_ID.fullmatch(route[len(JOB_ROUTE):]))):
+        if not (route in (CHAT_ROUTE, STREAM_ROUTE) or (route.startswith(JOB_ROUTE) and _JOB_ID.fullmatch(route[len(JOB_ROUTE):]))):
             raise ProbeError("unexpected route")
         data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
         headers = {"Authorization": "Bearer " + self._token, "Accept": "application/json", "Cache-Control": "no-store"}
@@ -116,7 +125,10 @@ class Http:
         request = Request(self._base + route, data=data, headers=headers, method="GET" if data is None else "POST")
         try:
             with self._opener.open(request, timeout=timeout) as response:
-                return response.status, _parse(response.read(MAX_REPLY + 1))
+                raw = response.read(MAX_REPLY + 1)
+                if route == STREAM_ROUTE and response.status == 200:
+                    return _stream_result(raw)
+                return response.status, _parse(raw)
         except HTTPError as exc:
             try:
                 return exc.code, _parse(exc.read(MAX_REPLY + 1))
@@ -126,6 +138,32 @@ class Http:
             return -1, None
         except (URLError, OSError):
             return 0, None
+
+
+def _stream_result(raw: bytes) -> tuple[int, object]:
+    """The last ``result`` line of a tools stream as ``(200, turn)``, the way the apps read it.
+
+    An ``error`` line is the turn's failure -- its status if it carries one, else 500 --
+    with the rig's reason kept short under ``detail``. No result and no error: the stream
+    was cut, which the apps report as an interrupted turn (status 0 here).
+    """
+    if len(raw) > MAX_REPLY:
+        return 0, None
+    turn = None
+    for line in raw.decode("utf-8", "replace").splitlines():
+        try:
+            item = json.loads(line) if line.strip() else None
+        except ValueError:
+            continue
+        if not isinstance(item, dict):
+            continue
+        if item.get("error"):
+            status = item.get("status")
+            return (status if isinstance(status, int) and not isinstance(status, bool) and 400 <= status <= 599 else 500,
+                    {"detail": str(item["error"])[:160]})
+        if isinstance(item.get("result"), dict):
+            turn = item["result"]
+    return (200, turn) if turn is not None else (0, None)
 
 
 def _parse(raw: bytes):
@@ -240,14 +278,16 @@ def follow_job(http: Http, job_id: str, *, timeout_s: float, poll_s: float, cloc
 
 
 def run_case(http: Http, case: dict, *, model: str, turn_timeout: float, job_timeout: float, poll_s: float,
-             clock=time.monotonic, sleep=time.sleep, vram=None) -> dict:
+             clock=time.monotonic, sleep=time.sleep, vram=None, stream: bool = False, system: str | None = None) -> dict:
     """One message through the tools turn, then every job it queued. ``case['expect']`` is a tool name or None."""
     before = vram() if vram is not None else None
     body = {"message": case["message"], "model": model}
+    if system:
+        body["system"] = system
     if case.get("history"):
         body["history"] = case["history"]
     started = clock()
-    status, turn = http.call(CHAT_ROUTE, body, timeout=turn_timeout)
+    status, turn = http.call(STREAM_ROUTE if stream else CHAT_ROUTE, body, timeout=turn_timeout)
     turn_seconds = round(clock() - started, 1)
     out = {"case": case["id"], "expect": case["expect"], "http": status, "turn_seconds": turn_seconds,
            "status": None, "tools_used": [], "jobs": [], "refusals": [], "answer_chars": 0,
@@ -255,6 +295,10 @@ def run_case(http: Http, case: dict, *, model: str, turn_timeout: float, job_tim
            "vram_before_mib": {str(k): v for k, v in sorted(before.items())} if before is not None else None}
     if status != 200 or not isinstance(turn, dict):
         out.update(ok=False, why="turn_failed")
+        detail = turn.get("detail") if isinstance(turn, dict) else None
+        if isinstance(detail, str) and detail:
+            # The rig's own reason for refusing the turn (a gate denial, a model error) -- not the model's text.
+            out["turn_error"] = detail[:160]
         return out
     used = [t for t in turn.get("tools_used") or [] if isinstance(t, str)]
     answer = turn.get("answer") if isinstance(turn.get("answer"), str) else ""
@@ -307,7 +351,7 @@ def suite_cases(suite: str, rounds: int) -> list[dict]:
 
 def run_suite(http: Http, suite: str, *, model: str, rounds: int = 1, turn_timeout: float = 300.0,
               job_timeout: float = 1800.0, poll_s: float = 2.0, clock=time.monotonic, sleep=time.sleep,
-              vram=None) -> dict:
+              vram=None, stream: bool = False, system: str | None = None) -> dict:
     results: list[dict] = []
     by_id: dict[str, dict] = {}
     threads: dict[str, list[dict]] = {}
@@ -328,7 +372,7 @@ def run_suite(http: Http, suite: str, *, model: str, rounds: int = 1, turn_timeo
             case = dict(case, history=[{"role": "user", "content": IMAGE_MESSAGES[0]},
                                        {"role": "assistant", "content": source.get("_answer", "")}])
         result = run_case(http, case, model=model, turn_timeout=turn_timeout, job_timeout=job_timeout, poll_s=poll_s,
-                          clock=clock, sleep=sleep, vram=vram)
+                          clock=clock, sleep=sleep, vram=vram, stream=stream, system=system)
         results.append(result)
         by_id[case["id"]] = result
         if thread is not None and result.get("http") == 200:
@@ -338,6 +382,9 @@ def run_suite(http: Http, suite: str, *, model: str, rounds: int = 1, turn_timeo
     for result in results:
         result.pop("_answer", None)  # used for the next turn's history only; never reported
     return {"schema": SCHEMA, "evidence": False, "suite": suite, "model": model, "rounds": rounds,
+            # How the turn was sent: the apps stream it and send the user's own system prompt.
+            # Only the prompt's length is kept.
+            "stream": bool(stream), "system_chars": len(system or ""),
             "cases": results, "summary": summarize(results)}
 
 
@@ -364,7 +411,8 @@ def summarize(results: list[dict]) -> dict:
 
 
 def render(report: dict) -> str:
-    lines = [f"suite={report['suite']} model={report['model']} rounds={report['rounds']}  (dev channel: not evidence)", ""]
+    how = ("stream" if report.get("stream") else "chat") + (f" system={report['system_chars']}" if report.get("system_chars") else "")
+    lines = [f"suite={report['suite']} model={report['model']} rounds={report['rounds']} via={how}  (dev channel: not evidence)", ""]
     lines.append(f"{'case':<18} {'ok':<3} {'turn s':>7} {'tool':<15} {'job':<11} {'job s':>7}  note")
     for r in report["cases"]:
         job = r["jobs"][0] if r["jobs"] else None
@@ -372,6 +420,8 @@ def render(report: dict) -> str:
         note = r["why"] or ""
         if r.get("refusals"):
             note = (note + " afvist:" + ",".join(r["refusals"])).strip()
+        if r.get("turn_error"):
+            note = (note + " " + r["turn_error"]).strip()
         if job and job.get("error"):
             note = (note + " " + job["error"]).strip()
         if job and job.get("profile_id"):
@@ -399,19 +449,31 @@ def main(argv=None, env=None) -> int:
     parser.add_argument("--poll-seconds", type=float, default=2.0)
     parser.add_argument("--report", default=None, help="write the JSON report here")
     parser.add_argument("--no-vram", action="store_true", help="do not sample nvidia-smi")
+    parser.add_argument("--stream", action="store_true",
+                        help="send each turn through /tools/chat/stream, as the phone and the desktop app do")
+    parser.add_argument("--system-file", default=None,
+                        help="a text file with the system prompt the app sends (the phone's own); only its length is reported")
     args = parser.parse_args(argv)
     try:
         if not 1 <= args.rounds <= 10:
             raise ProbeError("--rounds must be 1..10: every round generates for real")
         if not 0 <= args.poll_seconds <= 60:
             raise ProbeError("--poll-seconds must be 0..60")
+        system = None
+        if args.system_file:
+            try:
+                system = Path(args.system_file).read_text(encoding="utf-8-sig").strip()
+            except (OSError, UnicodeDecodeError) as exc:
+                raise ProbeError(f"--system-file could not be read ({type(exc).__name__})") from None
+            if not 0 < len(system) <= MAX_SYSTEM_CHARS:
+                raise ProbeError(f"--system-file must hold 1..{MAX_SYSTEM_CHARS} characters")
         http = Http(ensure_loopback(args.base), token_from_env(env))
     except ProbeError as exc:
         print(f"media_chat_probe: {exc}", file=sys.stderr)
         return 2
     report = run_suite(http, args.suite, model=args.model, rounds=args.rounds, turn_timeout=args.turn_timeout,
                        job_timeout=args.job_timeout, poll_s=args.poll_seconds,
-                       vram=None if args.no_vram else vram_sampler())
+                       vram=None if args.no_vram else vram_sampler(), stream=args.stream, system=system)
     print(render(report))
     if args.report:
         with open(args.report, "w", encoding="utf-8") as handle:

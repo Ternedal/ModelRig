@@ -154,7 +154,7 @@ check(o_src.startswith("Videogenerering er ikke tilgængelig") and "no_source_im
 for bad, label in (({"prompt": PROMPT, "input_asset_id": "x"}, "asset ids are never a model argument"),
                    ({"prompt": PROMPT, "task": "image_to_video"}, "task cannot be chosen by the model"),
                    ({"prompt": PROMPT, "source_image_job_id": 7}, "source must be a string"),
-                   ({"prompt": PROMPT, "frames": "33"}, "frames must be an int"),
+                   ({"prompt": PROMPT, "frames": "mange"}, "frames must be a number"),
                    ({}, "prompt missing")):
     # Refused as text, not ToolDenied: that would end the turn with HTTP 400 for the
     # likeliest mistake a small model makes. Nothing is queued either way.
