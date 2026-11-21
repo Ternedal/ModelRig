@@ -200,6 +200,75 @@ try:
     check(d.get("tools_used") == ["image_generate"], "unavailable: the tool ran and answered as text")
     check(before is not None, "unavailable: previously queued job untouched")
 
+    # 7 (#2462 review, Codex P2): a job queued in the turn survives a failed follow-up. The
+    #    render is already running; a 502 threw its reference away and a retry queued a second one.
+    #    A store of its own: the owner's active-job limit is three, and the cases above used it.
+    fresh_db = os.path.join(_tmp, "jobs-followup.sqlite3")
+    fresh = MediaJobService(ImageJobStore(fresh_db), {"sdxl-a": parse_profile(image_profile(profile_id="sdxl-a"))}, "s" * 40)
+
+    def run_fresh(args):
+        return igt._run_image_generate(args, service_getter=lambda: fresh, env={})
+
+    def new_store():
+        nonlocal_db = os.path.join(_tmp, f"jobs-followup-{len(os.listdir(_tmp))}.sqlite3")
+        service_n = MediaJobService(ImageJobStore(nonlocal_db), {"sdxl-a": parse_profile(image_profile(profile_id="sdxl-a"))}, "s" * 40)
+        register(lambda args: igt._run_image_generate(args, service_getter=lambda: service_n, env={}))
+        return nonlocal_db
+
+    register(run_fresh)
+
+    def failing_after(first, error):
+        seq = [first]
+
+        async def _mock(messages, *a, **k):
+            if seq:
+                return seq.pop(0)
+            raise error
+        main.oc.chat_tools = _mock
+
+    def queued_count():
+        import sqlite3
+        with sqlite3.connect(fresh_db) as conn:
+            return conn.execute("SELECT COUNT(*) FROM image_jobs").fetchone()[0]
+
+    count = queued_count()
+    failing_after(call("image_generate", {"prompt": PROMPT}), main.oc.OllamaError("cannot reach Ollama at http://127.0.0.1:11434: boom"))
+    r = chat()
+    d = r.json()
+    check(r.status_code == 200 and d.get("status") == "answered", f"follow-up fails: the turn is answered, not 502 (got {r.status_code})")
+    check(len(d.get("media_jobs") or []) == 1 and d["media_jobs"][0]["kind"] == "image", "follow-up fails: the queued job's reference is on the turn")
+    check(d.get("answer") == "Billedet er på vej — det vises her, når det er færdigt." and d.get("answer_fallback") == "model_unavailable",
+          f"follow-up fails: a fixed sentence and the reason as a code (got {d.get('answer')!r}, {d.get('answer_fallback')!r})")
+    check("11434" not in json.dumps(d) and "boom" not in json.dumps(d), "follow-up fails: no exception text on the wire")
+    check(queued_count() == count + 1, "follow-up fails: exactly one job was queued")
+    new_store()
+    failing_after(call("image_generate", {"prompt": PROMPT}), main.oc.OllamaError("down"))
+    lines = stream()
+    check("error" not in lines[-1] and len(lines[-1].get("result", {}).get("media_jobs") or []) == 1,
+          f"follow-up fails on the stream: a result line with the reference, not an error line (got {list(lines[-1])})")
+    # a later call for a tool that does not exist, or with broken arguments: the queued job stands
+    new_store()
+    script([call("image_generate", {"prompt": PROMPT}), call("no_such_tool", {})])
+    d = chat().json()
+    check(d.get("status") == "answered" and len(d.get("media_jobs") or []) == 1 and d.get("answer_fallback") == "tool_denied",
+          f"a refused later call keeps the queued job (got {d.get('status')!r}, {d.get('answer_fallback')!r})")
+    new_store()
+    script([call("image_generate", {"prompt": PROMPT}),
+            {"tool_calls": [{"function": {"name": "image_generate", "arguments": "{not json"}}], "content": ""}])
+    d = chat().json()
+    check(len(d.get("media_jobs") or []) == 1 and d.get("answer_fallback") == "tool_arguments_invalid", "broken arguments in a later call keep the queued job")
+    # nothing queued: the failure is still a failure
+
+    async def _always_down(messages, *a, **k):
+        raise main.oc.OllamaError("down")
+    main.oc.chat_tools = _always_down
+    r = chat()
+    check(r.status_code == 502, f"nothing queued: a model failure is still 502 (got {r.status_code})")
+    script([call("no_such_tool", {})])
+    check(chat().status_code == 404, "nothing queued: an unknown tool is still 404")
+    script([answer("hej")])
+    check("answer_fallback" not in chat().json(), "an ordinary turn has no fallback marker")
+
     # 5: unregistered -> unknown tool on the wire, and no rule in the system prompt.
     tools.REGISTRY.pop(igt.TOOL_NAME, None)
     script([call("image_generate", {"prompt": PROMPT})])

@@ -741,6 +741,29 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
     # argument. Additive, like media_jobs; empty when nothing was refused.
     media_refusals: list[dict] = []
 
+    def _keep_queued(reason: str) -> "dict | None":
+        """An answered turn built from what is already queued, or None if nothing is.
+
+        #2462 review (Codex, P2): a job that image_generate or video_generate queued earlier in
+        this turn is already rendering. If the model's follow-up then fails, a 502 threw the
+        reference away: no bubble, and a retry of the turn queued a second render. The turn now
+        ends answered with the references and a fixed sentence; ``answer_fallback`` names why the
+        model's own words are missing (a code, never an exception text)."""
+        if not media_jobs:
+            return None
+        kinds = {job.get("kind") for job in media_jobs}
+        if len(media_jobs) == 1 and kinds == {"image"}:
+            text = "Billedet er på vej — det vises her, når det er færdigt."
+        elif len(media_jobs) == 1 and kinds == {"video"}:
+            text = "Klippet er på vej — det vises her, når det er færdigt. Det tager et par minutter."
+        else:
+            text = "Det er på vej — det vises her, når det er færdigt."
+        _logger.warning("level=warn tool_loop media_kept reason=%s jobs=%d", reason, len(media_jobs))
+        return {"status": "answered", "answer": text, "answer_fallback": reason,
+                "tool": tools_used[-1] if tools_used else None, "tools_used": tools_used,
+                "sources": sources, "media_jobs": media_jobs, "media_refusals": media_refusals,
+                "context": context or [], "origin": origin}
+
     _BODY_STATES = {"generating": "thinking", "tool_run": "waiting_for_tool"}
 
     async def _phase(name: str) -> None:
@@ -764,6 +787,9 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
             msg = await oc.chat_tools(messages, tools=_schema, model=model,
                                       base_url=cloud_base_url, api_key=cloud_key)
         except oc.OllamaError as e:
+            kept = _keep_queued("model_unavailable")
+            if kept is not None:
+                return kept
             raise HTTPException(status_code=502, detail=str(e))
         calls = msg.get("tool_calls") or []
         _logger.info("level=info tool_loop step=%d has_calls=%s", step, bool(calls))
@@ -786,6 +812,9 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
             try:
                 args = _json.loads(args)
             except Exception:
+                kept = _keep_queued("tool_arguments_invalid")
+                if kept is not None:
+                    return kept
                 raise HTTPException(status_code=400, detail="tool arguments are not valid JSON")
         messages.append({"role": "assistant", "content": msg.get("content", ""),
                          "tool_calls": calls[:1]})
@@ -798,6 +827,9 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
                 messages=messages, model=model, origin=origin,
             )
         except t.ToolDenied as e:
+            kept = _keep_queued("tool_denied")  # a later call in the turn; the queued job stands
+            if kept is not None:
+                return kept
             m = str(e)
             if m.startswith("unknown tool"):
                 raise HTTPException(status_code=404, detail=m)
@@ -805,6 +837,9 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
                 raise HTTPException(status_code=403, detail=m)
             raise HTTPException(status_code=400, detail=m)
         except t.ToolError as e:
+            kept = _keep_queued("tool_error")
+            if kept is not None:
+                return kept
             raise HTTPException(status_code=503, detail=str(e))
         if result["status"] == "confirmation_required":
             # media_jobs too: a picture queued earlier in this turn is already rendering,
@@ -826,6 +861,9 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
     try:
         answer = await _final_answer(messages, model, cloud_base_url, cloud_key)
     except oc.OllamaError as e:
+        kept = _keep_queued("model_unavailable")
+        if kept is not None:
+            return kept
         raise HTTPException(status_code=502, detail=str(e))
     return {"status": "answered", "tool": tools_used[-1] if tools_used else None,
             "tools_used": tools_used, "answer": answer, "origin": origin,
