@@ -178,8 +178,14 @@ Exit 0 = alt som forventet, 1 = mindst ét tilfælde afveg.
 **1.5b Samme beskeder som én samtale** [repo] — det er sådan, telefonen sender dem:
 
 ```powershell
-python scripts\media_chat_probe.py --suite conversation --rounds 2 --report "$env:TEMP\media-chat-conversation.json"
+python scripts\media_chat_probe.py --suite conversation --stream --rounds 2 --report "$env:TEMP\media-chat-conversation.json"
 ```
+
+`--stream` sender turen gennem `/tools/chat/stream`, som telefonen og desktop-appen gør
+[repo: `ModelRigClient.toolsChatStream`]. Har du en systemprompt på telefonen
+(Indstillinger → rig), så gem den i en tekstfil og tilføj `--system-file <fil>`:
+appen sender den med hver tur, og proben uden den er ikke den samme samtale.
+Rapporten gemmer kun promptens længde.
 
 De fire billedbeskeder og kontrollen sendes med historikken fra de foregående ture.
 20/11 gik 19 af 19 igennem uden historik, mens telefonen fik "der er tekniske problemer
