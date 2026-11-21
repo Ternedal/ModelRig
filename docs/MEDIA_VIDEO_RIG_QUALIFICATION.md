@@ -127,7 +127,7 @@ These steps change the rig and download about 10 GB of Apache-2.0 weights. Run t
 
 ## 6. Image-to-video: what it adds (#2366, #2459)
 
-The entry point serves `image_to_video` under the same switch, and `video_generate` takes a picture from the conversation as the source (`docs/MEDIA_EXECUTOR.md`, "Image-to-video"). **Nothing of it has been run on the rig**, and the text-to-video model of §1 cannot do it: Wan 2.1 T2V 1.3B is text-only.
+The entry point serves `image_to_video` under the same switch, and `video_generate` takes a picture from the conversation as the source (`docs/MEDIA_EXECUTOR.md`, "Image-to-video"). It ran on the rig for the first time on 21 November (§7). The text-to-video model of §1 cannot do it: Wan 2.1 T2V 1.3B is text-only.
 
 **A second profile, not a second task on the first.** A ComfyUI template renders exactly one task, and the adapter refuses a request for any other [repo: `comfy_video_adapter`]. So image-to-video is its own profile with its own template (the one with the `__KALIV_VIDEO_IMAGE__` slot on `LoadImage`), listing `tasks: ["image_to_video"]` only, and the text-to-video profile lists `["text_to_video"]` only. `video_generate` picks the profile by task: with one profile per task, nothing needs configuring; `KALIV_VIDEO_TOOL_PROFILE` only settles a choice between two profiles for the same task [repo: `image_generate_tool._choose_profile`].
 
@@ -154,8 +154,57 @@ The entry point serves `image_to_video` under the same switch, and `video_genera
 4. Negative cases, each must fail the job without stopping the executor: the source job of another owner, a source deleted from the gallery between submit and claim (`source_image_unavailable`), and a video job named as the source (`source_not_an_image`, refused at the tool).
 5. From the chat: "lav et billede af …", wait for the picture, then "lav en video af det billede" as the next message; the model is told to pass `source_image_job_id="latest"`, the reply must carry a video job reference, and the clip must start from that picture. Also once before any picture exists: the answer must be that there is no finished picture (`no_source_image`), not an invented clip. **Whether qwen3:14b reliably passes `latest` is a rig measurement** [measure]. Then the case the review asked about: make a picture in a second conversation, go back to the first and ask for a video of "det billede" — with an app that sends `conversation_image_jobs` the clip must start from the first conversation's picture, not the newer one. Measured by `scripts/media_chat_probe.py --suite two-conversations`: the clip's job reference names its source picture job (`source_job_id`), and the suite passes only when that is the first conversation's.
 
-## 7. What this document does not do
+## 7. First rig run, 21 November 2026 (dev channel: not evidence)
+
+Run from the dev appliance on `integration/media-chat` (`74b2895d`), 2× RTX 3060, Ollama pinned to GPU 0 (`CUDA_VISIBLE_DEVICES`, `OLLAMA_SCHED_SPREAD=false`, `OLLAMA_VULKAN=false`, context 8192), media on `cuda:1`. Everything below is [measured] unless tagged. Nothing here promotes a profile.
+
+**What was installed**
+
+- ComfyUI tag `v0.46.2`, commit `10cdd12609eb17e8a90f2a2dd811b1c82f6107e7`, in `C:\Kaliv\ComfyUI` with its own venv (`C:\Kaliv\comfy-venv`, torch 2.14.1+cu126). `/system_stats` reports `comfyui_version` `0.46.2`.
+- The two templates are in the repository, byte for byte as they ran: [`deploy/media/comfy-templates/`](../deploy/media/comfy-templates/). Core nodes only.
+
+| | Text-to-video | Image-to-video |
+|---|---|---|
+| Profile | `wan21-t2v-1p3b-gpu1`, port 8189 | `wan22-ti2v-5b-gpu1`, port 8190 |
+| Template, SHA-256 | `wan21-t2v-1p3b.json`, `4cd0d604b4728159eb351f84992819eaf2730bad7b4187889697e2020b798369` | `wan22-ti2v-5b.json`, `62402da4ec636592c416cc05e7a8bd81be5baa9b205a403ebaae752ebe58e4d5` |
+| Repository revision | `Comfy-Org/Wan_2.1_ComfyUI_repackaged` @ `d6258323e18f14c60d37899da97ca555f3118259` | `Comfy-Org/Wan_2.2_ComfyUI_Repackaged` @ `5df3a4a3ed0628002308022198249dbbbd045d09` |
+| Size, frames, steps, fps | 832×480, 33, 20, 16 | 704×704, 49, 20, 24 |
+| Sampler | `uni_pc` / `simple`, cfg 6, shift 8 | `uni_pc` / `simple`, cfg 5, shift 8 |
+| `resources` | `min_usable_gib` 8, `reserve_gib` 1.0 | `min_usable_gib` 9, `reserve_gib` 1.0 |
+
+Weight pins (`{path, bytes, sha256}`, the rig's own hashes; §2's cross-check hash for the 1.3B model matched):
+
+| Path under `models/` | Bytes | SHA-256 |
+|---|---|---|
+| `diffusion_models/wan2.1_t2v_1.3B_fp16.safetensors` | 2838303560 | `be531024cd9018cb5b48c40cfbb6a6191645b1c792eb8bf4f8c1c6e10f924dc5` |
+| `text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors` | 6735906897 | `c3355d30191f1f066b26d93fba017ae9809dce6c627dda5f6a66eaa651204f68` |
+| `vae/wan_2.1_vae.safetensors` | 253815318 | `2fc39d31359a4b0a64f55876d8ff7fa8d780956ae2cb13463b0223e15148976b` |
+| `diffusion_models/wan2.2_ti2v_5B_fp16.safetensors` | 9999658848 | `456f901338bd9eadbded3828b819109a9b68e8a525ca5cf8d0049a69fcfeca1e` |
+| `vae/wan2.2_vae.safetensors` | 1409400960 | `e40321bd36b9709991dae2530eb4ac303dd168276980d3e9bc4b6e2b75fed156` |
+
+**Times**
+
+| | Directly against ComfyUI | Through the chat (executor's own time) |
+|---|---|---|
+| Text-to-video, 2.06 s clip | 150 s | 176–198 s; message to finished clip, median 205 s |
+| Image-to-video, 2.04 s clip | 161 s | 240 s |
+
+`media_chat_probe --suite video --stream --rounds 4`: 4/4 `video_generate`, 4/4 completed. `--suite two-conversations --stream --rounds 1`: all three cases passed, the clip was made from the first conversation's picture. Two video profiles on one GPU (two ports) took turns without a failure. **Not measured:** VRAM peak, host RAM, the full setting, more than one round of the two-conversation suite, and the Android and desktop bubbles with a clip.
+
+**What the run found** (each is in the code or in this document now, unless it says otherwise)
+
+1. **`SaveVideo` in 0.46.2 takes a compound format.** The API form is `"format": "mp4", "format.codec": "h264"`. `filename_prefix` must have no folder (the node's default is `video/ComfyUI`): the adapter takes one plain `.mp4` in the output root.
+2. **ComfyUI ships a placeholder file in `models/embeddings/`** (`put_embeddings_or_textual_inversion_concepts_here`). `comfy_weights.check_lookup_is_unambiguous` refuses any unpinned file there, so the start is refused until it is deleted. Delete it as part of §5 step 2.
+3. **Download into a folder of its own, then move the files** into `models/…`: the Hugging Face client leaves a `.cache` folder beside what it downloads.
+4. **The resident proof was refused on Windows.** A venv's `Scripts\python.exe` is a starter; the interpreter that takes the lock is its child (proof pid 1904, spawned pid 5372). The supervisor now accepts a pid that is in the Job Object the child was started in. The rig run used a wrapper that required the token alone; **the fix itself has not run on the rig** [measure].
+5. **ComfyUI was restarted for every clip** (`vram_short → closed → deferred → loaded`): the check before a job counted the model ComfyUI itself keeps as taken. `check_budget()` now counts ComfyUI's own `torch_vram_total` as free. **Not run on the rig**, and it rests on `/system_stats` reporting that field as the process's reserved memory [measure].
+6. **A failed load said nothing.** The `failed_load` event now ends in a reason code (`resident_proof_mismatch`, `comfy_not_ready`, `comfy_exited_at_start`, `comfyui_version_mismatch`, or the exception's type), a failed job adds `job_error:<job>:<code>`, and ComfyUI's own output is kept in `<KALIV_COMFY_DIR>\cuda<N>\comfyui.log` (8 MiB, one earlier file kept).
+7. **`KALIV_COMFY_WEIGHTS_CACHE`** was set (`C:\Kaliv\media-work\comfy\weights-cache.json`). Without it every ComfyUI start re-hashes 10–17 GB.
+8. **The model chose `image_generate` for a video** when a persona was in force (6 of 11 right with the old rule). The rule now says that a video described in words needs no picture first (#2471): 4/4 through the worker, 12/12 directly against Ollama.
+9. **The dev appliance does not start the executor**, and the executor block in `RIGDAG_MEDIE_I_CHAT.md` 1.2 must also carry the `KALIV_COMFY*` keys into the process.
+
+## 8. What this document does not do
 
 - It downloads nothing and changes no profile, environment file or supervisor default.
 - It does not touch cloud or egress settings. Media never leaves the rig.
-- It claims no measured time. All times above are tagged [source] or [estimate].
+- §1–§6 claim no measured time: every time there is tagged [source] or [estimate]. §7 is the first measurement, on the dev channel.
