@@ -400,6 +400,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_kaliv_software_exact_green_qualifier.py`
 - `tests/worker_kaliv_voicerig_physical_qualifier.py`
 - `tests/worker_lease_dir_acl.py`
+- `tests/worker_media_chat_chain.py`
 - `tests/worker_media_executor.py`
 - `tests/worker_media_executor_image_to_video.py`
 - `tests/worker_media_executor_main.py`
@@ -584,6 +585,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_kaliv_v1_rig_smoke.py`
 - `tests/workflow_kaliv_vr_renderer.py`
 - `tests/workflow_launcher_bytecode.py`
+- `tests/workflow_media_chat_probe.py`
 - `tests/workflow_media_gallery_asset.py`
 - `tests/workflow_media_gallery_catalog.py`
 - `tests/workflow_media_gallery_contract_fixture.py`

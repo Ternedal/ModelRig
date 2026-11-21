@@ -5,7 +5,7 @@ i chat-turen, boblerne i Android og desktop, og billede-til-video. Trin for trin
 og i den rækkefølge, der afslører mest tidligst. Udskiftede værdier står som `<…>`.
 
 > **Status:** samlet 20/11-2026. **Intet her er kørt på riggen.** Koden ligger
-> som drafts (#2448, #2449, #2457–#2461) og er samlet i grenen
+> som drafts (#2448, #2449, #2457–#2461, #2463, #2464) og er samlet i grenen
 > `integration/media-chat` (#2462, må ikke merges), hvor CI kører på helheden.
 > Udviklingskanalen er **ikke evidens**: ingen gate læser noget herfra.
 
@@ -152,7 +152,22 @@ det er færdigt. Billedet ligger i `D:\kaliv-media\gallery`.
   sætningen to gange mere, notér 0–3 af 3, og **stop her**, hvis det er 0.
 - **Jobbet står i `queued` i minutter:** se vindue B for udskydelser (VRAM, risiko 1).
 
-**1.5 Kontrol: slukket værktøj** [repo] — valgfri. Sæt `KALIV_IMAGE_TOOL_ENABLED=0`
+**1.5 Mål det i stedet for at tage tid i hånden** [repo] — samme vindue C (tokenet står i miljøet):
+
+```powershell
+cd C:\Users\an001\Desktop\ModelRig-media
+python scripts\media_chat_probe.py --suite image --rounds 2 --report "$env:TEMP\media-chat-image.json"
+```
+
+Proben sender planens fire billedbeskeder to gange plus kontrolbeskeden gennem
+`/api/v1/tools/chat`, følger hvert job til det er færdigt, og skriver én tabel:
+blev værktøjet kaldt, sekunder for turen, sekunder for jobbet. Med `nvidia-smi`
+på maskinen noterer den også VRAM pr. kort før hvert job og toppen under det —
+det er risiko 1 i tal. Den laver otte rigtige billeder (regn med 8–12 minutter)
+og taler kun med loopback. Rapporten indeholder hverken token eller modellens tekst.
+Exit 0 = alt som forventet, 1 = mindst ét tilfælde afveg.
+
+**1.6 Kontrol: slukket værktøj** [repo] — valgfri. Sæt `KALIV_IMAGE_TOOL_ENABLED=0`
 i env-filen, genstart vindue A, gentag 1.3: `image_generate` må ikke stå på
 listen, og 1.4 skal give et rent tekstsvar. Sæt den tilbage til 1 bagefter.
 
@@ -197,6 +212,7 @@ billede; 20–30 s pr. billede, hvis kortet er ledigt (17/11-tal fra Medier-skæ
 - [ ] **Del** → Androids delingsark åbner med billedet.
 - [ ] Luk appen helt, åbn samtalen igen → billedet kommer tilbage af sig selv.
 - [ ] Wi-Fi fra i 30 s under "Genererer …", til igen → boblen ender alligevel med billedet.
+- [ ] Wi-Fi fra under "Genererer …", og lad den være fra, til boblen siger "Riggen svarer ikke …" og viser **Prøv igen** (1½–3 minutter: seks forsøg med stigende pause); Wi-Fi til, tryk → billedet kommer (#2464).
 - [ ] Stop executoren (Ctrl+C i vindue B), bed om et billede → boblen bliver på "I kø på riggen"; start executoren igen → billedet kommer.
 
 ## 3. Desktop
@@ -231,7 +247,7 @@ $EnvFile = "C:\Rig\ModelRig\modelrig.env"; if (-not (Select-String -Path $EnvFil
 
 Genstart vindue A og executoren. 1.3 skal nu også vise `video_generate  True`.
 
-- [ ] Terminal som 1.4 med `lav en video af en papirbåd der driver over en dam` → `tools=video_generate`, ét job med `kind=video`, ender `completed`. Notér tiden.
+- [ ] Terminal: `python scripts\media_chat_probe.py --suite video --job-timeout 3600 --report "$env:TEMP\media-chat-video.json"` (beskeden er `lav en video af en papirbåd der driver over en dam`) → værktøj kaldt, ét job, `completed`. Tiden står i tabellen.
 - [ ] Android: boblen viser status og derefter en afspiller; klippet spiller i boblen.
 - [ ] Android: "Fuld skærm" → viser; **Gem** → klippet ligger under `Film/Kaliv`; **Del** → delingsark.
 - [ ] Desktop: "Klippet er færdigt" → "Gem klip …" → "Åbn" starter systemets afspiller.
@@ -243,21 +259,21 @@ Forudsætning: en billede-til-video-profil med sin egen template og port
 
 - [ ] **Før** der findes et færdigt billede i dag: `lav en video af det billede` → svaret siger, at der ikke er noget færdigt billede. Intet job.
 - [ ] Lav et billede (besked 1), vent til det er færdigt, og skriv så `lav en video af det billede` som næste besked → videoboble; klippet **starter fra det billede**.
-- [ ] Gentag tre gange med nye billeder. Notér, hvor mange gange modellen sendte kilden med (ellers bliver det en ren tekst-video, der ikke ligner billedet).
+- [ ] Tre gange i træk, målt: `python scripts\media_chat_probe.py --suite i2v --rounds 3 --job-timeout 3600 --report "$env:TEMP\media-chat-i2v.json"`. Hver runde laver et billede og beder derefter om `lav en video af det billede` som næste tur. Tabellen viser klippets profil i kantet parentes: står der tekst-til-video-profilen, sendte modellen **ikke** kilden med, og klippet ligner ikke billedet.
 
 ## Hvad der skal med hjem
 
 Skriv det som én kommentar på #2419:
 
 1. Tallene fra 0.4 (GPU 0 / GPU 1 med chatmodellen indlæst).
-2. 1.4: turens sekunder, jobbets sekunder, og om executoren udskød jobbet.
+2. Probens tabel fra 1.5 (og JSON-filen som bilag), og om executoren udskød et job.
 3. Tabellen fra 2.2 og afkrydsningerne fra 2.3 og 3.
 4. Alt, der så forkert ud, med skærmbillede — også småting i boblerne.
-5. For trin 4–5: tider, VRAM-peak og de tre billede-til-video-forsøg.
+5. For trin 4–5: probens tabeller for `video` og `i2v`.
 
 ## Stopregler
 
-- Værktøjet kaldes 0 af 3 gange i 1.4 → stop; resten måler ikke noget.
+- Værktøjet kaldes 0 af 3 gange i 1.4 → stop; resten måler ikke noget. Kaldes det i under halvdelen af probens tilfælde (1.5), så kør stadig trin 2–3 for boblernes skyld, men notér raten først: den er det vigtigste tal fra aftenen.
 - Android nægter at installere APK'en → stop, afinstallér ikke.
 - Et job fejler `gpu_unavailable` to gange i træk → stop; det er risiko 1, og løsningen er en afgørelse, ikke et forsøg mere.
 - Appen eller desktop-klienten går ned → notér hvad du gjorde, og gå videre til næste trin.
