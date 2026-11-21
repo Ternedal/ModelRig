@@ -180,4 +180,72 @@ class DesktopMediaContractTest {
             DesktopMediaContract.decodeRefs("junk,$id,video:junk,audio:$other,$id"),
         )
     }
+
+    private fun refused(mediaRefusals: String, mediaJobs: String = "[]"): ToolTurn = json.decodeFromString(
+        ToolTurn.serializer(),
+        """{"status":"answered","answer":"Beklager.","media_jobs":$mediaJobs,"media_refusals":$mediaRefusals}""",
+    )
+
+    @Test
+    fun `refusals are read with the rig's code, and only for the media tools`() {
+        val turn = refused(
+            """[{"tool":"image_generate","code":"profile_not_enabled"},{"tool":"video_generate","code":"no_source_image"},""" +
+                """{"tool":"note_append","code":"x"},{"tool":"image_generate","code":"Not A Code"},{"tool":"image_generate"},"junk"]""",
+        )
+        assertEquals(
+            listOf(
+                DesktopMediaRefusal(DesktopMediaKind.IMAGE, "profile_not_enabled"),
+                DesktopMediaRefusal(DesktopMediaKind.VIDEO, "no_source_image"),
+            ),
+            DesktopMediaContract.refusals(turn.media_refusals),
+        )
+        assertEquals("Der er ikke et færdigt billede at lave video af endnu. (no_source_image)", turn.mediaRefusalNotice())
+    }
+
+    @Test
+    fun `a refused picture says what to do, with the code`() {
+        assertEquals(
+            "Riggen er optaget med andre job. Bed om billedet igen, når et af dem er færdigt. (owner_limit)",
+            refused("""[{"tool":"image_generate","code":"owner_limit"}]""").mediaRefusalNotice(),
+        )
+        assertEquals(
+            "Riggen kunne ikke bruge det, modellen bad om. Prøv at bede om billedet igen. (invalid_arguments)",
+            refused("""[{"tool":"image_generate","code":"invalid_arguments"}]""").mediaRefusalNotice(),
+        )
+        assertEquals(
+            "Riggen lavede ikke videoen. (some_new_code)",
+            refused("""[{"tool":"video_generate","code":"some_new_code"}]""").mediaRefusalNotice(),
+        )
+    }
+
+    @Test
+    fun `no notice without a refusal, on an older rig, or when a job was queued after all`() {
+        assertNull(refused("[]").mediaRefusalNotice())
+        assertNull(turn(null).mediaRefusalNotice())
+        assertNull(refused(""""not an array"""").mediaRefusalNotice())
+        assertNull(refused("""[{"tool":"image_generate","code":"invalid_arguments"}]""", "[${ref(id)}]").mediaRefusalNotice())
+    }
+
+    @Test
+    fun `jobs queued before a confirmation card and after it are one turn`() {
+        val a = DesktopMediaJobRef(id, DesktopMediaKind.IMAGE)
+        val b = DesktopMediaJobRef(other, DesktopMediaKind.VIDEO)
+        assertEquals(listOf(a, b), DesktopMediaContract.across(listOf(a), listOf(b)))
+        assertEquals(listOf(a), DesktopMediaContract.across(listOf(a), listOf(a)))
+        assertEquals(emptyList<DesktopMediaJobRef>(), DesktopMediaContract.across(emptyList(), emptyList()))
+    }
+
+    @Test
+    fun `the conversation's pictures are named oldest first, clips left out, a repeat at its latest place`() {
+        val a = DesktopMediaJobRef(id, DesktopMediaKind.IMAGE)
+        val b = DesktopMediaJobRef(other, DesktopMediaKind.IMAGE)
+        val clip = DesktopMediaJobRef("f".repeat(32), DesktopMediaKind.VIDEO)
+        assertEquals(listOf(id, other), DesktopMediaContract.conversationImageJobs(listOf(emptyList(), listOf(a), listOf(clip), listOf(b))))
+        assertEquals(listOf(other, id), DesktopMediaContract.conversationImageJobs(listOf(listOf(a), listOf(b), listOf(a))))
+        assertEquals(emptyList<String>(), DesktopMediaContract.conversationImageJobs(listOf(listOf(clip), emptyList())))
+        val many = (0 until 40).map { listOf(DesktopMediaJobRef("%032x".format(it), DesktopMediaKind.IMAGE)) }
+        val kept = DesktopMediaContract.conversationImageJobs(many)
+        assertEquals(DesktopMediaContract.MAX_CONVERSATION_IMAGE_JOBS, kept.size)
+        assertEquals("%032x".format(39), kept.last())
+    }
 }
