@@ -62,6 +62,7 @@ from .media_generation_contract import MediaWorkArea
 RESIDENT_LAUNCHER = Path(__file__).resolve().with_name("comfy_resident_launcher.py")
 
 _WINDOWS = os.name == "nt"
+MAX_LOG_BYTES = 8 * 1024 * 1024
 
 LOOPBACK = "127.0.0.1"
 MAX_RESPONSE_BYTES = 1024 * 1024
@@ -326,11 +327,11 @@ class ComfySupervisor:
         log = None
         try:
             if port_answers(self.port):
-                raise ComfySupervisorError("port already answers: refusing to share a ComfyUI")
+                raise ComfySupervisorError("comfy_port_in_use: the port already answers, refusing to share a ComfyUI")
             if self._proof.is_symlink():
                 raise ComfySupervisorError("resident proof must not be a symlink")
             self._proof.unlink(missing_ok=True)  # a stale proof from an earlier run proves nothing
-            log = open(self.log_path, "ab") if self.log_path else subprocess.DEVNULL
+            log = self._open_log() if self.log_path else subprocess.DEVNULL
             proc = self._spawn(argv, self.child_env(), log, lease)
         except BaseException:
             lease.release()
@@ -344,6 +345,19 @@ class ComfySupervisor:
         except BaseException:
             self.stop()
             raise
+
+    def _open_log(self):
+        """ComfyUI's stdout and stderr, appended across starts; one earlier file is kept once the
+        log passes MAX_LOG_BYTES, so it cannot grow without bound. Never a link."""
+        path = str(self.log_path)
+        if os.path.islink(path):
+            raise ComfySupervisorError("ComfyUI log must not be a symlink")
+        try:
+            if os.path.getsize(path) > MAX_LOG_BYTES:
+                os.replace(path, path + ".1")
+        except OSError:
+            pass  # no log yet
+        return open(path, "ab")
 
     def _spawn(self, argv: list[str], env: dict[str, str], log, lease: GpuLease) -> subprocess.Popen:
         if _WINDOWS:
@@ -360,7 +374,7 @@ class ComfySupervisor:
         deadline = time.monotonic() + self.ready_timeout_s
         while True:
             if self._proc is None or self._proc.poll() is not None:
-                raise ComfySupervisorError("ComfyUI exited during startup")
+                raise ComfySupervisorError("comfy_exited_at_start: ComfyUI exited during startup")
             try:
                 stats = _get_json(self.port, "/system_stats", timeout_s=2.0)
             except (OSError, ValueError):
@@ -369,13 +383,13 @@ class ComfySupervisor:
                 # ComfyUI answers from inside the launcher, which took the
                 # resident lock first: refuse if that cannot be observed.
                 if not resident_is_held(self.gpu_uuid, lease_dir=self.lease_dir):
-                    raise ComfySupervisorError("ComfyUI answers but does not hold the resident lock")
+                    raise ComfySupervisorError("resident_lock_not_held: ComfyUI answers but does not hold the resident lock")
                 if not self._proves_identity(self._proof):
-                    raise ComfySupervisorError("the resident lock is not proven to be held by the launched child")
+                    raise ComfySupervisorError("resident_proof_mismatch: the resident lock is not proven to be held by the launched child")
                 return parse_vram_budget(stats, reserve_gib=self.reserve_gib,
                                          min_usable_gib=self.min_usable_gib)
             if time.monotonic() >= deadline:
-                raise ComfySupervisorError("ComfyUI did not become ready before the deadline")
+                raise ComfySupervisorError("comfy_not_ready: ComfyUI did not become ready before the deadline")
             time.sleep(self.poll_s)
 
     def check_budget(self) -> VramBudget:

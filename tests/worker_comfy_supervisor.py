@@ -327,6 +327,41 @@ time.sleep(120)
         self._assert_start_fails_and_cleans_up(
             self.supervisor(fake={"FAKE_COMFY_EXIT_EARLY": "1"}), "exited during startup")
 
+    def test_comfyui_output_goes_to_the_log_and_the_log_is_bounded(self):
+        # Rig 21/11: ComfyUI's output went to DEVNULL; a start that was refused left nothing to read.
+        log = Path(self.tmp, "comfyui.log")
+        sup = self.supervisor(log_path=str(log))
+        sup.start()
+        sup.stop()
+        first = log.stat().st_size
+        self.assertTrue(log.is_file(), "the child's stdout and stderr have a file")
+        sup = self.supervisor(log_path=str(log))
+        sup.start()
+        sup.stop()
+        self.assertGreaterEqual(log.stat().st_size, first, "a second start appends")
+        log.write_bytes(b"x" * (supervisor_module.MAX_LOG_BYTES + 1))
+        sup = self.supervisor(log_path=str(log))
+        sup.start()
+        sup.stop()
+        self.assertEqual(Path(str(log) + ".1").stat().st_size, supervisor_module.MAX_LOG_BYTES + 1, "one earlier file is kept")
+        self.assertLessEqual(log.stat().st_size, supervisor_module.MAX_LOG_BYTES)
+        if hasattr(os, "symlink"):
+            log.unlink()
+            os.symlink(Path(self.tmp, "elsewhere"), log)
+            self._assert_start_fails_and_cleans_up(self.supervisor(log_path=str(log)), "symlink")
+
+    def test_a_refused_start_names_its_reason_as_a_code(self):
+        # The executor's event keeps the part before the colon (media_executor._event_code).
+        from app.media_executor import _event_code
+        sup = self.supervisor(fake={"FAKE_COMFY_STARTUP_DELAY": "30"}, ready_timeout_s=1)
+        with self.assertRaises(ComfySupervisorError) as caught:
+            sup.start()
+        self.assertEqual(_event_code(caught.exception), "comfy_not_ready")
+        self._forging_launcher('"pid": os.getpid()}', '"pid": os.getpid() + 1}')
+        with self.assertRaises(ComfySupervisorError) as caught:
+            self.supervisor().start()
+        self.assertEqual(_event_code(caught.exception), "resident_proof_mismatch")
+
     def test_ready_deadline(self):
         self._assert_start_fails_and_cleans_up(
             self.supervisor(fake={"FAKE_COMFY_STARTUP_DELAY": "30"}, ready_timeout_s=1), "deadline")

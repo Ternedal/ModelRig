@@ -125,6 +125,9 @@ class VideoConfig:
         self.python, self.main_py, self.comfy_dir, self.template_dir = python, main_py, comfy_dir, template_dir
         self.weights_cache, self.work, self.gpu_uuid = weights_cache, work, gpu_uuid
         self.folders = {name: os.path.join(comfy_dir, name) for name in COMFY_FOLDERS}
+        # ComfyUI's own output, beside its folders in the private work area. Rig 21/11: it went to
+        # DEVNULL, so a ComfyUI that started and was then refused left nothing to read.
+        self.log_path = os.path.join(comfy_dir, "comfyui.log")
 
 
 def _comfy_device_folder(device: str) -> str:
@@ -230,7 +233,7 @@ def default_adapter_factory(device: str, lease_dir: str, env: Mapping[str, str],
             supervisor = (supervisor_class or ComfySupervisor)(
                 gpu_uuid=video.gpu_uuid, lease_dir=lease_dir, launch=launch, work_area=video.work,
                 reserve_gib=profile.resources.reserve_gib, min_usable_gib=profile.resources.min_usable_gib,
-                base_env=env)
+                base_env=env, log_path=getattr(video, "log_path", None))
             return ComfyVideoAdapter(profile, supervisor=supervisor, template_dir=video.template_dir,
                                      output_directory=folders["output"], weights_cache=video.weights_cache)
         raise ExecutorConfigError(f"{profile.profile_id}: backend {profile.backend} is not served by this executor yet")

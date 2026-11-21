@@ -346,6 +346,16 @@ class VideoEntryPointTests(unittest.TestCase):
             self.assertEqual([store.get(j, "anders")["state"] for j in (image, video)], ["completed", "completed"])
             self.assertEqual(kinds, ["image", "video"])
 
+    def test_comfyui_writes_its_log_in_its_own_folder_in_the_work_area(self):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            store = self.store()
+            job = store.submit("anders", "a paper boat", profile_id="wan-a", params=VIDEO_PARAMS)["job_id"]
+            executor = self.build()
+            self.assertEqual(executor.run(max_steps=2, idle_sleep=lambda: None), 0)
+            self.assertEqual(store.get(job, "anders")["state"], "completed")
+        log = Path(self.env["KALIV_COMFY_DIR"], "cuda0", "comfyui.log")
+        self.assertTrue(log.is_file(), "ComfyUI's output is kept beside its folders")
+
     def test_a_render_past_the_profile_deadline_is_stopped_and_nothing_is_published(self):
         self.write_video_profile(max_render_seconds=10)  # the profile minimum
         with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):

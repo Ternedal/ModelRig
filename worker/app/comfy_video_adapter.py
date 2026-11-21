@@ -177,7 +177,7 @@ class ComfyVideoAdapter:
         budget = self.supervisor.start()
         if not self._version_ok(budget):
             self.supervisor.stop()  # proven stop: the lease goes with ComfyUI
-            raise GenerationError("ComfyUI version does not match the profile pin")
+            raise GenerationError("comfyui_version_mismatch: ComfyUI version does not match the profile pin")
         self._verified_weights = verified
         self._template = template
 
@@ -319,7 +319,7 @@ class ComfyVideoAdapter:
                               source_png: bytes | None = None, staged: list | None = None) -> str:
         try:
             if not self._version_ok(self.supervisor.check_budget()):
-                raise GenerationError("ComfyUI version does not match the profile pin")
+                raise GenerationError("comfyui_version_mismatch: ComfyUI version does not match the profile pin")
             self._weights_still_verified()
             if not self.supervisor.queue_is_empty():
                 raise GenerationError("ComfyUI queue is not empty: refusing to share it")
