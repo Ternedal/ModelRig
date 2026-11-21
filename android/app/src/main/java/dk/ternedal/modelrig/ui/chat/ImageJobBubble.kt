@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -29,6 +30,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -67,7 +69,11 @@ import kotlinx.coroutines.withContext
  *
  * Stops asking when the composable leaves the composition, when the job is
  * terminal, or after [ImageJobBubbleLogic.MAX_FAILURES] transient failures in a
- * row (then "Prøv igen" by tapping is V1 work; for now the text says so).
+ * row. Giving up is the phone's verdict, not the rig's: the job goes on there.
+ * So a bubble that gave up -- or could not fetch a finished picture because the
+ * rig was away for a moment -- offers "Prøv igen", which starts the asking over.
+ * An end the rig itself announced (failed, cancelled, expired, gone) offers
+ * nothing: asking again would get the same answer.
  */
 sealed class ImageJobPhase {
     /** Asking the rig; [job] is the last answer, null before the first. */
@@ -75,14 +81,19 @@ sealed class ImageJobPhase {
     /** Terminal with a picture; [bytes] are kept for the full-size viewer (decoded larger there). */
     @Suppress("ArrayInDataClass")
     data class Shown(val job: MediaJob, val bitmap: Bitmap, val bytes: ByteArray) : ImageJobPhase()
-    /** Terminal without a picture, or the bubble gave up; [text] is what to show. */
-    data class Ended(val text: String) : ImageJobPhase()
+    /** Terminal without a picture, or the bubble gave up; [text] is what to show, [retryable] offers "Prøv igen". */
+    data class Ended(val text: String, val retryable: Boolean = false) : ImageJobPhase()
 }
 
 object ImageJobBubbleLogic {
     const val MAX_FAILURES = MediaGenerate.MAX_POLL_FAILURES
     const val IMAGE_SIDE_PX = 1024
     const val GAVE_UP_TEXT = "Riggen svarer ikke; billedet ligger i galleriet, når det er klar"
+    const val GAVE_UP_TEXT_VIDEO = "Riggen svarer ikke; klippet ligger i galleriet, når det er klar"
+    const val RETRY_LABEL = "Prøv igen"
+
+    fun gaveUpText(modality: MediaModality): String =
+        if (modality == MediaModality.VIDEO) GAVE_UP_TEXT_VIDEO else GAVE_UP_TEXT
 
     fun initial(): ImageJobPhase = ImageJobPhase.Following(null, 0)
 
@@ -95,22 +106,32 @@ object ImageJobBubbleLogic {
     }
 
     /** A poll answered. Non-terminal keeps following (failures reset); terminal decides. */
-    fun polled(job: MediaJob): ImageJobPhase = when {
+    fun polled(job: MediaJob, modality: MediaModality = MediaModality.IMAGE): ImageJobPhase = when {
         !job.state.terminal -> ImageJobPhase.Following(job, 0)
         job.state == MediaJobState.COMPLETED && job.assetId != null -> ImageJobPhase.Following(job, 0) // fetch next
-        job.state == MediaJobState.COMPLETED -> ImageJobPhase.Ended("Billedet er færdigt, men riggen gav intet billed-id")
-        else -> ImageJobPhase.Ended(MediaGenerate.stateLabel(job))
+        job.state == MediaJobState.COMPLETED -> ImageJobPhase.Ended(
+            if (modality == MediaModality.VIDEO) "Klippet er færdigt, men riggen gav intet id"
+            else "Billedet er færdigt, men riggen gav intet billed-id",
+        )
+        else -> ImageJobPhase.Ended(MediaGenerate.stateLabel(job, modality))
     }
 
-    /** A poll failed. A definite answer ends it; a transient one counts, up to [MAX_FAILURES]. */
-    fun pollFailed(phase: ImageJobPhase, e: MediaJobException): ImageJobPhase {
+    /**
+     * A poll failed. A definite answer ends it; a transient one counts, up to
+     * [MAX_FAILURES] -- and that end is the only one here that can be tried again.
+     */
+    fun pollFailed(
+        phase: ImageJobPhase,
+        e: MediaJobException,
+        modality: MediaModality = MediaModality.IMAGE,
+    ): ImageJobPhase {
         val cur = phase as? ImageJobPhase.Following ?: return phase
         return when (e.reason) {
             MediaJobException.Reason.NOT_FOUND -> ImageJobPhase.Ended("Jobbet findes ikke længere på riggen")
             MediaJobException.Reason.UNAUTHORIZED, MediaJobException.Reason.UNAVAILABLE,
             MediaJobException.Reason.ORIGIN_REFUSED, MediaJobException.Reason.NOT_PAIRED,
             MediaJobException.Reason.REDIRECT_REFUSED -> ImageJobPhase.Ended(MediaGenerate.message(e))
-            else -> if (cur.failures + 1 >= MAX_FAILURES) ImageJobPhase.Ended(GAVE_UP_TEXT)
+            else -> if (cur.failures + 1 >= MAX_FAILURES) ImageJobPhase.Ended(gaveUpText(modality), retryable = true)
             else cur.copy(failures = cur.failures + 1)
         }
     }
@@ -127,15 +148,13 @@ object ImageJobBubbleLogic {
             onFailure = { e ->
                 val failures = ((phase as? ImageJobPhase.Following)?.failures ?: 0) + 1
                 if (transient(e) && failures < MAX_FAILURES) ImageJobPhase.Following(job, failures)
-                else ImageJobPhase.Ended((e as? MediaGalleryException)?.message ?: "Billedet kunne ikke hentes fra riggen")
+                else ImageJobPhase.Ended(
+                    (e as? MediaGalleryException)?.message ?: "Billedet kunne ikke hentes fra riggen",
+                    // What the automatic tries could not get, a tap may: only where trying again can help.
+                    retryable = transient(e),
+                )
             },
         )
-
-    /** The rig was away for a moment (network, storage); everything else would fail the same way again. */
-    fun transient(e: Throwable?): Boolean = when ((e as? MediaGalleryException)?.reason) {
-        MediaGalleryException.Reason.NETWORK, MediaGalleryException.Reason.STORAGE_UNAVAILABLE -> true
-        else -> false
-    }
 
     /**
      * [runCatching] for code a coroutine runs: a cancellation is never a result. `runCatching`
@@ -201,6 +220,12 @@ object ImageJobBubbleLogic {
         }
     }
 
+    /** The rig was away for a moment (network, storage); everything else would fail the same way again. */
+    fun transient(e: Throwable?): Boolean = when ((e as? MediaGalleryException)?.reason) {
+        MediaGalleryException.Reason.NETWORK, MediaGalleryException.Reason.STORAGE_UNAVAILABLE -> true
+        else -> false
+    }
+
     /** True while the bubble should keep asking the rig. */
     fun polling(phase: ImageJobPhase): Boolean = phase is ImageJobPhase.Following
 
@@ -224,9 +249,11 @@ fun ImageJobBubble(
     io: CoroutineDispatcher = Dispatchers.IO,
     pollMillis: Long = MediaGenerate.POLL_MILLIS,
 ) {
-    var phase by remember(jobId) { mutableStateOf(ImageJobBubbleLogic.initial()) }
+    // "Prøv igen" starts the asking over: a new attempt is a new phase and a new effect.
+    var attempt by remember(jobId) { mutableIntStateOf(0) }
+    var phase by remember(jobId, attempt) { mutableStateOf(ImageJobBubbleLogic.initial()) }
 
-    LaunchedEffect(jobId) {
+    LaunchedEffect(jobId, attempt) {
         // One effect follows the job and fetches its picture, so leaving the composition
         // cancels everything; the loop itself is ImageJobBubbleLogic.follow, tested without Compose.
         ImageJobBubbleLogic.follow(jobId, jobs, gallery, io, pollMillis) { phase = it }
@@ -235,7 +262,11 @@ fun ImageJobBubble(
     // Tap the picture -> full-size viewer with pinch-zoom (Anders 19/11 23:02).
     var viewing by remember(jobId) { mutableStateOf(false) }
     val shown = phase as? ImageJobPhase.Shown
-    ImageJobBubbleContent(phase, modifier, onOpen = if (shown != null) ({ viewing = true }) else null)
+    ImageJobBubbleContent(
+        phase, modifier,
+        onOpen = if (shown != null) ({ viewing = true }) else null,
+        onRetry = { attempt += 1 },
+    )
     if (viewing && shown != null) {
         ZoomableImageDialog(bytes = shown.bytes, onDismiss = { viewing = false }, jobId = jobId)
     }
@@ -248,6 +279,7 @@ fun ImageJobBubbleContent(
     modifier: Modifier = Modifier,
     onOpen: (() -> Unit)? = null,
     modality: MediaModality = MediaModality.IMAGE,
+    onRetry: (() -> Unit)? = null,
 ) {
     val maxWidth = (LocalConfiguration.current.screenWidthDp * 0.78f).dp
     Column(
@@ -290,12 +322,35 @@ fun ImageJobBubbleContent(
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(
-                    phase.text,
-                    color = KalivTheme.colors.danger,
-                    style = TextStyle(fontFamily = KalivType.Inter, fontSize = 14.sp, lineHeight = 20.sp),
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp).testTag("image-job-status"),
-                )
+                if (phase.retryable && onRetry != null) {
+                    Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                        Text(
+                            phase.text,
+                            color = KalivTheme.colors.danger,
+                            style = TextStyle(fontFamily = KalivType.Inter, fontSize = 14.sp, lineHeight = 20.sp),
+                            modifier = Modifier.testTag("image-job-status"),
+                        )
+                        Text(
+                            ImageJobBubbleLogic.RETRY_LABEL,
+                            color = KalivTheme.colors.accent,
+                            style = TextStyle(fontFamily = KalivType.Inter, fontSize = 14.sp, lineHeight = 20.sp),
+                            modifier = Modifier
+                                .padding(top = 2.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(role = Role.Button, onClick = onRetry)
+                                .padding(vertical = 8.dp)
+                                .testTag("image-job-retry"),
+                        )
+                    }
+                } else {
+                    // Unchanged for every end that cannot be tried again (and for the screenshot baselines).
+                    Text(
+                        phase.text,
+                        color = KalivTheme.colors.danger,
+                        style = TextStyle(fontFamily = KalivType.Inter, fontSize = 14.sp, lineHeight = 20.sp),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp).testTag("image-job-status"),
+                    )
+                }
             }
         }
         Spacer(Modifier.height(2.dp))

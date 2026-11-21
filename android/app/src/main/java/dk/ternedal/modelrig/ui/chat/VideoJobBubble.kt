@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -67,7 +68,8 @@ import kotlinx.coroutines.withContext
  */
 sealed class VideoJobOutcome {
     data class Playable(val job: MediaJob, val item: MediaItem, val stream: MediaVideoStream) : VideoJobOutcome()
-    data class Ended(val text: String) : VideoJobOutcome()
+    /** [retryable]: the rig was away for a moment, so asking again may well find the clip. */
+    data class Ended(val text: String, val retryable: Boolean = false) : VideoJobOutcome()
 }
 
 object VideoJobBubbleLogic {
@@ -78,12 +80,28 @@ object VideoJobBubbleLogic {
     fun findItem(items: List<MediaItem>, assetId: String): MediaItem? =
         items.firstOrNull { it.id == assetId && it.kind == MediaKind.VIDEO }
 
-    fun resolved(job: MediaJob, item: MediaItem?, stream: Result<MediaVideoStream>?): VideoJobOutcome = when {
-        item == null -> VideoJobOutcome.Ended(IN_GALLERY_TEXT)
+    /**
+     * [lookupFailed]: the gallery page could not be read at all (as opposed to read,
+     * and the clip not among the newest). Only a failure that may pass -- the lookup,
+     * or a stream refused for network/storage -- is offered "Prøv igen"; a clip that
+     * is simply older than the newest page is in the gallery, and saying so is the answer.
+     */
+    fun resolved(
+        job: MediaJob,
+        item: MediaItem?,
+        stream: Result<MediaVideoStream>?,
+        lookupFailed: Boolean = false,
+    ): VideoJobOutcome = when {
+        item == null -> VideoJobOutcome.Ended(IN_GALLERY_TEXT, retryable = lookupFailed)
         stream == null -> VideoJobOutcome.Ended(IN_GALLERY_TEXT)
         else -> stream.fold(
             onSuccess = { VideoJobOutcome.Playable(job, item, it) },
-            onFailure = { e -> VideoJobOutcome.Ended((e as? MediaGalleryException)?.message ?: IN_GALLERY_TEXT) },
+            onFailure = { e ->
+                VideoJobOutcome.Ended(
+                    (e as? MediaGalleryException)?.message ?: IN_GALLERY_TEXT,
+                    retryable = ImageJobBubbleLogic.transient(e),
+                )
+            },
         )
     }
 }
@@ -100,10 +118,12 @@ fun VideoJobBubble(
     player: @Composable (MediaVideoStream, MediaItem, (MediaGalleryException.Reason) -> Unit) -> Unit =
         { stream, item, onError -> MediaVideoPlayer(stream, item, onError) },
 ) {
-    var phase by remember(jobId) { mutableStateOf(ImageJobBubbleLogic.initial()) }
-    var outcome by remember(jobId) { mutableStateOf<VideoJobOutcome?>(null) }
+    // "Prøv igen" starts the asking over, as in the image bubble.
+    var attempt by remember(jobId) { mutableIntStateOf(0) }
+    var phase by remember(jobId, attempt) { mutableStateOf(ImageJobBubbleLogic.initial()) }
+    var outcome by remember(jobId, attempt) { mutableStateOf<VideoJobOutcome?>(null) }
 
-    LaunchedEffect(jobId) {
+    LaunchedEffect(jobId, attempt) {
         // ImageJobBubbleLogic.catching, never runCatching: a cancellation must end this loop,
         // not be counted as a failed call (review 6004386757 on the image bubble).
         var first = true
@@ -112,15 +132,15 @@ fun VideoJobBubble(
             if (done != null) {
                 val assetId = done.assetId ?: break
                 val resolvedOutcome = withContext(io) {
-                    val item = ImageJobBubbleLogic.catching { gallery.page(VideoJobBubbleLogic.LOOKUP_PAGE).items }
-                        .getOrNull()?.let { VideoJobBubbleLogic.findItem(it, assetId) }
+                    val page = ImageJobBubbleLogic.catching { gallery.page(VideoJobBubbleLogic.LOOKUP_PAGE).items }
+                    val item = page.getOrNull()?.let { VideoJobBubbleLogic.findItem(it, assetId) }
                     val stream = item?.let { ImageJobBubbleLogic.catching { gallery.video(it) } }
-                    VideoJobBubbleLogic.resolved(done, item, stream)
+                    VideoJobBubbleLogic.resolved(done, item, stream, lookupFailed = page.isFailure)
                 }
                 outcome = resolvedOutcome
                 phase = when (resolvedOutcome) {
                     is VideoJobOutcome.Playable -> ImageJobPhase.Ended("") // terminal; rendered by outcome
-                    is VideoJobOutcome.Ended -> ImageJobPhase.Ended(resolvedOutcome.text)
+                    is VideoJobOutcome.Ended -> ImageJobPhase.Ended(resolvedOutcome.text, resolvedOutcome.retryable)
                 }
                 break
             }
@@ -128,12 +148,13 @@ fun VideoJobBubble(
             first = false
             val result = withContext(io) { ImageJobBubbleLogic.catching { jobs.status(jobId) } }
             phase = result.fold(
-                onSuccess = { ImageJobBubbleLogic.polled(it) },
+                onSuccess = { ImageJobBubbleLogic.polled(it, MediaModality.VIDEO) },
                 onFailure = { e ->
                     ImageJobBubbleLogic.pollFailed(
                         phase,
                         e as? MediaJobException
                             ?: MediaJobException(MediaJobException.Reason.UNAVAILABLE, "Uventet svar fra riggen"),
+                        MediaModality.VIDEO,
                     )
                 },
             )
@@ -148,7 +169,7 @@ fun VideoJobBubble(
             VideoViewerDialog(playable, gallery, onDismiss = { viewerOpen = false }, io = io, player = player)
         }
     } else {
-        ImageJobBubbleContent(phase, modifier, modality = MediaModality.VIDEO)
+        ImageJobBubbleContent(phase, modifier, modality = MediaModality.VIDEO, onRetry = { attempt += 1 })
     }
 }
 

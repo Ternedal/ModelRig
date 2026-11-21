@@ -21,6 +21,7 @@ import dk.ternedal.modelrig.net.MediaJobProfile
 import dk.ternedal.modelrig.net.MediaJobRequest
 import dk.ternedal.modelrig.net.MediaJobSource
 import dk.ternedal.modelrig.net.MediaJobState
+import dk.ternedal.modelrig.net.MediaModality
 import dk.ternedal.modelrig.net.MediaPage
 import dk.ternedal.modelrig.net.MediaVideoStream
 import dk.ternedal.modelrig.ui.MediaGenerate
@@ -172,7 +173,10 @@ class ImageJobBubbleTest {
     fun `a rig that stays away ends the fetch after the limit, with the rig's words`() {
         val gallery = FakeGallery { throw gone() }
         val phases = followed(FakeJobs(listOf({ job(MediaJobState.COMPLETED, assetId = "asset-9") })), gallery)
-        assertEquals(ImageJobPhase.Ended("Riggen svarer ikke"), phases.last())
+        assertEquals(
+            "the automatic tries are spent; Prøv igen is what is left",
+            ImageJobPhase.Ended("Riggen svarer ikke", retryable = true), phases.last(),
+        )
         assertEquals(ImageJobBubbleLogic.MAX_FAILURES, gallery.assets.size)
     }
 
@@ -266,10 +270,65 @@ class ImageJobBubbleTest {
     }
 
     @Test
+    fun `a bubble that gave up offers Prøv igen, and asking again finds the picture`() {
+        val away: () -> MediaJob = { throw MediaJobException(Reason.TRANSIENT, "x") }
+        val jobs = FakeJobs(List(ImageJobBubbleLogic.MAX_FAILURES) { away } + listOf({ job(MediaJobState.COMPLETED, assetId = "asset-5") }))
+        val gallery = FakeGallery(::png)
+        show(jobs, gallery)
+        waitForText(ImageJobBubbleLogic.GAVE_UP_TEXT)
+        assertEquals("the phone stopped asking", ImageJobBubbleLogic.MAX_FAILURES, jobs.polled.size)
+        compose.onNodeWithText(ImageJobBubbleLogic.RETRY_LABEL).assertIsDisplayed()
+
+        compose.onNodeWithTag("image-job-retry").performClick()
+        waitForTag("image-job-picture")
+        assertEquals("one more poll found the finished job", ImageJobBubbleLogic.MAX_FAILURES + 1, jobs.polled.size)
+        assertEquals(listOf("asset-5"), gallery.assets)
+        assertTrue(compose.onAllNodesWithTag("image-job-retry").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun `an end the rig itself announced offers nothing to try again`() {
+        show(FakeJobs(listOf({ job(MediaJobState.FAILED, error = "gpu_unavailable") })), FakeGallery(::png))
+        waitForText(MediaGenerate.errorText("gpu_unavailable"))
+        assertTrue(compose.onAllNodesWithTag("image-job-retry").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun `a finished picture the rig would not hand over through every automatic try can be fetched by a tap`() {
+        var calls = 0
+        val jobs = FakeJobs(listOf({ job(MediaJobState.COMPLETED, assetId = "asset-6") }))
+        val gallery = FakeGallery {
+            if (calls++ < ImageJobBubbleLogic.MAX_FAILURES) {
+                throw MediaGalleryException(MediaGalleryException.Reason.NETWORK, "Riggen kan ikke nås")
+            } else png()
+        }
+        show(jobs, gallery)
+        waitForText("Riggen kan ikke nås")
+        assertEquals("the bubble tried by itself first", ImageJobBubbleLogic.MAX_FAILURES, gallery.assets.size)
+        compose.onNodeWithTag("image-job-retry").performClick()
+        waitForTag("image-job-picture")
+        assertEquals(ImageJobBubbleLogic.MAX_FAILURES + 1, gallery.assets.size)
+    }
+
+    @Test
+    fun `a finished picture the rig could not hand over for a moment arrives without a tap`() {
+        var calls = 0
+        val gallery = FakeGallery {
+            if (calls++ == 0) throw MediaGalleryException(MediaGalleryException.Reason.NETWORK, "Riggen kan ikke nås") else png()
+        }
+        show(FakeJobs(listOf({ job(MediaJobState.COMPLETED, assetId = "asset-6") })), gallery)
+        waitForTag("image-job-picture")
+        assertEquals(listOf("asset-6", "asset-6"), gallery.assets)
+        assertTrue(compose.onAllNodesWithTag("image-job-retry").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
     fun `a completed job whose picture cannot be fetched says so`() {
         val jobs = FakeJobs(listOf({ job(MediaJobState.COMPLETED, assetId = "asset-1") }))
         show(jobs, FakeGallery { throw MediaGalleryException(MediaGalleryException.Reason.TOO_LARGE, "For stort til at blive vist på telefonen") })
         waitForText("For stort til at blive vist på telefonen")
+        // Too large now is too large again: nothing to retry.
+        assertTrue(compose.onAllNodesWithTag("image-job-retry").fetchSemanticsNodes().isEmpty())
     }
 
     @Test
@@ -327,6 +386,60 @@ class ImageJobBubbleTest {
         val once = ImageJobBubbleLogic.pollFailed(start, MediaJobException(Reason.NETWORK, "x"))
         assertEquals(1, (once as ImageJobPhase.Following).failures)
         assertTrue(ImageJobBubbleLogic.polling(once))
+    }
+
+    @Test
+    fun `only the phone's own verdicts can be tried again`() {
+        var phase: ImageJobPhase = ImageJobBubbleLogic.initial()
+        repeat(ImageJobBubbleLogic.MAX_FAILURES) { phase = ImageJobBubbleLogic.pollFailed(phase, MediaJobException(Reason.NETWORK, "x")) }
+        assertEquals(ImageJobPhase.Ended(ImageJobBubbleLogic.GAVE_UP_TEXT, retryable = true), phase)
+
+        val start = ImageJobBubbleLogic.initial()
+        for (reason in listOf(Reason.NOT_FOUND, Reason.UNAUTHORIZED, Reason.UNAVAILABLE, Reason.ORIGIN_REFUSED, Reason.NOT_PAIRED, Reason.REDIRECT_REFUSED)) {
+            val ended = ImageJobBubbleLogic.pollFailed(start, MediaJobException(reason, "x")) as ImageJobPhase.Ended
+            assertEquals(reason.name, false, ended.retryable)
+        }
+        for (state in listOf(MediaJobState.FAILED, MediaJobState.CANCELLED, MediaJobState.EXPIRED)) {
+            assertEquals(state.name, false, (ImageJobBubbleLogic.polled(job(state)) as ImageJobPhase.Ended).retryable)
+        }
+
+        val done = job(MediaJobState.COMPLETED, assetId = "a")
+        // The last automatic try has failed: what is left is the user's "Prøv igen".
+        val lastTry = ImageJobPhase.Following(done, ImageJobBubbleLogic.MAX_FAILURES - 1)
+        fun fetchFailed(reason: MediaGalleryException.Reason) =
+            ImageJobBubbleLogic.fetched(lastTry, done, Result.failure(MediaGalleryException(reason, "x"))) as ImageJobPhase.Ended
+        assertTrue(fetchFailed(MediaGalleryException.Reason.NETWORK).retryable)
+        assertTrue(fetchFailed(MediaGalleryException.Reason.STORAGE_UNAVAILABLE).retryable)
+        // Before that, a rig that is only away is asked again by itself.
+        assertEquals(
+            ImageJobPhase.Following(done, 1),
+            ImageJobBubbleLogic.fetched(
+                ImageJobPhase.Following(done, 0), done,
+                Result.failure(MediaGalleryException(MediaGalleryException.Reason.NETWORK, "x")),
+            ),
+        )
+        for (reason in listOf(MediaGalleryException.Reason.NOT_FOUND, MediaGalleryException.Reason.TOO_LARGE,
+            MediaGalleryException.Reason.PROTOCOL, MediaGalleryException.Reason.UNAUTHORIZED)) {
+            assertEquals(reason.name, false, fetchFailed(reason).retryable)
+        }
+        // A picture that arrived but would not decode is not the rig being away.
+        val undecodable = ImageJobBubbleLogic.fetched(
+            ImageJobPhase.Following(done, 0), done, Result.failure(IllegalStateException("decode")),
+        ) as ImageJobPhase.Ended
+        assertEquals(false, undecodable.retryable)
+        assertEquals(false, ImageJobBubbleLogic.transient(null))
+    }
+
+    @Test
+    fun `a clip's ends are said about a clip`() {
+        var phase: ImageJobPhase = ImageJobBubbleLogic.initial()
+        repeat(ImageJobBubbleLogic.MAX_FAILURES) {
+            phase = ImageJobBubbleLogic.pollFailed(phase, MediaJobException(Reason.TRANSIENT, "x"), MediaModality.VIDEO)
+        }
+        assertEquals(ImageJobPhase.Ended(ImageJobBubbleLogic.GAVE_UP_TEXT_VIDEO, retryable = true), phase)
+        assertTrue(ImageJobBubbleLogic.GAVE_UP_TEXT_VIDEO.contains("klippet"))
+        val noId = ImageJobBubbleLogic.polled(job(MediaJobState.COMPLETED, assetId = null), MediaModality.VIDEO) as ImageJobPhase.Ended
+        assertTrue(noId.text.startsWith("Klippet"))
     }
 
     @Test
