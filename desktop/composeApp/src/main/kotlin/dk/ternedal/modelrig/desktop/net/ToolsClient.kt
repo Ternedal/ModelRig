@@ -39,6 +39,11 @@ private data class ToolChatRequest(
     val history: List<ToolMsg> = emptyList(),
     val system: String? = null,
     val conversation_id: String? = null,
+    // The image jobs shown in this conversation, oldest first. With it the rig's
+    // video_generate takes "det billede" to mean this conversation's newest picture; without
+    // it, the owner's newest anywhere (#2459). Null is "not said" and is left out of the
+    // request; an empty list says the conversation has none.
+    val conversation_image_jobs: List<String>? = null,
 )
 
 @Serializable
@@ -169,6 +174,7 @@ class ToolsClient(baseUrl: String, private val bearer: String?) {
         model: String?,
         history: List<Pair<String, String>>,
         system: String?,
+        conversationImageJobs: List<String>? = null,
     ): ToolTurn {
         val body = json.encodeToString(
             ToolChatRequest(
@@ -176,6 +182,7 @@ class ToolsClient(baseUrl: String, private val bearer: String?) {
                 model = model,
                 history = history.map { ToolMsg(it.first, it.second) },
                 system = system?.takeIf { it.isNotBlank() },
+                conversation_image_jobs = conversationImageJobs,
             ),
         )
         val req = builder("/api/v1/tools/chat")
@@ -208,6 +215,7 @@ class ToolsClient(baseUrl: String, private val bearer: String?) {
         model: String?,
         history: List<Pair<String, String>>,
         system: String?,
+        conversationImageJobs: List<String>? = null,
         onPhase: (String) -> Unit = {},
     ): ToolTurn {
         val body = json.encodeToString(
@@ -216,6 +224,7 @@ class ToolsClient(baseUrl: String, private val bearer: String?) {
                 model = model,
                 history = history.map { ToolMsg(it.first, it.second) },
                 system = system?.takeIf { it.isNotBlank() },
+                conversation_image_jobs = conversationImageJobs,
             ),
         )
         val req = builder("/api/v1/tools/chat/stream")

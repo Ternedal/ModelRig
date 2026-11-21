@@ -238,4 +238,34 @@ class KalivMediaJobPresentationTest {
             dir.toFile().deleteRecursively()
         }
     }
+
+    @Test
+    fun `catching never turns a cancellation into a result`() {
+        assertEquals(7, KalivMediaJob.catching { 7 }.getOrNull())
+        assertTrue(KalivMediaJob.catching<Int> { throw IllegalStateException("x") }.isFailure)
+        val thrown = kotlin.runCatching {
+            KalivMediaJob.catching<Int> { throw kotlin.coroutines.cancellation.CancellationException("left") }
+        }.exceptionOrNull()
+        assertIs<kotlin.coroutines.cancellation.CancellationException>(thrown)
+        assertEquals("left", thrown.message)
+    }
+
+    @Test
+    fun `a finished picture is fetched again while the rig is only away, with the poll's backoff`() {
+        val away = failure(Reason.NETWORK)
+        assertEquals(20L, KalivMediaJob.refetchDelayMillis(1, away, base = 10))
+        assertEquals(40L, KalivMediaJob.refetchDelayMillis(2, away, base = 10))
+        assertEquals(KalivMediaJob.MAX_POLL_BACKOFF_MILLIS, KalivMediaJob.refetchDelayMillis(5, away, base = 2_000))
+        assertNull(KalivMediaJob.refetchDelayMillis(KalivMediaJob.MAX_POLL_FAILURES, away), "the limit ends it; Prøv igen takes over")
+        assertNull(KalivMediaJob.refetchDelayMillis(0, away), "nothing has failed yet")
+        assertEquals(4_000L, KalivMediaJob.refetchDelayMillis(1, failure(Reason.TRANSIENT)))
+    }
+
+    @Test
+    fun `a picture that would fail the same way again is not fetched twice`() {
+        assertNull(KalivMediaJob.refetchDelayMillis(1, failure(Reason.NOT_FOUND)))
+        assertNull(KalivMediaJob.refetchDelayMillis(1, failure(Reason.UNAUTHORIZED)))
+        assertNull(KalivMediaJob.refetchDelayMillis(1, IllegalStateException("x")))
+        assertNull(KalivMediaJob.refetchDelayMillis(1, null))
+    }
 }

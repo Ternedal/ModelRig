@@ -148,6 +148,21 @@ object DesktopMediaContract {
     fun across(before: List<DesktopMediaJobRef>, after: List<DesktopMediaJobRef>): List<DesktopMediaJobRef> =
         (before + after).distinctBy { it.jobId }
 
+    /** At most this many picture ids ride on a turn; the rig keeps the newest of them anyway. */
+    const val MAX_CONVERSATION_IMAGE_JOBS = 32
+
+    /**
+     * The image jobs a conversation holds, oldest first, for the turn's `conversation_image_jobs`:
+     * every picture reference of every message in order, without repeats, the newest
+     * [MAX_CONVERSATION_IMAGE_JOBS]. Clips are not pictures and are left out.
+     */
+    fun conversationImageJobs(messages: List<List<DesktopMediaJobRef>>): List<String> =
+        messages.asSequence().flatten()
+            .filter { it.kind == DesktopMediaKind.IMAGE }
+            .map { it.jobId }
+            .toList().asReversed().distinct().asReversed()
+            .takeLast(MAX_CONVERSATION_IMAGE_JOBS)
+
     private val REFUSAL_CODE = Regex("[a-z0-9_]{1,64}")
     private const val MAX_REFUSALS = 8
 

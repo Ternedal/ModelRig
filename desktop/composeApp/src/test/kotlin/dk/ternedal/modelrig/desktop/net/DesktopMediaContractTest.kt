@@ -234,4 +234,18 @@ class DesktopMediaContractTest {
         assertEquals(listOf(a), DesktopMediaContract.across(listOf(a), listOf(a)))
         assertEquals(emptyList<DesktopMediaJobRef>(), DesktopMediaContract.across(emptyList(), emptyList()))
     }
+
+    @Test
+    fun `the conversation's pictures are named oldest first, clips left out, a repeat at its latest place`() {
+        val a = DesktopMediaJobRef(id, DesktopMediaKind.IMAGE)
+        val b = DesktopMediaJobRef(other, DesktopMediaKind.IMAGE)
+        val clip = DesktopMediaJobRef("f".repeat(32), DesktopMediaKind.VIDEO)
+        assertEquals(listOf(id, other), DesktopMediaContract.conversationImageJobs(listOf(emptyList(), listOf(a), listOf(clip), listOf(b))))
+        assertEquals(listOf(other, id), DesktopMediaContract.conversationImageJobs(listOf(listOf(a), listOf(b), listOf(a))))
+        assertEquals(emptyList<String>(), DesktopMediaContract.conversationImageJobs(listOf(listOf(clip), emptyList())))
+        val many = (0 until 40).map { listOf(DesktopMediaJobRef("%032x".format(it), DesktopMediaKind.IMAGE)) }
+        val kept = DesktopMediaContract.conversationImageJobs(many)
+        assertEquals(DesktopMediaContract.MAX_CONVERSATION_IMAGE_JOBS, kept.size)
+        assertEquals("%032x".format(39), kept.last())
+    }
 }
