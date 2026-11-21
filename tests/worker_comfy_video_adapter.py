@@ -65,6 +65,85 @@ def request(**overrides) -> GenerationRequest:
 
 
 class TemplateTests(unittest.TestCase):
+    def test_a_number_several_nodes_need_may_sit_on_a_primitive(self):
+        # LTX-2.3 renders sound with the picture: the frame count goes to the video latent and to
+        # the audio latent, the frame rate to three nodes. A marker appears once, so it sits on
+        # ComfyUI's own fan-out node, whose input is called "value".
+        graph = json.loads(raw())
+        graph["7"]["inputs"]["length"] = ["20", 0]
+        graph["9"]["inputs"]["fps"] = ["21", 0]
+        graph["20"] = {"class_type": "PrimitiveInt", "inputs": {"value": "__KALIV_VIDEO_FRAMES__"}}
+        graph["21"] = {"class_type": "PrimitiveInt", "inputs": {"value": "__KALIV_VIDEO_FPS__"}}
+        graph["22"] = {"class_type": "LTXVEmptyLatentAudio", "inputs": {"frames_number": ["20", 0], "frame_rate": ["21", 0]}}
+        template = load_template(raw(graph), sha(raw(graph)))
+        bound = template.bind(request(frames=49), fps=25)
+        self.assertEqual((bound["20"]["inputs"]["value"], bound["21"]["inputs"]["value"]), (49, 25))
+        self.assertEqual(bound["22"]["inputs"]["frames_number"], ["20", 0], "links are untouched")
+        # only on that class, and never for the prompt or the picture
+        for class_type in ("PrimitiveString", "PrimitiveFloat", "KSampler", "Reroute"):
+            other = json.loads(raw(graph))
+            other["20"]["class_type"] = class_type
+            with self.subTest(class_type), self.assertRaisesRegex(GenerationError, "may not fill input 'value'"):
+                load_template(raw(other), sha(raw(other)))
+        for marker in ("__KALIV_VIDEO_PROMPT__", "__KALIV_VIDEO_IMAGE__"):
+            other = json.loads(raw())
+            other["30"] = {"class_type": "PrimitiveInt", "inputs": {"value": marker}}
+            if marker == "__KALIV_VIDEO_PROMPT__":
+                other["6"]["inputs"]["text"] = ["30", 0]
+            with self.subTest(marker), self.assertRaisesRegex(GenerationError, "may not fill input 'value'"):
+                load_template(raw(other), sha(raw(other)))
+        twice = json.loads(raw(graph))
+        twice["23"] = {"class_type": "PrimitiveInt", "inputs": {"value": "__KALIV_VIDEO_FRAMES__"}}
+        with self.assertRaisesRegex(GenerationError, "more than once"):
+            load_template(raw(twice), sha(raw(twice)))
+
+    def test_the_ltx23_rig_helper_builds_a_template_the_adapter_accepts(self):
+        # scripts/media_comfy_ltx23_setup.py: video WITH sound, to be tried on the rig. Not run
+        # anywhere yet -- this only proves that what it would write passes the repository's checks.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("ltx23", ROOT / "scripts" / "media_comfy_ltx23_setup.py")
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        pins = [target for _repo, _name, target in helper.FILES]
+        data = helper.template_bytes()
+        template = load_template(data, sha(data), pinned_files=pins)
+        self.assertEqual(template.task, "text_to_video")
+        self.assertEqual(sorted(template.slots), sorted(m for m in (
+            "__KALIV_VIDEO_PROMPT__", "__KALIV_VIDEO_WIDTH__", "__KALIV_VIDEO_HEIGHT__", "__KALIV_VIDEO_FPS__",
+            "__KALIV_VIDEO_FRAMES__", "__KALIV_VIDEO_SEED__")), "its schedule is in the graph: no steps slot")
+        graph = template.bind(request(profile_id=helper.PROFILE_ID, width=768, height=512, frames=49, steps=8), fps=25)
+        self.assertEqual((graph["20"]["inputs"]["value"], graph["21"]["inputs"]["value"]), (49, 25))
+        self.assertEqual(graph["19"]["inputs"]["audio"], ["18", 0], "the muxer gets the decoded sound")
+        self.assertEqual(helper.bound({"FRAMES": 49, "FPS": 25, "WIDTH": 768, "HEIGHT": 512, "SEED": 1, "PROMPT": "x"})["7"]["inputs"]["width"], 768)
+        self.assertFalse([v for n in helper.bound({"FRAMES": 49, "FPS": 25, "WIDTH": 768, "HEIGHT": 512, "SEED": 1, "PROMPT": "x"}).values()
+                          for v in n["inputs"].values() if isinstance(v, str) and "KALIV" in v], "the direct test leaves no marker")
+        from app.media_generation_profiles import parse_profile
+        made = helper.profile([{"path": p, "sha256": "a" * 64, "bytes": 1} for p in pins], "b" * 40, sha(data),
+                              width=768, height=512, frames=49, fps=25)
+        parsed = parse_profile(made)
+        self.assertEqual((parsed.qualification, parsed.license, sorted(parsed.tasks)), ("candidate", "ltx-2-community-license", ["text_to_video"]))
+        # the sound-track check reads the MP4's handler boxes
+        def hdlr(kind):
+            return b"\x00\x00\x00\x21hdlr" + b"\x00" * 8 + kind + b"\x00" * 13
+        self.assertTrue(helper.has_sound_track(b"ftypisom" + hdlr(b"vide") + hdlr(b"soun")))
+        self.assertFalse(helper.has_sound_track(b"ftypisom" + hdlr(b"vide")))
+        self.assertFalse(helper.has_sound_track(b"soun but no handler box"))
+
+    def test_a_template_with_its_own_schedule_may_leave_the_steps_slot_out(self):
+        # A distilled model's schedule is part of the graph (LTX-2.3: a list of sigmas).
+        graph = json.loads(raw())
+        del graph["3"]["inputs"]["steps"]
+        template = load_template(raw(graph), sha(raw(graph)))
+        self.assertNotIn("__KALIV_VIDEO_STEPS__", template.slots)
+        bound = template.bind(request(steps=20), fps=16)
+        self.assertNotIn("steps", bound["3"]["inputs"], "nothing in the graph takes the request's step count")
+        # every other slot is still required
+        for marker_input, node in (("seed", "3"), ("text", "6"), ("width", "7"), ("height", "7"), ("length", "7"), ("fps", "9")):
+            missing = json.loads(raw())
+            del missing[node]["inputs"][marker_input]
+            with self.subTest(marker_input), self.assertRaisesRegex(GenerationError, "missing slots"):
+                load_template(raw(missing), sha(raw(missing)))
+
     def test_the_templates_that_ran_on_the_rig_are_the_ones_in_the_repository(self):
         # docs/MEDIA_VIDEO_RIG_QUALIFICATION.md §7: byte for byte what ran on 21 November 2026.
         folder = ROOT / "deploy" / "media" / "comfy-templates"

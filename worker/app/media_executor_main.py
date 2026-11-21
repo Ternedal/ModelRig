@@ -29,6 +29,8 @@ configuration error (exit 78) unless all of this holds:
                                       cuda<N>/ in it, with existing input/, output/, temp/ and user/
   KALIV_COMFY_TEMPLATE_DIR            the operator's workflow template directory
   KALIV_COMFY_WEIGHTS_CACHE           optional: the weight-hash cache file, in the work area
+  KALIV_COMFY_HOST_MEMORY_GIB         optional: how much host RAM one ComfyUI process may commit,
+                                      1..64, default 48 (a 29 GB checkpoint needs more headroom)
   and every served video profile uses the comfyui backend and pins comfyui_version and weights.
   A profile whose template carries the image slot renders image_to_video: the source is a completed
   PNG of the job's owner, read through the owner-gated reader (media_source_image) from the verified
@@ -84,6 +86,7 @@ COMFY_MAIN_ENV = "KALIV_COMFY_MAIN"
 COMFY_DIR_ENV = "KALIV_COMFY_DIR"
 COMFY_TEMPLATE_DIR_ENV = "KALIV_COMFY_TEMPLATE_DIR"
 COMFY_WEIGHTS_CACHE_ENV = "KALIV_COMFY_WEIGHTS_CACHE"
+COMFY_HOST_MEMORY_ENV = "KALIV_COMFY_HOST_MEMORY_GIB"
 COMFY_FOLDERS = ("input", "output", "temp", "user")
 
 
@@ -121,8 +124,10 @@ class VideoConfig:
     """The checked ComfyUI side of one executor (built only when video is switched on)."""
 
     def __init__(self, *, python: str, main_py: str, comfy_dir: str, template_dir: str,
-                 weights_cache: str | None, work: PrivateWorkArea, gpu_uuid: str):
+                 weights_cache: str | None, work: PrivateWorkArea, gpu_uuid: str,
+                 host_memory_gib: float | None = None):
         self.python, self.main_py, self.comfy_dir, self.template_dir = python, main_py, comfy_dir, template_dir
+        self.host_memory_gib = host_memory_gib  # None: the supervisor's default
         self.weights_cache, self.work, self.gpu_uuid = weights_cache, work, gpu_uuid
         self.folders = {name: os.path.join(comfy_dir, name) for name in COMFY_FOLDERS}
         # ComfyUI's own output, beside its folders in the private work area. Rig 21/11: it went to
@@ -206,8 +211,16 @@ def _video_config(env: Mapping[str, str], video: Mapping[str, ModelProfile], wor
         except ArtifactSinkUnavailable as exc:
             raise ExecutorConfigError(f"{COMFY_WEIGHTS_CACHE_ENV} must be in an existing folder in the work area "
                                       f"({exc})") from None
+    host_memory = None
+    raw_memory = (env.get(COMFY_HOST_MEMORY_ENV) or "").strip()
+    if raw_memory:
+        # The supervisor's Job Object caps what one ComfyUI process may commit. Whole GiB, so a
+        # typo cannot become a fraction of the intended limit.
+        if not raw_memory.isdecimal() or not 1 <= int(raw_memory) <= 64:
+            raise ExecutorConfigError(f"{COMFY_HOST_MEMORY_ENV} must be a whole number of GiB, 1..64")
+        host_memory = float(int(raw_memory))
     return VideoConfig(python=python, main_py=main_py, comfy_dir=comfy_dir, template_dir=template_dir,
-                       weights_cache=weights_cache, work=work, gpu_uuid=gpu_uuid)
+                       weights_cache=weights_cache, work=work, gpu_uuid=gpu_uuid, host_memory_gib=host_memory)
 
 
 def default_adapter_factory(device: str, lease_dir: str, env: Mapping[str, str], *,
@@ -233,7 +246,8 @@ def default_adapter_factory(device: str, lease_dir: str, env: Mapping[str, str],
             supervisor = (supervisor_class or ComfySupervisor)(
                 gpu_uuid=video.gpu_uuid, lease_dir=lease_dir, launch=launch, work_area=video.work,
                 reserve_gib=profile.resources.reserve_gib, min_usable_gib=profile.resources.min_usable_gib,
-                base_env=env, log_path=getattr(video, "log_path", None))
+                base_env=env, log_path=getattr(video, "log_path", None),
+                **({"host_memory_gib": video.host_memory_gib} if getattr(video, "host_memory_gib", None) else {}))
             return ComfyVideoAdapter(profile, supervisor=supervisor, template_dir=video.template_dir,
                                      output_directory=folders["output"], weights_cache=video.weights_cache)
         raise ExecutorConfigError(f"{profile.profile_id}: backend {profile.backend} is not served by this executor yet")
