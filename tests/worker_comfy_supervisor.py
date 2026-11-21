@@ -363,51 +363,62 @@ time.sleep(120)
         self.assertEqual(_event_code(caught.exception), "resident_proof_mismatch")
 
     def test_the_idle_reading_is_taken_after_a_job_and_dropped_with_the_process(self):
-        COST = 832 * 480 * 33
+        COST, T2V, I2V = 832 * 480 * 33, "wan-a|aa|text_to_video", "wan-a|aa|image_to_video"
         sup = self.supervisor()  # reserve 2 GiB, min usable 8 GiB
         sup.start()
         self.assertIsNone(sup._idle_free_bytes)
-        sup.note_idle()  # no size: nothing was proven
-        self.assertIsNone(sup._idle_free_bytes)
-        sup.note_idle(COST)
-        self.assertEqual((sup._idle_free_bytes, sup._idle_job_cost), (20 * GIB, COST), "what the fake reports free")
+        for cost, kind in ((None, T2V), (COST, None), (COST, ""), (0, T2V), (COST, 7)):
+            sup.note_idle(cost, kind)  # no size or no kind: nothing was proven
+            self.assertIsNone(sup._idle_free_bytes)
+        sup.note_idle(COST, T2V)
+        self.assertEqual((sup._idle_free_bytes, sup._idle_job_cost, sup._idle_job_kind), (20 * GIB, COST, T2V))
         Path(self.state, "vram_free_gib").write_text("5")
-        sup.note_idle(COST)
-        sup.check_budget(COST)  # 5 GiB free is a shortage at a start, not after a job this size succeeded at 5
-        sup.check_budget(COST - 1)  # a smaller job leans on the same proof
+        sup.note_idle(COST, T2V)
+        sup.check_budget(COST, T2V)  # 5 GiB free is a shortage at a start, not after a job this size succeeded at 5
+        sup.check_budget(COST - 1, T2V)  # a smaller job of the same kind leans on the same proof
         # a larger job, or a caller that does not say how large, gets the strict check
         for cost in (COST + 1, None, 0, -1, True, float(COST)):
             with self.subTest(cost=cost), self.assertRaisesRegex(ComfySupervisorError, "insufficient"):
-                sup.check_budget(cost)
+                sup.check_budget(cost, T2V)
+        # #2462 review (ChatGPT, P2): the same size in another workflow proves nothing
+        for kind in (I2V, "wan-b|aa|text_to_video", "wan-a|bb|text_to_video", None, "", 7):
+            with self.subTest(kind=kind), self.assertRaisesRegex(ComfySupervisorError, "insufficient"):
+                sup.check_budget(COST, kind)
+        sup.note_idle(COST, I2V)  # an image-to-video job succeeded: now that is what is proven
+        sup.check_budget(COST, I2V)
+        with self.assertRaisesRegex(ComfySupervisorError, "insufficient"):
+            sup.check_budget(COST, T2V)
+        sup.note_idle(COST, T2V)
         Path(self.state, "vram_free_gib").write_text("4")
         with self.assertRaisesRegex(ComfySupervisorError, "insufficient"):
-            sup.check_budget(COST)  # 1 GiB lower than its own idle reading: somebody took it
+            sup.check_budget(COST, T2V)  # 1 GiB lower than its own idle reading: somebody took it
         sup.stop()
-        self.assertEqual((sup._idle_free_bytes, sup._idle_job_cost), (None, 0), "a stopped ComfyUI has proven nothing")
-        sup.note_idle(COST)  # not running: no reading, no error
+        self.assertEqual((sup._idle_free_bytes, sup._idle_job_cost, sup._idle_job_kind), (None, 0, None),
+                         "a stopped ComfyUI has proven nothing")
+        sup.note_idle(COST, T2V)  # not running: no reading, no error
         self.assertIsNone(sup._idle_free_bytes)
 
     def test_a_warm_reading_never_admits_a_job_into_the_reserve(self):
         # #2462 review (ChatGPT, P2): a baseline of 0.5 GiB must not admit the next job at 0.5 GiB.
-        COST = 832 * 480 * 33
+        COST, KIND = 832 * 480 * 33, "wan-a|aa|text_to_video"
         sup = self.supervisor()  # reserve 2 GiB
         sup.start()
         for free in ("0.5", "1.9"):
             Path(self.state, "vram_free_gib").write_text(free)
-            sup.note_idle(COST)
+            sup.note_idle(COST, KIND)
             with self.subTest(free=free), self.assertRaisesRegex(ComfySupervisorError, "insufficient"):
-                sup.check_budget(COST)
+                sup.check_budget(COST, KIND)
         Path(self.state, "vram_free_gib").write_text("2")
-        sup.note_idle(COST)
-        sup.check_budget(COST)  # the reserve is free in full: the earlier job is the proof for the rest
+        sup.note_idle(COST, KIND)
+        sup.check_budget(COST, KIND)  # the reserve is free in full: the earlier job is the proof for the rest
         # competing load: the reading fell after the baseline was taken
         Path(self.state, "vram_free_gib").write_text("6")
-        sup.note_idle(COST)
+        sup.note_idle(COST, KIND)
         Path(self.state, "vram_free_gib").write_text("5.5")
         with self.assertRaisesRegex(ComfySupervisorError, "insufficient"):
-            sup.check_budget(COST)  # 0.5 GiB went to somebody else: more than the 256 MiB slack
+            sup.check_budget(COST, KIND)  # 0.5 GiB went to somebody else: more than the 256 MiB slack
         Path(self.state, "vram_free_gib").write_text("5.8")
-        sup.check_budget(COST)  # within the slack
+        sup.check_budget(COST, KIND)  # within the slack
         sup.stop()
 
     def test_ready_deadline(self):

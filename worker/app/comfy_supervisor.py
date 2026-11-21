@@ -186,8 +186,8 @@ def parse_vram_budget(stats: object, *, reserve_gib: float, min_usable_gib: floa
                       idle_free_bytes: int | None = None) -> VramBudget:
     """Fail-closed reading of /system_stats: one CUDA device with enough free VRAM.
 
-    idle_free_bytes: what this same ComfyUI reported free when a job AT LEAST AS LARGE as the
-    one about to run had just succeeded in it (the supervisor decides that; see check_budget).
+    idle_free_bytes: what this same ComfyUI reported free when a job OF THE SAME KIND and at least
+    as large as the one about to run had just succeeded in it (the supervisor decides that; see check_budget).
     A warm ComfyUI keeps its models, so its own reading is low without anybody else having taken
     anything. Rig 21/11: idle after a clip it reported 5.2 GiB free of 12 (torch_vram_total
     64 MiB: the models are not in torch's own figure), every second job read as a shortage, and
@@ -252,6 +252,7 @@ class ComfySupervisor:
         self._lease: GpuLease | None = None
         self._idle_free_bytes: int | None = None  # see note_idle(); cleared with every start and stop
         self._idle_job_cost = 0
+        self._idle_job_kind: str | None = None
         self._proc: subprocess.Popen | None = None
         self._token = secrets.token_hex(16)
         self._job_lock = threading.Lock()
@@ -333,7 +334,7 @@ class ComfySupervisor:
         resident = resident_lock_path(self.gpu_uuid, lease_dir=self.lease_dir)
         argv = self.launch.argv(str(resident))
         self.require_work_area()  # before the lease: no ComfyUI outside the private work area
-        self._idle_free_bytes, self._idle_job_cost = None, 0
+        self._idle_free_bytes, self._idle_job_cost, self._idle_job_kind = None, 0, None
         self._token = secrets.token_hex(16)  # fresh per start
         self._proof = Path(str(resident) + ".proof")
         lease = acquire_gpu_lease(self.gpu_uuid, lease_dir=self.lease_dir)
@@ -405,30 +406,35 @@ class ComfySupervisor:
                 raise ComfySupervisorError("comfy_not_ready: ComfyUI did not become ready before the deadline")
             time.sleep(self.poll_s)
 
-    def check_budget(self, job_cost: int | None = None) -> VramBudget:
+    def check_budget(self, job_cost: int | None = None, job_kind: str | None = None) -> VramBudget:
         """Re-read VRAM before each job: processes outside the lease may have taken VRAM.
 
-        job_cost: the size of the job about to run (pixels x frames). The warm reading is used
-        only for a job no larger than the one it was taken after: that job is the proof that this
-        much free memory is enough. A larger job, or a caller that does not say, gets the strict
-        check."""
+        job_cost: the size of the job about to run (pixels x frames). job_kind: what it is -- the
+        caller's name for workflow, task and model (the adapter gives profile, template SHA-256
+        and task). The warm reading is used only for a job of the SAME kind and no larger than
+        the one it was taken after: that job is the proof that this much free memory is enough.
+        Pixels x frames says nothing across workflows (#2462 review, ChatGPT P2: text-to-video
+        and image-to-video of one size need different memory), so a job of another kind, a
+        larger job, or a caller that does not say, gets the strict check."""
         if not self.running:
             raise ComfySupervisorError("ComfyUI is not running")
         try:
             stats = _get_json(self.port, "/system_stats", timeout_s=5.0)
         except (OSError, ValueError) as exc:
             raise ComfySupervisorError("ComfyUI /system_stats unavailable") from exc
-        proven = (type(job_cost) is int and job_cost > 0 and self._idle_free_bytes is not None
-                  and job_cost <= self._idle_job_cost)
+        proven = (type(job_cost) is int and job_cost > 0 and isinstance(job_kind, str) and bool(job_kind)
+                  and self._idle_free_bytes is not None
+                  and job_kind == self._idle_job_kind and job_cost <= self._idle_job_cost)
         return parse_vram_budget(stats, reserve_gib=self.reserve_gib, min_usable_gib=self.min_usable_gib,
                                  idle_free_bytes=self._idle_free_bytes if proven else None)
 
-    def note_idle(self, job_cost: int | None = None) -> None:
+    def note_idle(self, job_cost: int | None = None, job_kind: str | None = None) -> None:
         """Called when a job has SUCCEEDED: remember what this ComfyUI reports free while it keeps
-        its models, and how large that job was, for the check before the next one. Never raises;
-        without a usable figure or a size the strict check stays in place."""
-        self._idle_free_bytes, self._idle_job_cost = None, 0
-        if not self.running or type(job_cost) is not int or job_cost <= 0:
+        its models, how large that job was and of what kind, for the check before the next one.
+        Never raises; without a usable figure, a size and a kind the strict check stays in place."""
+        self._idle_free_bytes, self._idle_job_cost, self._idle_job_kind = None, 0, None
+        if (not self.running or type(job_cost) is not int or job_cost <= 0
+                or not isinstance(job_kind, str) or not job_kind):
             return
         try:
             stats = _get_json(self.port, "/system_stats", timeout_s=5.0)
@@ -436,7 +442,7 @@ class ComfySupervisor:
         except (OSError, ValueError, ComfySupervisorError, KeyError, IndexError, TypeError):
             return
         if type(free) is int and free > 0:
-            self._idle_free_bytes, self._idle_job_cost = free, job_cost
+            self._idle_free_bytes, self._idle_job_cost, self._idle_job_kind = free, job_cost, job_kind
 
     # --- the ComfyUI API the adapter needs; HTTP stays in this module -------
     def _api(self, path: str, *, method: str = "GET", payload: object | None = None,
@@ -480,7 +486,7 @@ class ComfySupervisor:
 
     def stop(self) -> None:
         """Interrupt, terminate, kill. The lease is released only after ComfyUI has exited."""
-        self._idle_free_bytes, self._idle_job_cost = None, 0
+        self._idle_free_bytes, self._idle_job_cost, self._idle_job_kind = None, 0, None
         proc = self._proc
         if proc is not None and proc.poll() is None:
             try:

@@ -190,6 +190,13 @@ class ComfyVideoAdapter:
         self._verified_weights = verified
         self._template = template
 
+    def _job_kind(self, request: GenerationRequest) -> str:
+        """What a job is, for the warm VRAM check: the profile (its models and settings), the exact
+        workflow (the template's SHA-256) and the task. Proof from one kind says nothing about
+        another, even at the same size."""
+        template = self._template.sha256 if self._template is not None else ""
+        return f"{self.profile.profile_id}|{template}|{request.task}"
+
     def _weights_still_verified(self) -> None:
         """Before every job: the files hashed at load are still those files, and the lookup is
         still unambiguous (no embedding or same-named file added since). ComfyUI reads weights
@@ -255,7 +262,7 @@ class ComfyVideoAdapter:
             mime = self._render_and_hand_over(request, sink_file, before, owned, should_cancel, source_png, staged)
             handed_over = True
             # This job succeeded at this size: the proof the next job's VRAM check may lean on.
-            self.supervisor.note_idle(_job_cost(request))  # never raises
+            self.supervisor.note_idle(_job_cost(request), self._job_kind(request))  # never raises
             return mime
         finally:
             if (handed_over or self._sink_failed) and self._holding is not None:
@@ -329,7 +336,7 @@ class ComfyVideoAdapter:
                               owned: list, should_cancel: Callable[[], bool] | None = None,
                               source_png: bytes | None = None, staged: list | None = None) -> str:
         try:
-            if not self._version_ok(self.supervisor.check_budget(_job_cost(request))):
+            if not self._version_ok(self.supervisor.check_budget(_job_cost(request), self._job_kind(request))):
                 raise GenerationError("comfyui_version_mismatch: ComfyUI version does not match the profile pin")
             self._weights_still_verified()
             if not self.supervisor.queue_is_empty():
