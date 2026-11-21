@@ -238,6 +238,20 @@ def vram_sampler():
 MAX_TRANSIENT_IN_A_ROW = 30
 
 
+def _own_seconds(job: dict) -> float | None:
+    """The job's own time on the rig's clock: asked for -> last change. None when it cannot be read.
+
+    ``seconds`` below is how long the probe waited AFTER the turn returned. A job is queued
+    while the model is still writing its answer, so that wait hides whatever part of the job
+    overlapped the turn -- on the rig 20/11 it read 17 s for jobs the executor timed at 50 s.
+    """
+    created, updated = job.get("created"), job.get("updated")
+    if (isinstance(created, (int, float)) and isinstance(updated, (int, float))
+            and not isinstance(created, bool) and not isinstance(updated, bool) and 0 <= updated - created < 86400):
+        return round(updated - created, 1)
+    return None
+
+
 def follow_job(http: Http, job_id: str, *, timeout_s: float, poll_s: float, clock=time.monotonic, sleep=time.sleep,
                vram=None) -> dict:
     """Poll one job to a terminal state. Transient answers (unreachable, 5xx) are counted, not fatal --
@@ -260,6 +274,9 @@ def follow_job(http: Http, job_id: str, *, timeout_s: float, poll_s: float, cloc
             error = body.get("error")
             result.update(state=state, profile_id=body.get("profile_id") if isinstance(body.get("profile_id"), str) else None,
                           error=error if isinstance(error, str) and _CODE.fullmatch(error) else None)
+            own = _own_seconds(body)
+            if own is not None:
+                result["rig_seconds"] = own
             if state in TERMINAL:
                 break
         elif status in (0, 500, 502, 503, 504):
@@ -432,7 +449,12 @@ def summarize(results: list[dict]) -> dict:
     tool_cases = [r for r in results if r["expect"] is not None and r["why"] != "skipped_no_picture"]
     called = [r for r in tool_cases if r["expect"] in r["tools_used"]]
     jobs = [j for r in results for j in r["jobs"]]
-    done = [j["seconds"] for j in jobs if j["state"] == "completed"]
+    finished = [j for j in jobs if j["state"] == "completed"]
+    # The job's own time where the rig reports it; the wait after the turn only as a fallback.
+    done = [j.get("rig_seconds", j["seconds"]) for j in finished]
+    # What the user waits: the turn, then whatever of the job was left when it returned.
+    to_picture = [round(r["turn_seconds"] + r["jobs"][0]["seconds"], 1) for r in results
+                  if r["turn_seconds"] is not None and len(r["jobs"]) == 1 and r["jobs"][0]["state"] == "completed"]
     turns = [r["turn_seconds"] for r in results if r["turn_seconds"] is not None and r["http"] == 200]
     controls = [r for r in results if r["expect"] is None]
     return {
@@ -443,6 +465,9 @@ def summarize(results: list[dict]) -> dict:
         "jobs_completed": len(done),
         "job_seconds_median": round(statistics.median(done), 1) if done else None,
         "job_seconds_max": max(done) if done else None,
+        "job_seconds_source": ("rig" if finished and all("rig_seconds" in j for j in finished)
+                               else "wait_after_turn" if finished else None),
+        "request_to_done_seconds_median": round(statistics.median(to_picture), 1) if to_picture else None,
         "turn_seconds_median": round(statistics.median(turns), 1) if turns else None,
         "refusals": sorted({code for r in results for code in r.get("refusals") or []}),
         "control_ok": all(r["ok"] for r in controls) if controls else None,
@@ -468,11 +493,15 @@ def render(report: dict) -> str:
             note = (note + f" [{job['profile_id']}]").strip()
         lines.append(f"{r['case']:<18} {'ja' if r['ok'] else 'NEJ':<3} "
                      f"{'-' if r['turn_seconds'] is None else r['turn_seconds']:>7} {tools:<15} "
-                     f"{job['state'] if job else '-':<11} {job['seconds'] if job else '-':>7}  {note}")
+                     f"{job['state'] if job else '-':<11} {job.get('rig_seconds', job['seconds']) if job else '-':>7}  {note}")
     s = report["summary"]
     lines += ["", f"værktøj kaldt: {s['tool_called']}/{s['tool_cases']}   job færdige: {s['jobs_completed']}/{s['jobs']}   "
                   f"median job: {s['job_seconds_median']} s   median tur: {s['turn_seconds_median']} s   "
                   f"kontrol: {'ok' if s['control_ok'] else 'FEJL'}"]
+    if s.get("request_to_done_seconds_median") is not None:
+        how_timed = ("riggens egen tid" if s.get("job_seconds_source") == "rig"
+                     else "ventetid efter turen (riggen oplyste ikke jobbets egen tid)")
+        lines.append(f"besked -> færdig (median): {s['request_to_done_seconds_median']} s   job s = {how_timed}")
     if s.get("refusals"):
         lines.append("afvisninger: " + ", ".join(s["refusals"]))
     return "\n".join(lines)
