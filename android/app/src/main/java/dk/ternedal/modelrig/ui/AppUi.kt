@@ -1780,8 +1780,11 @@ private fun ChatScreen(
             // A pending tool proposal produces no answer yet: the card is on
             // screen and nothing has run. Persisting an empty assistant turn
             // would leave a blank bubble in the history forever.
-            if ((err == null || cancelled) && finalText.isNotBlank()) {
-                val jobs = messages[idx].mediaJobs
+            // ...but a turn that queued a picture or a clip is kept even without words: its
+            // bubble is on screen, and the row is what makes the job this conversation's.
+            val jobs = messages[idx].mediaJobs
+            if ((err == null || cancelled) &&
+                dk.ternedal.modelrig.ui.chat.MediaTurnJobs.worthSaving(finalText, jobs, parked = proposal != null)) {
                 withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText, jobs) }
             }
             if (proposal != null) messages.removeAt(idx)
@@ -1935,8 +1938,9 @@ private fun ChatScreen(
             val finalText = messages[i].text
             // Mirror the main path: a parked proposal has no answer yet --
             // never persist a blank assistant turn.
-            if (cidNow != null && (err == null || cancelled) && finalText.isNotBlank()) {
-                val jobs = messages[i].mediaJobs
+            val jobs = messages[i].mediaJobs
+            if (cidNow != null && (err == null || cancelled) &&
+                dk.ternedal.modelrig.ui.chat.MediaTurnJobs.worthSaving(finalText, jobs, parked = proposal != null)) {
                 withContext(Dispatchers.IO) { db.addMessage(cidNow, "assistant", finalText, jobs) }
             }
             busy = false

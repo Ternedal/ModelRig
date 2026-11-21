@@ -43,6 +43,18 @@ object MediaTurnJobs {
     fun across(before: List<MediaJobRef>, after: List<MediaJobRef>): List<MediaJobRef> =
         (before + after).distinctBy { it.jobId }
 
+    /**
+     * Whether a finished assistant turn belongs in the conversation's history.
+     *
+     * A turn with words always does. A turn with no words but with media references does too
+     * (#2462 review, Codex P2): the bubble is on the screen, and without the row the job is no
+     * longer the conversation's after a restart -- not shown, and not there for "lav en video af
+     * det billede". The exception is a turn [parked] on a confirmation card: its references
+     * ride on the card and are saved with the turn that follows the decision.
+     */
+    fun worthSaving(text: String, jobs: List<MediaJobRef>, parked: Boolean): Boolean =
+        text.isNotBlank() || (jobs.isNotEmpty() && !parked)
+
     /** At most this many picture ids ride on a turn; the rig keeps the newest of them anyway. */
     const val MAX_PICTURES = 32
 
