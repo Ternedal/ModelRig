@@ -236,11 +236,27 @@ class VideoEntryPointTests(unittest.TestCase):
         with self.assertRaisesRegex(ExecutorConfigError, "KALIV_COMFY_DIR/cuda1/input"):
             _video_config(self.env, video, work, "GPU-1", "cuda:1")
 
-    def test_unpinned_image_to_video_or_clashing_profiles_are_refused(self):
+    def test_image_to_video_profiles_are_served_with_the_owner_gated_reader(self):
+        # 20/11: image_to_video is served. A pinned profile that lists it builds an executor whose
+        # source reader is the owner-gated one (media_source_image), not None and not a path.
+        self.write_video_profile(tasks=["text_to_video", "image_to_video"])
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            executor = self.build()
+            self.assertIsNotNone(executor.source_reader)
+            from app.media_generation_contract import SourceImageUnavailable
+            # Another owner's asset, an unknown asset: refused by ownership before any disk read.
+            with self.assertRaises(SourceImageUnavailable):
+                executor.source_reader("someone-else", "img_unknown")
+            with self.assertRaises(SourceImageUnavailable):
+                executor.source_reader("installation", "img_unknown")
+            # The reader validates the id shape itself; ownership fails first for a non-id too.
+            with self.assertRaises((SourceImageUnavailable, ValueError)):
+                executor.source_reader("installation", "../etc/passwd")
+
+    def test_unpinned_or_clashing_profiles_are_refused(self):
         cases = {
             "no version pin": dict(comfyui_version=None),
             "no weight pins": dict(weights=[]),
-            "image to video": dict(tasks=["text_to_video", "image_to_video"]),
         }
         for label, options in cases.items():
             with self.subTest(label), patch("app.media_gallery_catalog.os.path.ismount", return_value=True):

@@ -21,8 +21,10 @@ Without a usable configuration it answers 503 with a reason code and never opens
 - ``KALIV_MEDIA_WORK_ROOT`` and ``KALIV_MEDIA_JOB_DB``: the job database is in the private work
   area (``media_work_area``), checked before every database access, as the executor does;
 - ``KALIV_MEDIA_PROFILE_DIR`` and ``KALIV_MEDIA_PROFILES_ENABLED``: only enabled profiles are
-  accepted. A video profile also needs ``KALIV_MEDIA_VIDEO=1``, and image-to-video is refused:
-  the executor serves neither otherwise (#2366), so such a job would only wait 24 hours and expire.
+  accepted. A video profile also needs ``KALIV_MEDIA_VIDEO=1``: the executor serves nothing
+  otherwise (#2366), so such a job would only wait 24 hours and expire. Image-to-video needs
+  ``input_asset_id`` naming a *completed asset of this owner* (checked here and again by the
+  executor's owner-gated reader); anything else is ``source_not_found``.
 
 **Validated at submit, with the executor's own rule** (``validate_request`` on the profile), so a
 request the executor would refuse is a 400 now, not a failed job later.
@@ -53,7 +55,7 @@ VIDEO_ENV = "KALIV_MEDIA_VIDEO"
 OWNER = "installation"  # #2365 mediaInstallationOwner
 MIN_SECRET_CHARS = 32
 REQUEST_PARAMS = ("width", "height", "steps", "seed", "input_asset_id", "frames")  # media_executor._REQUEST_PARAMS
-NOT_SERVED_TASKS = frozenset({"image_to_video"})  # #2366: the owner-gated source reader is not wired
+NOT_SERVED_TASKS: frozenset[str] = frozenset()  # image_to_video is served since the reader was wired (20/11)
 
 _ERRORS = {  # ImageJobStore messages -> codes; anything else is invalid_request
     "image job queue full": (429, "queue_full"),
@@ -99,9 +101,11 @@ class MediaJobService:
             raise HTTPException(status_code=400, detail="profile_not_enabled")
         if profile.modality == "video" and not self.video_enabled:
             raise HTTPException(status_code=400, detail="video_not_enabled")
-        task = body.task if body.task is not None else sorted(profile.tasks)[0]
-        if task in NOT_SERVED_TASKS:
+        task = body.task if body.task is not None else _default_task(profile, body)
+        if task in NOT_SERVED_TASKS or task not in profile.tasks:
             raise HTTPException(status_code=400, detail="task_not_served")
+        if task == "image_to_video" and not body.input_asset_id:
+            raise HTTPException(status_code=400, detail="invalid_request")
         try:
             request = validate_request(profile, GenerationRequest(
                 profile_id=profile.profile_id, task=task, prompt=body.prompt,
@@ -109,6 +113,18 @@ class MediaJobService:
         except GenerationError:
             raise HTTPException(status_code=400, detail="invalid_request") from None
         return profile, request
+
+
+def _default_task(profile, body) -> str:
+    """With no task named: image_to_video when a source is given and the profile renders it, else the
+    profile's text task; never the alphabetical first (which would be image_to_video)."""
+    tasks = set(profile.tasks)
+    if body.input_asset_id and "image_to_video" in tasks:
+        return "image_to_video"
+    for text_task in ("text_to_image", "text_to_video"):
+        if text_task in tasks:
+            return text_task
+    return sorted(tasks)[0]
 
 
 def _usable_secret(secret: object) -> bool:
@@ -188,8 +204,9 @@ def build_media_job_router(service: Callable[[], MediaJobService], *,
                 lambda: configured.store.owns_completed_asset(OWNER, generation.input_asset_id)):
             raise HTTPException(status_code=400, detail="source_not_found")
         params = {key: getattr(body, key) for key in REQUEST_PARAMS if getattr(body, key) is not None}
-        if body.task is not None:
-            params["task"] = body.task
+        # The resolved task, always: the executor must never re-derive it from the profile's task
+        # list (whose alphabetical first is image_to_video once a profile lists it).
+        params["task"] = generation.task
         try:
             created = store_call(lambda: configured.store.submit(OWNER, body.prompt, profile_id=profile.profile_id,
                                                                  params=params))
