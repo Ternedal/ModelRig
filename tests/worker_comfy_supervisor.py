@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "worker"))
 
 from app.comfy_supervisor import (  # noqa: E402
-    ComfyLaunch, ComfySupervisor, ComfySupervisorError, parse_vram_budget, port_answers,
+    ComfyLaunch, ComfySupervisor, ComfySupervisorError, ComfyVramShortage, parse_vram_budget, port_answers,
 )
 import app.comfy_supervisor as supervisor_module  # noqa: E402
 from app.gpu_lease import GpuBusy, acquire_gpu_lease, resident_is_held  # noqa: E402
@@ -609,6 +609,27 @@ class VramParsingTests(unittest.TestCase):
             with self.subTest(label):
                 with self.assertRaisesRegex(ComfySupervisorError, "unusable VRAM"):
                     parse_vram_budget(cases[label], reserve_gib=2, min_usable_gib=8)
+
+    def test_a_warm_comfyui_counts_what_it_holds_itself(self):
+        # Rig 21/11: after a clip the model stays in ComfyUI's own process; the next job read that
+        # as "taken" and ComfyUI was restarted for every clip (vram_short -> closed -> loaded).
+        warm = self.stats(vram_free=3 * GIB, torch_vram_total=9 * GIB, vram_total=12 * GIB)
+        with self.assertRaisesRegex(ComfyVramShortage, "insufficient"):
+            parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8)  # at start: nothing may be held
+        self.assertEqual(parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8, count_own=True).usable_bytes, 11 * GIB)
+        # what another process holds is still a shortage
+        taken = self.stats(vram_free=3 * GIB, torch_vram_total=1 * GIB, vram_total=12 * GIB)
+        with self.assertRaisesRegex(ComfyVramShortage, "insufficient"):
+            parse_vram_budget(taken, reserve_gib=1, min_usable_gib=8, count_own=True)
+        # never more than the card, and a missing or impossible figure counts as nothing
+        over = self.stats(vram_free=8 * GIB, torch_vram_total=9 * GIB, vram_total=12 * GIB)
+        self.assertEqual(parse_vram_budget(over, reserve_gib=1, min_usable_gib=8, count_own=True).free_bytes, 12 * GIB)
+        for bad in (None, True, -1, 13 * GIB, 9.0 * GIB, "9"):
+            stats = self.stats(vram_free=3 * GIB, vram_total=12 * GIB)
+            if bad is not None:
+                stats["devices"][0]["torch_vram_total"] = bad
+            with self.subTest(bad=bad), self.assertRaisesRegex(ComfyVramShortage, "insufficient"):
+                parse_vram_budget(stats, reserve_gib=1, min_usable_gib=8, count_own=True)
 
     def test_edge_exactly_enough(self):
         self.assertEqual(parse_vram_budget(self.stats(vram_free=10 * GIB), reserve_gib=2,

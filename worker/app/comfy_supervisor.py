@@ -180,8 +180,16 @@ def port_answers(port: int, timeout_s: float = 0.5) -> bool:
         connection.close()
 
 
-def parse_vram_budget(stats: object, *, reserve_gib: float, min_usable_gib: float) -> VramBudget:
-    """Fail-closed reading of /system_stats: one CUDA device with enough free VRAM."""
+def parse_vram_budget(stats: object, *, reserve_gib: float, min_usable_gib: float,
+                      count_own: bool = False) -> VramBudget:
+    """Fail-closed reading of /system_stats: one CUDA device with enough free VRAM.
+
+    count_own: the check before a job on a ComfyUI that is already running. What ComfyUI's own
+    process holds (``torch_vram_total``: models kept from the job before) is not taken by
+    anybody else -- ComfyUI reuses or evicts it -- so it counts as free. Rig 21/11: without it
+    the second job on a warm ComfyUI always read as a shortage, and ComfyUI was closed and
+    started again for every clip. A missing or impossible figure counts as nothing held.
+    """
     devices = stats.get("devices") if isinstance(stats, dict) else None
     if not isinstance(devices, list) or len(devices) != 1 or not isinstance(devices[0], dict):
         raise ComfySupervisorError("ComfyUI must report exactly one device")
@@ -191,6 +199,10 @@ def parse_vram_budget(stats: object, *, reserve_gib: float, min_usable_gib: floa
     total, free = device.get("vram_total"), device.get("vram_free")
     if type(total) is not int or type(free) is not int or not 0 <= free <= total or total == 0:
         raise ComfySupervisorError("ComfyUI reported unusable VRAM figures")
+    if count_own:
+        own = device.get("torch_vram_total")
+        if type(own) is int and 0 <= own <= total:
+            free = min(total, free + own)
     usable = max(0, free - int(reserve_gib * GIB))
     if usable < int(min_usable_gib * GIB):
         raise ComfyVramShortage("insufficient free VRAM after reservation")
@@ -374,7 +386,8 @@ class ComfySupervisor:
             stats = _get_json(self.port, "/system_stats", timeout_s=5.0)
         except (OSError, ValueError) as exc:
             raise ComfySupervisorError("ComfyUI /system_stats unavailable") from exc
-        return parse_vram_budget(stats, reserve_gib=self.reserve_gib, min_usable_gib=self.min_usable_gib)
+        return parse_vram_budget(stats, reserve_gib=self.reserve_gib, min_usable_gib=self.min_usable_gib,
+                                 count_own=True)
 
     # --- the ComfyUI API the adapter needs; HTTP stays in this module -------
     def _api(self, path: str, *, method: str = "GET", payload: object | None = None,
