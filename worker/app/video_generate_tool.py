@@ -32,6 +32,7 @@ from typing import Callable, Mapping
 from .image_generate_tool import (
     ArgMistake,
     _arg_name,
+    int_arg,
     STATUS_URL_PREFIX,
     VIDEO_JOB_REFERENCE_SCHEMA,
     _submit_media_job,
@@ -145,13 +146,7 @@ def _validate_args(args: object) -> dict:
             source = UNREADABLE_SOURCE
     clean["source_image_job_id"] = source
     for key in _INT_ARGS:
-        value = args.get(key)
-        if value is None:
-            clean[key] = None
-            continue
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ArgMistake(f"{key} skal være et heltal (et tal, ikke en tekst)")
-        clean[key] = value
+        clean[key] = int_arg(key, args.get(key))
     return clean
 
 

@@ -190,8 +190,8 @@ class ArgMistake(ValueError):
     """An argument the model got wrong: a made-up field, a number as a string, no prompt.
 
     Not ``ToolDenied``. That ends the whole turn with an HTTP 400, and the user sees an
-    error instead of an answer for what is the likeliest mistake a small model makes
-    (``"width": "1024"``, ``"style": "photo"``). The call is still refused and nothing is
+    error instead of an answer for a mistake a small model makes easily
+    (``"style": "photo"``, ``"width": "bred"``). The call is still refused and nothing is
     queued; the model gets a text result naming the argument, and can call again.
     The message carries argument names only, never a value.
     """
@@ -224,6 +224,29 @@ def parse_refusal(result: str) -> str | None:
     return None
 
 
+_INT_TEXT = re.compile(r"-?[0-9]{1,10}")
+
+
+def int_arg(key: str, value: object) -> int | None:
+    """A whole-number argument as the model sent it. ``1024``, ``"1024"`` and ``1024.0`` are
+    the same wish, and ``""`` is how a model leaves a field out; anything else is a mistake.
+
+    Reading these costs nothing: the value is still checked against what the profile allows.
+    Refusing them costs the user a model round trip for a difference they cannot see.
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if isinstance(value, bool):
+        raise ArgMistake(f"{key} skal være et heltal")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer() and abs(value) < 1e10:
+        return int(value)
+    if isinstance(value, str) and _INT_TEXT.fullmatch(value.strip()):
+        return int(value.strip())
+    raise ArgMistake(f"{key} skal være et heltal")
+
+
 def _arg_mistake(tool: str, modality: str, mistake: ArgMistake) -> str:
     _logger.info("media_tool=refused modality=%s code=invalid_arguments detail=%s", modality, mistake)
     return (f"Riggen afviste kaldet (invalid_arguments): {mistake}. Der blev ikke startet et job. "
@@ -251,13 +274,7 @@ def _validate_args(args: object) -> dict:
     # not a refusal that ends the turn.
     clean: dict = {"prompt": prompt, "profile_id": (profile_id.strip() or None) if isinstance(profile_id, str) else None}
     for key in _INT_ARGS:
-        value = args.get(key)
-        if value is None:
-            clean[key] = None
-            continue
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ArgMistake(f"{key} skal være et heltal (et tal, ikke en tekst)")
-        clean[key] = value
+        clean[key] = int_arg(key, args.get(key))
     return clean
 
 
