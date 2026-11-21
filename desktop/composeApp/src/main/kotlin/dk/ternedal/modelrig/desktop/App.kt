@@ -310,6 +310,8 @@ fun App() {
             conversationPublicationEpoch.advance()
             // History for the tools path: the turns BEFORE this message --
             // the worker gets the new message in its own field (Android parity).
+            // Which pictures this conversation holds, before this turn: the rig's "det billede".
+            val pictureJobs = DesktopMediaContract.conversationImageJobs(messages.map { it.mediaJobs })
             val priorPairs = messages
                 .filter { it.role == "user" || it.role == "assistant" }
                 .map { it.role to it.text }
@@ -334,7 +336,7 @@ fun App() {
                     val res = withContext(Dispatchers.IO) {
                         runCatching {
                             ToolsClient(turnConfig.localUrl, turnConfig.deviceToken.ifBlank { null })
-                                .toolsChatStream(text, turnConfig.localModel, priorPairs, sysT) { name ->
+                                .toolsChatStream(text, turnConfig.localModel, priorPairs, sysT, conversationImageJobs = pictureJobs) { name ->
                                     // Riggens egen fase undervejs. En vaerktoejstur
                                     // var foer en lukket doer: een statisk tekst og
                                     // ingen tegn paa liv foer svaret landede.
