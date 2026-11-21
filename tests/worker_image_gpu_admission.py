@@ -70,6 +70,36 @@ class ImageGpuAdmissionTests(unittest.TestCase):
             self.assertIsNone(budget_detail(not_a_budget))
         self.assertIsInstance(admitted, GpuBudget)
 
+    def test_nvidia_smi_is_a_second_opinion_that_can_only_be_missing_never_fail(self):
+        # Under WDDM cudaMemGetInfo answers from Windows' GPU memory manager; NVML counts every process.
+        from app.image_gpu_admission import GpuBudget, budget_detail, smi_used_mib
+        uuid = "GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        out = "GPU-00000000-1111-2222-3333-444444444444, 9845\nGPU-AAAAAAAA-bbbb-cccc-dddd-eeeeeeeeeeee, 8149\n"
+        calls = []
+
+        def run(argv, **kw):
+            calls.append((argv, kw))
+            return types.SimpleNamespace(returncode=0, stdout=out)
+        self.assertEqual(smi_used_mib(uuid, run=run), 8149, "matched by UUID, case-insensitively")
+        self.assertEqual(calls[0][0], ["nvidia-smi", "--query-gpu=uuid,memory.used", "--format=csv,noheader,nounits"])
+        self.assertEqual(calls[0][1].get("timeout"), 3.0)
+        self.assertIsNone(smi_used_mib("GPU-ffffffff-0000-0000-0000-000000000000", run=run), "an unknown GPU")
+        self.assertIsNone(smi_used_mib(uuid, run=lambda *a, **k: types.SimpleNamespace(returncode=9, stdout=out)))
+        self.assertIsNone(smi_used_mib(uuid, run=lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=uuid + ", [N/A]\n")))
+
+        def missing(*a, **k):
+            raise FileNotFoundError("nvidia-smi")
+        self.assertIsNone(smi_used_mib(uuid, run=missing), "no nvidia-smi is not an error")
+        for nothing in (None, "", 7):
+            self.assertIsNone(smi_used_mib(nothing, run=run))
+        gib = 1024**3
+        budget = GpuBudget(1, 12 * gib, 11 * gib, gib, 10 * gib)
+        self.assertEqual(budget_detail(budget, 8149),
+                         "cuda1,free_mib=11264,reserved_mib=1024,usable_mib=10240,total_mib=12288,smi_used_mib=8149")
+        for not_a_reading in (None, True, "8149", -1, 8149.0, 10**7):
+            self.assertEqual(budget_detail(budget, not_a_reading),
+                             "cuda1,free_mib=11264,reserved_mib=1024,usable_mib=10240,total_mib=12288")
+
     def test_rejects_missing_gpu(self):
         with patch.dict(sys.modules, {"torch": self._torch(11, count=1)}):
             with self.assertRaises(ImageGpuAdmissionError):

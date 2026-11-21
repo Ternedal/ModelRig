@@ -54,7 +54,7 @@ from dataclasses import dataclass
 from typing import Callable, Mapping
 
 from .gpu_lease import GpuLease, acquire_gpu_lease, device_uuid_map, parse_cuda_device
-from .image_gpu_admission import inspect_cuda_budget
+from .image_gpu_admission import GpuMemoryShortage, inspect_cuda_budget, smi_used_mib
 from .media_generation_contract import GenerationCancelled, GenerationError, GenerationRequest, RenderedArtifact
 from .media_generation_profiles import DIFFUSERS_PIPELINES, ModelProfile, validate_request
 
@@ -138,6 +138,7 @@ class DiffusersImageAdapter:
         self._lease = None
         self._pipeline = None
         self.admitted_budget = None
+        self.admitted_smi_used_mib = None
         self._quarantine: _Quarantined | None = None
         self._baseline: int | None = None
         self._torch = None
@@ -173,10 +174,17 @@ class DiffusersImageAdapter:
         try:
             # Advisory: weights may still exceed what was free, but no process
             # that takes this lease can load onto this GPU while we hold it.
-            # Kept for the executor's diagnostics: what the card looked like when the load was admitted.
-            self.admitted_budget = inspect_cuda_budget(
-                self.index, reserve_gib=self.profile.resources.reserve_gib,
-                min_usable_gib=self.profile.resources.min_usable_gib, expected_uuid=gpu_uuid)
+            # Kept for the executor's diagnostics: what the card looked like when the load was
+            # admitted or refused -- the probe's own numbers and nvidia-smi's, taken together.
+            smi_used = smi_used_mib(gpu_uuid)
+            try:
+                self.admitted_budget = inspect_cuda_budget(
+                    self.index, reserve_gib=self.profile.resources.reserve_gib,
+                    min_usable_gib=self.profile.resources.min_usable_gib, expected_uuid=gpu_uuid)
+            except GpuMemoryShortage as shortage:
+                shortage.smi_used_mib = smi_used
+                raise
+            self.admitted_smi_used_mib = smi_used
             import torch
             import diffusers
             pipeline_class = getattr(diffusers, self.profile.pipeline)

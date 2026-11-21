@@ -21,11 +21,13 @@ class GpuMemoryShortage(ImageGpuAdmissionError):
     """Not enough free VRAM right now -- another process (Ollama, typically) holds it. Transient:
     the executor puts the job back in the queue instead of failing it (G4, Anders 5 Nov 2026).
 
-    ``budget`` is what the probe measured when it said no, for the diagnostics stream."""
+    ``budget`` is what the probe measured when it said no, and ``smi_used_mib`` what nvidia-smi
+    said at the same moment (set by the caller that asked it), for the diagnostics stream."""
 
     def __init__(self, message: str, budget: "GpuBudget | None" = None):
         super().__init__(message)
         self.budget = budget
+        self.smi_used_mib: int | None = None
 
 
 @dataclass(frozen=True)
@@ -75,7 +77,34 @@ def inspect_cuda_budget(index: int, *, reserve_gib: float = 3.0,
     return budget
 
 
-def budget_detail(budget: object) -> str | None:
+def smi_used_mib(gpu_uuid: str | None, *, run=None, timeout_s: float = 3.0) -> int | None:
+    """What ``nvidia-smi`` (NVML) says is in use on this GPU, in MiB, or None when it cannot say.
+
+    A second opinion for the diagnostics stream, taken next to the admission probe. Under
+    Windows' WDDM driver model ``cudaMemGetInfo`` answers from Windows' own GPU memory manager,
+    which can oversubscribe a card; NVML counts what every process holds. When the two disagree,
+    this is where it shows. Never an admission input, and never able to fail a load.
+    """
+    if not isinstance(gpu_uuid, str) or not gpu_uuid:
+        return None
+    try:
+        import subprocess
+        result = (run or subprocess.run)(
+            ["nvidia-smi", "--query-gpu=uuid,memory.used", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=timeout_s, check=False)
+        if getattr(result, "returncode", 1) != 0:
+            return None
+        for line in str(result.stdout).splitlines()[:64]:
+            uuid, _, used = line.partition(",")
+            if uuid.strip().lower() == gpu_uuid.strip().lower() and used.strip().isdigit():
+                value = int(used.strip())
+                return value if value < 10**7 else None
+    except Exception:
+        return None
+    return None
+
+
+def budget_detail(budget: object, smi_used: object = None) -> str | None:
     """A measured budget as one diagnostics detail in MiB, or None for anything that is not one.
 
     Rig 20/11: a job started on a card that another process held 8 GB of, and nothing said
@@ -84,5 +113,9 @@ def budget_detail(budget: object) -> str | None:
     if not isinstance(budget, GpuBudget):
         return None
     mib = 1024 * 1024
-    return (f"cuda{budget.index},free_mib={budget.free_bytes // mib},reserved_mib={budget.reserved_bytes // mib},"
-            f"usable_mib={budget.usable_bytes // mib},total_mib={budget.total_bytes // mib}")
+    detail = (f"cuda{budget.index},free_mib={budget.free_bytes // mib},reserved_mib={budget.reserved_bytes // mib},"
+              f"usable_mib={budget.usable_bytes // mib},total_mib={budget.total_bytes // mib}")
+    if type(smi_used) is int and 0 <= smi_used < 10**7:
+        # NVML's "used" at the same moment: free_mib + smi_used_mib should be about total_mib.
+        detail += f",smi_used_mib={smi_used}"
+    return detail
