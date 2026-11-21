@@ -357,13 +357,21 @@ fun App() {
                         lastSource = ChatResult.Source.LOCAL
                         when (turn.status) {
                             "confirmation_required" -> {
+                                // Media the turn queued before the card is rendering regardless of
+                                // the decision, and the card lives in memory only: show the bubbles
+                                // and save the references now. The card carries none.
+                                val queued = turn.mediaJobRefs()
                                 messages[assistantIdxT] = messages[assistantIdxT].copy(
                                     text = "⚙ Kaliv foreslår: ${turn.summary.ifBlank { turn.tool }}",
-                                    streaming = false,
+                                    streaming = false, mediaJobs = queued,
                                 )
+                                if (queued.isNotEmpty()) withContext(Dispatchers.IO) {
+                                    db.addMessage(cid, "assistant", DesktopMediaContract.QUEUED_BEFORE_CARD_TEXT,
+                                        DesktopMediaContract.encodeRefs(queued))
+                                }
                                 pendingCardError = null
                                 pendingCardTurnConfig = turnConfig
-                                pendingCardJobs = turn.mediaJobRefs()
+                                pendingCardJobs = emptyList()
                                 pendingCard = turn
                             }
                             else -> {
@@ -946,7 +954,17 @@ fun App() {
                             // A chained write gets its own authoritative card. One
                             // approval never authorises the next write.
                             pendingCard = next
-                            pendingCardJobs = DesktopMediaContract.across(pendingCardJobs, next.mediaJobRefs())
+                            // Queued between two cards: saved and shown now, for the same reason.
+                            val between = DesktopMediaContract.across(pendingCardJobs, next.mediaJobRefs())
+                            pendingCardJobs = emptyList()
+                            if (between.isNotEmpty()) {
+                                messages.add(UiMessage("assistant", DesktopMediaContract.QUEUED_BEFORE_CARD_TEXT, mediaJobs = between))
+                                val cidNow = convId
+                                if (cidNow != null) withContext(Dispatchers.IO) {
+                                    db.addMessage(cidNow, "assistant", DesktopMediaContract.QUEUED_BEFORE_CARD_TEXT,
+                                        DesktopMediaContract.encodeRefs(between))
+                                }
+                            }
                             pendingCardError = null
                         } else {
                             // Only a successful worker acknowledgement may clear the card.
