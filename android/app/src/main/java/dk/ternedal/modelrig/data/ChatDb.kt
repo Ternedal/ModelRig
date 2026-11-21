@@ -13,7 +13,7 @@ import dk.ternedal.modelrig.logic.RigProfileTokenResolver
  * (streaming deltas are not persisted per-token — an in-flight reply is lost on a
  * crash; accepted V1 tradeoff).
  */
-class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 3) {
+class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, SCHEMA_VERSION) {
 
     data class ConvMeta(
         val id: Long,
@@ -46,7 +46,8 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
                  conv_id INTEGER NOT NULL REFERENCES conversation(id) ON DELETE CASCADE,
                  role TEXT NOT NULL,
                  content TEXT NOT NULL,
-                 created_at INTEGER NOT NULL)""",
+                 created_at INTEGER NOT NULL,
+                 media_jobs TEXT NOT NULL DEFAULT '')""",
         )
         db.execSQL("CREATE INDEX idx_message_conv ON message(conv_id)")
         db.execSQL(PRESET_TABLE_SQL)
@@ -55,7 +56,7 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
 
     override fun onUpgrade(db: SQLiteDatabase, oldV: Int, newV: Int) {
         // v1 -> v2: added the preset table. v2 -> v3: added rig_profile.
-        // Never drops existing data.
+        // message.media_jobs (#2419) is NOT a version step: see ensureMediaJobsColumn.
         if (oldV < 2) db.execSQL(PRESET_TABLE_SQL)
         if (oldV < 3) db.execSQL(RIG_PROFILE_TABLE_SQL)
     }
@@ -63,6 +64,32 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
     override fun onOpen(db: SQLiteDatabase) {
         super.onOpen(db)
         db.execSQL("PRAGMA foreign_keys=ON")
+        ensureMediaJobsColumn(db)
+    }
+
+    /**
+     * #2419: `message.media_jobs` -- the image jobs an assistant turn queued, so the
+     * bubble survives an app restart -- is added here, when it is missing, and **not**
+     * through a schema version bump.
+     *
+     * A bump would make the database unreadable to the app version before it:
+     * SQLiteOpenHelper refuses to open a newer database ("Can't downgrade database
+     * from version 4 to 3"), and that app has no onDowngrade. So trying a build with
+     * media bubbles and going back to the released app -- or an updater rollback to
+     * it -- would crash on every start until the app's data, every stored
+     * conversation, was cleared. Without the bump the older app opens the same file
+     * and never notices the extra column: its INSERT gets the default, its SELECT
+     * names its own columns.
+     */
+    private fun ensureMediaJobsColumn(db: SQLiteDatabase) {
+        if (db.isReadOnly) return
+        val present = db.rawQuery("PRAGMA table_info(message)", null).use { c ->
+            val name = c.getColumnIndex("name")
+            var found = false
+            while (name >= 0 && c.moveToNext()) if (c.getString(name) == "media_jobs") found = true
+            found
+        }
+        if (!present) db.execSQL(MEDIA_JOBS_COLUMN_SQL)
     }
 
     fun newConversation(source: String, model: String, title: String): Long {
@@ -76,7 +103,11 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
         })
     }
 
-    fun addMessage(convId: Long, role: String, content: String) {
+    /**
+     * #2419: [mediaJobs] are the 32-hex ids of image jobs the turn queued; stored
+     * comma-separated, only well-formed ids, so a restart redraws the bubbles.
+     */
+    fun addMessage(convId: Long, role: String, content: String, mediaJobs: List<String> = emptyList()) {
         val now = System.currentTimeMillis()
         val db = writableDatabase
         // If the conversation was deleted mid-send, skip rather than insert an
@@ -90,8 +121,23 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
             put("role", role)
             put("content", content)
             put("created_at", now)
+            put("media_jobs", encodeMediaJobs(mediaJobs))
         })
         db.execSQL("UPDATE conversation SET updated_at=? WHERE id=?", arrayOf(now, convId))
+    }
+
+    /** One stored message with what the bubble needs; [loadMessages] is the text-only view of the same rows. */
+    data class StoredMessage(val role: String, val content: String, val mediaJobs: List<String>)
+
+    fun loadMessagesWithMedia(convId: Long): List<StoredMessage> {
+        val out = mutableListOf<StoredMessage>()
+        readableDatabase.rawQuery(
+            "SELECT role, content, media_jobs FROM message WHERE conv_id=? ORDER BY id ASC",
+            arrayOf(convId.toString()),
+        ).use { c ->
+            while (c.moveToNext()) out.add(StoredMessage(c.getString(0), c.getString(1), decodeMediaJobs(c.getString(2))))
+        }
+        return out
     }
 
     /**
@@ -299,6 +345,21 @@ class ChatDb(context: Context) : SQLiteOpenHelper(context, "modelrig.db", null, 
     }
 
     companion object {
+        /**
+         * The schema version the released app (2.0.21) writes and can open. Raising it
+         * makes every older app version crash on this database; do that only together
+         * with a plan for going back (see [ensureMediaJobsColumn]).
+         */
+        const val SCHEMA_VERSION = 3
+        private const val MEDIA_JOBS_COLUMN_SQL =
+            "ALTER TABLE message ADD COLUMN media_jobs TEXT NOT NULL DEFAULT ''"
+        private val JOB_ID = Regex("^[0-9a-f]{32}$")
+
+        /** Comma-separated, well-formed ids only; anything else is dropped on write. */
+        fun encodeMediaJobs(ids: List<String>): String = ids.filter { JOB_ID.matches(it) }.distinct().joinToString(",")
+
+        fun decodeMediaJobs(stored: String?): List<String> =
+            stored.orEmpty().split(',').filter { JOB_ID.matches(it) }.distinct()
         private const val PRESET_TABLE_SQL =
             """CREATE TABLE IF NOT EXISTS preset(
                  id INTEGER PRIMARY KEY AUTOINCREMENT,

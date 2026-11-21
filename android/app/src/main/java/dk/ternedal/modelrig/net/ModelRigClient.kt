@@ -1093,7 +1093,25 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
         } ?: emptyList(),
         personName = o.optJSONObject("person")?.optString("display_name")?.takeIf { it.isNotBlank() },
         personRevision = o.optJSONObject("person")?.optString("person_revision")?.takeIf { it.isNotBlank() },
+        mediaJobs = parseMediaJobs(o.optJSONArray("media_jobs")),
     )
+
+    /**
+     * #2419: the image jobs the turn queued (`media_jobs`, additive on newer rigs;
+     * absent on older ones -> empty). Only a well-formed reference counts: a 32-hex
+     * job id whose `status_url` is exactly the job route for that id. Anything
+     * else is dropped, never guessed at -- the bubble polls what the rig named.
+     */
+    private fun parseMediaJobs(a: JSONArray?): List<String> {
+        if (a == null) return emptyList()
+        return (0 until a.length()).mapNotNull { i ->
+            val ref = a.optJSONObject(i) ?: return@mapNotNull null
+            val id = ref.optString("job_id")
+            if (!MediaJobContract.isJobId(id)) return@mapNotNull null
+            if (ref.optString("status_url") != MediaJobContract.jobPath(id)) return@mapNotNull null
+            id
+        }.distinct()
+    }
 
     fun ingestPdf(source: String, pdfBytes: ByteArray, chunkSize: Int = 800, overlap: Int = 150): IngestResult {
         val b64 = android.util.Base64.encodeToString(pdfBytes, android.util.Base64.NO_WRAP)
@@ -1278,6 +1296,12 @@ data class ToolTurn(
      */
     val personName: String? = null,
     val personRevision: String? = null,
+    /**
+     * #2419: ids of image jobs this turn queued through `image_generate`. The
+     * app draws one bubble per id and polls `GET /api/v1/media/jobs/{id}`.
+     * Empty on older rigs and on turns without an image.
+     */
+    val mediaJobs: List<String> = emptyList(),
 )
 
 /**
