@@ -300,6 +300,9 @@ o = latest_in([foreign, "f" * 32], mixed)
 check("no_source_image" in o and "img_foreign" not in o and parse_job_reference(o) is None,
       "only foreign or unknown ids: no source -- naming another owner's job id gets nothing")
 
+from app.image_generate_tool import parse_refusal  # noqa: E402
+for code in ("no_source_image", "source_job_not_completed", "source_job_not_found", "source_not_an_image"):
+    check(parse_refusal(vgt._source_refusal(code)) == code, f"a source refusal carries its code for the turn's media_refusals ({code})")
 check(vgt.conversation_image_jobs(None) is None, "context: the field not sent stays None (an older client)")
 check(vgt.conversation_image_jobs([]) == () and vgt.conversation_image_jobs("x") == () and vgt.conversation_image_jobs({"a": 1}) == (),
       "context: an empty or unusable value is 'no pictures', not 'unknown'")
