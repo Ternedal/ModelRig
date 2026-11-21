@@ -69,6 +69,15 @@ from .media_generation_contract import (GenerationCancelled, GenerationError, Ge
 from .media_generation_profiles import ModelProfile, validate_request
 
 MIME = "video/mp4"
+
+
+def _job_cost(request: GenerationRequest) -> int:
+    """How large a job is for the warm VRAM check: pixels x frames. Requests are validated before
+    they get here; anything else is 0, which the supervisor treats as 'do not use the warm path'."""
+    values = (request.width, request.height, request.frames)
+    if any(type(value) is not int or value <= 0 for value in values):
+        return 0
+    return request.width * request.height * request.frames
 COPY_CHUNK = 1024 * 1024
 DRAIN_SECONDS = 30  # how long an interrupted job may take to leave ComfyUI's queue
 _log = logging.getLogger("kaliv.media.comfy")
@@ -245,9 +254,8 @@ class ComfyVideoAdapter:
         try:
             mime = self._render_and_hand_over(request, sink_file, before, owned, should_cancel, source_png, staged)
             handed_over = True
-            note_idle = getattr(self.supervisor, "note_idle", None)
-            if callable(note_idle):
-                note_idle()  # the baseline for the next job's VRAM check; never raises
+            # This job succeeded at this size: the proof the next job's VRAM check may lean on.
+            self.supervisor.note_idle(_job_cost(request))  # never raises
             return mime
         finally:
             if (handed_over or self._sink_failed) and self._holding is not None:
@@ -321,7 +329,7 @@ class ComfyVideoAdapter:
                               owned: list, should_cancel: Callable[[], bool] | None = None,
                               source_png: bytes | None = None, staged: list | None = None) -> str:
         try:
-            if not self._version_ok(self.supervisor.check_budget()):
+            if not self._version_ok(self.supervisor.check_budget(_job_cost(request))):
                 raise GenerationError("comfyui_version_mismatch: ComfyUI version does not match the profile pin")
             self._weights_still_verified()
             if not self.supervisor.queue_is_empty():
