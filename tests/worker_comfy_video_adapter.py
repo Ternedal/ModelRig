@@ -65,6 +65,27 @@ def request(**overrides) -> GenerationRequest:
 
 
 class TemplateTests(unittest.TestCase):
+    def test_the_templates_that_ran_on_the_rig_are_the_ones_in_the_repository(self):
+        # docs/MEDIA_VIDEO_RIG_QUALIFICATION.md §7: byte for byte what ran on 21 November 2026.
+        folder = ROOT / "deploy" / "media" / "comfy-templates"
+        cases = {
+            "wan21-t2v-1p3b.json": ("4cd0d604b4728159eb351f84992819eaf2730bad7b4187889697e2020b798369", "text_to_video",
+                                    ["diffusion_models/wan2.1_t2v_1.3B_fp16.safetensors",
+                                     "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "vae/wan_2.1_vae.safetensors"]),
+            "wan22-ti2v-5b.json": ("62402da4ec636592c416cc05e7a8bd81be5baa9b205a403ebaae752ebe58e4d5", "image_to_video",
+                                   ["diffusion_models/wan2.2_ti2v_5B_fp16.safetensors",
+                                    "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "vae/wan2.2_vae.safetensors"]),
+        }
+        self.assertEqual(sorted(p.name for p in folder.glob("*.json")), sorted(cases))
+        for name, (sha, task, pins) in cases.items():
+            with self.subTest(name):
+                template = load_template((folder / name).read_bytes(), sha, pinned_files=pins)
+                self.assertEqual(template.task, task)
+                save = [n["inputs"] for n in template.graph.values() if n["class_type"] == "SaveVideo"]
+                self.assertEqual(len(save), 1)
+                self.assertEqual((save[0]["format"], save[0]["format.codec"]), ("mp4", "h264"))
+                self.assertNotIn("/", save[0]["filename_prefix"], "one plain .mp4 in the output root")
+
     def test_a_pinned_template_may_only_load_pinned_model_files(self):
         load_template(raw(), sha(raw()), pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors"])
         with self.assertRaisesRegex(GenerationError, "not pinned"):

@@ -253,7 +253,9 @@ class MediaExecutor:
                     released = adapter.close() is True
                 except Exception:
                     released = False
-                self.events.append(f"failed_load:{profile.profile_id}:{released}")
+                # The reason as a code (rig 21/11: a refused ComfyUI start was readable nowhere).
+                self.events.append(f"failed_load:{profile.profile_id}:{released}:{_event_code(exc)}")
+                self._reported = exc  # the job's own handler does not report it a second time
                 if not released:
                     self._retained.append(adapter)
                     raise GpuResourcesRetained("a failed load did not prove its release; the executor must exit") from exc
@@ -460,9 +462,13 @@ class MediaExecutor:
                 self._claim_not_before = self.clock() + VRAM_RETRY_S
                 return "deferred"
             return "failed" if outcome == "expired" else outcome
-        except Exception:
+        except Exception as exc:
             self.last_used = self.clock()
             # Never persist exception text. After the commit point it is a publication failure.
+            # The diagnostics stream gets the reason as a code, like every other event.
+            if exc is not getattr(self, "_reported", None):
+                self.events.append(f"job_error:{job_id}:{_event_code(exc)}")
+            self._reported = None
             self.store.fail(job_id, self.instance, PUBLICATION_FAILED if publishing else FAILED)
             return "failed"
         # The artifact is durable. If its completion cannot be recorded, the job stays publishing

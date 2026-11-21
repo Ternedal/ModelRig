@@ -527,7 +527,7 @@ class ExecutorTests(unittest.TestCase):
         self.assertEqual(ex.step(), "failed")
         self.assertEqual(self.state(job)["error"], "generation_failed")
         self.assertTrue(lease_free(GPU_A, self.lease_dir), "close() released what load() took")
-        self.assertEqual(ex.events[-2], "failed_load:sdxl-a:True")
+        self.assertEqual(ex.events[-2], "failed_load:sdxl-a:True:RuntimeError")
         self.assertTrue(ex.events[-1].startswith("job:") and ":sdxl-a:failed:" in ex.events[-1])
 
     def test_a_failed_load_without_proven_release_is_fatal_and_nothing_more_is_claimed(self):
@@ -1144,7 +1144,7 @@ class VideoExecutorTests(unittest.TestCase):
         self.assertEqual(ex.step(), "failed")
         self.assertEqual(self.store.get(job, "anders")["error"], "generation_failed")
         self.assertIsNone(ex.adapter)
-        self.assertIn("failed_load:wan-t2v:True", ex.events, "close() proved the stop, so it continues")
+        self.assertIn("failed_load:wan-t2v:True:comfyui_version_mismatch", ex.events, "close() proved the stop, so it continues")
         self.assertEqual(ex.step(), "idle")
 
     def test_video_adoption_is_job_keyed_when_the_staged_sink_offers_it(self):
