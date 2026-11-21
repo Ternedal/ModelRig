@@ -47,8 +47,10 @@ sit eget worktree.
    med ca. 4 GB ledigt, er ikke forklaret — gem dens output (1.2), så det kan læses.
    Mulighederne står i 1.7. Med #2470 (i integrationsgrenen) skriver executoren, hvad
    adgangsproben målte: efter første job, læs
-   `Select-String 'gpu_budget|vram_short' "$env:TEMP\media-executor.log"` og sammenlign
-   `free_mib` med `nvidia-smi`. Er de uenige, er det forklaringen.
+   `Select-String 'gpu_budget|vram_short' "$env:TEMP\media-executor.log"`. Linjen har
+   både probens `free_mib` og `nvidia-smi`'s `smi_used_mib` fra samme øjeblik. Giver de
+   to ikke tilsammen cirka `total_mib`, ser proben ikke Ollamas forbrug, og det er
+   forklaringen.
 2. **Kalder modellen værktøjet?** Om `qwen3:14b` pålideligt vælger
    `image_generate` på en dansk bøn, er en egenskab ved modellen og systemreglen,
    ikke noget der kan rettes på riggen. Mål raten; justér ikke undervejs.
