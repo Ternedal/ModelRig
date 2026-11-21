@@ -126,4 +126,29 @@ class VideoExportTest {
         assertEquals("Videoen kunne ikke hentes fra riggen", VideoExport.copyFailureText(IOException("boom")))
         assertEquals("Videoen kunne ikke hentes fra riggen", VideoExport.copyFailureText(null))
     }
+
+    /** Rig 21/11: turned sideways, the full-screen clip was cropped top and bottom. */
+    @Test
+    fun the_full_screen_clip_fits_inside_the_screen_in_both_orientations() {
+        val wide = 832f / 480f
+        // portrait 411 x 891 dp: the width runs out first
+        assertEquals(411f to 411f / wide, VideoViewer.fit(wide, 411f, 891f))
+        assertEquals(411f to 411f, VideoViewer.fit(1f, 411f, 891f))
+        // landscape 891 x 411 dp: the height runs out first -- before, the clip was 514 and 891 dp tall
+        assertEquals(411f * wide to 411f, VideoViewer.fit(wide, 891f, 411f))
+        assertEquals(411f to 411f, VideoViewer.fit(1f, 891f, 411f))
+        for ((aspect, w, h) in listOf(Triple(wide, 891f, 411f), Triple(1f, 891f, 411f), Triple(9f / 16f, 891f, 411f),
+                                      Triple(wide, 411f, 891f), Triple(9f / 16f, 411f, 891f))) {
+            val (width, height) = VideoViewer.fit(aspect, w, h)
+            assertTrue("inside the screen", width <= w + 0.01f && height <= h + 0.01f)
+            assertEquals("the clip's own shape", aspect, width / height, 0.001f)
+            assertTrue("touches one side", width >= w - 0.01f || height >= h - 0.01f)
+        }
+        // nothing to lay out is nothing, never a division by zero
+        for (bad in listOf(0f, -1f, Float.NaN, Float.POSITIVE_INFINITY)) {
+            assertEquals(0f to 0f, VideoViewer.fit(bad, 411f, 891f))
+        }
+        assertEquals(0f to 0f, VideoViewer.fit(wide, 0f, 891f))
+        assertEquals(0f to 0f, VideoViewer.fit(wide, 411f, Float.NaN))
+    }
 }
