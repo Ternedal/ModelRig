@@ -1574,6 +1574,8 @@ private fun ChatScreen(
         val sys = (if (useCloud) store.cloudSystem else store.rigSystem).trim()
         val convo = messages.filter { !it.error }.map { it.role to it.text }
         val history = trimHistory(sys, convo)
+        // The pictures this conversation holds, for the rig's "det billede" (#2459).
+        val pictureJobs = dk.ternedal.modelrig.ui.chat.MediaTurnJobs.pictures(messages.map { it.mediaJobs })
         val idx = messages.size
         messages.add(Msg("assistant", "", streaming = true, status = TurnStatus.forPlan(turnPlan)))
         val rigModel = currentModel
@@ -1703,6 +1705,7 @@ private fun ChatScreen(
                                     system = sys,
                                     registerCall = hook,
                                     onPhase = onPhase,
+                                    conversationImageJobs = pictureJobs,
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.context.isNotEmpty()) onContext(turn.context)
@@ -1809,6 +1812,9 @@ private fun ChatScreen(
         val sys = (if (useCloud) store.cloudSystem else store.rigSystem).trim()
         val convo = messages.filterIndexed { idx2, mm -> idx2 != i && !mm.error }.map { it.role to it.text }
         val history = trimHistory(sys, convo)
+        val pictureJobs = dk.ternedal.modelrig.ui.chat.MediaTurnJobs.pictures(
+            messages.filterIndexed { idx2, _ -> idx2 != i }.map { it.mediaJobs },
+        )
         val rigModel = currentModel
         val cModel = cloudModel
         val srcFilter = ragSourceFilter
@@ -1867,6 +1873,7 @@ private fun ChatScreen(
                                     system = sys,
                                     registerCall = hook,
                                     onPhase = onPhase,
+                                    conversationImageJobs = pictureJobs,
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.context.isNotEmpty()) onContext(turn.context)

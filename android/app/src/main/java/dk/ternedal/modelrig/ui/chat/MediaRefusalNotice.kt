@@ -42,4 +42,19 @@ object MediaTurnJobs {
      */
     fun across(before: List<MediaJobRef>, after: List<MediaJobRef>): List<MediaJobRef> =
         (before + after).distinctBy { it.jobId }
+
+    /** At most this many picture ids ride on a turn; the rig keeps the newest of them anyway. */
+    const val MAX_PICTURES = 32
+
+    /**
+     * The image jobs a conversation holds, oldest first, for the turn's `conversation_image_jobs`:
+     * every picture reference of every message in order, a repeat at its latest place, the
+     * newest [MAX_PICTURES]. Clips are not pictures and are left out.
+     */
+    fun pictures(messages: List<List<MediaJobRef>>): List<String> =
+        messages.flatten()
+            .filter { it.kind == MediaJobRef.Kind.IMAGE }
+            .map { it.jobId }
+            .asReversed().distinct().asReversed()
+            .takeLast(MAX_PICTURES)
 }
