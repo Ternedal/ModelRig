@@ -45,7 +45,10 @@ sit eget worktree.
    Prisen faldt på chatten: en tur med værktøj tog 13–16 s uden resident billedmodel
    og 37–59 s med (kontrol uden værktøj: 5–6 s). Hvorfor executoren lod jobbet starte
    med ca. 4 GB ledigt, er ikke forklaret — gem dens output (1.2), så det kan læses.
-   Mulighederne står i 1.7.
+   Mulighederne står i 1.7. Med #2470 (i integrationsgrenen) skriver executoren, hvad
+   adgangsproben målte: efter første job, læs
+   `Select-String 'gpu_budget|vram_short' "$env:TEMP\media-executor.log"` og sammenlign
+   `free_mib` med `nvidia-smi`. Er de uenige, er det forklaringen.
 2. **Kalder modellen værktøjet?** Om `qwen3:14b` pålideligt vælger
    `image_generate` på en dansk bøn, er en egenskab ved modellen og systemreglen,
    ikke noget der kan rettes på riggen. Mål raten; justér ikke undervejs.
