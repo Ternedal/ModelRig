@@ -48,7 +48,7 @@ sit eget worktree.
    Mulighederne står i 1.7. Med #2470 (i integrationsgrenen) skriver executoren, hvad
    adgangsproben målte: efter første job, læs
    `Select-String 'gpu_budget|vram_short' "$env:TEMP\media-executor.log"`. Linjen har
-   både probens `free_mib` og `nvidia-smi`'s `smi_used_mib` fra samme øjeblik. Giver de
+   både probens `free_mib` og NVML's `nvml_used_mib` fra samme øjeblik (mangler feltet, så brug probens `vram_before_mib` for første job). Giver de
    to ikke tilsammen cirka `total_mib`, ser proben ikke Ollamas forbrug, og det er
    forklaringen.
 2. **Kalder modellen værktøjet?** Om `qwen3:14b` pålideligt vælger
