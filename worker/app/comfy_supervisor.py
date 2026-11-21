@@ -63,6 +63,7 @@ RESIDENT_LAUNCHER = Path(__file__).resolve().with_name("comfy_resident_launcher.
 
 _WINDOWS = os.name == "nt"
 MAX_LOG_BYTES = 8 * 1024 * 1024
+WARM_SLACK_BYTES = 512 * 1024 * 1024  # how much lower than its own idle reading a warm ComfyUI may read
 
 LOOPBACK = "127.0.0.1"
 MAX_RESPONSE_BYTES = 1024 * 1024
@@ -182,14 +183,16 @@ def port_answers(port: int, timeout_s: float = 0.5) -> bool:
 
 
 def parse_vram_budget(stats: object, *, reserve_gib: float, min_usable_gib: float,
-                      count_own: bool = False) -> VramBudget:
+                      idle_free_bytes: int | None = None) -> VramBudget:
     """Fail-closed reading of /system_stats: one CUDA device with enough free VRAM.
 
-    count_own: the check before a job on a ComfyUI that is already running. What ComfyUI's own
-    process holds (``torch_vram_total``: models kept from the job before) is not taken by
-    anybody else -- ComfyUI reuses or evicts it -- so it counts as free. Rig 21/11: without it
-    the second job on a warm ComfyUI always read as a shortage, and ComfyUI was closed and
-    started again for every clip. A missing or impossible figure counts as nothing held.
+    idle_free_bytes: what this same ComfyUI reported free when its last job had finished. A warm
+    ComfyUI keeps its models, so its own reading is low without anybody else having taken
+    anything. Rig 21/11: idle after a clip it reported 5.2 GiB free of 12 (torch_vram_total 64 MiB:
+    the models are not in torch's own figure), every second job read as a shortage, and ComfyUI
+    was closed and started again for every clip. If the reading is no lower than it was then
+    (within WARM_SLACK_BYTES), nothing outside has taken memory since a job last ran in it, and
+    that is enough. Lower than that is a shortage as before.
     """
     devices = stats.get("devices") if isinstance(stats, dict) else None
     if not isinstance(devices, list) or len(devices) != 1 or not isinstance(devices[0], dict):
@@ -200,13 +203,11 @@ def parse_vram_budget(stats: object, *, reserve_gib: float, min_usable_gib: floa
     total, free = device.get("vram_total"), device.get("vram_free")
     if type(total) is not int or type(free) is not int or not 0 <= free <= total or total == 0:
         raise ComfySupervisorError("ComfyUI reported unusable VRAM figures")
-    if count_own:
-        own = device.get("torch_vram_total")
-        if type(own) is int and 0 <= own <= total:
-            free = min(total, free + own)
     usable = max(0, free - int(reserve_gib * GIB))
     if usable < int(min_usable_gib * GIB):
-        raise ComfyVramShortage("insufficient free VRAM after reservation")
+        warm = type(idle_free_bytes) is int and 0 < idle_free_bytes <= total
+        if not warm or free + WARM_SLACK_BYTES < idle_free_bytes:
+            raise ComfyVramShortage("insufficient free VRAM after reservation")
     name = device.get("name")
     system = stats.get("system")
     version = system.get("comfyui_version") if isinstance(system, dict) else None
@@ -240,6 +241,7 @@ class ComfySupervisor:
             raise ComfySupervisorError("a verified private work area is required (no default folder)")
         self.work_area = work_area
         self._lease: GpuLease | None = None
+        self._idle_free_bytes: int | None = None  # see note_idle(); cleared with every start and stop
         self._proc: subprocess.Popen | None = None
         self._token = secrets.token_hex(16)
         self._job_lock = threading.Lock()
@@ -321,6 +323,7 @@ class ComfySupervisor:
         resident = resident_lock_path(self.gpu_uuid, lease_dir=self.lease_dir)
         argv = self.launch.argv(str(resident))
         self.require_work_area()  # before the lease: no ComfyUI outside the private work area
+        self._idle_free_bytes = None
         self._token = secrets.token_hex(16)  # fresh per start
         self._proof = Path(str(resident) + ".proof")
         lease = acquire_gpu_lease(self.gpu_uuid, lease_dir=self.lease_dir)
@@ -401,7 +404,22 @@ class ComfySupervisor:
         except (OSError, ValueError) as exc:
             raise ComfySupervisorError("ComfyUI /system_stats unavailable") from exc
         return parse_vram_budget(stats, reserve_gib=self.reserve_gib, min_usable_gib=self.min_usable_gib,
-                                 count_own=True)
+                                 idle_free_bytes=self._idle_free_bytes)
+
+    def note_idle(self) -> None:
+        """Called when a job has finished: remember what this ComfyUI reports free while it keeps
+        its models, for the check before the next job. Never raises; an unreadable figure leaves
+        the strict check in place."""
+        self._idle_free_bytes = None
+        if not self.running:
+            return
+        try:
+            stats = _get_json(self.port, "/system_stats", timeout_s=5.0)
+            free = stats["devices"][0]["vram_free"]
+        except (OSError, ValueError, ComfySupervisorError, KeyError, IndexError, TypeError):
+            return
+        if type(free) is int and free > 0:
+            self._idle_free_bytes = free
 
     # --- the ComfyUI API the adapter needs; HTTP stays in this module -------
     def _api(self, path: str, *, method: str = "GET", payload: object | None = None,
@@ -445,6 +463,7 @@ class ComfySupervisor:
 
     def stop(self) -> None:
         """Interrupt, terminate, kill. The lease is released only after ComfyUI has exited."""
+        self._idle_free_bytes = None
         proc = self._proc
         if proc is not None and proc.poll() is None:
             try:

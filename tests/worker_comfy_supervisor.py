@@ -362,6 +362,23 @@ time.sleep(120)
             self.supervisor().start()
         self.assertEqual(_event_code(caught.exception), "resident_proof_mismatch")
 
+    def test_the_idle_reading_is_taken_after_a_job_and_dropped_with_the_process(self):
+        sup = self.supervisor()
+        sup.start()
+        self.assertIsNone(sup._idle_free_bytes)
+        sup.note_idle()
+        self.assertEqual(sup._idle_free_bytes, 20 * GIB, "what the fake reports free")
+        Path(self.state, "vram_free_gib").write_text("5")
+        sup.note_idle()
+        sup.check_budget()  # 5 GiB free is a shortage at a start, not for this warm ComfyUI
+        Path(self.state, "vram_free_gib").write_text("3")
+        with self.assertRaisesRegex(ComfySupervisorError, "insufficient"):
+            sup.check_budget()  # 2 GiB lower than its own idle reading: somebody took it
+        sup.stop()
+        self.assertIsNone(sup._idle_free_bytes, "a stopped ComfyUI holds nothing")
+        sup.note_idle()  # not running: no reading, no error
+        self.assertIsNone(sup._idle_free_bytes)
+
     def test_ready_deadline(self):
         self._assert_start_fails_and_cleans_up(
             self.supervisor(fake={"FAKE_COMFY_STARTUP_DELAY": "30"}, ready_timeout_s=1), "deadline")
@@ -645,26 +662,23 @@ class VramParsingTests(unittest.TestCase):
                 with self.assertRaisesRegex(ComfySupervisorError, "unusable VRAM"):
                     parse_vram_budget(cases[label], reserve_gib=2, min_usable_gib=8)
 
-    def test_a_warm_comfyui_counts_what_it_holds_itself(self):
-        # Rig 21/11: after a clip the model stays in ComfyUI's own process; the next job read that
-        # as "taken" and ComfyUI was restarted for every clip (vram_short -> closed -> loaded).
-        warm = self.stats(vram_free=3 * GIB, torch_vram_total=9 * GIB, vram_total=12 * GIB)
+    def test_a_warm_comfyui_is_measured_against_its_own_idle_reading(self):
+        # Rig 21/11: idle after a clip ComfyUI reported 5.2 GiB free of 12 (its models are not in
+        # torch_vram_total either), so the next job read as a shortage and ComfyUI was restarted.
+        MIB = 1024 * 1024
+        warm = self.stats(vram_free=5205 * MIB, vram_total=12288 * MIB, torch_vram_total=64 * MIB)
         with self.assertRaisesRegex(ComfyVramShortage, "insufficient"):
-            parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8)  # at start: nothing may be held
-        self.assertEqual(parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8, count_own=True).usable_bytes, 11 * GIB)
-        # what another process holds is still a shortage
-        taken = self.stats(vram_free=3 * GIB, torch_vram_total=1 * GIB, vram_total=12 * GIB)
+            parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8)  # a start: nothing may be held
+        budget = parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8, idle_free_bytes=5205 * MIB)
+        self.assertEqual(budget.free_bytes, 5205 * MIB, "accepted, and the figures are reported as read")
+        parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8, idle_free_bytes=5493 * MIB)  # within the slack
+        # somebody else took memory since: lower than its own idle reading by more than the slack
         with self.assertRaisesRegex(ComfyVramShortage, "insufficient"):
-            parse_vram_budget(taken, reserve_gib=1, min_usable_gib=8, count_own=True)
-        # never more than the card, and a missing or impossible figure counts as nothing
-        over = self.stats(vram_free=8 * GIB, torch_vram_total=9 * GIB, vram_total=12 * GIB)
-        self.assertEqual(parse_vram_budget(over, reserve_gib=1, min_usable_gib=8, count_own=True).free_bytes, 12 * GIB)
-        for bad in (None, True, -1, 13 * GIB, 9.0 * GIB, "9"):
-            stats = self.stats(vram_free=3 * GIB, vram_total=12 * GIB)
-            if bad is not None:
-                stats["devices"][0]["torch_vram_total"] = bad
+            parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8, idle_free_bytes=5205 * MIB + supervisor_module.WARM_SLACK_BYTES + 1)
+        # a baseline that is no reading at all changes nothing
+        for bad in (None, 0, -1, True, 5205.0 * MIB, 12289 * MIB, "5205"):
             with self.subTest(bad=bad), self.assertRaisesRegex(ComfyVramShortage, "insufficient"):
-                parse_vram_budget(stats, reserve_gib=1, min_usable_gib=8, count_own=True)
+                parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8, idle_free_bytes=bad)
 
     def test_edge_exactly_enough(self):
         self.assertEqual(parse_vram_budget(self.stats(vram_free=10 * GIB), reserve_gib=2,
