@@ -309,6 +309,29 @@ class AdapterTests(unittest.TestCase):
         adapter.close()
         self.assertTrue(self.lease_is_free())
 
+    def test_a_warm_comfyui_takes_the_next_job_without_a_restart(self):
+        # Rig 21/11: a ComfyUI that keeps its models reports 5 of 12 GiB free; the next job read
+        # that as a shortage and ComfyUI was closed and started again for every clip.
+        from app.comfy_supervisor import ComfyVramShortage
+        adapter = self.adapter()
+        adapter.load()
+        pid = adapter.supervisor.pid
+        self.assertIsNone(adapter.supervisor._idle_free_bytes)
+        Path(self.state, "vram_free_gib").write_text("5")  # what the fake reports from now on
+        with self.assertRaises(ComfyVramShortage):
+            adapter.render_to(request(), io.BytesIO())  # no job has finished in it yet: strict
+        Path(self.state, "vram_free_gib").unlink()
+        self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
+        self.assertIsNotNone(adapter.supervisor._idle_free_bytes, "the reading is taken when the job has finished")
+        Path(self.state, "vram_free_gib").write_text("5")
+        adapter.supervisor.note_idle()  # as after a job whose models stayed loaded
+        self.assertEqual(adapter.render_to(request(seed=8), io.BytesIO()), "video/mp4")
+        self.assertEqual(adapter.supervisor.pid, pid, "the same ComfyUI rendered both")
+        Path(self.state, "vram_free_gib").write_text("3")  # somebody else took 2 GiB since
+        with self.assertRaises(ComfyVramShortage):
+            adapter.render_to(request(seed=9), io.BytesIO())
+        adapter.close()
+
     def test_end_to_end_into_a_staged_sink(self):
         """The #2296 seam: with sink.staged(".mp4") as out: mime = render_to(req, out); sink.adopt(out, mime)."""
         from worker_staged_sink_conformance import ReferenceSink
