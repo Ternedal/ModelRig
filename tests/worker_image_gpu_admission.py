@@ -54,6 +54,22 @@ class ImageGpuAdmissionTests(unittest.TestCase):
                 inspect_cuda_budget(0, reserve_gib=1, min_usable_gib=8)
             self.assertNotIsInstance(caught.exception, GpuMemoryShortage, "a missing GPU is not a wait")
 
+    def test_a_shortage_carries_what_the_probe_measured_and_a_budget_reads_as_mib(self):
+        # Rig 20/11: a job started on a card another process held 8 GB of, and nothing said what
+        # the probe had seen. The numbers ride on the result and on the refusal.
+        from app.image_gpu_admission import GpuBudget, GpuMemoryShortage, budget_detail
+        with patch.dict(sys.modules, {"torch": self._torch(free_gib=4)}), self.assertRaises(GpuMemoryShortage) as caught:
+            inspect_cuda_budget(1, reserve_gib=1, min_usable_gib=8)
+        self.assertEqual(budget_detail(caught.exception.budget),
+                         "cuda1,free_mib=4096,reserved_mib=1024,usable_mib=3072,total_mib=12288")
+        with patch.dict(sys.modules, {"torch": self._torch(free_gib=11)}):
+            admitted = inspect_cuda_budget(1, reserve_gib=1, min_usable_gib=8)
+        self.assertEqual(budget_detail(admitted), "cuda1,free_mib=11264,reserved_mib=1024,usable_mib=10240,total_mib=12288")
+        self.assertIsNone(GpuMemoryShortage("insufficient free VRAM after reservation").budget, "a bare shortage still works")
+        for not_a_budget in (None, object(), "cuda1", {"free_bytes": 1}, unittest.mock.MagicMock()):
+            self.assertIsNone(budget_detail(not_a_budget))
+        self.assertIsInstance(admitted, GpuBudget)
+
     def test_rejects_missing_gpu(self):
         with patch.dict(sys.modules, {"torch": self._torch(11, count=1)}):
             with self.assertRaises(ImageGpuAdmissionError):

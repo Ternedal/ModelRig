@@ -65,7 +65,7 @@ from typing import Callable, Mapping
 from .comfy_supervisor import ComfyVramShortage
 from .diffusers_image_adapter import GpuResourcesRetained
 from .gpu_lease import ExecutorAlreadyRunning, GpuBusy, acquire_executor_lock, normalize_gpu_uuid
-from .image_gpu_admission import GpuMemoryShortage
+from .image_gpu_admission import GpuMemoryShortage, budget_detail
 from .image_job_store import ImageJobStore
 from .media_generation_contract import (ArtifactSink, ArtifactSinkUnavailable, GenerationCancelled, GenerationError,
                                         GenerationRequest, JobKeyedArtifactSink, JobKeyedStagedSink,
@@ -260,7 +260,19 @@ class MediaExecutor:
                 raise  # released: GpuBusy -> "gpu_busy", anything else -> "generation_failed"
             self.adapter = adapter
             self.events.append(f"loaded:{profile.profile_id}")
+            self._budget_event("admitted", getattr(adapter, "admitted_budget", None))
         return self.adapter
+
+    def _budget_event(self, verdict: str, budget: object) -> None:
+        """What the admission probe measured, as one diagnostics event: ``gpu_budget:admitted,cuda1,
+        free_mib=…``. Only for an adapter that measures (the in-process image adapter); never
+        required, never able to fail a job."""
+        try:
+            detail = budget_detail(budget)
+        except Exception:
+            detail = None
+        if detail is not None:
+            self.events.append(f"gpu_budget:{verdict},{detail}")
 
     def maybe_unload_idle(self) -> None:
         if self.adapter is not None and self.clock() - self.last_used >= self.idle_unload_s:
@@ -432,9 +444,10 @@ class MediaExecutor:
         except GpuBusy:
             self.store.fail(job_id, self.instance, GPU_BUSY)
             return "failed"
-        except _VRAM_SHORTAGE:  # before anything was submitted; a failed load proved its release
+        except _VRAM_SHORTAGE as shortage:  # before anything was submitted; a failed load proved its release
             outcome = self.store.defer(job_id, self.instance, max_wait_s=VRAM_MAX_WAIT_S, error=GPU_UNAVAILABLE)
             self.events.append(f"vram_short:{outcome}")
+            self._budget_event("short", getattr(shortage, "budget", None))
             if self.adapter is not None:
                 # The shortage came from a resident model's pre-job check: chat first means media
                 # gives the GPU back while it waits, not only when idle_unload_s expires (which
