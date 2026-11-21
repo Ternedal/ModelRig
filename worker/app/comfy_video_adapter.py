@@ -245,6 +245,9 @@ class ComfyVideoAdapter:
         try:
             mime = self._render_and_hand_over(request, sink_file, before, owned, should_cancel, source_png, staged)
             handed_over = True
+            note_idle = getattr(self.supervisor, "note_idle", None)
+            if callable(note_idle):
+                note_idle()  # the baseline for the next job's VRAM check; never raises
             return mime
         finally:
             if (handed_over or self._sink_failed) and self._holding is not None:
