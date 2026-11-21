@@ -138,14 +138,19 @@ VIDEO_GENERATE_CAPABILITY = Tool(
 )
 
 SYSTEM_RULE = (
+    # Rig 21/11: with a Danish persona in force qwen3:14b read "lav en video af en papirbåd"
+    # as "make a picture, then animate it" (image_generate 5 of 6 times). The old rule gave
+    # 'lav en video af det billede' as its only example of the source argument. The rule now
+    # says that words alone need no picture; measured 4/4 text and 4/4 picture afterwards.
     "When the user asks for a video, a clip or an animation (Danish: 'video', 'klip', "
-    "'lav en video af', 'animer'), call video_generate with an English, concrete prompt "
-    "that has one subject and one motion; then tell the user the clip is on its way in "
-    "this conversation and that it takes a few minutes. Never describe it as finished. "
-    "To animate a picture made earlier ('lav en video af det billede'), pass "
-    "source_image_job_id='latest'; describe only the motion in the prompt. If the tool "
-    "answers that there is no finished picture, or that the picture is not finished yet, "
-    "say so instead of inventing one."
+    "'lav en video af', 'animer'), call video_generate -- and only video_generate: a video of "
+    "something described in words needs no picture first, so do NOT call image_generate for it. "
+    "Use an English, concrete prompt that has one subject and one motion; then tell the user the "
+    "clip is on its way in this conversation and that it takes a few minutes. Never describe it "
+    "as finished. Only when the user points at a picture that already exists in this conversation "
+    "('det billede', 'billedet', 'animer den') pass source_image_job_id='latest' and describe only "
+    "the motion. If the tool answers that there is no finished picture, or that the picture is not "
+    "finished yet, say so instead of inventing one."
 )
 
 
