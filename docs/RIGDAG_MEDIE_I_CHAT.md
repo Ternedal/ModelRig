@@ -45,6 +45,11 @@ sit eget worktree.
    Prisen faldt på chatten: en tur med værktøj tog 13–16 s uden resident billedmodel
    og 37–59 s med (kontrol uden værktøj: 5–6 s). Hvorfor executoren lod jobbet starte
    med ca. 4 GB ledigt, er ikke forklaret — gem dens output (1.2), så det kan læses.
+   **Forklaret 21/11:** `gpu_budget:admitted,cuda1,free_mib=11255,…total_mib=12287`,
+   mens `nvidia-smi` viste 8149 MiB brugt på samme kort. Adgangsproben
+   (`torch.cuda.mem_get_info`) ser ikke Ollamas forbrug under Windows' WDDM-model, så
+   "chat først"-reglen er reelt ude af kraft på riggen. Jobbene tog i virkeligheden
+   49–66 s (executorens egen tid); de 15–20 s ovenfor var probens ventetid efter turen.
    Mulighederne står i 1.7. Med #2470 (i integrationsgrenen) skriver executoren, hvad
    adgangsproben målte: efter første job, læs
    `Select-String 'gpu_budget|vram_short' "$env:TEMP\media-executor.log"`. Linjen har
@@ -211,43 +216,42 @@ workeren i et `cmd /k`-vindue], så kopiér linjen derfra, hvis den skal med hje
 i env-filen, genstart vindue A, gentag 1.3: `image_generate` må ikke stå på
 listen, og 1.4 skal give et rent tekstsvar. Sæt den tilbage til 1 bagefter.
 
-**1.7 Chat og billeder på hvert sit kort** — valgfri, og **din afgørelse**: det ændrer
-riggens Ollama-opsætning, ikke repoet, og dermed hvad V1-kandidaten kører på.
+**1.7 Chat og billeder på hvert sit kort** — **din afgørelse**: det ændrer riggens
+Ollama-opsætning, ikke repoet, og dermed hvad V1-kandidaten kører på.
 
-Målet er `qwen3:14b` på GPU 0 alene og GPU 1 fri til medie. Det kræver en mindre
-kontekst end 40960, ellers kan modellen ikke være på ét 12 GB-kort.
-[antagelse: Ollama på riggen læser `OLLAMA_CONTEXT_LENGTH` og `CUDA_VISIBLE_DEVICES`
-fra brugerens miljø og skal genstartes fra bakken; ikke afprøvet på riggen]
+**Målt 21/11** (integration @ `dc31b9a8`, `--suite conversation --stream`, Ollama 0.40.16):
 
-```powershell
-nvidia-smi --query-gpu=index,uuid,memory.used --format=csv,noheader
-[Environment]::GetEnvironmentVariable('OLLAMA_CONTEXT_LENGTH','User'); [Environment]::GetEnvironmentVariable('CUDA_VISIBLE_DEVICES','User')
-```
+| | Delt (riggens opsætning) | Adskilt |
+|---|---|---|
+| `qwen3:14b` | 17 GB over begge kort, context 40960 | 10 GB på GPU 0, context 8192, 100 % GPU |
+| GPU 1 før første job | 8149 MiB | 128 MiB |
+| Tur med værktøj (median) | 42,3 s | 11,1 s |
+| Besked → færdigt billede, ca. | 60 s | 30 s |
 
-Notér de to nuværende værdier (tomme = ikke sat). Sæt derefter, med UUID'en for GPU 0:
+Tre ting, målingen viste, og som en tidligere udgave af dette trin havde forkert:
 
-```powershell
-[Environment]::SetEnvironmentVariable('CUDA_VISIBLE_DEVICES','<GPU-uuid for index 0>','User')
-[Environment]::SetEnvironmentVariable('OLLAMA_CONTEXT_LENGTH','16384','User')
-```
+- Riggen har `OLLAMA_SCHED_SPREAD=true`: det er derfor, modellen ligger over begge kort.
+- `CUDA_VISIBLE_DEVICES` alene er ikke nok. Med `OLLAMA_VULKAN=true` ser Ollama stadig
+  det andet kort via Vulkan.
+- Context 16384 kan ikke være på GPU 0 alene (13 % CPU; skærmen bruger ca. 1,4 GB).
+  8192 kan.
 
-Afslut Ollama fra bakken, start den igen, og mål:
-
-```powershell
-ollama run qwen3:14b "hej" *> $null; ollama ps; nvidia-smi --query-gpu=index,memory.used --format=csv,noheader
-python scripts\media_chat_probe.py --suite conversation --rounds 2 --report "$env:TEMP\media-chat-split.json"
-```
-
-Bestået, når `ollama ps` viser 100% GPU, GPU 1 står på ca. 0 MiB før første job, og
-median tur falder mærkbart fra de ca. 45 s. Viser `ollama ps` en CPU-andel, er
-konteksten stadig for stor til ét kort: prøv 8192. Tilbage til før:
+Variablerne sættes **kun for ét Ollama-vindue**, aldrig på brugerniveau:
+`CUDA_VISIBLE_DEVICES` på brugerniveau ville også ramme executoren, som skal bruge GPU 1.
 
 ```powershell
-[Environment]::SetEnvironmentVariable('CUDA_VISIBLE_DEVICES',$null,'User'); [Environment]::SetEnvironmentVariable('OLLAMA_CONTEXT_LENGTH',$null,'User')
+Get-Process ollama* -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3
+$env:CUDA_VISIBLE_DEVICES = ((nvidia-smi --query-gpu=index,uuid --format=csv,noheader | Where-Object { $_ -match '^0,' }) -replace '^0,\s*','').Trim()
+$env:OLLAMA_SCHED_SPREAD = "false"; $env:OLLAMA_VULKAN = "false"; $env:OLLAMA_CONTEXT_LENGTH = "8192"; ollama serve
 ```
 
-Prisen er kortere hukommelse i lange samtaler og dokumenttunge RAG-ture. Det er en
-produktafgørelse, ikke en teknisk detalje.
+Bestået opstart: kun ét `inference compute` (CUDA0) og `total_vram="12.0 GiB"` i
+loggen. Derefter `ollama ps` (skal vise `100% GPU`) og proben som i 1.5b. Tilbage til
+før: Ctrl+C, luk vinduet, start Ollama fra Start-menuen.
+
+Prisen er en femtedel af konteksten (lange samtaler, dokumenttunge RAG-ture), og at
+modeller, der kræver begge kort, ikke kan indlæses, mens Ollama er bundet til ét. Det
+er en produktafgørelse, ikke en teknisk detalje.
 
 ## 2. Android
 

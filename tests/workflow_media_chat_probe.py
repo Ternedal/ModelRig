@@ -444,6 +444,42 @@ report, chats = two_conversations(clip(D, A), pictures=(True, False))
 check(report["cases"][2]["why"] == "skipped_no_picture" and len(chats) == 3,
       "without both pictures there is nothing to tell apart: the clip is not asked for")
 
+# 6e. how long a job took: the rig's own time, not the wait after the turn
+print("== 6e. job timing ==")
+
+
+def timed(job_id: str, created: float, updated: float) -> deque:
+    states = lifecycle(job_id)
+    for item in states:
+        if isinstance(item, tuple) and isinstance(item[1], dict):
+            item[1].update(created=created, updated=updated if item[1].get("state") == "completed" else created)
+    return states
+
+
+with appliance([turn("image_generate", A), turn(None)], {A: timed(A, 1000.0, 1050.4)}) as fake:
+    report = run(fake, "image")
+    report["cases"] = report["cases"][:1] + report["cases"][-1:]
+    first = report["cases"][0]["jobs"][0]
+    check(first["rig_seconds"] == 50.4, f"the job's own time is asked-for -> finished on the rig's clock (got {first.get('rig_seconds')!r})")
+    check(first["seconds"] < 5, "the wait after the turn is still recorded, and is a different number")
+    summary = probe.summarize(report["cases"])
+    check(summary["job_seconds_median"] == 50.4 and summary["job_seconds_source"] == "rig",
+          "the median is of the rig's own times (20/11: 17 s reported for jobs the executor timed at 50 s)")
+    check(summary["request_to_done_seconds_median"] is not None and summary["request_to_done_seconds_median"] < 50,
+          "what the user waits is the turn plus what was left of the job, not the two added up")
+    text = probe.render(dict(report, summary=summary))
+    check(" 50.4  " in text and "riggens egen tid" in text and "besked -> færdig" in text, "the table shows it and says which time it is")
+
+with appliance([turn("image_generate", A), turn(None)], {A: lifecycle(A)}) as fake:
+    report = run(fake, "image")
+    report["cases"] = report["cases"][:1] + report["cases"][-1:]
+    summary = probe.summarize(report["cases"])
+    check("rig_seconds" not in report["cases"][0]["jobs"][0] and summary["job_seconds_source"] == "wait_after_turn"
+          and "riggen oplyste ikke" in probe.render(dict(report, summary=summary)),
+          "a rig that does not give created/updated: the wait is used, and the table says so")
+for odd in ({"created": "x", "updated": 5}, {"created": 5.0, "updated": 1.0}, {"created": True, "updated": 9}, {}):
+    check(probe._own_seconds(odd) is None, f"an unreadable pair is no time: {odd!r}")
+
 # 7. VRAM sampling
 print("== 7. vram ==")
 samples = iter([{0: 9000, 1: 900}, {0: 9100, 1: 4000}, {0: 9100, 1: 11000}, {0: 9050, 1: 7700}] + [{0: 9000, 1: 7700}] * 10)
