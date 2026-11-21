@@ -26,6 +26,7 @@ import dk.ternedal.modelrig.net.MediaVideoStream
 import dk.ternedal.modelrig.ui.MediaGenerate
 import dk.ternedal.modelrig.ui.theme.ModelRigTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -136,6 +137,132 @@ class ImageJobBubbleTest {
         show(jobs, FakeGallery(::png))
         waitForText(ImageJobBubbleLogic.GAVE_UP_TEXT)
         assertEquals(ImageJobBubbleLogic.MAX_FAILURES, jobs.polled.size)
+    }
+
+    // --- review 6004386757: cancellation, and a picture that exists but could not be fetched once ---
+
+    private fun gone() = MediaGalleryException(MediaGalleryException.Reason.NETWORK, "Riggen svarer ikke")
+
+    /** Runs [ImageJobBubbleLogic.follow] to its end on the test thread and returns every phase it reported. */
+    private fun followed(jobs: MediaJobSource, gallery: MediaGallerySource): List<ImageJobPhase> {
+        val phases = mutableListOf<ImageJobPhase>()
+        kotlinx.coroutines.runBlocking {
+            ImageJobBubbleLogic.follow(jobId, jobs, gallery, Dispatchers.Unconfined, pollMillis = 1) { phases += it }
+        }
+        return phases
+    }
+
+    @Test
+    fun `a finished picture the rig could not hand over once is fetched again`() {
+        val jobs = FakeJobs(listOf({ job(MediaJobState.COMPLETED, assetId = "asset-9") }))
+        var calls = 0
+        val gallery = FakeGallery { calls += 1; if (calls < 3) throw gone() else png() }
+        val phases = followed(jobs, gallery)
+        assertTrue("it ends with the picture", phases.last() is ImageJobPhase.Shown)
+        assertEquals("the same asset, three times", listOf("asset-9", "asset-9", "asset-9"), gallery.assets)
+        assertEquals("the job is not asked again: it is finished", 1, jobs.polled.size)
+        assertEquals(
+            "the failures in a row are counted on the way",
+            listOf(1, 2),
+            phases.filterIsInstance<ImageJobPhase.Following>().map { it.failures }.filter { it > 0 },
+        )
+    }
+
+    @Test
+    fun `a rig that stays away ends the fetch after the limit, with the rig's words`() {
+        val gallery = FakeGallery { throw gone() }
+        val phases = followed(FakeJobs(listOf({ job(MediaJobState.COMPLETED, assetId = "asset-9") })), gallery)
+        assertEquals(ImageJobPhase.Ended("Riggen svarer ikke"), phases.last())
+        assertEquals(ImageJobBubbleLogic.MAX_FAILURES, gallery.assets.size)
+    }
+
+    @Test
+    fun `a picture that can never be shown is not asked for twice`() {
+        val gallery = FakeGallery { throw MediaGalleryException(MediaGalleryException.Reason.TOO_LARGE, "For stort") }
+        val phases = followed(FakeJobs(listOf({ job(MediaJobState.COMPLETED, assetId = "asset-9") })), gallery)
+        assertEquals(ImageJobPhase.Ended("For stort"), phases.last())
+        assertEquals(1, gallery.assets.size)
+        val undecodable = FakeGallery { byteArrayOf(1, 2, 3) }
+        val bad = kotlinx.coroutines.runBlocking {
+            val seen = mutableListOf<ImageJobPhase>()
+            ImageJobBubbleLogic.follow(
+                jobId, FakeJobs(listOf({ job(MediaJobState.COMPLETED, assetId = "asset-9") })), undecodable,
+                Dispatchers.Unconfined, pollMillis = 1, decode = { throw IllegalStateException("not a picture") },
+            ) { seen += it }
+            seen
+        }
+        assertEquals(ImageJobPhase.Ended("Billedet kunne ikke hentes fra riggen"), bad.last())
+        assertEquals("bytes that do not decode would not decode next time either", 1, undecodable.assets.size)
+    }
+
+    @Test
+    fun `catching never turns a cancellation into a result`() {
+        assertEquals(7, ImageJobBubbleLogic.catching { 7 }.getOrNull())
+        assertTrue(ImageJobBubbleLogic.catching<Int> { throw IllegalStateException("x") }.isFailure)
+        var thrown: Throwable? = null
+        try {
+            ImageJobBubbleLogic.catching<Int> { throw kotlinx.coroutines.CancellationException("left") }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            thrown = e
+        }
+        assertEquals("left", thrown?.message)
+    }
+
+    @Test
+    fun `a cancellation raised inside a rig call ends the loop instead of counting as a failure`() {
+        // What runCatching used to swallow: the call itself throws CancellationException.
+        val jobs = FakeJobs(listOf({ throw kotlinx.coroutines.CancellationException("left the composition") }))
+        val phases = mutableListOf<ImageJobPhase>()
+        var escaped: Throwable? = null
+        try {
+            kotlinx.coroutines.runBlocking {
+                ImageJobBubbleLogic.follow(jobId, jobs, FakeGallery(::png), Dispatchers.Unconfined, pollMillis = 1) { phases += it }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            escaped = e
+        }
+        assertEquals("left the composition", escaped?.message)
+        assertEquals("asked once, never again", 1, jobs.polled.size)
+        assertTrue("and no phase was reported for it", phases.isEmpty())
+    }
+
+    @Test
+    fun `cancelling the coroutine stops the asking - while waiting and while fetching`() {
+        // While waiting between polls of a job that never finishes.
+        val running = FakeJobs(listOf({ job(MediaJobState.RUNNING) }))
+        val seen = mutableListOf<ImageJobPhase>()
+        kotlinx.coroutines.runBlocking {
+            val following = launch {
+                ImageJobBubbleLogic.follow(jobId, running, FakeGallery(::png), Dispatchers.Unconfined, pollMillis = 20) { seen += it }
+            }
+            while (running.polled.isEmpty()) kotlinx.coroutines.yield()
+            following.cancel()
+            following.join()
+            assertTrue(following.isCancelled)
+        }
+        val pollsAtCancel = running.polled.size
+        val phasesAtCancel = seen.size
+        Thread.sleep(80)
+        assertEquals("no poll after the cancel", pollsAtCancel, running.polled.size)
+        assertEquals("no phase after the cancel", phasesAtCancel, seen.size)
+        assertTrue("it never ended on its own", seen.none { it is ImageJobPhase.Ended })
+
+        // While the picture is being retried: the cancel must not become "the rig failed".
+        val gallery = FakeGallery { throw gone() }
+        val fetching = mutableListOf<ImageJobPhase>()
+        kotlinx.coroutines.runBlocking {
+            val following = launch {
+                ImageJobBubbleLogic.follow(
+                    jobId, FakeJobs(listOf({ job(MediaJobState.COMPLETED, assetId = "asset-9") })), gallery,
+                    Dispatchers.Unconfined, pollMillis = 50,
+                ) { fetching += it }
+            }
+            while (gallery.assets.isEmpty()) kotlinx.coroutines.yield()
+            following.cancel()
+            following.join()
+        }
+        assertTrue("cancelled between two fetches: no Ended phase", fetching.none { it is ImageJobPhase.Ended })
+        assertTrue("and fewer fetches than the limit", gallery.assets.size < ImageJobBubbleLogic.MAX_FAILURES)
     }
 
     @Test
