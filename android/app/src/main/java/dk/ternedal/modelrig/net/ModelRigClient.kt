@@ -835,8 +835,19 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
         allowRagCloud: Boolean,
         imageB64: String?,
         system: String?,
+        conversationImageJobs: List<String>? = null,
     ): JSONObject {
         val payload = JSONObject().put("message", message)
+        // Which pictures this conversation holds, oldest first (job ids only). With it the
+        // rig's video_generate takes "det billede" to mean this conversation's newest
+        // picture; without it, the owner's newest anywhere (#2459, review 6004386187).
+        // The ids stay on the rig -- it never forwards them to a model. Null is "not
+        // said"; an empty list says the conversation has none. Older rigs ignore the field.
+        // Not on a cloud turn: that one carries the current message and nothing about the
+        // conversation (#2275), and the rig then falls back as for an older client.
+        if (cloudBaseUrl == null && cloudKey == null) {
+            conversationImageJobs?.let { payload.put("conversation_image_jobs", JSONArray(it)) }
+        }
         // Send the system prompt in its own field, not at the head of history.
         // The rig protects a leading system message when trimming, but an
         // explicit field cannot be crowded out by a long conversation at all.
@@ -891,9 +902,10 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
         allowRagCloud: Boolean = false,
         imageB64: String? = null,
         system: String? = null,
+        conversationImageJobs: List<String>? = null,
     ): ToolTurn {
         val payload = toolsChatPayload(message, model, conversationId, cloudBaseUrl,
-            cloudKey, history, rag, ragSource, allowRagCloud, imageB64, system)
+            cloudKey, history, rag, ragSource, allowRagCloud, imageB64, system, conversationImageJobs)
         val builder = Request.Builder().url("$base/api/v1/tools/chat")
             .post(payload.toString().toRequestBody(jsonType))
         token?.let { builder.header("Authorization", "Bearer $it") }
@@ -933,9 +945,10 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
         system: String? = null,
         registerCall: ((okhttp3.Call) -> Unit)? = null,
         onPhase: (String) -> Unit = {},
+        conversationImageJobs: List<String>? = null,
     ): ToolTurn {
         val payload = toolsChatPayload(message, model, conversationId, cloudBaseUrl,
-            cloudKey, history, rag, ragSource, allowRagCloud, imageB64, system)
+            cloudKey, history, rag, ragSource, allowRagCloud, imageB64, system, conversationImageJobs)
         val builder = Request.Builder().url("$base/api/v1/tools/chat/stream")
             .post(payload.toString().toRequestBody(jsonType))
         token?.let { builder.header("Authorization", "Bearer $it") }
@@ -1094,7 +1107,25 @@ data class IngestResult(val documents: Int, val chunksAdded: Int, val total: Int
         personName = o.optJSONObject("person")?.optString("display_name")?.takeIf { it.isNotBlank() },
         personRevision = o.optJSONObject("person")?.optString("person_revision")?.takeIf { it.isNotBlank() },
         mediaJobs = parseMediaJobs(o.optJSONArray("media_jobs")),
+        mediaRefusals = parseMediaRefusals(o.optJSONArray("media_refusals")),
     )
+
+    /**
+     * The media tool calls this turn that queued nothing (`media_refusals`, additive;
+     * absent on older rigs -> empty). Only a known tool with a well-formed code counts;
+     * the code is the rig's, shown as given and never interpreted beyond
+     * [dk.ternedal.modelrig.ui.chat.MediaRefusalNotice].
+     */
+    private fun parseMediaRefusals(a: JSONArray?): List<MediaRefusal> {
+        if (a == null) return emptyList()
+        return (0 until minOf(a.length(), MediaRefusal.MAX)).mapNotNull { i ->
+            val item = a.optJSONObject(i) ?: return@mapNotNull null
+            val kind = MediaRefusal.kindOf(item.optString("tool")) ?: return@mapNotNull null
+            val code = item.optString("code")
+            if (!MediaRefusal.isCode(code)) return@mapNotNull null
+            MediaRefusal(kind, code)
+        }
+    }
 
     /**
      * #2419: the image jobs the turn queued (`media_jobs`, additive on newer rigs;
@@ -1304,7 +1335,31 @@ data class ToolTurn(
      * Empty on older rigs and on turns without an image.
      */
     val mediaJobs: List<MediaJobRef> = emptyList(),
+    /**
+     * Media tool calls this turn that the rig refused (nothing was queued), with the
+     * rig's code. Rig 20/11: a refused picture reached the user only as the model's
+     * paraphrase ("der er tekniske problemer"); this is the reason itself. Empty on
+     * older rigs and when nothing was refused.
+     */
+    val mediaRefusals: List<MediaRefusal> = emptyList(),
 )
+
+/** One refused media tool call: what was asked for and the rig's code for why not. */
+data class MediaRefusal(val kind: MediaJobRef.Kind, val code: String) {
+    companion object {
+        const val MAX = 8
+        private val CODE = Regex("[a-z0-9_]{1,64}")
+
+        fun isCode(raw: String): Boolean = CODE.matches(raw)
+
+        /** The two media tools; anything else is not a media refusal. */
+        fun kindOf(tool: String): MediaJobRef.Kind? = when (tool) {
+            "image_generate" -> MediaJobRef.Kind.IMAGE
+            "video_generate" -> MediaJobRef.Kind.VIDEO
+            else -> null
+        }
+    }
+}
 
 /**
  * #2419: one media job the rig queued for a turn. [kind] decides the bubble:
