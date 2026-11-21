@@ -124,15 +124,17 @@ fun VideoJobBubble(
     var outcome by remember(jobId, attempt) { mutableStateOf<VideoJobOutcome?>(null) }
 
     LaunchedEffect(jobId, attempt) {
+        // ImageJobBubbleLogic.catching, never runCatching: a cancellation must end this loop,
+        // not be counted as a failed call (review 6004386757 on the image bubble).
         var first = true
         while (ImageJobBubbleLogic.polling(phase)) {
             val done = ImageJobBubbleLogic.toFetch(phase)
             if (done != null) {
                 val assetId = done.assetId ?: break
                 val resolvedOutcome = withContext(io) {
-                    val page = runCatching { gallery.page(VideoJobBubbleLogic.LOOKUP_PAGE).items }
+                    val page = ImageJobBubbleLogic.catching { gallery.page(VideoJobBubbleLogic.LOOKUP_PAGE).items }
                     val item = page.getOrNull()?.let { VideoJobBubbleLogic.findItem(it, assetId) }
-                    val stream = item?.let { runCatching { gallery.video(it) } }
+                    val stream = item?.let { ImageJobBubbleLogic.catching { gallery.video(it) } }
                     VideoJobBubbleLogic.resolved(done, item, stream, lookupFailed = page.isFailure)
                 }
                 outcome = resolvedOutcome
@@ -144,7 +146,7 @@ fun VideoJobBubble(
             }
             if (!first) delay(ImageJobBubbleLogic.delayMillis(phase, pollMillis))
             first = false
-            val result = withContext(io) { runCatching { jobs.status(jobId) } }
+            val result = withContext(io) { ImageJobBubbleLogic.catching { jobs.status(jobId) } }
             phase = result.fold(
                 onSuccess = { ImageJobBubbleLogic.polled(it, MediaModality.VIDEO) },
                 onFailure = { e ->
