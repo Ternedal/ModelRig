@@ -161,6 +161,15 @@ try:
     d = chat("hej").json()
     check(d.get("media_jobs") == [], "a plain answer carries media_jobs: []")
 
+    # 3b: a picture, then a write that needs approval, in one turn. The picture is
+    # already rendering, so its reference must ride on the confirmation answer too.
+    script([call("image_generate", {"prompt": PROMPT}), call("note_append", {"text": "husk billedet"})])
+    d = chat("lav et billede og skriv en note om det").json()
+    check(d.get("status") == "confirmation_required", f"a write after the picture asks for approval (got {d.get('status')})")
+    check(len(d.get("media_jobs") or []) == 1 and d["media_jobs"][0].get("kind") == "image",
+          "the confirmation answer still carries the picture's job reference")
+    check(d.get("tools_used") == ["image_generate"], "and says the picture tool already ran")
+
     # 4: the tool is registered but the job API is off -> text, no job, no error.
     register(run_unavailable)
     before = store.get(job.get("job_id", ""), OWNER)
