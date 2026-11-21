@@ -4,11 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -61,6 +60,18 @@ import kotlinx.coroutines.withContext
 object VideoViewer {
     const val SAVED_TEXT = "Gemt i Film/Kaliv"
     const val BUSY_TEXT = "Henter videoen fra riggen …"
+
+    /**
+     * The largest (width, height) with the clip's aspect that fits inside the screen.
+     *
+     * Rig 21/11 (Anders, phone turned sideways): the player filled the width and took its height
+     * from the aspect, so in landscape a 832x480 clip was taller than the screen and a square
+     * one twice as tall -- cropped top and bottom. Whichever side runs out first decides.
+     */
+    fun fit(aspect: Float, maxWidth: Float, maxHeight: Float): Pair<Float, Float> {
+        if (!(aspect > 0f) || aspect.isInfinite() || !(maxWidth > 0f) || !(maxHeight > 0f)) return 0f to 0f
+        return if (maxWidth / maxHeight > aspect) maxHeight * aspect to maxHeight else maxWidth to maxWidth / aspect
+    }
 }
 
 @Composable
@@ -101,14 +112,16 @@ fun VideoViewerDialog(
                     modifier = Modifier.align(Alignment.Center).padding(24.dp).testTag("video-viewer-error"),
                 )
             } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(videoAspect(playable.item))
-                        .align(Alignment.Center)
-                        .testTag("video-viewer-player"),
-                ) {
-                    player(playable.stream, playable.item) { reason -> playbackError = mediaGalleryMessage(reason) }
+                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    val (width, height) = VideoViewer.fit(videoAspect(playable.item), maxWidth.value, maxHeight.value)
+                    Box(
+                        modifier = Modifier
+                            .size(width.dp, height.dp)
+                            .align(Alignment.Center)
+                            .testTag("video-viewer-player"),
+                    ) {
+                        player(playable.stream, playable.item) { reason -> playbackError = mediaGalleryMessage(reason) }
+                    }
                 }
             }
             IconButton(
