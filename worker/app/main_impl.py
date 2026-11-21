@@ -603,6 +603,13 @@ class ToolChatReq(BaseModel):
     model: str | None = None
     conversation_id: str | None = None
     system: str | None = None
+    # The image jobs shown in this conversation, oldest first (ids only). With it,
+    # "lav en video af det billede" means the newest picture of THIS conversation;
+    # without it the rig can only take the owner's newest picture anywhere, which
+    # may be another conversation's (#2459, review 6004386187). Optional and
+    # additive: an older client sends nothing and gets the fallback. Sanitised on
+    # use -- malformed entries are dropped, never a 422 for a whole turn.
+    conversation_image_jobs: list | None = None
     # Cloud may propose tools (Anders 2026-07-10). Writes still need the card;
     # reads run either way. The key is never persisted -- per request only.
     cloud_base_url: str | None = None
@@ -945,11 +952,19 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
     messages.append(user_msg)
 
     origin = "cloud" if _cloud_upstream(req) else "local"
-    result = await _run_tool_loop(
-        messages, req.model, req.cloud_base_url, req.cloud_key,
-        req.conversation_id, origin, sources, [], on_phase=on_phase,
-        context=context_used,
-    )
+    # Which pictures this conversation holds, for video_generate's "latest" (#2459). Set for
+    # exactly this turn's tool calls and taken away again: a parked confirmation continues in
+    # another request, without it, and falls back like an older client.
+    from .video_generate_tool import CONVERSATION_IMAGE_JOBS, conversation_image_jobs
+    shown = CONVERSATION_IMAGE_JOBS.set(conversation_image_jobs(req.conversation_image_jobs))
+    try:
+        result = await _run_tool_loop(
+            messages, req.model, req.cloud_base_url, req.cloud_key,
+            req.conversation_id, origin, sources, [], on_phase=on_phase,
+            context=context_used,
+        )
+    finally:
+        CONVERSATION_IMAGE_JOBS.reset(shown)
     if person is not None and isinstance(result, dict):
         # Which person answered -- additive, so older clients ignore it and a
         # newer one can show it. Absent means "no person selected".
