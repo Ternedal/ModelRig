@@ -231,6 +231,13 @@ class VideoEntryPointTests(unittest.TestCase):
         self.assertEqual(first.folders["output"], str(self.comfy / "cuda0" / "output"))
         self.assertEqual(second.folders["output"], str(self.comfy / "cuda1" / "output"))
         self.assertFalse(set(first.folders.values()) & set(second.folders.values()))
+        # How much host RAM one ComfyUI may commit: unset is the supervisor's default (48 GiB); a
+        # 29 GB checkpoint (LTX-2.3) needs the operator to be able to raise it, in whole GiB.
+        self.assertIsNone(first.host_memory_gib)
+        self.assertEqual(_video_config({**self.env, "KALIV_COMFY_HOST_MEMORY_GIB": "64"}, video, work, "GPU-0", "cuda:0").host_memory_gib, 64.0)
+        for bad in ("0", "65", "48.5", "-1", "many", "6 4"):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ExecutorConfigError, "KALIV_COMFY_HOST_MEMORY_GIB"):
+                _video_config({**self.env, "KALIV_COMFY_HOST_MEMORY_GIB": bad}, video, work, "GPU-0", "cuda:0")
         # A GPU without its own folders is refused, never pointed at another GPU's.
         shutil.rmtree(self.comfy / "cuda1")
         with self.assertRaisesRegex(ExecutorConfigError, "KALIV_COMFY_DIR/cuda1/input"):

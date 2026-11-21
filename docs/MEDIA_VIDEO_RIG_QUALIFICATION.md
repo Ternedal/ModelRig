@@ -203,7 +203,24 @@ Weight pins (`{path, bytes, sha256}`, the rig's own hashes; §2's cross-check ha
 8. **The model chose `image_generate` for a video** when a persona was in force (6 of 11 right with the old rule). The rule now says that a video described in words needs no picture first (#2471): 4/4 through the worker, 12/12 directly against Ollama.
 9. **The dev appliance does not start the executor**, and the executor block in `RIGDAG_MEDIE_I_CHAT.md` 1.2 must also carry the `KALIV_COMFY*` keys into the process.
 
-## 8. What this document does not do
+## 8. Sound: LTX-2.3 (prepared, not run)
+
+Anders, 21 November: a clip without sound is no use. Wan 2.1/2.2 render picture only, and the Wan versions with sound (2.5 and later) have no downloadable weights [source: comfy.org Wan workflow page; Runpod Wan 2.5 guide]. The candidate is **LTX-2.3**: picture and sound in one pass, text-to-video and image-to-video from the same files, native ComfyUI workflows with no custom nodes [source: docs.comfy.org LTX-2.3 tutorial]. The nodes it needs are in the rig's ComfyUI: `LTXAVTextEncoderLoader`, `LTXVAudioVAELoader`, `LTXVEmptyLatentAudio`, `LTXVConcatAVLatent`, `LTXVSeparateAVLatent`, `LTXVAudioVAEDecode`, and `CreateVideo` takes an `audio` input [repo: ComfyUI source at tag `v0.46.2`].
+
+| File | Folder under `models/` | Size |
+|---|---|---|
+| `ltx-2.3-22b-dev-fp8.safetensors` | `checkpoints/` | 29.1 GB [source: `Lightricks/LTX-2.3-fp8` file listing] |
+| `gemma_3_12B_it_fp4_mixed.safetensors` | `text_encoders/` | 9.45 GB [source: `Comfy-Org/ltx-2` file listing] |
+| `ltx_2.3_22b_distilled_1.1_lora_dynamic_fro09_avg_rank_111_bf16.safetensors` | `loras/` | not looked up |
+
+- **License: LTX-2 Community License**, not Apache. Free self-hosted use, including commercial, under USD 10 million annual revenue [source: ltx.io licence FAQ]. The profile's `license` is `ltx-2-community-license`.
+- **Whether it is usable on a 12 GB card is a measurement.** The checkpoint is ten times the Wan 1.3B model and runs through ComfyUI's offloading to host RAM. NVIDIA's guide puts 540p at "12GB+"; Lightricks' own node pack asks for 32 GB [source: both]. Time per clip and peak host RAM are unknown [measure].
+- **Host RAM limit.** The supervisor's Job Object lets one ComfyUI process commit 48 GiB. `KALIV_COMFY_HOST_MEMORY_GIB` (whole GiB, 1..64) raises it if the measurement says so [repo].
+- **Two template rules were added for it** [repo: `comfy_workflow_template`]: an integer slot may sit on a `PrimitiveInt`'s `value` (the frame count goes to the video latent and the audio latent, the frame rate to three nodes, and a marker appears once), and a template whose schedule is part of the graph may leave the steps slot out (the distilled model runs a fixed list of sigmas).
+- **The helper** `scripts/media_comfy_ltx23_setup.py` downloads the three files, submits the first stage of ComfyUI's own LTX-2.3 text-to-video graph (8 distilled steps, no spatial upscale, 768×512, 49 frames at 25 fps) to a running ComfyUI, samples ComfyUI's lowest free VRAM and host RAM while it renders, checks that the MP4 has a sound track, and only then hashes the weights and writes template and candidate profile (`ltx23-t2v-av-gpu1`, port 8191). The graph's input names are taken from the ComfyUI source; **it has not been submitted to a ComfyUI** [measure].
+- Image-to-video with sound, the spatial upscale stage and the text encoder on the other card (`SelectCLIPDevice` is a core node in 0.46.2 [repo: ComfyUI source]) come after the first measurement, if it is worth going on.
+
+## 9. What this document does not do
 
 - It downloads nothing and changes no profile, environment file or supervisor default.
 - It does not touch cloud or egress settings. Media never leaves the rig.
