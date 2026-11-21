@@ -310,7 +310,8 @@ def _choose_profile(service, requested: str | None, env: Mapping[str, str], *,
 
 def _submit_media_job(clean: dict, *, service_getter: Callable[[], object] | None, env: Mapping[str, str] | None,
                       modality: str, task: str | None, profile_env: str, schema: str, kind: str,
-                      params_keys: tuple[str, ...], text: Callable[[str, str], str]) -> str:
+                      params_keys: tuple[str, ...], text: Callable[[str, str], str],
+                      source_job_id: str | None = None) -> str:
     """The shared path for image_generate and video_generate: queue one job, answer as text.
 
     Every rig-side condition is a text result with a code; only the caller's
@@ -370,6 +371,11 @@ def _submit_media_job(clean: dict, *, service_getter: Callable[[], object] | Non
         "profile_id": profile.profile_id,
         "status_url": STATUS_URL_PREFIX + job_id,
     }
+    if source_job_id is not None:
+        # Which of the owner's own picture jobs this clip starts from. A job id the owner
+        # already holds, never an asset: it lets an app -- and a rig test -- see that
+        # "det billede" became the picture that was meant (review 6004675603).
+        reference["source_job_id"] = source_job_id
     return json.dumps(reference, ensure_ascii=False, sort_keys=True) + "\n" + text(job_id, profile.profile_id)
 
 
@@ -424,8 +430,12 @@ def parse_job_reference(result: str) -> dict | None:
     if data.get("status_url") != STATUS_URL_PREFIX + job_id:
         return None
     kind = data.get("kind") or JOB_REFERENCE_SCHEMAS[data["schema"]]
-    return {"job_id": job_id, "kind": kind, "state": data.get("state"), "profile_id": data.get("profile_id"),
-            "status_url": data["status_url"]}
+    ref = {"job_id": job_id, "kind": kind, "state": data.get("state"), "profile_id": data.get("profile_id"),
+           "status_url": data["status_url"]}
+    source = data.get("source_job_id")
+    if isinstance(source, str) and len(source) == 32 and all(c in "0123456789abcdef" for c in source):
+        ref["source_job_id"] = source  # only on a clip made from a picture; absent otherwise
+    return ref
 
 
 SYSTEM_RULE = (

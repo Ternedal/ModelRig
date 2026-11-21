@@ -343,6 +343,7 @@ Forudsætning: en billede-til-video-profil med sin egen template og port
 - [ ] **Før** der findes et færdigt billede i dag: `lav en video af det billede` → svaret siger, at der ikke er noget færdigt billede. Intet job.
 - [ ] Lav et billede (besked 1), vent til det er færdigt, og skriv så `lav en video af det billede` som næste besked → videoboble; klippet **starter fra det billede**.
 - [ ] Tre gange i træk, målt: `python scripts\media_chat_probe.py --suite i2v --rounds 3 --job-timeout 3600 --report "$env:TEMP\media-chat-i2v.json"`. Hver runde laver et billede og beder derefter om `lav en video af det billede` som næste tur. Tabellen viser klippets profil i kantet parentes: står der tekst-til-video-profilen, sendte modellen **ikke** kilden med, og klippet ligner ikke billedet.
+- [ ] **To samtaler** (review 6004675603 — det er den måling, reviewet beder om før noget kan kaldes korrekt): `python scripts\media_chat_probe.py --suite two-conversations --stream --rounds 2 --job-timeout 3600 --report "$env:TEMP\media-chat-two-conversations.json"`. Proben laver et billede i samtale A, et i samtale B (som bliver færdigt senere), og beder så om `lav en video af det billede` tilbage i A. Klippets reference siger, hvilket billedjob det starter fra (`source_job_id`). **Bestået** kun, hvis det er A's billede. `wrong_source` = klippet startede fra B's billede; `source_not_reported` = workeren er ældre end #2466.
 
 ## Hvad der skal med hjem
 

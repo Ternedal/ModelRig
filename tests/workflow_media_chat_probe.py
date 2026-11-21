@@ -398,6 +398,52 @@ with tempfile.TemporaryDirectory() as tmp:
                              env={"MODELRIG_TOKEN": TOKEN}) == 2 and not fake.chats,
               "an empty or missing system file is a setup error: exit 2, nothing sent")
 
+# 6d. two conversations: "det billede" must be the picture of the conversation it is said in
+print("== 6d. two conversations ==")
+
+
+def clip(job_id: str, source: str | None) -> dict:
+    body = turn("video_generate", job_id, kind="video")
+    if source is not None:
+        body["media_jobs"][0]["source_job_id"] = source
+    return body
+
+
+def two_conversations(animate: dict, pictures=(True, True)) -> tuple[dict, list]:
+    turns = [turn("image_generate", A) if pictures[0] else turn(None),
+             turn("image_generate", C) if pictures[1] else turn(None), animate, turn(None)]
+    with appliance(turns, {A: lifecycle(A), C: lifecycle(C), D: lifecycle(D)}) as fake:
+        return run(fake, "two-conversations"), list(fake.chats)
+
+
+report, chats = two_conversations(clip(D, A))
+check([c["case"] for c in report["cases"]] == ["tc-a.r1", "tc-b.r1", "tc-animate.r1", "control"],
+      "a picture in A, a picture in B, then the clip back in A")
+check(chats[1]["body"].get("conversation_image_jobs") == [] and "history" not in chats[1]["body"],
+      "conversation B starts empty: it does not know A's picture")
+check(chats[2]["body"].get("conversation_image_jobs") == [A] and len(chats[2]["body"]["history"]) == 2
+      and chats[2]["body"]["history"][0]["content"] == probe.IMAGE_MESSAGES[0],
+      "the clip is asked for in A: with A's history and A's picture, not B's")
+animate_case = report["cases"][2]
+check(animate_case["ok"] is True and animate_case["jobs"][0]["source_job_id"] == A,
+      "the clip names A's picture job as its source: passed")
+
+report, _ = two_conversations(clip(D, C))
+check(report["cases"][2]["ok"] is False and report["cases"][2]["why"] == "wrong_source"
+      and report["cases"][2]["jobs"][0]["source_job_id"] == C and "wrong_source" in probe.render(report),
+      "the clip starts from B's picture, the one that finished later: FAILED as wrong_source")
+
+report, _ = two_conversations(clip(D, None))
+check(report["cases"][2]["ok"] is False and report["cases"][2]["why"] == "source_not_reported",
+      "a worker that does not say which picture it took cannot pass")
+
+report, _ = two_conversations(clip(D, "../" + "a" * 29))
+check(report["cases"][2]["why"] == "source_not_reported", "a source that is not a job id is not a source")
+
+report, chats = two_conversations(clip(D, A), pictures=(True, False))
+check(report["cases"][2]["why"] == "skipped_no_picture" and len(chats) == 3,
+      "without both pictures there is nothing to tell apart: the clip is not asked for")
+
 # 7. VRAM sampling
 print("== 7. vram ==")
 samples = iter([{0: 9000, 1: 900}, {0: 9100, 1: 4000}, {0: 9100, 1: 11000}, {0: 9050, 1: 7700}] + [{0: 9000, 1: 7700}] * 10)

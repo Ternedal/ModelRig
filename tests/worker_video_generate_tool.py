@@ -277,6 +277,22 @@ check(source_of(latest_in(None, many), many) == "img_elsewhere",
       "no conversation context (older client): the owner's newest picture anywhere -- the documented fallback")
 check(source_of(latest_in([here_old, here_new], many), many) == "img_here_new",
       "with the conversation's pictures: ITS newest one, not the one another conversation finished later")
+named = parse_job_reference(latest_in([here_old, here_new], many))
+check(named is not None and named.get("source_job_id") == here_new,
+      "the clip's reference names the picture job it starts from -- what 'latest' turned out to mean")
+with sqlite3.connect(many.store.path) as _db:  # the owner may hold three active jobs; these checks queue more
+    _db.execute("UPDATE image_jobs SET state='cancelled' WHERE state='queued' AND profile_id='wan-t2v'")
+by_id = parse_job_reference(vgt._run_video_generate({"prompt": PROMPT, "source_image_job_id": here_old},
+                                                    service_getter=lambda: many, env={}))
+check(by_id is not None and by_id.get("source_job_id") == here_old, "and so does a clip asked for by id")
+with sqlite3.connect(many.store.path) as _db:
+    _db.execute("UPDATE image_jobs SET state='cancelled' WHERE state='queued' AND profile_id='wan-t2v'")
+plain_clip = parse_job_reference(vgt._run_video_generate({"prompt": PROMPT}, service_getter=lambda: service_with(VID), env={}))
+check(plain_clip is not None and "source_job_id" not in plain_clip, "a clip from text names no source")
+forged = json.dumps({"schema": vgt.VIDEO_JOB_REFERENCE_SCHEMA, "kind": "video", "job_id": "a" * 32, "state": "queued",
+                     "profile_id": "wan-t2v", "status_url": "/api/v1/media/jobs/" + "a" * 32, "source_job_id": "../etc"})
+check("source_job_id" not in (parse_job_reference(forged) or {"source_job_id": 1}),
+      "a source that is not a job id is dropped from the reference, not passed on")
 check(source_of(latest_in([here_new, here_old], many), many) == "img_here_old",
       "the client's order decides which is newest in the conversation")
 o = latest_in([], many)
@@ -416,6 +432,12 @@ try:
 
     check(animated({"conversation_image_jobs": [in_this_chat]}) == "img_this_chat",
           "turn: with conversation_image_jobs, 'latest' animates this conversation's picture")
+    seq[:] = [dict(animate), {"tool_calls": [], "content": "Klippet er på vej."}]
+    listed = client.post("/tools/chat", json={"message": "lav en video af det billede", "model": "qwen3:14b",
+                                              "conversation_image_jobs": [in_this_chat]}).json()["media_jobs"]
+    check(len(listed) == 1 and listed[0].get("source_job_id") == in_this_chat and listed[0]["kind"] == "video",
+          "turn: media_jobs says which picture job the clip starts from")
+    assert turn_svc.store.cancel(listed[0]["job_id"], OWNER)
     check(animated({"conversation_image_jobs": [in_this_chat]}, "/tools/chat/stream") == "img_this_chat",
           "turn: the same through the stream route the apps use")
     check(animated({}) == "img_other_chat", "turn: without the field (an older client), the owner's newest picture anywhere")
