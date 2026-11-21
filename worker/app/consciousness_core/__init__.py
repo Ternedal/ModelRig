@@ -4,6 +4,19 @@ C4 is deliberately dormant and route-less. Importing this package grants no
 model, memory, tool, scheduler, body, voice, or persistence authority.
 """
 
+import warnings as _warnings
+
+# Every wire model in this package carries a ``schema`` field: it is the contract's own
+# name for its version tag. Pydantic warns once per class that the field shadows the
+# deprecated ``BaseModel.schema()`` -- about 150 lines at every worker start, which on the
+# rig (20/11) buried the two lines that mattered. Exactly that message is silenced, for
+# exactly that field name; any other shadowed attribute still warns. This runs before the
+# first model class is defined, because importing any submodule imports this file first.
+_warnings.filterwarnings(
+    "ignore", category=UserWarning,
+    message=r'Field name "schema" in "[A-Za-z0-9_]+" shadows an attribute in parent "_?StrictModel"',
+)
+
 from .contracts import CognitiveProfile, PersonalitySnapshot, ThoughtProposal, ThoughtRequest
 from .lived_continuity import (
     LivedContinuityError,
