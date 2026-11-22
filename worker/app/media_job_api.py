@@ -131,6 +131,9 @@ def _usable_secret(secret: object) -> bool:
     return isinstance(secret, str) and len(secret) >= MIN_SECRET_CHARS and not any(c in secret for c in "\r\n")
 
 
+RECENT_LIMIT = 20  # GET /recent: how many of the newest jobs are listed
+
+
 def job_view(job: dict) -> dict:
     """What a device may see of a job: no parameters, no internal claim, not the prompt it sent
     itself. `translated_prompt` is the one exception, and only when local translation changed the
@@ -217,6 +220,26 @@ def build_media_job_router(service: Callable[[], MediaJobService], *,
         if job is None:  # just written in this process: only a broken store gets here
             raise HTTPException(status_code=503, detail="media_jobs_store_inconsistent")
         return job_view(job)
+
+    @router.get("/recent")
+    def recent(configured: MediaJobService = Depends(ready)) -> dict:
+        """The installation's latest jobs, newest first (#2475). Declared before ``/{job_id}``.
+
+        A client that died between the rig's answer and its own save has no row for a job that
+        still ran; this is the list it reconciles against. Each entry is the view ``status``
+        gives without ``translated_prompt`` -- so no prompt in any form, no parameters -- plus ``kind`` (image or video, from the enabled
+        profile; null when the profile is no longer enabled), so a client knows which bubble a
+        job it has never seen belongs in. Not the conversation: the rig does not know it.
+        """
+        jobs = store_call(lambda: configured.store.recent_for(OWNER, RECENT_LIMIT))
+        entries = []
+        for job in jobs:
+            profile = configured.profiles.get(job.get("profile_id"))
+            # Not ``translated_prompt``: status shows it for the one job the owner asks about; a
+            # list of twenty jobs must not hand out twenty rendered prompts (#2481 review).
+            view = {key: value for key, value in job_view(job).items() if key != "translated_prompt"}
+            entries.append({**view, "kind": getattr(profile, "modality", None)})
+        return {"schema": "kaliv-media-job-list/v1", "jobs": entries}
 
     @router.get("/{job_id}")
     def status(job_id: str, configured: MediaJobService = Depends(ready)) -> dict:
