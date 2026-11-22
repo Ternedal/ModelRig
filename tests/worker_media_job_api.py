@@ -83,8 +83,21 @@ class RouteTests(unittest.TestCase):
         self.assertEqual([(j["id"], j["kind"], j["state"]) for j in body["jobs"]],
                          [(second, "video", "queued"), (first, "image", "queued")], "newest first, each with its kind")
         status = self.client.get(f"/internal/media/jobs/{first}", headers=HEADERS).json()
-        self.assertEqual({k: v for k, v in body["jobs"][1].items() if k != "kind"}, status,
-                         "an entry is exactly what status shows for that job, plus kind")
+        self.assertEqual({k: v for k, v in body["jobs"][1].items() if k != "kind"},
+                         {k: v for k, v in status.items() if k != "translated_prompt"},
+                         "an entry is what status shows for that job without translated_prompt, plus kind")
+        # #2481 review (P2): status may show the rendered prompt of the one job asked about; the
+        # list must not hand out the rendered prompts of twenty.
+        import sqlite3
+        db = sqlite3.connect(str(self.tmp / "jobs.sqlite3"))
+        db.execute("UPDATE image_jobs SET effective_prompt=? WHERE id=?", ("a translated secret prompt", first))
+        db.commit(); db.close()
+        self.assertEqual(self.client.get(f"/internal/media/jobs/{first}", headers=HEADERS).json()["translated_prompt"],
+                         "a translated secret prompt", "status still shows it for that one job")
+        listed = self.client.get("/internal/media/jobs/recent", headers=HEADERS)
+        self.assertNotIn("translated secret prompt", listed.text)
+        self.assertTrue(all("translated_prompt" not in entry for entry in listed.json()["jobs"]))
+        body = listed.json()
         raw = json.dumps(body)
         for private in (PROMPT, "params", "owner", "claimed", "832", "sdxl-base"):
             self.assertNotIn(private, raw)
