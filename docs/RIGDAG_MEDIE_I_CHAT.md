@@ -263,20 +263,37 @@ gh workflow run candidate-apk.yml -R Ternedal/ModelRig --ref main
 Start-Sleep 10; gh run watch (gh run list -R Ternedal/ModelRig --workflow candidate-apk.yml -L 1 --json databaseId --jq '.[0].databaseId') -R Ternedal/ModelRig --exit-status
 ```
 
-`--ref main` bygger `main`s hoved, og kørslens `headSha` nedenfor er den commit,
-APK'en er bygget fra. Bygget tager ca. 4 minutter.
+`--ref main` bygger `main`s hoved. Bygget tager ca. 4 minutter.
 
-Når kørslen er grøn — og **kun** hvis `headSha` er `main`s hoved, som du vil prøve
-(`git ls-remote https://github.com/Ternedal/ModelRig refs/heads/main`; 20/11 gav
-`-L 1` en kørsel fra 14/11, fordi den nye ikke var startet endnu):
+Blokken henter kun en APK, der er bygget fra `main`s nuværende hoved og er
+afsluttet grønt; ellers stopper den med en fejl og henter ingenting (20/11 gav
+`-L 1` en kørsel fra 14/11, fordi den nye ikke var startet endnu — derfor vælges
+kørslen på SHA, ikke på rækkefølge):
 
 ```powershell
-$run = gh run list -R Ternedal/ModelRig --workflow candidate-apk.yml -L 1 --json databaseId,conclusion,headSha | ConvertFrom-Json; $run
-gh run download $run[0].databaseId -R Ternedal/ModelRig -D "$env:TEMP\kaliv-apk"
-$apk = Get-ChildItem "$env:TEMP\kaliv-apk" -Recurse -Filter app-debug.apk | Select-Object -First 1; $apk.FullName
-(Get-NetIPAddress -AddressFamily IPv4 | Where-Object PrefixOrigin -eq Dhcp).IPAddress
-python -m http.server 8000 --directory $apk.DirectoryName
+& {
+    $main = (git ls-remote https://github.com/Ternedal/ModelRig refs/heads/main) -split '\s+' | Select-Object -First 1
+    if ($main -notmatch '^[0-9a-f]{40}$') { throw "kunne ikke aflaese main's hoved" }
+    $runs = gh run list -R Ternedal/ModelRig --workflow candidate-apk.yml -L 20 --json databaseId,status,conclusion,headSha | ConvertFrom-Json
+    $run = $runs | Where-Object { $_.headSha -eq $main -and $_.status -eq 'completed' -and $_.conclusion -eq 'success' } | Select-Object -First 1
+    if (-not $run) {
+        $runs | Select-Object -First 5 | Format-Table databaseId, status, conclusion, headSha | Out-Host
+        throw "ingen afsluttet, groen candidate-apk-koersel for main $main - APK'en hentes ikke"
+    }
+    "APK fra koersel $($run.databaseId), bygget fra $($run.headSha)"
+    Remove-Item "$env:TEMP\kaliv-apk" -Recurse -Force -ErrorAction SilentlyContinue
+    gh run download $run.databaseId -R Ternedal/ModelRig -D "$env:TEMP\kaliv-apk"
+    if ($LASTEXITCODE -ne 0) { throw "download fejlede" }
+    $apk = Get-ChildItem "$env:TEMP\kaliv-apk" -Recurse -Filter app-debug.apk | Select-Object -First 1
+    if (-not $apk) { throw "ingen app-debug.apk i det hentede artefakt" }
+    $apk.FullName
+    (Get-NetIPAddress -AddressFamily IPv4 | Where-Object PrefixOrigin -eq Dhcp).IPAddress
+    python -m http.server 8000 --directory $apk.DirectoryName
+}
 ```
+
+Blokken er én samlet kommando (`& { … }`), så en `throw` stopper alt efter den —
+også når den indsættes linje for linje i et vindue.
 
 Telefon, Chrome: `http://<rig-ip>:8000/app-debug.apk` → installér (se risiko 3).
 Par mod dev-appliancen som 17/11 (parringen fra release-appliancen gælder ikke).
