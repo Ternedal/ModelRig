@@ -587,6 +587,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_kaliv_vr_renderer.py`
 - `tests/workflow_launcher_bytecode.py`
 - `tests/workflow_media_chat_probe.py`
+- `tests/workflow_media_env_set.py`
 - `tests/workflow_media_gallery_asset.py`
 - `tests/workflow_media_gallery_catalog.py`
 - `tests/workflow_media_gallery_contract_fixture.py`
