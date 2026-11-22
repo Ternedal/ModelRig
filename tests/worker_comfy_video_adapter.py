@@ -408,23 +408,72 @@ class AdapterTests(unittest.TestCase):
         plain.load()
         self.assertEqual(plain.render_to(request(), io.BytesIO()), "video/mp4")
 
-    def test_the_sound_track_scan_sees_a_handler_box_split_across_chunks(self):
+    def test_bytes_that_look_like_a_sound_handler_are_not_a_sound_track(self):
+        # #2477 review (P2): the scan searched for "hdlr....soun" anywhere, so the same bytes in
+        # mdat or in metadata passed a silent clip. Only moov > trak > mdia > hdlr counts.
+        decoy = self.adapter(fake={"FAKE_COMFY_SOUND": "decoy"}, profile=self.profile(sound=True))
+        decoy.load()
+        sink = io.BytesIO()
+        with self.assertRaisesRegex(GenerationError, "^output_has_no_sound:"):
+            decoy.render_to(request(), sink)
+        decoy.close()
+
+    def test_the_sound_track_scan_walks_the_boxes(self):
         from app.comfy_video_adapter import _SoundTrackScan
-        box = b"\x00\x00\x00\x21hdlr" + b"\x00" * 8 + b"soun" + b"\x00" * 13
-        video = b"\x00\x00\x00\x21hdlr" + b"\x00" * 8 + b"vide" + b"\x00" * 13
-        data = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 40 + video + b"\x00" * 7 + box
-        for cut in range(1, len(data)):
-            scan = _SoundTrackScan()
-            scan.feed(data[:cut]); scan.feed(data[cut:])
-            self.assertTrue(scan.found, f"split at {cut}")
-        for size in (1, 3, 5):
-            scan = _SoundTrackScan()
-            for at in range(0, len(data), size):
-                scan.feed(data[at:at + size])
-            self.assertTrue(scan.found, f"chunks of {size}")
-        scan = _SoundTrackScan()
-        scan.feed(b"\x00\x00\x00\x18ftypisom" + video + b"soun but not in a handler box")
-        self.assertFalse(scan.found, "a video-only clip, and the word alone is not a track")
+
+        def box(kind, payload, wide=False):
+            if wide:
+                return b"\x00\x00\x00\x01" + kind + (16 + len(payload)).to_bytes(8, "big") + payload
+            return (8 + len(payload)).to_bytes(4, "big") + kind + payload
+
+        def hdlr(handler):
+            return box(b"hdlr", b"\x00" * 8 + handler + b"\x00" * 13)
+
+        def track(handler, **kw):
+            return box(b"trak", box(b"tkhd", b"\x00" * 12) + box(b"mdia", box(b"mdhd", b"\x00" * 12) + hdlr(handler)), **kw)
+
+        def scan(data, size=None):
+            found = _SoundTrackScan()
+            for at in range(0, len(data), size or max(len(data), 1)):
+                found.feed(data[at:at + (size or len(data))])
+            return found.found
+
+        ftyp = box(b"ftyp", b"isom\x00\x00\x02\x00isomiso2")
+        bait = hdlr(b"soun")
+        with_sound = ftyp + box(b"mdat", b"\x07" * 50) + box(b"moov", track(b"vide") + track(b"soun"))
+        cases = {
+            "moov after mdat": (with_sound, True),
+            "moov before mdat": (ftyp + box(b"moov", track(b"soun") + track(b"vide")) + box(b"mdat", b"\x07" * 50), True),
+            "64-bit box sizes": (ftyp + box(b"mdat", b"\x07" * 9, wide=True) + box(b"moov", track(b"soun", wide=True), wide=True), True),
+            "video only": (ftyp + box(b"mdat", b"\x07" * 50) + box(b"moov", track(b"vide")), False),
+            "the bytes inside mdat": (ftyp + box(b"mdat", bait) + box(b"moov", track(b"vide")), False),
+            "the bytes in udta": (ftyp + box(b"moov", track(b"vide") + box(b"udta", bait)), False),
+            "an hdlr directly under moov": (ftyp + box(b"moov", track(b"vide") + bait), False),
+            "an hdlr under trak, outside mdia": (ftyp + box(b"moov", box(b"trak", bait)), False),
+            "a trak outside moov": (ftyp + track(b"soun") + box(b"moov", track(b"vide")), False),
+            "meta's handler": (ftyp + box(b"moov", track(b"vide") + box(b"meta", b"\x00" * 4 + bait)), False),
+            "mdat to the end of the file": (ftyp + box(b"moov", track(b"vide")) + b"\x00\x00\x00\x00mdat" + bait, False),
+            "a box smaller than its header": (ftyp + b"\x00\x00\x00\x04moov" + box(b"moov", track(b"soun")), False),
+            "a child past its parent": (ftyp + box(b"moov", b"\x00\x00\xff\xfftrak") + box(b"moov", track(b"soun")), False),
+            "a handler box cut short": (ftyp + box(b"moov", box(b"trak", box(b"mdia", box(b"hdlr", b"\x00" * 4)))), False),
+            "zero padding after ftyp": (ftyp + b"\x00" * 64, False),
+            "empty": (b"", False),
+        }
+        for name, (data, expected) in cases.items():
+            for size in (None, 1, 3, 7, 16):
+                with self.subTest(case=name, chunk=size):
+                    self.assertEqual(scan(data, size), expected)
+        for cut in range(1, len(with_sound)):  # every split point of a real clip
+            found = _SoundTrackScan()
+            found.feed(with_sound[:cut]); found.feed(with_sound[cut:])
+            self.assertTrue(found.found, f"split at {cut}")
+        skipping = _SoundTrackScan()  # mdat is passed, not kept: memory does not follow the clip's size
+        skipping.feed(ftyp + (8 + 5_000_000).to_bytes(4, "big") + b"mdat")
+        for _ in range(5):
+            skipping.feed(b"\x07" * 1_000_000)
+            self.assertLessEqual(len(skipping._buffer), 16)
+        skipping.feed(box(b"moov", track(b"soun")))
+        self.assertTrue(skipping.found)
         with self.assertRaisesRegex(Exception, "backend_options.sound must be true or false"):
             self.profile(sound="yes")
 

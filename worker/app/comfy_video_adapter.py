@@ -116,34 +116,86 @@ def check_source_png(data: object) -> None:
 
 
 class _SoundTrackScan:
-    """Does an MP4 stream hold a sound track? Fed chunk by chunk while the file is copied.
+    """Does an MP4 stream declare a sound track? Fed chunk by chunk while the file is copied.
 
-    A track's handler box is ``size 'hdlr' version/flags(4) pre_defined(4) handler_type(4)``
-    (ISO 14496-12 8.4.3); a sound track's handler type is ``soun``. The scan looks for that
-    16-byte shape and keeps a short tail so a box split across two chunks is still seen. It is a
-    presence check on the container, not a decode: it says a sound track is declared, which is
-    what separates "the graph muxed audio" from "the graph saved pictures only".
+    The boxes are walked, not searched (#2477 review: a search for the bytes ``hdlr....soun``
+    also matches them inside ``mdat`` or metadata, and a silent clip would pass). Only
+    ``moov > trak > mdia > hdlr`` counts, with handler type ``soun`` (ISO 14496-12 8.4.3: the
+    handler box is version/flags(4) pre_defined(4) handler_type(4) ...). Every other box is
+    skipped by its declared size without being read into memory, so ``mdat`` costs nothing and
+    ``moov`` may come before or after it.
+
+    A stream whose boxes do not add up (a size smaller than its header, a child that runs past
+    its parent) ends the walk: nothing after that point can be trusted, and a track found
+    before it stands. It is a check on what the container declares, not a decode.
     """
-    _TAIL = 15
+    _PATH = (b"moov", b"trak", b"mdia")
 
     def __init__(self) -> None:
         self.found = False
-        self._tail = b""
+        self._done = False          # found, or the structure broke: stop looking
+        self._buffer = b""          # only ever a partial box header (and a handler box's first 12 bytes)
+        self._position = 0          # stream offset of the first byte in _buffer
+        self._skip = 0              # bytes of an uninteresting box still to pass
+        self._open: list[int] = []  # end offsets of the open moov / trak / mdia
 
     def feed(self, chunk: bytes) -> None:
-        if self.found or not chunk:
+        if self._done or not chunk:
             return
-        data = self._tail + chunk
+        data = self._buffer + chunk
         at = 0
-        while True:
-            at = data.find(b"hdlr", at)
-            if at < 0 or at + 16 > len(data):
+        while not self._done:
+            if self._skip:
+                step = min(self._skip, len(data) - at)
+                at += step
+                self._skip -= step
+                if self._skip:
+                    break
+            here = self._position + at
+            while self._open and here >= self._open[-1]:
+                self._open.pop()
+            if len(data) - at < 8:
                 break
-            if data[at + 12:at + 16] == b"soun":
-                self.found = True
-                return
-            at += 4
-        self._tail = data[-self._TAIL:]
+            size = int.from_bytes(data[at:at + 4], "big")
+            kind = data[at + 4:at + 8]
+            header = 8
+            if size == 1:  # 64-bit size follows the type
+                if len(data) - at < 16:
+                    break
+                size = int.from_bytes(data[at + 8:at + 16], "big")
+                header = 16
+            if size == 0:  # "to the end of the file": legal for the last top-level box only
+                if self._open:
+                    self._done = True
+                    break
+                size = None
+            elif size < header or (self._open and here + size > self._open[-1]):
+                self._done = True
+                break
+            depth = len(self._open)
+            if size is not None and depth < len(self._PATH) and kind == self._PATH[depth]:
+                self._open.append(here + size)
+                at += header
+                continue
+            if size is not None and depth == len(self._PATH) and kind == b"hdlr":
+                if size < header + 12:
+                    self._done = True
+                    break
+                if len(data) - at < header + 12:
+                    break
+                if data[at + header + 8:at + header + 12] == b"soun":
+                    self.found = self._done = True
+                    break
+                at += header + 12
+                self._skip = size - header - 12
+                continue
+            if size is None:  # the rest of the stream is this one box: nothing more to find
+                self._done = True
+                break
+            at += header
+            self._skip = size - header
+        self._position += at
+        self._buffer = b"" if self._done else data[at:]
 
 
 class ComfyVideoAdapter:

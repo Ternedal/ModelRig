@@ -91,10 +91,22 @@ def _render(prompt_id: str) -> None:
     name = os.environ.get("FAKE_COMFY_OUTPUT_PREFIX", "kaliv_") + f"{prompt_id[:8]}.mp4"
     path = os.path.join(args.output_directory, name)
     mp4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2" + b"\x00" * int(os.environ.get("FAKE_COMFY_MP4_PAD", "64"))
-    # FAKE_COMFY_SOUND=1: the clip declares a sound track (an hdlr box with handler type 'soun'),
-    # as a graph that muxes audio writes it. Placed after the padding, like a moov at the end.
-    if os.environ.get("FAKE_COMFY_SOUND") == "1":
-        mp4 += b"\x00\x00\x00\x21hdlr" + b"\x00" * 8 + b"soun" + b"\x00" * 13
+    sound = os.environ.get("FAKE_COMFY_SOUND")
+    if sound in ("1", "decoy"):
+        def box(kind, payload):
+            return (8 + len(payload)).to_bytes(4, "big") + kind + payload
+
+        def track(handler):
+            return box(b"trak", box(b"tkhd", b"\x00" * 12) + box(b"mdia", box(b"mdhd", b"\x00" * 12)
+                       + box(b"hdlr", b"\x00" * 8 + handler + b"\x00" * 13)))
+        pad = b"\x00" * int(os.environ.get("FAKE_COMFY_MP4_PAD", "64"))
+        handler_bytes = b"\x00\x00\x00\x21hdlr" + b"\x00" * 8 + b"soun" + b"\x00" * 13
+        # "1": a real sound track beside the video track, moov after mdat as SaveVideo writes it.
+        # "decoy": video only, but the same handler bytes lie inside mdat and in a udta box -
+        # what a byte search would take for a sound track (#2477 review).
+        tracks = track(b"vide") + (track(b"soun") if sound == "1" else box(b"udta", handler_bytes))
+        mp4 = (b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2"
+               + box(b"mdat", pad + (handler_bytes if sound == "decoy" else b"")) + box(b"moov", tracks))
     entries = [{"filename": name, "subfolder": "", "type": "output"}]
     status = {"status_str": "success", "completed": True}
 

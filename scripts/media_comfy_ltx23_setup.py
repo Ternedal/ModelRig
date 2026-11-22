@@ -155,15 +155,16 @@ def profile(pins: list, revision: str, template_sha: str, *, width: int, height:
 
 
 def has_sound_track(data: bytes) -> bool:
-    """An MP4 with sound has a track whose handler type is 'soun' (ISO 14496-12, hdlr box)."""
-    at = 0
-    while True:
-        at = data.find(b"hdlr", at)
-        if at < 0:
-            return False
-        if data[at + 12:at + 16] == b"soun":
-            return True
-        at += 4
+    """The adapter's own check (moov > trak > mdia > hdlr with handler type 'soun'), so that what
+    this helper reports on the rig is what the executor will decide for the same file."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "worker"))
+    try:
+        from app.comfy_video_adapter import _SoundTrackScan
+    finally:
+        sys.path.pop(0)
+    scan = _SoundTrackScan()
+    scan.feed(data)
+    return scan.found
 
 
 def _call(url: str, path: str, body=None, timeout: float = 30):
