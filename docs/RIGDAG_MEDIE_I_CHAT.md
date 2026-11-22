@@ -263,11 +263,12 @@ gh workflow run candidate-apk.yml -R Ternedal/ModelRig --ref main
 Start-Sleep 10; gh run watch (gh run list -R Ternedal/ModelRig --workflow candidate-apk.yml -L 1 --json databaseId --jq '.[0].databaseId') -R Ternedal/ModelRig --exit-status
 ```
 
-`--ref` skal med: uden den registreres kørslen på `main`, og `headSha` nedenfor
-viser så `main` i stedet for det, der blev bygget. Bygget tager ca. 4 minutter.
+`--ref main` bygger `main`s hoved, og kørslens `headSha` nedenfor er den commit,
+APK'en er bygget fra. Bygget tager ca. 4 minutter.
 
-Når kørslen er grøn — og **kun** hvis `headSha` er integrationsgrenens hoved
-(20/11 gav `-L 1` en kørsel fra 14/11, fordi den nye ikke var startet endnu):
+Når kørslen er grøn — og **kun** hvis `headSha` er `main`s hoved, som du vil prøve
+(`git ls-remote https://github.com/Ternedal/ModelRig refs/heads/main`; 20/11 gav
+`-L 1` en kørsel fra 14/11, fordi den nye ikke var startet endnu):
 
 ```powershell
 $run = gh run list -R Ternedal/ModelRig --workflow candidate-apk.yml -L 1 --json databaseId,conclusion,headSha | ConvertFrom-Json; $run
