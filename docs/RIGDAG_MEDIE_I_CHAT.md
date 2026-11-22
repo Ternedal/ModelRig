@@ -354,6 +354,7 @@ $EnvFile = "C:\Rig\ModelRig\modelrig.env"; if (-not (Select-String -Path $EnvFil
 Genstart vindue A og executoren. 1.3 skal nu også vise `video_generate  True`.
 
 - [ ] Terminal: `python scripts\media_chat_probe.py --suite video --job-timeout 3600 --report "$env:TEMP\media-chat-video.json"` (beskeden er `lav en video af en papirbåd der driver over en dam`) → værktøj kaldt, ét job, `completed`. Tiden står i tabellen.
+- [ ] En længde, brugeren nævner: `python scripts\media_chat_probe.py --suite video-length --job-timeout 3600` (beskeden er `lav en video på 5 sekunder af en papirbåd der driver over en dam`) → `video_generate`, `completed`. Tabellen kan ikke se klippets længde: afspil det, og sammenlign jobtiden med den almindelige video-kørsel (et klip på det halve tager omtrent det halve at rendere).
 - [ ] Android: boblen viser status og derefter en afspiller; klippet spiller i boblen.
 - [ ] Android: "Fuld skærm" → viser; **Gem** → klippet ligger under `Film/Kaliv`; **Del** → delingsark.
 - [ ] Desktop: "Klippet er færdigt" → "Gem klip …" → "Åbn" starter systemets afspiller.

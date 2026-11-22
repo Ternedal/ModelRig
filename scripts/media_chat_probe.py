@@ -69,6 +69,9 @@ IMAGE_MESSAGES = (
     "generér et billede af et gammelt bibliotek",
 )
 VIDEO_MESSAGE = "lav en video af en papirbåd der driver over en dam"
+# A length the user names: the tool turns seconds into the profile's frames (#2480). The table
+# cannot see the clip's length -- compare the job time with the plain video case, and play it.
+VIDEO_LENGTH_MESSAGE = "lav en video på 5 sekunder af en papirbåd der driver over en dam"
 ANIMATE_MESSAGE = "lav en video af det billede"
 CONTROL_MESSAGE = "hvad er hovedstaden i Frankrig?"
 
@@ -379,6 +382,8 @@ def suite_cases(suite: str, rounds: int) -> list[dict]:
                           "thread": f"a{r}", "source_from": f"tc-a.r{r}", "needs": [f"tc-a.r{r}", f"tc-b.r{r}"]})
         elif suite == "video":
             cases.append({"id": f"video-1.r{r}", "message": VIDEO_MESSAGE, "expect": "video_generate"})
+        elif suite == "video-length":
+            cases.append({"id": f"video-5s.r{r}", "message": VIDEO_LENGTH_MESSAGE, "expect": "video_generate"})
         elif suite == "i2v":
             cases.append({"id": f"i2v-picture.r{r}", "message": IMAGE_MESSAGES[0], "expect": "image_generate"})
             cases.append({"id": f"i2v-animate.r{r}", "message": ANIMATE_MESSAGE, "expect": "video_generate",
@@ -511,7 +516,7 @@ def main(argv=None, env=None) -> int:
     parser = argparse.ArgumentParser(description="Measure media-in-chat on a running appliance (dev channel, not evidence).")
     parser.add_argument("--base", default="http://127.0.0.1:8080")
     parser.add_argument("--model", default="qwen3:14b")
-    parser.add_argument("--suite", choices=("image", "conversation", "video", "i2v", "two-conversations"), default="image")
+    parser.add_argument("--suite", choices=("image", "conversation", "video", "video-length", "i2v", "two-conversations"), default="image")
     parser.add_argument("--rounds", type=int, default=1)
     parser.add_argument("--turn-timeout", type=float, default=300.0)
     parser.add_argument("--job-timeout", type=float, default=1800.0)
