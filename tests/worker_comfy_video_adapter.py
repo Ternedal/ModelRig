@@ -139,11 +139,16 @@ class TemplateTests(unittest.TestCase):
         parsed = parse_profile(made)
         self.assertEqual((parsed.profile_id, sorted(parsed.tasks), parsed.backend_options.port),
                          ("ltx23-i2v-av-gpu1", ["image_to_video"], 8192))
-        # the sound-track check reads the MP4's handler boxes
-        def hdlr(kind):
-            return b"\x00\x00\x00\x21hdlr" + b"\x00" * 8 + kind + b"\x00" * 13
-        self.assertTrue(helper.has_sound_track(b"ftypisom" + hdlr(b"vide") + hdlr(b"soun")))
-        self.assertFalse(helper.has_sound_track(b"ftypisom" + hdlr(b"vide")))
+        # the helper reports what the adapter decides: a handler box inside moov > trak > mdia
+        def box(kind, payload):
+            return (8 + len(payload)).to_bytes(4, "big") + kind + payload
+
+        def track(kind):
+            return box(b"trak", box(b"mdia", box(b"hdlr", b"\x00" * 8 + kind + b"\x00" * 13)))
+        ftyp = box(b"ftyp", b"isom\x00\x00\x02\x00")
+        self.assertTrue(helper.has_sound_track(ftyp + box(b"moov", track(b"vide") + track(b"soun"))))
+        self.assertFalse(helper.has_sound_track(ftyp + box(b"moov", track(b"vide"))))
+        self.assertFalse(helper.has_sound_track(ftyp + box(b"mdat", track(b"soun")) + box(b"moov", track(b"vide"))))
         self.assertFalse(helper.has_sound_track(b"soun but no handler box"))
 
     def test_a_template_with_its_own_schedule_may_leave_the_steps_slot_out(self):
