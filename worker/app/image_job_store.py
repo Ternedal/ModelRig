@@ -314,7 +314,8 @@ class ImageJobStore:
         return dict(row) if row else None
 
     def recent_for(self, owner: str, limit: int = 20) -> list[dict]:
-        """The owner's most recently requested jobs, newest first, in any state. Read-only.
+        """The owner's most recently requested jobs, newest first, in any state. Reads only,
+        except that a queued job past its deadline is expired first, exactly as ``get`` does.
 
         For a client that lost its own record of a job (#2475: it died between the rig's answer
         and its local save): the job still ran, and this is how the client finds it again.
@@ -322,9 +323,17 @@ class ImageJobStore:
         """
         if type(limit) is not int or not 1 <= limit <= RECENT_MAX:
             raise ImageJobError("invalid limit")
-        with self._db() as db:
-            rows = db.execute("SELECT * FROM image_jobs WHERE owner=? ORDER BY created DESC, id DESC LIMIT ?",
-                              (owner, limit)).fetchall()
+        def read() -> list:
+            with self._db() as db:
+                return db.execute("SELECT * FROM image_jobs WHERE owner=? ORDER BY created DESC, id DESC LIMIT ?",
+                                  (owner, limit)).fetchall()
+        rows = read()
+        deadline = time.time() - QUEUED_MAX_AGE_S
+        if any(row["state"] == "queued" and row["created"] <= deadline for row in rows):
+            # As in get(): with media off and no executor running nothing else expires a stale
+            # queued job, and the list must not call "queued" what status calls "expired".
+            self.expire_queued()
+            rows = read()
         return [dict(row) for row in rows]
 
     def newest_picture_for(self, owner: str, profile_ids) -> dict | None:

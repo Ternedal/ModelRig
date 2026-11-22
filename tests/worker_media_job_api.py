@@ -106,6 +106,24 @@ class RouteTests(unittest.TestCase):
         kinds = {j["id"]: j["kind"] for j in self.client.get("/internal/media/jobs/recent", headers=HEADERS).json()["jobs"]}
         self.assertEqual(kinds, {second: None, first: "image"})
 
+    def test_recent_and_status_agree_on_a_job_that_expired_in_the_queue(self):
+        # #2481 review (Codex P2): with no executor running nothing expires a stale queued job;
+        # status did it on read and the list did not, so one job was "expired" and "queued" at once.
+        stale = self.submit().json()["id"]
+        import sqlite3
+        db = sqlite3.connect(str(self.tmp / "jobs.sqlite3"))
+        db.execute("UPDATE image_jobs SET created=created-? WHERE id=?", (QUEUED_MAX_AGE_S + 60, stale))
+        db.commit(); db.close()
+        fresh = self.submit().json()["id"]
+        db = sqlite3.connect(str(self.tmp / "jobs.sqlite3"))
+        db.execute("UPDATE image_jobs SET state='queued', error=NULL WHERE id=?", (stale,))  # as if never looked at
+        db.commit(); db.close()
+        listed = {j["id"]: j for j in self.client.get("/internal/media/jobs/recent", headers=HEADERS).json()["jobs"]}
+        self.assertEqual(listed[stale]["state"], "expired", "the list expires it instead of calling it queued")
+        self.assertEqual(listed[fresh]["state"], "queued", "a job inside its deadline is untouched")
+        status = self.client.get(f"/internal/media/jobs/{stale}", headers=HEADERS).json()
+        self.assertEqual((listed[stale]["state"], listed[stale]["error"]), (status["state"], status["error"]))
+
     def test_recent_is_bounded_owner_bound_and_behind_the_secret(self):
         from app.image_job_store import RECENT_MAX, ImageJobError
         from app.media_job_api import RECENT_LIMIT
