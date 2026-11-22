@@ -28,6 +28,8 @@ Hver kommandoblok er mærket med, hvad den hviler på:
    og kan ikke klares på samme aften som trin 1–3.
 4. **Trin 6, video med lyd** (LTX-2.3) bygger oven på trin 4–5 og har sine egne
    vægte (41 GB) og sit eget RAM-loft.
+5. **Trin 7, acceptforløbet**, er det eneste, der må kaldes fysisk accept: succes,
+   fejl og genstart på én kandidat-SHA, på telefon og desktop.
 
 **Hvornår:** ikke mens en V1-gate eller soaken kører — dev-appliancen bruger
 samme porte (8080/8099). Kandidat-checkoutet til V1 røres ikke: testen kører fra
@@ -449,6 +451,81 @@ python scripts\media_chat_probe.py --suite i2v --rounds 2 --job-timeout 3600 --r
 - [ ] Skift af kliplængde: `scripts\media_comfy_ltx23_setup.py run --frames N` (8n+1) mod en manuel ComfyUI skriver den målte længde som profilens loft. Stop executoren først, og genstart den bagefter.
 
 Executor-loggens sidste linjer, når noget fejler: `Get-Content "$env:TEMP\media-executor.log" -Tail 30`.
+
+## 7. Acceptforløb på én kandidat-SHA — succes, fejl og genstart
+
+Spor A, slice A1 (#2264). Afsnit 1–6 viser, at kæden **kan** virke. Dette afsnit er
+det, der kan kaldes accepteret: ét forløb på **én** commit, hvor også det, der går
+galt, er set. **Intet her er kørt** [repo: hver forventet tekst er læst i koden på
+`main`, ikke set på riggen]. Grøn CI er ikke en fysisk PASS, og et forløb på en
+anden commit end kandidaten tæller ikke.
+
+**7.0 Før du starter — skriv det ned**
+
+| | |
+|---|---|
+| Kandidat-SHA (worktree: `git log --oneline -1`) | |
+| APK: `candidate-apk`-kørslens `headSha` (skal være samme SHA, se 2.1) | |
+| Desktop bygget fra samme SHA | |
+| Profiler slået til (`KALIV_MEDIA_PROFILES_ENABLED`) | |
+| Dato, hvem | |
+
+Start som i 6.2. Hav executor-vinduet synligt hele vejen.
+
+**7.1 Succes** — hver på telefonen **og** på desktop:
+
+| # | Gør | Forventet | Tlf. | Desktop |
+|---|---|---|---|---|
+| S1 | `lav et billede af en rød cykel ved en sø` | boble "I kø på riggen" → "Genererer …" → billedet | | |
+| S2 | `lav en video af en papirbåd der driver over en dam` | videoboble → klip, **med lyd** når standardprofilen er LTX | | |
+| S3 | efter S1: `lav en video af det billede` | klippet starter fra S1's billede | | |
+| S4 | `lav en video på 5 sekunder af en papirbåd der driver over en dam` | klip på ca. 5 s (afspil det; jobtiden er omtrent det halve af S2) | | |
+| S5 | Luk appen helt, mens S2 renderer, og åbn samtalen igen | boblen er der stadig og følger jobbet til klippet | | |
+| S6 | Åbn galleriet | S1–S4 ligger der | | |
+
+**7.2 Fejl — hver skal ende i en besked, et menneske kan forstå, og aldrig i en boble, der hænger**
+
+| # | Sådan fremkaldes den | Forventet på riggen | Forventet i chatten |
+|---|---|---|---|
+| F1 Executor nede | Stop executoren (Ctrl+C). Bed om et billede. | Jobbet bliver stående `queued`; intet i executor-loggen | Boble "I kø på riggen" — og den bliver der. Start executoren: jobbet køres. (Uden start: "Udløbet: riggen nåede ikke at starte jobbet inden for et døgn" efter 24 timer — **vent ikke på det**, notér kun at boblen står i kø.) |
+| F2 For mange på én gang | Bed om fire billeder i fire beskeder hurtigt efter hinanden | Tre job i kø/gang; det fjerde oprettes ikke (`owner_limit`) | Svaret siger, at riggen er optaget, og at man kan bede igen, når et er færdigt. **Ingen** fjerde boble. |
+| F3 Afvist argument | `lav et billede i 4000 gange 4000 pixels af en rød cykel` | `media_tool=refused … code=invalid_request optional=width,height` i worker-loggen, eller modellen prøver igen uden størrelsen og får et job | Enten et billede i riggens størrelse eller et svar om, at det ikke kunne lade sig gøre. Aldrig en boble uden job. |
+| F4 Intet billede at animere | I en **ny** samtale: `lav en video af det billede` | intet job (`no_source_image`) | Svaret siger, at der ikke er noget færdigt billede |
+| F5 Executor dræbt midt i et job | Bed om en video; når executor-loggen viser `loaded`, luk executor-vinduet. Start executoren igen. | Ved start: `recovered` med 1; jobbet er `failed` med `interrupted_by_restart` | Boblen: "Afbrudt: riggen genstartede". Indtil executoren er startet igen, står der "Genererer …" — det er forventet. |
+| F6 Worker genstartet midt i et job | Bed om en video; genstart dev-appliancen (vindue A), mens den renderer | Jobbet fortsætter i executoren og bliver `completed` | Boblen kan vise "Riggen svarer ikke; klippet ligger i galleriet, når det er klar" med **Prøv igen**; efter Prøv igen kommer klippet |
+| F7 Uden parring | På riggen: `Invoke-WebRequest http://127.0.0.1:8080/api/v1/media/jobs/recent -SkipHttpErrorCheck` (uden token) | HTTP 401, `Cache-Control: private, no-store` | — |
+| F8 Værktøj slukket | `KALIV_VIDEO_TOOL_ENABLED=0`, genstart vindue A, bed om en video | `video_generate` står ikke i 1.3's liste | Et tekstsvar; ingen boble, ingen påstand om et klip |
+
+`output_has_no_sound` (en lydprofil, hvis klip mangler lydspor) kan ikke fremkaldes
+uden at ændre en profil eller en graf; den er dækket af
+`tests/worker_comfy_video_adapter.py` og regnes **ikke** som fysisk set.
+
+**7.3 Loggene må ikke indeholde det, brugeren skrev** — efter 7.1 og 7.2, i executor-vinduet:
+
+```powershell
+$needles = 'rød cykel', 'red bicycle', 'papirbåd', 'paper boat'
+$logs = "$env:TEMP\media-executor.log", "C:\Kaliv\media-work\comfy\cuda1\comfyui.log"
+foreach ($log in $logs) { foreach ($n in $needles) { $hits = @(Select-String -Path $log -SimpleMatch $n -ErrorAction SilentlyContinue); "{0,-60} {1,-14} {2} linjer" -f $log, $n, $hits.Count } }
+```
+
+Forventet: 0 linjer i `media-executor.log` (den skriver job-id, profil og koder).
+`comfyui.log` er ComfyUI's egen log; finder blokken prompten dér, så notér det
+som et fund med linjen — det er ikke afgjort, hvad den log må indeholde.
+Kør samme søgning mod dev-appliancens worker-log, hvis den skrives til en fil.
+
+**7.4 Dommen**
+
+| | Ja/nej |
+|---|---|
+| Alle S1–S6 set på telefonen på kandidat-SHA'en | |
+| Alle S1–S6 set på desktop på samme SHA | |
+| F1–F8: hver endte som beskrevet, eller afvigelsen er noteret med hvad der faktisk skete | |
+| 7.3: ingen prompt i executor-loggen | |
+| Rapporter gemt: `media-chat-*.json`, executor-log, skærmbilleder af F2, F5 og F6 | |
+
+Kun med ja i alle fem rækker er medie-i-chat **fysisk accepteret på den SHA**. Det
+er en accept af denne kæde på udviklingskanalen — ikke en V1-gate og ikke en
+kvalificering af profilerne, som fortsat er `candidate`.
 
 ## Hvad der skal med hjem
 
