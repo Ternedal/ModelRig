@@ -122,6 +122,7 @@ class TemplateTests(unittest.TestCase):
                               width=768, height=512, frames=49, fps=25)
         parsed = parse_profile(made)
         self.assertEqual((parsed.qualification, parsed.license, sorted(parsed.tasks)), ("candidate", "ltx-2-community-license", ["text_to_video"]))
+        self.assertTrue(parsed.backend_options.sound, "the sound profile promises sound, so a silent clip fails the job")
         # image-to-video with sound: the same files, the picture written into the video latent
         data = helper.template_bytes("image_to_video")
         animated = load_template(data, sha(data), pinned_files=pins)
@@ -386,6 +387,46 @@ class AdapterTests(unittest.TestCase):
             return True
         except GpuBusy:
             return False
+
+    def test_a_profile_that_promises_sound_refuses_a_silent_clip(self):
+        # Anders, 21 Nov 2026: "der skal lyd på". A sound profile's clip without a sound track is a
+        # failed job, not a finished one the user has to play to find out.
+        silent = self.adapter(profile=self.profile(sound=True))
+        silent.load()
+        sink = io.BytesIO()
+        with self.assertRaisesRegex(GenerationError, "^output_has_no_sound:"):
+            silent.render_to(request(), sink)
+        silent.close()
+        with_sound = self.adapter(fake={"FAKE_COMFY_SOUND": "1"}, profile=self.profile(sound=True))
+        with_sound.load()
+        sink = io.BytesIO()
+        self.assertEqual(with_sound.render_to(request(), sink), "video/mp4")
+        self.assertIn(b"soun", sink.getvalue())
+        with_sound.close()
+        # a profile that promises nothing publishes either kind
+        plain = self.adapter(fake={"FAKE_COMFY_SOUND": "1"})
+        plain.load()
+        self.assertEqual(plain.render_to(request(), io.BytesIO()), "video/mp4")
+
+    def test_the_sound_track_scan_sees_a_handler_box_split_across_chunks(self):
+        from app.comfy_video_adapter import _SoundTrackScan
+        box = b"\x00\x00\x00\x21hdlr" + b"\x00" * 8 + b"soun" + b"\x00" * 13
+        video = b"\x00\x00\x00\x21hdlr" + b"\x00" * 8 + b"vide" + b"\x00" * 13
+        data = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 40 + video + b"\x00" * 7 + box
+        for cut in range(1, len(data)):
+            scan = _SoundTrackScan()
+            scan.feed(data[:cut]); scan.feed(data[cut:])
+            self.assertTrue(scan.found, f"split at {cut}")
+        for size in (1, 3, 5):
+            scan = _SoundTrackScan()
+            for at in range(0, len(data), size):
+                scan.feed(data[at:at + size])
+            self.assertTrue(scan.found, f"chunks of {size}")
+        scan = _SoundTrackScan()
+        scan.feed(b"\x00\x00\x00\x18ftypisom" + video + b"soun but not in a handler box")
+        self.assertFalse(scan.found, "a video-only clip, and the word alone is not a track")
+        with self.assertRaisesRegex(Exception, "backend_options.sound must be true or false"):
+            self.profile(sound="yes")
 
     def test_end_to_end_text_to_video(self):
         adapter = self.adapter()

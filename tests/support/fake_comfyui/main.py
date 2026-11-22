@@ -91,6 +91,10 @@ def _render(prompt_id: str) -> None:
     name = os.environ.get("FAKE_COMFY_OUTPUT_PREFIX", "kaliv_") + f"{prompt_id[:8]}.mp4"
     path = os.path.join(args.output_directory, name)
     mp4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2" + b"\x00" * int(os.environ.get("FAKE_COMFY_MP4_PAD", "64"))
+    # FAKE_COMFY_SOUND=1: the clip declares a sound track (an hdlr box with handler type 'soun'),
+    # as a graph that muxes audio writes it. Placed after the padding, like a moov at the end.
+    if os.environ.get("FAKE_COMFY_SOUND") == "1":
+        mp4 += b"\x00\x00\x00\x21hdlr" + b"\x00" * 8 + b"soun" + b"\x00" * 13
     entries = [{"filename": name, "subfolder": "", "type": "output"}]
     status = {"status_str": "success", "completed": True}
 

@@ -115,6 +115,37 @@ def check_source_png(data: object) -> None:
     raise GenerationError("the source image is not a complete PNG")
 
 
+class _SoundTrackScan:
+    """Does an MP4 stream hold a sound track? Fed chunk by chunk while the file is copied.
+
+    A track's handler box is ``size 'hdlr' version/flags(4) pre_defined(4) handler_type(4)``
+    (ISO 14496-12 8.4.3); a sound track's handler type is ``soun``. The scan looks for that
+    16-byte shape and keeps a short tail so a box split across two chunks is still seen. It is a
+    presence check on the container, not a decode: it says a sound track is declared, which is
+    what separates "the graph muxed audio" from "the graph saved pictures only".
+    """
+    _TAIL = 15
+
+    def __init__(self) -> None:
+        self.found = False
+        self._tail = b""
+
+    def feed(self, chunk: bytes) -> None:
+        if self.found or not chunk:
+            return
+        data = self._tail + chunk
+        at = 0
+        while True:
+            at = data.find(b"hdlr", at)
+            if at < 0 or at + 16 > len(data):
+                break
+            if data[at + 12:at + 16] == b"soun":
+                self.found = True
+                return
+            at += 4
+        self._tail = data[-self._TAIL:]
+
+
 class ComfyVideoAdapter:
     def __init__(self, profile: ModelProfile, *, supervisor: ComfySupervisor, template_dir: str,
                  output_directory: str, poll_s: float = 1.0, settle_s: float = 0.5,
@@ -643,6 +674,8 @@ class ComfyVideoAdapter:
             self._to_sink(sink_file.write, header)
             digest.update(header)
             copied = len(header)
+            sound = _SoundTrackScan()
+            sound.feed(header)
             while True:
                 chunk = handle.read(COPY_CHUNK)
                 if not chunk:
@@ -652,10 +685,15 @@ class ComfyVideoAdapter:
                     raise GenerationError("ComfyUI output grew past the size cap")
                 self._to_sink(sink_file.write, chunk)
                 digest.update(chunk)
+                sound.feed(chunk)
             last = os.fstat(handle.fileno())
         if (copied != first.st_size or last.st_size != first.st_size
                 or last.st_mtime_ns != first.st_mtime_ns or last.st_ino != first.st_ino):
             raise GenerationError("ComfyUI output changed while it was copied")
+        # A profile that promises sound must not publish a silent clip as finished: the user asked
+        # for sound and would only find out by playing it. Raised before the bytes are adopted.
+        if self.options.sound and not sound.found:
+            raise GenerationError("output_has_no_sound: the profile promises a sound track and the clip has none")
         self._to_sink(sink_file.flush)
         # The bytes must be durable on the publication volume before anything relies on them
         # (Anders, 6 Nov: work on C:, publish to Z:). A delayed write error (disk full, I/O error)

@@ -62,7 +62,7 @@ _TOP_KEYS = frozenset({
 _COMFY_OPTION_KEYS = frozenset({
     "template_name", "template_sha256", "fps", "max_render_seconds", "max_output_bytes", "port",
 })
-_COMFY_OPTIONAL_KEYS = frozenset({"comfyui_version", "weights"})  # pins (G3, #2296 6634996133)
+_COMFY_OPTIONAL_KEYS = frozenset({"comfyui_version", "weights", "sound"})  # pins (G3, #2296 6634996133)
 _TEMPLATE_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}\.json")
 _COMFY_VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}")
 _WEIGHT_SEGMENT = r"[A-Za-z0-9_][A-Za-z0-9._-]{0,127}"
@@ -122,6 +122,9 @@ class ComfyOptions:
     port: int
     comfyui_version: str | None = None
     weights: tuple[WeightPin, ...] = ()
+    # The profile promises a clip WITH sound (Anders, 21 Nov 2026: "der skal lyd på"). The adapter
+    # then refuses an output without a sound track instead of publishing a silent clip as done.
+    sound: bool = False
 
 
 @dataclass(frozen=True)
@@ -169,6 +172,12 @@ def _strict_number(value: object, low: float, high: float, name: str, *, low_ope
 def _string(value: object, pattern: re.Pattern[str], name: str) -> str:
     if not isinstance(value, str) or not pattern.fullmatch(value):
         raise _fail(f"{name} is malformed")
+    return value
+
+
+def _sound_flag(value: object) -> bool:
+    if not isinstance(value, bool):
+        raise _fail("backend_options.sound must be true or false")
     return value
 
 
@@ -290,6 +299,7 @@ def parse_profile(obj: object) -> ModelProfile:
             comfyui_version=(_string(options["comfyui_version"], _COMFY_VERSION, "backend_options.comfyui_version")
                              if "comfyui_version" in options else None),
             weights=_weight_pins(options["weights"]) if "weights" in options else (),
+            sound=_sound_flag(options["sound"]) if "sound" in options else False,
         )
         if qualification == "rig-qualified" and (backend_options.comfyui_version is None or not backend_options.weights):
             raise _fail("a rig-qualified comfyui profile must pin comfyui_version and weights")
