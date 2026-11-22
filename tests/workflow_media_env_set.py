@@ -113,6 +113,43 @@ try:
     check(code == 1 and env.read_bytes() == original and not list(tmp.glob("*.tmp-*")),
           "a failed swap: exit 1, original untouched, no temporary file left")
 
+    # 5b. #2479 review (Codex P2): the env file can hold secrets. A backup or a replacement with
+    # default permissions would expose what the original's permissions protected.
+    if os.name != "nt":
+        for old in tmp.glob("modelrig.env*"):
+            old.unlink()
+        previous = os.umask(0o022)
+        try:
+            for mode in (0o600, 0o640, 0o400):
+                for old in tmp.glob("modelrig.env*"):
+                    os.chmod(old, 0o600)
+                    old.unlink()
+                env.write_bytes(original)
+                os.chmod(env, mode)
+                if mode == 0o400:
+                    os.chmod(env, 0o600); os.chmod(env, mode)
+                backup, changed = tool.apply(env, tool.parse_pairs(["KALIV_COMFY_HOST_MEMORY_GIB=40"]), stamp="perm")
+                check(changed and (os.stat(env).st_mode & 0o7777) == mode, f"mode {mode:o}: the replaced file keeps the original's mode under umask 022")
+                check((os.stat(backup).st_mode & 0o7777) == mode, f"mode {mode:o}: the backup has the original's mode, not the default")
+            # never wider than the original, not even for a moment: the file is created 0600 first
+            seen = []
+            real_open = os.open
+
+            def watching(path, flags, mode=0o777, **kw):
+                if flags & os.O_CREAT:
+                    seen.append(mode)
+                return real_open(path, flags, mode, **kw)
+            env.unlink() if env.exists() else None
+            env.write_bytes(original); os.chmod(env, 0o600)
+            os.open = watching
+            try:
+                tool.apply(env, tool.parse_pairs(["KALIV_COMFY_HOST_MEMORY_GIB=41"]), stamp="perm2")
+            finally:
+                os.open = real_open
+            check(seen and all(mode == 0o600 for mode in seen), "the backup and the replacement are created owner-only before they are given the original's mode")
+        finally:
+            os.umask(previous)
+
     # 6. The runbook uses the tool instead of rewriting the file from the shell.
     plan = (ROOT / "docs" / "RIGDAG_MEDIE_I_CHAT.md").read_text(encoding="utf-8")
     section = plan[plan.index("## 6. Video med lyd"):]

@@ -15,6 +15,9 @@ What this does instead:
   with the file's own line ending.
 - A backup is made first under a name that does not exist yet (``<file>.bak-<UTC time>``,
   created exclusively) -- an earlier backup is never overwritten.
+- The backup and the replacement get the original's access restrictions before any content is
+  written to them (POSIX mode; on Windows the file's DACL): the file can hold secrets, and a
+  copy readable by more accounts than the original would expose them.
 - The new content is written to a temporary file beside the original, read back and checked
   (each key exactly once with its value, every other line unchanged and in order), and only
   then moved into place in one step. On any failure the original is untouched.
@@ -115,12 +118,84 @@ def verify(before: bytes, after: bytes, pairs: dict[str, str]) -> None:
         raise RuntimeError("verification failed: a line that was not asked for changed")
 
 
+def _copy_windows_dacl(source: Path, target: Path) -> None:
+    """Give ``target`` the discretionary ACL of ``source``, including whether it is protected
+    from inheritance. Raises when Windows refuses: a copy that may be readable by more accounts
+    than the original must not be filled with the original's content."""
+    import ctypes
+    from ctypes import wintypes
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    SE_FILE_OBJECT, DACL, PROTECTED, UNPROTECTED, SE_DACL_PROTECTED = 1, 0x4, 0x80000000, 0x20000000, 0x1000
+    advapi.GetNamedSecurityInfoW.argtypes = [wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD, ctypes.c_void_p, ctypes.c_void_p,
+                                             ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+    advapi.GetNamedSecurityInfoW.restype = wintypes.DWORD
+    advapi.GetSecurityDescriptorControl.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.WORD), ctypes.POINTER(wintypes.DWORD)]
+    advapi.GetSecurityDescriptorControl.restype = wintypes.BOOL
+    advapi.SetNamedSecurityInfoW.argtypes = [wintypes.LPWSTR, ctypes.c_int, wintypes.DWORD, ctypes.c_void_p, ctypes.c_void_p,
+                                             ctypes.c_void_p, ctypes.c_void_p]
+    advapi.SetNamedSecurityInfoW.restype = wintypes.DWORD
+    kernel.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel.LocalFree.restype = ctypes.c_void_p
+    dacl, descriptor = ctypes.c_void_p(), ctypes.c_void_p()
+    status = advapi.GetNamedSecurityInfoW(str(source), SE_FILE_OBJECT, DACL, None, None, ctypes.byref(dacl), None,
+                                          ctypes.byref(descriptor))
+    if status != 0:
+        raise RuntimeError(f"could not read the file's access list (error {status})")
+    try:
+        control, revision = wintypes.WORD(), wintypes.DWORD()
+        if not advapi.GetSecurityDescriptorControl(descriptor, ctypes.byref(control), ctypes.byref(revision)):
+            raise RuntimeError(f"could not read the file's access list (error {ctypes.get_last_error()})")
+        if not dacl.value:
+            raise RuntimeError("the file has no access list (everyone has access): not copied")
+        flags = DACL | (PROTECTED if control.value & SE_DACL_PROTECTED else UNPROTECTED)
+        status = advapi.SetNamedSecurityInfoW(str(target), SE_FILE_OBJECT, flags, None, None, dacl, None)
+        if status != 0:
+            raise RuntimeError(f"could not set the access list on {target.name} (error {status})")
+    finally:
+        kernel.LocalFree(descriptor)
+
+
+def create_like(original: Path, target: Path) -> None:
+    """Create ``target`` empty, exclusively, with the access restrictions of ``original`` --
+    before a single byte of the original's content is written to it (#2479 review: modelrig.env
+    can hold secrets, and a backup or replacement with default permissions would expose them).
+
+    POSIX: created 0600, then given the original's exact mode (and its owner and group when this
+    process may set them). Windows: created, then given the original's DACL. FileExistsError
+    passes through; any other failure removes the file again.
+    """
+    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
+    try:
+        try:
+            if os.name == "nt":
+                os.close(descriptor)
+                descriptor = None
+                _copy_windows_dacl(original, target)
+            else:
+                info = os.stat(original)
+                try:
+                    os.fchown(descriptor, info.st_uid, info.st_gid)
+                except PermissionError:
+                    pass  # not ours to give away; the mode below is still the original's
+                os.fchmod(descriptor, info.st_mode & 0o7777)
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+    except BaseException:
+        try:
+            os.unlink(target)
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def backup_path(path: Path, stamp: str) -> Path:
     for attempt in range(1000):
         candidate = path.with_name(f"{path.name}.bak-{stamp}" + (f"-{attempt}" if attempt else ""))
         try:
-            with open(candidate, "xb"):
-                return candidate
+            create_like(path, candidate)
+            return candidate
         except FileExistsError:
             continue
     raise RuntimeError("no free backup name")
@@ -138,10 +213,15 @@ def apply(path: Path, pairs: dict[str, str], *, stamp: str | None = None) -> tup
     backup = backup_path(path, stamp or time.strftime("%Y%m%d-%H%M%S", time.gmtime()))
     temporary = path.with_name(f"{path.name}.tmp-{os.getpid()}")
     try:
-        backup.write_bytes(before)
+        # Both new files exist with the original's access restrictions before they hold content.
+        with open(backup, "r+b") as handle:
+            handle.write(before)
+            handle.flush()
+            os.fsync(handle.fileno())
         if backup.read_bytes() != before:
             raise RuntimeError("the backup does not match the original")
-        with open(temporary, "xb") as handle:
+        create_like(path, temporary)
+        with open(temporary, "r+b") as handle:
             handle.write(after)
             handle.flush()
             os.fsync(handle.fileno())
