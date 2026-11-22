@@ -150,6 +150,58 @@ try:
         finally:
             os.umask(previous)
 
+    # 5c. #2479 review (P2): an original that is read-only even to its owner (0400). The new
+    # files get that mode too, so they must be written through the descriptor they were created
+    # with. Root ignores mode bits, so this case runs as an unprivileged user: directly when the
+    # suite is not root (CI), in a child process as "nobody" when it is.
+    if os.name != "nt":
+        import subprocess
+        import textwrap
+        box = Path(tempfile.mkdtemp())
+        try:
+            shutil.copy(ROOT / "scripts" / "media_env_set.py", box / "media_env_set.py")
+            case = textwrap.dedent("""
+                import os, sys
+                from pathlib import Path
+                sys.path.insert(0, sys.argv[1])
+                import media_env_set as tool
+                assert os.geteuid() != 0, "this case must not run as root"
+                os.umask(0o022)
+                work = Path(sys.argv[1]) / "work"
+                work.mkdir()
+                env = work / "modelrig.env"
+                original = b"SECRET=dummy-not-a-secret\\nKALIV_COMFY_HOST_MEMORY_GIB=64\\n"
+                env.write_bytes(original)
+                os.chmod(env, 0o400)
+                try:
+                    open(env, "r+b").close()
+                    print("NOT-READONLY")
+                except PermissionError:
+                    pass
+                backup, changed = tool.apply(env, tool.parse_pairs(["KALIV_COMFY_HOST_MEMORY_GIB=40"]), stamp="ro")
+                modes = (os.stat(env).st_mode & 0o7777, os.stat(backup).st_mode & 0o7777)
+                ok = (changed and modes == (0o400, 0o400) and backup.read_bytes() == original
+                      and env.read_bytes() == b"SECRET=dummy-not-a-secret\\nKALIV_COMFY_HOST_MEMORY_GIB=40\\n"
+                      and not list(work.glob("*.tmp-*")))
+                print("OK" if ok else f"WRONG modes={modes} changed={changed}")
+            """)
+            extra = {}
+            if os.geteuid() == 0:
+                os.chown(box, 65534, 65534)
+                os.chmod(box, 0o700)
+                os.chown(box / "media_env_set.py", 65534, 65534)
+                extra = {"user": 65534, "group": 65534, "extra_groups": []}
+            done = subprocess.run([sys.executable, "-c", case, str(box)], capture_output=True, text=True, timeout=60,
+                                  cwd="/", env={"PATH": os.environ.get("PATH", ""), "PYTHONDONTWRITEBYTECODE": "1"}, **extra)
+            output = done.stdout.strip().splitlines()
+            check(done.returncode == 0 and output == ["OK"],
+                  "as an unprivileged user: a 0400 env file is updated, and the replaced file and the backup are 0400 "
+                  f"(got rc={done.returncode} out={output} err={done.stderr.strip()[-300:]!r})")
+        finally:
+            if os.geteuid() == 0:
+                subprocess.run(["chmod", "-R", "u+rwX", str(box)], check=False)
+            shutil.rmtree(box, ignore_errors=True)
+
     # 6. The runbook uses the tool instead of rewriting the file from the shell.
     plan = (ROOT / "docs" / "RIGDAG_MEDIE_I_CHAT.md").read_text(encoding="utf-8")
     section = plan[plan.index("## 6. Video med lyd"):]

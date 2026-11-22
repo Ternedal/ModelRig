@@ -15,9 +15,10 @@ What this does instead:
   with the file's own line ending.
 - A backup is made first under a name that does not exist yet (``<file>.bak-<UTC time>``,
   created exclusively) -- an earlier backup is never overwritten.
-- The backup and the replacement get the original's access restrictions before any content is
-  written to them (POSIX mode; on Windows the file's DACL): the file can hold secrets, and a
-  copy readable by more accounts than the original would expose them.
+- The backup and the replacement are never readable by more accounts than the original
+  (POSIX: created owner-only, given the original's mode after writing; Windows: given the
+  original's DACL before writing): the file can hold secrets. An original that is read-only
+  even to its owner is handled too.
 - The new content is written to a temporary file beside the original, read back and checked
   (each key exactly once with its value, every other line unchanged and in order), and only
   then moved into place in one step. On any failure the original is untouched.
@@ -156,23 +157,30 @@ def _copy_windows_dacl(source: Path, target: Path) -> None:
         kernel.LocalFree(descriptor)
 
 
-def create_like(original: Path, target: Path) -> None:
-    """Create ``target`` empty, exclusively, with the access restrictions of ``original`` --
-    before a single byte of the original's content is written to it (#2479 review: modelrig.env
-    can hold secrets, and a backup or replacement with default permissions would expose them).
+def write_like(original: Path, target: Path, data: bytes) -> None:
+    """Create ``target`` exclusively, holding ``data``, with the access restrictions of
+    ``original`` (#2479 review: modelrig.env can hold secrets, and a backup or replacement with
+    default permissions would expose them). At no moment is it readable by more than the original.
 
-    POSIX: created 0600, then given the original's exact mode (and its owner and group when this
-    process may set them). Windows: created, then given the original's DACL. FileExistsError
-    passes through; any other failure removes the file again.
+    The content is written through the descriptor the file was created with, so an original
+    that is read-only even to its owner (mode 0400, or a DACL that grants read alone) can still
+    be copied: the restriction applies to later opens, not to the handle already held.
+
+    POSIX: created 0600, written, then given the original's exact mode (and its owner and group
+    when this process may set them). Windows: created, given the original's DACL -- before any
+    content, since the directory's inherited list may be wider -- then written.
+    FileExistsError passes through untouched; any other failure removes the file again.
     """
     descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
     try:
         try:
             if os.name == "nt":
-                os.close(descriptor)
-                descriptor = None
                 _copy_windows_dacl(original, target)
-            else:
+            view = memoryview(data)
+            while view:
+                view = view[os.write(descriptor, view):]
+            os.fsync(descriptor)
+            if os.name != "nt":
                 info = os.stat(original)
                 try:
                     os.fchown(descriptor, info.st_uid, info.st_gid)
@@ -180,8 +188,7 @@ def create_like(original: Path, target: Path) -> None:
                     pass  # not ours to give away; the mode below is still the original's
                 os.fchmod(descriptor, info.st_mode & 0o7777)
         finally:
-            if descriptor is not None:
-                os.close(descriptor)
+            os.close(descriptor)
     except BaseException:
         try:
             os.unlink(target)
@@ -190,11 +197,12 @@ def create_like(original: Path, target: Path) -> None:
         raise
 
 
-def backup_path(path: Path, stamp: str) -> Path:
+def write_backup(path: Path, stamp: str, data: bytes) -> Path:
+    """The original's bytes under a name that did not exist, never over an earlier backup."""
     for attempt in range(1000):
         candidate = path.with_name(f"{path.name}.bak-{stamp}" + (f"-{attempt}" if attempt else ""))
         try:
-            create_like(path, candidate)
+            write_like(path, candidate, data)
             return candidate
         except FileExistsError:
             continue
@@ -210,21 +218,12 @@ def apply(path: Path, pairs: dict[str, str], *, stamp: str | None = None) -> tup
     verify(before, after, pairs)
     if after == before:
         return None, False
-    backup = backup_path(path, stamp or time.strftime("%Y%m%d-%H%M%S", time.gmtime()))
     temporary = path.with_name(f"{path.name}.tmp-{os.getpid()}")
+    backup = write_backup(path, stamp or time.strftime("%Y%m%d-%H%M%S", time.gmtime()), before)
     try:
-        # Both new files exist with the original's access restrictions before they hold content.
-        with open(backup, "r+b") as handle:
-            handle.write(before)
-            handle.flush()
-            os.fsync(handle.fileno())
         if backup.read_bytes() != before:
             raise RuntimeError("the backup does not match the original")
-        create_like(path, temporary)
-        with open(temporary, "r+b") as handle:
-            handle.write(after)
-            handle.flush()
-            os.fsync(handle.fileno())
+        write_like(path, temporary, after)
         verify(before, temporary.read_bytes(), pairs)
         if path.read_bytes() != before:
             raise RuntimeError("the file changed while it was being edited; nothing was replaced")
