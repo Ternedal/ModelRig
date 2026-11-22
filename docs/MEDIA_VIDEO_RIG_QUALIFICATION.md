@@ -203,7 +203,7 @@ Weight pins (`{path, bytes, sha256}`, the rig's own hashes; §2's cross-check ha
 8. **The model chose `image_generate` for a video** when a persona was in force (6 of 11 right with the old rule). The rule now says that a video described in words needs no picture first (#2471): 4/4 through the worker, 12/12 directly against Ollama.
 9. **The dev appliance does not start the executor**, and the executor block in `RIGDAG_MEDIE_I_CHAT.md` 1.2 must also carry the `KALIV_COMFY*` keys into the process.
 
-## 8. Sound: LTX-2.3 (prepared, not run)
+## 8. Sound: LTX-2.3 (run on the rig 22 November 2026, dev channel)
 
 Anders, 21 November: a clip without sound is no use. Wan 2.1/2.2 render picture only, and the Wan versions with sound (2.5 and later) have no downloadable weights [source: comfy.org Wan workflow page; Runpod Wan 2.5 guide]. The candidate is **LTX-2.3**: picture and sound in one pass, text-to-video and image-to-video from the same files, native ComfyUI workflows with no custom nodes [source: docs.comfy.org LTX-2.3 tutorial]. The nodes it needs are in the rig's ComfyUI: `LTXAVTextEncoderLoader`, `LTXVAudioVAELoader`, `LTXVEmptyLatentAudio`, `LTXVConcatAVLatent`, `LTXVSeparateAVLatent`, `LTXVAudioVAEDecode`, and `CreateVideo` takes an `audio` input [repo: ComfyUI source at tag `v0.46.2`].
 
@@ -218,7 +218,63 @@ Anders, 21 November: a clip without sound is no use. Wan 2.1/2.2 render picture 
 - **Host RAM limit.** The supervisor's Job Object lets one ComfyUI process commit 48 GiB. `KALIV_COMFY_HOST_MEMORY_GIB` (whole GiB, 1..64) raises it if the measurement says so [repo].
 - **Two template rules were added for it** [repo: `comfy_workflow_template`]: an integer slot may sit on a `PrimitiveInt`'s `value` (the frame count goes to the video latent and the audio latent, the frame rate to three nodes, and a marker appears once), and a template whose schedule is part of the graph may leave the steps slot out (the distilled model runs a fixed list of sigmas).
 - **The helper** `scripts/media_comfy_ltx23_setup.py` downloads the three files, submits the first stage of ComfyUI's own LTX-2.3 text-to-video graph (8 distilled steps, no spatial upscale, 768×512, 49 frames at 25 fps) to a running ComfyUI, samples ComfyUI's lowest free VRAM and host RAM while it renders, checks that the MP4 has a sound track, and only then hashes the weights and writes template and candidate profile (`ltx23-t2v-av-gpu1`, port 8191). `run --task image_to_video` does the same with the picture written into the video latent (`ltx23-i2v-av-gpu1`, port 8192, 640×640). Both graphs were submitted to a ComfyUI `v0.46.2` on a CPU with empty placeholder files: `/prompt` accepted them with no node errors, and execution stopped at loading the placeholder checkpoint, as it must. **Neither has rendered anything** [measure].
+- **A sound profile cannot finish silent** [repo: `media_generation_profiles`, `comfy_video_adapter`]. `backend_options.sound: true` (optional, default false; the helper writes it for both LTX profiles) makes the adapter look for a sound track in the clip while it copies it — an `hdlr` box with handler type `soun` — and fail the job with `output_has_no_sound` when there is none. It is a check on the container, not on what the sound is.
+- **Sound and silent side by side** [repo: `image_generate_tool._choose_profile`]. With Wan and LTX both enabled, each task has two profiles and one default id cannot choose for both. `KALIV_VIDEO_TOOL_PROFILE` takes a comma-separated list, one id per task: `ltx23-t2v-av-gpu1,ltx23-i2v-av-gpu1` sends chat requests to LTX and leaves Wan reachable by explicit `profile_id`. A list naming a profile that is not an enabled video profile is refused whole.
 - The spatial upscale stage and the text encoder on the other card (`SelectCLIPDevice` is a core node in 0.46.2 [repo: ComfyUI source]) come after the first measurement, if it is worth going on.
+
+### 8.1 Rig run, 22 November 2026
+
+Dev appliance, 2× RTX 3060 (12 GB), ComfyUI 0.46.2, Ollama pinned to GPU 0 as in §7, executor on `cuda:1`. Commit `75494d41` (`main` at `30b95e6a` plus #2477 and #2478). **Development channel: nothing here is evidence and no profile is promoted** — both LTX profiles stay `candidate`.
+
+**Direct against ComfyUI** (`scripts/media_comfy_ltx23_setup.py run`, 49 frames at 25 fps = 1.96 s):
+
+| Task | Size | Time | Lowest free VRAM | Lowest free RAM (of 98 GiB) | Sound track |
+|---|---|---|---|---|---|
+| text_to_video | 768×512 | 75 s | 496 MiB | 42.5 GiB | yes |
+| image_to_video | 640×640 | 65 s | 565 MiB | 44.6 GiB | yes |
+
+Anders listened to the text-to-video clip: the sound is fine. Pins written by the helper: checkpoint `28606c5b…6450` (29,145,431,166 bytes), text encoder `aaca463d…3f6d` (9,447,702,218), LoRA `31e0c019…e3ac` (2,741,024,390); repository revision `91eda216f820e5ecb3d17dc9fe3b7cdaf56b587d`; templates `6aff8c02…d0b0` (text) and `1c5db190…eb20` (image).
+
+**Through the chat** (`media_chat_probe`, qwen3:14b, `KALIV_VIDEO_TOOL_PROFILE=ltx23-t2v-av-gpu1,ltx23-i2v-av-gpu1`, `KALIV_COMFY_HOST_MEMORY_GIB=64`, Wan profiles still enabled):
+
+| Case | Job time |
+|---|---|
+| Text → clip, first ever (hashing 41 GB of weights, cold load) | 386 s |
+| Text → clip, model warm | 64 s |
+| Text → clip, cold load, weights already hashed | 174 s |
+| Picture (RealVisXL) right after an LTX clip | 75–99 s |
+| Picture → clip (LTX loaded again after the picture model) | 152–153 s |
+
+- Every clip passed the adapter's sound-track check (`backend_options.sound`), so ComfyUI 0.46.2's `SaveVideo` writes the track with handler type `soun`.
+- **Switching model on the one card costs about 90 s each way**: a warm clip is 64 s, the same clip after a picture is 152 s. That is the price of one 12 GB card for both; it is not a fault.
+- **Found and fixed (#2478):** before the fix the first picture after an LTX clip failed after 0.3 s with `gpu_busy` — `stop()` gave up the GPU while ComfyUI's own process (the venv launcher's child, ~44 GiB) was still being torn down. After the fix: 4 of 4 jobs in `--suite i2v --rounds 2` run directly after an LTX clip.
+- Host RAM: ComfyUI used about 44 GiB. The run had the Job Object limit raised to 64 GiB; whether the default 48 GiB is enough was not tried.
+- Not done: the spatial upscale stage, more than two rounds.
+
+### 8.2 Longer clips, and the same rig on 64 GB (22 November 2026, dev channel)
+
+**Longer clips, direct against ComfyUI, 98 GiB RAM** (`run --frames N`; the helper writes the measured length into the profile as `max_frames`, and a chat request that names no length gets the profile's maximum):
+
+| Task | Clip | Time | Lowest free VRAM |
+|---|---|---|---|
+| text_to_video 768×512 | 121 frames, 4.8 s | 226 s (includes a cold load) | 519 MiB |
+| text_to_video 768×512 | 241 frames, 9.6 s | 191 s (warm) | 395 MiB |
+| image_to_video 640×640 | 121 frames, 4.8 s | 116 s (warm) | 398 MiB |
+
+About 20 s of rendering per second of clip. Lowest free VRAM is the same at 2, 5 and 10 s, so length is not what presses the card. The profiles on the rig now stand at 241 frames (text) and 121 frames (picture).
+
+**The rig lost a RAM module the same day** (it would not boot with it; unrelated to the software, 64 GB left of 98). Same commit and settings, except `KALIV_COMFY_HOST_MEMORY_GIB=40` so that ComfyUI is stopped by its Job Object before Windows runs out. Through the chat:
+
+| Case (64 GB, limit 40 GiB) | Job time |
+|---|---|
+| Text → 9.6 s clip, cold load | 351 s |
+| Text → 9.6 s clip, warm | 199 s |
+| Picture (RealVisXL) after an LTX clip | 115 s |
+| Picture → 4.8 s clip (LTX loaded again) | 234 s |
+
+**On the phone** (Android, the APK from 21 November, same afternoon): Anders asked for a picture and for video in the app and reports that picture, video and sound all work. That is his report of what he saw and heard, not a measurement; the landscape viewer fix is not in that APK.
+
+All four completed, so LTX-2.3 runs within a 40 GiB host-memory limit on this rig; the warm 10 s clip is 8 s slower than on 98 GiB. Every figure in 8.1 was measured with 98 GiB and a 64 GiB limit.
 
 ## 9. What this document does not do
 
