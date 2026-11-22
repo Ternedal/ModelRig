@@ -112,8 +112,8 @@ print("== 2. contract ==")
 cap = vgt.VIDEO_GENERATE_CAPABILITY
 check(cap.risk == "read" and cap.impact == "read" and cap.idempotent is False, "read, not idempotent")
 check(cap.schedulable is False and cap.network == "none" and cap.sensitivity == "private", "not schedulable, local, private")
-check(set(cap.params["properties"]) == {"prompt", "profile_id", "width", "height", "frames", "seed", "source_image_job_id"}
-      and cap.params["required"] == ["prompt"], "argument surface incl. frames + source_image_job_id; prompt required")
+check(set(cap.params["properties"]) == {"prompt", "profile_id", "width", "height", "frames", "seconds", "seed", "source_image_job_id"}
+      and cap.params["required"] == ["prompt"], "argument surface incl. seconds, frames + source_image_job_id; prompt required")
 check("source_image_job_id" in cap.description and "Never claim it is finished" in cap.description
       and "cannot animate" not in cap.description, "description: both ways, on-its-way rule, no stale refusal")
 check("source_image_job_id" in vgt.SYSTEM_RULE and "cannot animate" not in vgt.SYSTEM_RULE, "system rule names i2v")
@@ -134,6 +134,66 @@ params = json.loads(job["params"]) if job and isinstance(job.get("params"), str)
 check(job is not None and job["state"] == "queued", "job queued for OWNER")
 check(params.get("task") == "text_to_video" and params.get("frames") == 33 and params.get("seed") == 5,
       "stored params carry task=text_to_video, frames, seed")
+
+# A person asks for a length in seconds; the profile turns it into frames (16 fps, max 81 here).
+from app.media_generation_profiles import frames_for_seconds
+
+
+def frames_of(arguments, *profiles):
+    fresh = service_with(*(profiles or (VID, IMG)))
+    text = vgt._run_video_generate({"prompt": PROMPT, **arguments}, service_getter=lambda: fresh, env={})
+    reference = parse_job_reference(text)
+    if reference is None:
+        return None, text
+    stored = fresh.store.get(reference["job_id"], OWNER)
+    stored = json.loads(stored["params"]) if isinstance(stored.get("params"), str) else stored.get("params") or {}
+    return stored.get("frames"), text
+
+
+got, text = frames_of({"seconds": 3})
+check(got == 48 and "kortere end" not in text, "seconds=3 at 16 fps -> 48 frames, nothing to tell the user")
+check(frames_of({"seconds": "2,5"})[0] == 40 and frames_of({"seconds": 2.5})[0] == 40 and frames_of({"seconds": "2.5"})[0] == 40,
+      "2,5 / 2.5 / '2.5' are the same wish")
+got, text = frames_of({"seconds": 30})
+check(got == 81 and "Klippet bliver ca. 5 sekunder" in text and "kortere end de 30 sekunder" in text,
+      "longer than the profile can make: the longest clip, and the user is told")
+got, text = frames_of({"seconds": 5.2})
+check(got == 81 and "kortere end" not in text, "within half a second of the limit: the limit, without a remark")
+check(frames_of({"seconds": 0.01})[0] == 2, "a tiny length is still a clip (one grid step), not a refusal")
+check(frames_of({})[0] is None, "no length asked: the frames are left to the profile's default, as before")
+check(frames_of({"seconds": ""})[0] is None, "an empty seconds is 'not given'")
+for bad, why in (({"seconds": "lang"}, "a word"), ({"seconds": -2}, "negative"), ({"seconds": 0}, "zero"),
+                 ({"seconds": True}, "a boolean"), ({"seconds": 4000}, "over an hour"),
+                 ({"seconds": 3, "frames": 33}, "both seconds and frames")):
+    got, text = frames_of(bad)
+    check(got is None and parse_job_reference(text) is None and "ikke startet" in text.lower(), f"seconds refused as a mistake: {why}")
+# the grid: LTX-2.3 clips have 8k+1 frames at 25 fps
+GRID = parse_profile(video_profile(profile_id="grid", limits={"max_prompt_chars": 500, "sizes": [[832, 480]], "max_steps": 30, "max_frames": 241},
+                                   backend_options={"template_name": "wan-t2v.json", "template_sha256": "ab" * 32, "fps": 25,
+                                                    "max_render_seconds": 1800, "max_output_bytes": 512 * 1024 * 1024,
+                                                    "port": 8188, "frame_step": 8}))
+check([frames_for_seconds(GRID, s) for s in (5, 2, 10, 0.1, 9.64, 60)]
+      == [(121, False), (49, False), (241, False), (9, False), (241, False), (241, True)],
+      "frame_step 8 at 25 fps: 5 s -> 121, 2 s -> 49, 10 s -> 241, tiny -> one step, 60 s -> the limit and told")
+check(frames_of({"seconds": 5}, GRID, IMG)[0] == 121, "through the tool: 5 s on the grid profile is 121 frames")
+ODD = parse_profile(video_profile(profile_id="odd", limits={"max_prompt_chars": 500, "sizes": [[832, 480]], "max_steps": 30, "max_frames": 100},
+                                  backend_options={"template_name": "wan-t2v.json", "template_sha256": "ab" * 32, "fps": 25,
+                                                   "max_render_seconds": 1800, "max_output_bytes": 512 * 1024 * 1024,
+                                                   "port": 8188, "frame_step": 8}))
+check(frames_for_seconds(ODD, 60)[0] == 97, "a limit off the grid is taken down to it, never above the limit")
+for value in (0, 65, "8", True, 1.5):
+    try:
+        parse_profile(video_profile(backend_options={"template_name": "wan-t2v.json", "template_sha256": "ab" * 32, "fps": 16,
+                                                     "max_render_seconds": 1800, "max_output_bytes": 512 * 1024 * 1024,
+                                                     "port": 8188, "frame_step": value}))
+        check(False, f"frame_step {value!r} must be refused")
+    except Exception:
+        check(True, f"frame_step {value!r} is refused")
+try:
+    frames_for_seconds(IMG, 3)
+    check(False, "a length in seconds on an image profile must be refused")
+except Exception:
+    check(True, "a length in seconds needs a video profile")
 check(PROMPT not in out and "minutter" in out and "på vej" in out, "text: minutes, on its way, no prompt")
 check('"schema": "kaliv-video-job-ref/v1"' in out.split("\n", 1)[0], "first line is the video job-ref schema")
 

@@ -17,8 +17,11 @@ tool's; this module only states what differs for video:
 - **Switches below the tool:** the job API refuses a video profile unless
   ``KALIV_MEDIA_VIDEO=1`` (``video_not_enabled``); that answer is relayed as a
   text result like every other rig-side condition.
-- **Extra argument** ``frames`` (the profile's own bounds decide; the executor's
-  validator is applied at submit, as for size).
+- **Extra arguments** ``seconds`` and ``frames``. A person asks for a length in
+  seconds; the tool turns it into frames at the chosen profile's frame rate and
+  grid (``frames_for_seconds``), and says so when the profile's limit makes the
+  clip clearly shorter. ``frames`` stays for a caller that knows the profile; the
+  executor's validator is applied at submit, as for size.
 - **Honesty towards Anders' goal:** these are short clips (the profile's frame
   budget), not the 15-minute pieces the video chain is for (12/11). The tool is
   the chat entry point for the seam; the length is the pipeline's to grow.
@@ -26,6 +29,7 @@ tool's; this module only states what differs for video:
 from __future__ import annotations
 
 import contextvars
+import math
 import dataclasses
 import os
 import re
@@ -46,7 +50,7 @@ VIDEO_TOOL_FLAG = "KALIV_VIDEO_TOOL_ENABLED"
 VIDEO_TOOL_PROFILE_ENV = "KALIV_VIDEO_TOOL_PROFILE"
 VIDEO_TASK = "text_to_video"
 
-_ALLOWED_ARGS = frozenset({"prompt", "profile_id", "width", "height", "frames", "seed", "source_image_job_id"})
+_ALLOWED_ARGS = frozenset({"prompt", "profile_id", "width", "height", "frames", "seconds", "seed", "source_image_job_id"})
 I2V_TASK = "image_to_video"
 LATEST_SOURCE = "latest"
 
@@ -128,7 +132,9 @@ VIDEO_GENERATE_CAPABILITY = Tool(
                                           "profile; never a person, persona or revision id"},
             "width": {"type": "integer", "description": "leave out unless the user asks for a size; the rig's default always works"},
             "height": {"type": "integer", "description": "leave out unless the user asks for a size; the rig's default always works"},
-            "frames": {"type": "integer", "description": "leave out unless the user asks for a length; within the profile's frame budget"},
+            "seconds": {"type": "number", "description": "leave out unless the user asks for a length; the clip's length in seconds. "
+                                                         "The rig makes it as long as it can if that is shorter"},
+            "frames": {"type": "integer", "description": "leave out; use seconds for a length"},
             "seed": {"type": "integer", "description": "optional, for 'the same again but…'"},
             "source_image_job_id": {"type": "string",
                                     "description": "optional: animate a finished picture -- 'latest' for the newest one of this conversation, or the 32-hex id from image_generate"},
@@ -185,7 +191,30 @@ def _validate_args(args: object) -> dict:
     clean["source_image_job_id"] = source
     for key in _INT_ARGS:
         clean[key] = int_arg(key, args.get(key))
+    clean["seconds"] = _seconds_arg(args.get("seconds"))
+    if clean["seconds"] is not None and clean["frames"] is not None:
+        raise ArgMistake("angiv enten seconds eller frames, ikke begge")
     return clean
+
+
+_SECONDS_TEXT = re.compile(r"\d{1,4}(?:[.,]\d{1,3})?")
+MAX_SECONDS = 3600.0
+
+
+def _seconds_arg(value: object) -> float | None:
+    """A length in seconds as the model sent it: ``5``, ``5.0``, ``"5"``, ``"2,5"``; ``""`` and
+    None mean "not given". The profile decides what it becomes; this only reads the number."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if isinstance(value, bool):
+        raise ArgMistake("seconds skal være et tal")
+    if isinstance(value, str):
+        if not _SECONDS_TEXT.fullmatch(value.strip()):
+            raise ArgMistake("seconds skal være et tal")
+        value = float(value.strip().replace(",", "."))
+    if not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 < value <= MAX_SECONDS:
+        raise ArgMistake("seconds skal være et tal mellem 0 og 3600")
+    return float(value)
 
 
 def _run_video_generate(args: dict, *, service_getter: Callable[[], object] | None = None,
@@ -209,14 +238,35 @@ def _run_video_generate(args: dict, *, service_getter: Callable[[], object] | No
         params_keys = _INT_ARGS + ("input_asset_id",)
     else:
         source_job_id = None
+    shortened: list[str] = []
+
+    def length(profile, values: dict) -> str | None:
+        """The user's length in seconds as this profile's frames. Told to the user when the
+        profile's limit makes the clip clearly shorter than asked, never delivered silently."""
+        if values.get("seconds") is None:
+            return None
+        from .media_generation_contract import GenerationError
+        from .media_generation_profiles import frames_for_seconds
+        try:
+            frames, cut = frames_for_seconds(profile, values["seconds"])
+        except GenerationError:
+            return "invalid_request"
+        values["frames"] = frames
+        if cut:
+            got = frames / profile.backend_options.fps
+            shortened.append(f" Klippet bliver ca. {got:.0f} sekunder — det længste, riggen laver i ét klip, "
+                             f"og kortere end de {values['seconds']:g} sekunder, der blev bedt om. Sig det til brugeren.")
+        return None
+
     return _submit_media_job(
         clean, service_getter=service_getter, env=env, modality="video", task=task,
         profile_env=VIDEO_TOOL_PROFILE_ENV, schema=VIDEO_JOB_REFERENCE_SCHEMA, kind="video",
-        params_keys=params_keys, source_job_id=source_job_id,
+        params_keys=params_keys, source_job_id=source_job_id, resolve=length,
         text=lambda job_id, profile_id: (
             f"Videojobbet er sat i kø på riggen (profil {profile_id}). "
             "Klippet tager nogle minutter og vises i samtalen, når det er klar. Sig til brugeren, "
             "at det er på vej — påstå ikke, at det er færdigt, gentag ikke prompten, og nævn ikke job-id'et."
+            + "".join(shortened)
         ),
     )
 
