@@ -428,8 +428,11 @@ Executoren (ikke administrator, lad stå; `exit=73` = en gammel executor lever e
 $GenPy = "C:\Kaliv\media-venv\Scripts\python.exe"; $Repo = "C:\Users\an001\Desktop\ModelRig-media"; $EnvFile = "C:\Rig\ModelRig\modelrig.env"
 Get-Content $EnvFile | Where-Object { $_ -match '^(KALIV_MEDIA|KALIV_GPU|KALIV_COMFY|CUDA_)' } | ForEach-Object { $k,$v = (($_ -split '#')[0]) -split '=',2; [Environment]::SetEnvironmentVariable($k.Trim(), $v.Trim(), 'Process') }
 $env:KALIV_MEDIA_EXECUTOR = "1"; $env:HF_HUB_OFFLINE = "1"; $env:TRANSFORMERS_OFFLINE = "1"
-Push-Location "$Repo\worker"; try { & $GenPy -u -m app.media_executor_main --device cuda:1 2>&1 | Tee-Object "$env:TEMP\media-executor.log"; "exit=$LASTEXITCODE" } finally { Pop-Location }
+Push-Location "$Repo\worker"; try { & $GenPy -u -m app.media_executor_main --device cuda:1 2>&1 | Tee-Object "$env:TEMP\media-executor.log" -Append; "exit=$LASTEXITCODE" } finally { Pop-Location }
 ```
+
+`-Append` er med vilje: uden den overskriver hver genstart loggen fra den forrige
+kørsel, og så kan hverken fejlsøgning eller 7.3 se, hvad der skete før genstarten.
 
 Probe (token og mappe sættes i samme blok):
 
@@ -470,7 +473,16 @@ anden commit end kandidaten tæller ikke.
 | Profiler slået til (`KALIV_MEDIA_PROFILES_ENABLED`) | |
 | Dato, hvem | |
 
-Start som i 6.2. Hav executor-vinduet synligt hele vejen.
+Læg først en eventuel gammel executor-log til side, så forløbets log kun er
+forløbets (executoren skal være stoppet):
+
+```powershell
+if (Test-Path "$env:TEMP\media-executor.log") { Move-Item "$env:TEMP\media-executor.log" "$env:TEMP\media-executor-foer-$(Get-Date -Format yyyyMMdd-HHmmss).log" }
+```
+
+Start som i 6.2. Hav executor-vinduet synligt hele vejen. F1 og F5 genstarter
+executoren; 6.2's blok skriver videre i samme log (`-Append`), så alt fra S1 til
+F8 står i én fil, når 7.3 søger i den.
 
 **7.1 Succes** — hver på telefonen **og** på desktop:
 
@@ -507,6 +519,15 @@ $needles = 'rød cykel', 'red bicycle', 'papirbåd', 'paper boat'
 $logs = "$env:TEMP\media-executor.log", "C:\Kaliv\media-work\comfy\cuda1\comfyui.log"
 foreach ($log in $logs) { foreach ($n in $needles) { $hits = @(Select-String -Path $log -SimpleMatch $n -ErrorAction SilentlyContinue); "{0,-60} {1,-14} {2} linjer" -f $log, $n, $hits.Count } }
 ```
+
+Tjek først, at loggen dækker hele forløbet — den skal indeholde lige så mange
+`recovered`-linjer, som executoren er startet (mindst tre: start, efter F1, efter F5):
+
+```powershell
+@(Select-String -Path "$env:TEMP\media-executor.log" -SimpleMatch '"event": "recovered"').Count
+```
+
+Viser den færre, er en del af forløbet ikke i loggen, og 7.3 kan ikke bestås på den.
 
 Forventet: 0 linjer i `media-executor.log` (den skriver job-id, profil og koder).
 `comfyui.log` er ComfyUI's egen log; finder blokken prompten dér, så notér det
