@@ -446,6 +446,42 @@ time.sleep(120)
         stopper.join(15)
         self.assertTrue(self.lease_is_free())
 
+    def test_stop_waits_until_the_resident_lock_is_free(self):
+        # Rig 22/11: on Windows the spawned process is the venv launcher; ComfyUI is its child and
+        # outlives it for a moment (a 44 GiB process being torn down). stop() returned at once and
+        # the next generator met "held by a resident process" -> gpu_busy. Simulated here by a
+        # resident lock that stays held for a while after the spawned process has exited.
+        real = supervisor_module.resident_is_held
+        self.addCleanup(setattr, supervisor_module, "resident_is_held", real)
+        sup = self.supervisor(stop_timeout_s=3)
+        sup.start()
+        release_at = [None]
+
+        def lingering(*args, **kwargs):
+            if sup._proc is not None and sup._proc.poll() is not None:  # only once the spawned process is gone
+                release_at[0] = release_at[0] or time.monotonic() + 0.6
+                return time.monotonic() < release_at[0]
+            return real(*args, **kwargs)
+        supervisor_module.resident_is_held = lingering
+        started = time.monotonic()
+        sup.stop()
+        self.assertGreaterEqual(time.monotonic() - started, 0.55, "stop waited for the resident lock")
+        self.assertFalse(sup.running)
+        self.assertTrue(self.lease_is_free())
+
+    def test_stop_keeps_the_lease_when_the_resident_lock_never_frees(self):
+        real = supervisor_module.resident_is_held
+        self.addCleanup(setattr, supervisor_module, "resident_is_held", real)
+        sup = self.supervisor(stop_timeout_s=1)
+        sup.start()
+        supervisor_module.resident_is_held = lambda *a, **k: True
+        with self.assertRaisesRegex(ComfySupervisorError, "did not exit; GPU lease kept"):
+            sup.stop()
+        self.assertFalse(self.lease_is_free(), "the GPU may still be in use: the lease stays")
+        supervisor_module.resident_is_held = real
+        sup.stop()  # the lock is free now: a second stop completes
+        self.assertTrue(self.lease_is_free())
+
     def test_windows_path_spawns_in_a_job_object_with_limits(self):
         """Wiring only: the real Job Object is covered by windows_job contracts on the Windows runner."""
         import app.windows_job as windows_job
