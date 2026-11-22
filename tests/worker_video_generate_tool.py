@@ -375,6 +375,25 @@ o = vgt._run_video_generate({"prompt": PROMPT}, service_getter=lambda: svc5, env
 check("profile_required" in o and parse_job_reference(o) is None, "two profiles for one task: ambiguity is refused, not guessed")
 o = vgt._run_video_generate({"prompt": PROMPT}, service_getter=lambda: svc5, env={"KALIV_VIDEO_TOOL_PROFILE": "wan-t2v-b"})
 check((parse_job_reference(o) or {}).get("profile_id") == "wan-t2v-b", "the configured default resolves it")
+# Two video models on the rig, each with a profile per task (silent Wan, LTX with sound): one id
+# cannot name a default for both tasks, a comma-separated list can.
+I2V_B = parse_profile(video_profile(profile_id="wan-i2v-b", tasks=["image_to_video"]))
+svc6 = service_with(T2V, T2V_B, I2V, I2V_B)
+both = {"KALIV_VIDEO_TOOL_PROFILE": " wan-t2v-b , wan-i2v-b "}
+o = vgt._run_video_generate({"prompt": PROMPT}, service_getter=lambda: svc6, env=both)
+check((parse_job_reference(o) or {}).get("profile_id") == "wan-t2v-b", "a list: the id that lists text_to_video serves a text request")
+o = vgt._run_video_generate({"prompt": PROMPT}, service_getter=lambda: svc6, env={"KALIV_VIDEO_TOOL_PROFILE": "wan-t2v-b"})
+check((parse_job_reference(o) or {}).get("profile_id") == "wan-t2v-b", "one id still works as before")
+o = vgt._run_video_generate({"prompt": PROMPT}, service_getter=lambda: svc6,
+                            env={"KALIV_VIDEO_TOOL_PROFILE": "wan-t2v-b,sdxl-a"})
+check("configured_profile_not_enabled" in o and parse_job_reference(o) is None,
+      "a list naming a profile that is not an enabled video profile is refused whole, not half used")
+from app.image_generate_tool import _choose_profile as _choose
+check(_choose(svc6, None, both, modality="video", profile_env="KALIV_VIDEO_TOOL_PROFILE", task="image_to_video")
+      == ("wan-i2v-b", None), "a list: the id that lists image_to_video serves a picture request")
+check(_choose(svc6, None, {"KALIV_VIDEO_TOOL_PROFILE": "wan-t2v-b"}, modality="video",
+              profile_env="KALIV_VIDEO_TOOL_PROFILE", task="image_to_video") == (None, "profile_required"),
+      "with one id the other task still has two candidates and says so")
 
 # A source the model wrote badly is a text result it can act on, never a turn that dies with HTTP 400.
 for bad_source in ("det billede", "newest", "x", "A" * 32, "\x00unreadable"):

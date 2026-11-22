@@ -484,6 +484,23 @@ class ComfySupervisor:
     def interrupt(self) -> None:
         self._api("/interrupt", method="POST")
 
+    def _wait_resident_released(self) -> None:
+        """ComfyUI has gone when its resident lock is free, not when the process we spawned is.
+
+        On Windows the spawned process is the venv's launcher and ComfyUI is its child (rig 21/11:
+        proof pid 1904, spawned pid 5372). The launcher exits at once; the child dies when the Job
+        Object closes, and a process holding tens of GiB takes a moment to be torn down. Returning
+        before that hands the next generator a GPU that is still "held by a resident process"
+        (rig 22/11: the first picture after an LTX-2.3 clip failed with gpu_busy after 0.3 s, the
+        next one went through). Waits at most stop_timeout_s; after that the lease is kept, as for
+        a ComfyUI that will not exit.
+        """
+        deadline = time.monotonic() + self.stop_timeout_s
+        while resident_is_held(self.gpu_uuid, lease_dir=self.lease_dir):
+            if time.monotonic() >= deadline:
+                raise ComfySupervisorError("ComfyUI did not exit; GPU lease kept")
+            time.sleep(min(self.poll_s, 0.1))
+
     def stop(self) -> None:
         """Interrupt, terminate, kill. The lease is released only after ComfyUI has exited."""
         self._idle_free_bytes, self._idle_job_cost, self._idle_job_kind = None, 0, None
@@ -506,6 +523,8 @@ class ComfySupervisor:
         if proc is not None and _WINDOWS:
             from .windows_job import close_attached_job
             close_attached_job(proc)
+        if proc is not None:
+            self._wait_resident_released()
         self._proc = None
         if self._lease is not None:
             self._lease.release()

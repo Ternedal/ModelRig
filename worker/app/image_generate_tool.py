@@ -286,8 +286,9 @@ def _choose_profile(service, requested: str | None, env: Mapping[str, str], *,
     With ``task`` the choice is among the profiles that list it. That matters for
     video: a ComfyUI template renders exactly one task, so text-to-video and
     image-to-video are two profiles on the rig, and "the sole video profile" or
-    one configured default cannot serve both. The configured default wins for the
-    task it lists; for the other task the sole profile that lists it is used. An
+    one configured default cannot serve both. The configured default (one id, or a
+    comma-separated list with one id per task) wins for the task it lists; for a
+    task no configured id lists, the sole profile that lists it is used. An
     explicitly requested profile is never second-guessed here -- the job API
     answers ``task_not_served`` for it.
     """
@@ -295,12 +296,15 @@ def _choose_profile(service, requested: str | None, env: Mapping[str, str], *,
     if requested is not None:
         return (requested, None) if requested in enabled else (None, "profile_not_enabled")
     serving = enabled if task is None else {pid: p for pid, p in enabled.items() if task in getattr(p, "tasks", ())}
-    configured = env.get(profile_env, "").strip()
-    if configured:
-        if configured not in enabled:
-            return None, "configured_profile_not_enabled"
-        if configured in serving:
-            return configured, None
+    # One id, or several separated by commas: the first that lists the task is the default for
+    # it. With two video models on the rig (say one silent, one with sound), each with a profile
+    # per task, a single id leaves the other task with two candidates and no way to choose.
+    configured = [part.strip() for part in env.get(profile_env, "").split(",") if part.strip()]
+    if any(pid not in enabled for pid in configured):
+        return None, "configured_profile_not_enabled"
+    for pid in configured:
+        if pid in serving:
+            return pid, None
     if len(serving) == 1:
         return next(iter(serving)), None
     if not enabled:

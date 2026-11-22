@@ -122,6 +122,7 @@ class TemplateTests(unittest.TestCase):
                               width=768, height=512, frames=49, fps=25)
         parsed = parse_profile(made)
         self.assertEqual((parsed.qualification, parsed.license, sorted(parsed.tasks)), ("candidate", "ltx-2-community-license", ["text_to_video"]))
+        self.assertTrue(parsed.backend_options.sound, "the sound profile promises sound, so a silent clip fails the job")
         # image-to-video with sound: the same files, the picture written into the video latent
         data = helper.template_bytes("image_to_video")
         animated = load_template(data, sha(data), pinned_files=pins)
@@ -138,11 +139,16 @@ class TemplateTests(unittest.TestCase):
         parsed = parse_profile(made)
         self.assertEqual((parsed.profile_id, sorted(parsed.tasks), parsed.backend_options.port),
                          ("ltx23-i2v-av-gpu1", ["image_to_video"], 8192))
-        # the sound-track check reads the MP4's handler boxes
-        def hdlr(kind):
-            return b"\x00\x00\x00\x21hdlr" + b"\x00" * 8 + kind + b"\x00" * 13
-        self.assertTrue(helper.has_sound_track(b"ftypisom" + hdlr(b"vide") + hdlr(b"soun")))
-        self.assertFalse(helper.has_sound_track(b"ftypisom" + hdlr(b"vide")))
+        # the helper reports what the adapter decides: a handler box inside moov > trak > mdia
+        def box(kind, payload):
+            return (8 + len(payload)).to_bytes(4, "big") + kind + payload
+
+        def track(kind):
+            return box(b"trak", box(b"mdia", box(b"hdlr", b"\x00" * 8 + kind + b"\x00" * 13)))
+        ftyp = box(b"ftyp", b"isom\x00\x00\x02\x00")
+        self.assertTrue(helper.has_sound_track(ftyp + box(b"moov", track(b"vide") + track(b"soun"))))
+        self.assertFalse(helper.has_sound_track(ftyp + box(b"moov", track(b"vide"))))
+        self.assertFalse(helper.has_sound_track(ftyp + box(b"mdat", track(b"soun")) + box(b"moov", track(b"vide"))))
         self.assertFalse(helper.has_sound_track(b"soun but no handler box"))
 
     def test_a_template_with_its_own_schedule_may_leave_the_steps_slot_out(self):
@@ -386,6 +392,95 @@ class AdapterTests(unittest.TestCase):
             return True
         except GpuBusy:
             return False
+
+    def test_a_profile_that_promises_sound_refuses_a_silent_clip(self):
+        # Anders, 21 Nov 2026: "der skal lyd på". A sound profile's clip without a sound track is a
+        # failed job, not a finished one the user has to play to find out.
+        silent = self.adapter(profile=self.profile(sound=True))
+        silent.load()
+        sink = io.BytesIO()
+        with self.assertRaisesRegex(GenerationError, "^output_has_no_sound:"):
+            silent.render_to(request(), sink)
+        silent.close()
+        with_sound = self.adapter(fake={"FAKE_COMFY_SOUND": "1"}, profile=self.profile(sound=True))
+        with_sound.load()
+        sink = io.BytesIO()
+        self.assertEqual(with_sound.render_to(request(), sink), "video/mp4")
+        self.assertIn(b"soun", sink.getvalue())
+        with_sound.close()
+        # a profile that promises nothing publishes either kind
+        plain = self.adapter(fake={"FAKE_COMFY_SOUND": "1"})
+        plain.load()
+        self.assertEqual(plain.render_to(request(), io.BytesIO()), "video/mp4")
+
+    def test_bytes_that_look_like_a_sound_handler_are_not_a_sound_track(self):
+        # #2477 review (P2): the scan searched for "hdlr....soun" anywhere, so the same bytes in
+        # mdat or in metadata passed a silent clip. Only moov > trak > mdia > hdlr counts.
+        decoy = self.adapter(fake={"FAKE_COMFY_SOUND": "decoy"}, profile=self.profile(sound=True))
+        decoy.load()
+        sink = io.BytesIO()
+        with self.assertRaisesRegex(GenerationError, "^output_has_no_sound:"):
+            decoy.render_to(request(), sink)
+        decoy.close()
+
+    def test_the_sound_track_scan_walks_the_boxes(self):
+        from app.comfy_video_adapter import _SoundTrackScan
+
+        def box(kind, payload, wide=False):
+            if wide:
+                return b"\x00\x00\x00\x01" + kind + (16 + len(payload)).to_bytes(8, "big") + payload
+            return (8 + len(payload)).to_bytes(4, "big") + kind + payload
+
+        def hdlr(handler):
+            return box(b"hdlr", b"\x00" * 8 + handler + b"\x00" * 13)
+
+        def track(handler, **kw):
+            return box(b"trak", box(b"tkhd", b"\x00" * 12) + box(b"mdia", box(b"mdhd", b"\x00" * 12) + hdlr(handler)), **kw)
+
+        def scan(data, size=None):
+            found = _SoundTrackScan()
+            for at in range(0, len(data), size or max(len(data), 1)):
+                found.feed(data[at:at + (size or len(data))])
+            return found.found
+
+        ftyp = box(b"ftyp", b"isom\x00\x00\x02\x00isomiso2")
+        bait = hdlr(b"soun")
+        with_sound = ftyp + box(b"mdat", b"\x07" * 50) + box(b"moov", track(b"vide") + track(b"soun"))
+        cases = {
+            "moov after mdat": (with_sound, True),
+            "moov before mdat": (ftyp + box(b"moov", track(b"soun") + track(b"vide")) + box(b"mdat", b"\x07" * 50), True),
+            "64-bit box sizes": (ftyp + box(b"mdat", b"\x07" * 9, wide=True) + box(b"moov", track(b"soun", wide=True), wide=True), True),
+            "video only": (ftyp + box(b"mdat", b"\x07" * 50) + box(b"moov", track(b"vide")), False),
+            "the bytes inside mdat": (ftyp + box(b"mdat", bait) + box(b"moov", track(b"vide")), False),
+            "the bytes in udta": (ftyp + box(b"moov", track(b"vide") + box(b"udta", bait)), False),
+            "an hdlr directly under moov": (ftyp + box(b"moov", track(b"vide") + bait), False),
+            "an hdlr under trak, outside mdia": (ftyp + box(b"moov", box(b"trak", bait)), False),
+            "a trak outside moov": (ftyp + track(b"soun") + box(b"moov", track(b"vide")), False),
+            "meta's handler": (ftyp + box(b"moov", track(b"vide") + box(b"meta", b"\x00" * 4 + bait)), False),
+            "mdat to the end of the file": (ftyp + box(b"moov", track(b"vide")) + b"\x00\x00\x00\x00mdat" + bait, False),
+            "a box smaller than its header": (ftyp + b"\x00\x00\x00\x04moov" + box(b"moov", track(b"soun")), False),
+            "a child past its parent": (ftyp + box(b"moov", b"\x00\x00\xff\xfftrak") + box(b"moov", track(b"soun")), False),
+            "a handler box cut short": (ftyp + box(b"moov", box(b"trak", box(b"mdia", box(b"hdlr", b"\x00" * 4)))), False),
+            "zero padding after ftyp": (ftyp + b"\x00" * 64, False),
+            "empty": (b"", False),
+        }
+        for name, (data, expected) in cases.items():
+            for size in (None, 1, 3, 7, 16):
+                with self.subTest(case=name, chunk=size):
+                    self.assertEqual(scan(data, size), expected)
+        for cut in range(1, len(with_sound)):  # every split point of a real clip
+            found = _SoundTrackScan()
+            found.feed(with_sound[:cut]); found.feed(with_sound[cut:])
+            self.assertTrue(found.found, f"split at {cut}")
+        skipping = _SoundTrackScan()  # mdat is passed, not kept: memory does not follow the clip's size
+        skipping.feed(ftyp + (8 + 5_000_000).to_bytes(4, "big") + b"mdat")
+        for _ in range(5):
+            skipping.feed(b"\x07" * 1_000_000)
+            self.assertLessEqual(len(skipping._buffer), 16)
+        skipping.feed(box(b"moov", track(b"soun")))
+        self.assertTrue(skipping.found)
+        with self.assertRaisesRegex(Exception, "backend_options.sound must be true or false"):
+            self.profile(sound="yes")
 
     def test_end_to_end_text_to_video(self):
         adapter = self.adapter()
