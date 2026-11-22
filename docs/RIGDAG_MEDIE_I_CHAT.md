@@ -385,8 +385,9 @@ Filen omskrives ikke fra skallen: `scripts\media_env_set.py` fjerner kun de
 nævnte nøgler og tilføjer dem igen, lader alle andre linjer stå byte for byte
 (også æ/ø/å, uanset filens tegnsæt), tager først en backup under et nyt navn
 (`modelrig.env.bak-<UTC-tid>`, aldrig oven i en ældre) og bytter først filen ud,
-når den nye er skrevet og kontrolleret. [repo; 22/11 blev nøglerne sat med
-`Set-Content`, som denne blok afløser — selve værktøjet er ikke kørt på riggen]
+når den nye er skrevet og kontrolleret. [repo; 22/11 blev nøglerne sat ved at
+omskrive hele filen fra skallen, som denne blok afløser — selve værktøjet er
+ikke kørt på riggen]
 
 ```powershell
 cd C:\Users\an001\Desktop\ModelRig-media
