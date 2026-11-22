@@ -870,9 +870,14 @@ en RAM-blok samme dag (64 GB tilbage af 98); LTX kører med
   `scripts\media_env_set.py` på riggen (kun kørt på Windows i CI).
 
 **Sådan lander en PR på `main` nu — hvert punkt kostede mindst én ekstra review-runde 22/11:**
-1. **Drafts kører ikke de krævede checks.** `exact-head-core` og Stage B-adgang
-   starter først ved ready-for-review; merge afvises med "N of 14 required
-   status checks are in progress", til de er grønne. Det er ikke en fejl.
+1. **Ready-for-review starter de krævede checks forfra — og Stage B for første
+   gang.** `exact-head-core` kører også på drafts (`opened`/`synchronize`); et rødt
+   eller manglende `exact-head-core` på en draft er derfor en rigtig fejl og skal
+   undersøges med det samme. Men `ready_for_review` er selv en trigger: den
+   igangværende kørsel annulleres (ses som `cancelled`, ikke som en fejl), en ny
+   starter, og `stage-b-slices`, som springes over på drafts og på docs-only,
+   kører nu. Indtil den nye kørsel er grøn, afvises merge med "N of 14 required
+   status checks are in progress".
 2. **Codex reviewer først, når PR'en er sat klar** — altså EFTER ChatGPT's
    ACCEPT på draften. To PR'er fik et reelt P2 dér (#2479: backup med
    standardrettigheder; #2481: listen og status uenige om et udløbet job), og
