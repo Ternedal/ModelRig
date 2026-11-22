@@ -26,6 +26,8 @@ Hver kommandoblok er mærket med, hvad den hviler på:
    templates på riggen. Det er et selvstændigt forløb
    ([MEDIA_VIDEO_RIG_QUALIFICATION.md](MEDIA_VIDEO_RIG_QUALIFICATION.md) §5 og §6)
    og kan ikke klares på samme aften som trin 1–3.
+4. **Trin 6, video med lyd** (LTX-2.3) bygger oven på trin 4–5 og har sine egne
+   vægte (41 GB) og sit eget RAM-loft.
 
 **Hvornår:** ikke mens en V1-gate eller soaken kører — dev-appliancen bruger
 samme porte (8080/8099). Kandidat-checkoutet til V1 røres ikke: testen kører fra
@@ -368,6 +370,85 @@ Forudsætning: en billede-til-video-profil med sin egen template og port
 - [ ] Lav et billede (besked 1), vent til det er færdigt, og skriv så `lav en video af det billede` som næste besked → videoboble; klippet **starter fra det billede**.
 - [ ] Tre gange i træk, målt: `python scripts\media_chat_probe.py --suite i2v --rounds 3 --job-timeout 3600 --report "$env:TEMP\media-chat-i2v.json"`. Hver runde laver et billede og beder derefter om `lav en video af det billede` som næste tur. Tabellen viser klippets profil i kantet parentes: står der tekst-til-video-profilen, sendte modellen **ikke** kilden med, og klippet ligner ikke billedet.
 - [ ] **To samtaler** (review 6004675603 — det er den måling, reviewet beder om før noget kan kaldes korrekt): `python scripts\media_chat_probe.py --suite two-conversations --stream --rounds 2 --job-timeout 3600 --report "$env:TEMP\media-chat-two-conversations.json"`. Proben laver et billede i samtale A, et i samtale B (som bliver færdigt senere), og beder så om `lav en video af det billede` tilbage i A. Klippets reference siger, hvilket billedjob det starter fra (`source_job_id`). **Bestået** kun, hvis det er A's billede. `wrong_source` = klippet startede fra B's billede; `source_not_reported` = workeren er ældre end #2466.
+
+## 6. Video med lyd (LTX-2.3) — kørt 22/11
+
+Forudsætning: [MEDIA_VIDEO_RIG_QUALIFICATION.md](MEDIA_VIDEO_RIG_QUALIFICATION.md) §8
+(vægte hentet, begge grafer kørt direkte mod ComfyUI, profilerne
+`ltx23-t2v-av-gpu1` og `ltx23-i2v-av-gpu1` skrevet af `scripts\media_comfy_ltx23_setup.py`).
+Blokkene her er dem, der blev kørt på riggen 22/11 [kørt 22/11]; tallene står i §8.1–8.2.
+
+**6.1 Env** — LTX som standard for video, Wan stadig slået til. Kommalisten giver
+én standardprofil pr. opgave; RAM-loftet stopper ComfyUI, før Windows løber tør
+(40 passer til 64 GB RAM; 22/11 formiddag kørte 98 GB med 64).
+
+Filen omskrives ikke fra skallen: `scripts\media_env_set.py` fjerner kun de
+nævnte nøgler og tilføjer dem igen, lader alle andre linjer stå byte for byte
+(også æ/ø/å, uanset filens tegnsæt), tager først en backup under et nyt navn
+(`modelrig.env.bak-<UTC-tid>`, aldrig oven i en ældre) og bytter først filen ud,
+når den nye er skrevet og kontrolleret. [repo; 22/11 blev nøglerne sat ved at
+omskrive hele filen fra skallen, som denne blok afløser — selve værktøjet er
+ikke kørt på riggen]
+
+```powershell
+cd C:\Users\an001\Desktop\ModelRig-media
+python scripts\media_env_set.py --file C:\Rig\ModelRig\modelrig.env `
+  "KALIV_MEDIA_PROFILES_ENABLED=sdxl-base-1-0,realvisxl-4-0,wan21-t2v-1p3b-gpu1,wan22-ti2v-5b-gpu1,ltx23-t2v-av-gpu1,ltx23-i2v-av-gpu1" `
+  "KALIV_VIDEO_TOOL_PROFILE=ltx23-t2v-av-gpu1,ltx23-i2v-av-gpu1" `
+  "KALIV_COMFY_HOST_MEMORY_GIB=40"
+```
+
+Den skriver de tre linjer og `BACKUP <sti>`. Tilbage til før: kopiér netop den
+backup oven i `modelrig.env`. `AFVIST` eller `FEJL` betyder, at filen ikke er rørt.
+
+**6.2 Start** — fire vinduer, i denne rækkefølge. Hver blok er selvstændig: et nyt
+vindue kender hverken `$Repo`, `$GenPy` eller tokenet (det kostede tre fejlkørsler 22/11).
+En manuel ComfyUI på port 8188 skal være stoppet først — den holder kort 1.
+
+Ollama på kort 0 (lad stå; uden dette deles chatmodellen over begge kort):
+
+```powershell
+Get-Process ollama* -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3
+$env:CUDA_VISIBLE_DEVICES = ((nvidia-smi --query-gpu=index,uuid --format=csv,noheader | Where-Object { $_ -match '^0,' }) -replace '^0,\s*','').Trim()
+$env:OLLAMA_SCHED_SPREAD = "false"; $env:OLLAMA_VULKAN = "false"; $env:OLLAMA_CONTEXT_LENGTH = "8192"; ollama serve
+```
+
+Dev-appliancen (beder om administrator):
+
+```powershell
+& "C:\Users\an001\Desktop\ModelRig-media\START_DEV_APPLIANCE.cmd" -ApplianceDir C:\Rig\ModelRig -SkipVisionRig
+```
+
+Executoren (ikke administrator, lad stå; `exit=73` = en gammel executor lever endnu,
+`exit=78` = `KALIV_MEDIA_EXECUTOR=1` mangler):
+
+```powershell
+$GenPy = "C:\Kaliv\media-venv\Scripts\python.exe"; $Repo = "C:\Users\an001\Desktop\ModelRig-media"; $EnvFile = "C:\Rig\ModelRig\modelrig.env"
+Get-Content $EnvFile | Where-Object { $_ -match '^(KALIV_MEDIA|KALIV_GPU|KALIV_COMFY|CUDA_)' } | ForEach-Object { $k,$v = (($_ -split '#')[0]) -split '=',2; [Environment]::SetEnvironmentVariable($k.Trim(), $v.Trim(), 'Process') }
+$env:KALIV_MEDIA_EXECUTOR = "1"; $env:HF_HUB_OFFLINE = "1"; $env:TRANSFORMERS_OFFLINE = "1"
+Push-Location "$Repo\worker"; try { & $GenPy -u -m app.media_executor_main --device cuda:1 2>&1 | Tee-Object "$env:TEMP\media-executor.log"; "exit=$LASTEXITCODE" } finally { Pop-Location }
+```
+
+Probe (token og mappe sættes i samme blok):
+
+```powershell
+cd C:\Users\an001\Desktop\ModelRig-media
+$B = "http://127.0.0.1:8080"
+$code = (Invoke-RestMethod "$B/api/v1/pair/start" -Method Post -ContentType 'application/json' -Body '{}').code
+$env:MODELRIG_TOKEN = (Invoke-RestMethod "$B/api/v1/pair/claim" -Method Post -ContentType 'application/json' -Body (@{ device_name = 'rig-terminal'; code = $code } | ConvertTo-Json)).token
+python scripts\media_chat_probe.py --suite video --rounds 2 --job-timeout 3600 --report "$env:TEMP\media-chat-ltx-video.json"
+python scripts\media_chat_probe.py --suite i2v --rounds 2 --job-timeout 3600 --report "$env:TEMP\media-chat-ltx-i2v.json"
+```
+
+**6.3 Hvad du skal se**
+
+- [ ] `video`: begge runder `completed` på `ltx23-t2v-av-gpu1`. Første job efter en genstart er koldt (22/11, 64 GB: 351 s for 10 s klip), det næste varmt (199 s). Allerførste job nogensinde hasher 41 GB vægte oveni.
+- [ ] `i2v`: billede `completed` på `realvisxl-4-0`, klip `completed` på `ltx23-i2v-av-gpu1` (22/11, 64 GB: 115 s + 234 s). Ingen `gpu_busy` — det var fejlen før #2478.
+- [ ] Et job, der ender med `output_has_no_sound`, er lydkravet, der slår til: profilen lover lyd, og klippet har intet lydspor. Det er en fejl i grafen eller vægtene, ikke i tjekket — send executor-loggen.
+- [ ] Telefon: bed om en video og **hør** den. Standardlængden er profilens loft (241 billeder ≈ 10 s fra tekst, 121 ≈ 5 s fra billede), så regn med godt tre minutter.
+- [ ] Skift af kliplængde: `scripts\media_comfy_ltx23_setup.py run --frames N` (8n+1) mod en manuel ComfyUI skriver den målte længde som profilens loft. Stop executoren først, og genstart den bagefter.
+
+Executor-loggens sidste linjer, når noget fejler: `Get-Content "$env:TEMP\media-executor.log" -Tail 30`.
 
 ## Hvad der skal med hjem
 
