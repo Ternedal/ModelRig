@@ -4,9 +4,10 @@
 i chat-turen, boblerne i Android og desktop, og billede-til-video. Trin for trin
 og i den rækkefølge, der afslører mest tidligst. Udskiftede værdier står som `<…>`.
 
-> **Status:** samlet 20/11-2026. **Intet her er kørt på riggen.** Koden ligger
-> som drafts (#2448, #2449, #2457–#2461, #2463, #2464) og er samlet i grenen
-> `integration/media-chat` (#2462, må ikke merges), hvor CI kører på helheden.
+> **Status:** samlet 20/11-2026, landet på `main` 22/11-2026 gennem #2462
+> (merge-commit `30b95e6a494c0606ccc276cb76b3d56189b67b95`). Køreplanen køres
+> derfor fra `main`; grenen `integration/media-chat` er afløst. Hvad der faktisk
+> er kørt på riggen 21/11, står i `docs/MEDIA_VIDEO_RIG_QUALIFICATION.md` §7.
 > Udviklingskanalen er **ikke evidens**: ingen gate læser noget herfra.
 
 Hver kommandoblok er mærket med, hvad den hviler på:
@@ -70,16 +71,16 @@ sit eget worktree.
 
 Nyt, **ikke-elevated** PowerShell 7-vindue.
 
-**0.1 Worktree på integrationsgrenen** [repo]
+**0.1 Worktree på `main`** [repo]
 
 ```powershell
 $Main = "C:\Users\an001\Desktop\ModelRig-git"; $Repo = "C:\Users\an001\Desktop\ModelRig-media"
 git -C $Main fetch origin
-git -C $Main worktree add --detach $Repo origin/integration/media-chat
+git -C $Main worktree add --detach $Repo origin/main
 git -C $Repo log --oneline -1
 ```
 
-Findes worktree'et allerede: `git -C $Repo fetch origin; git -C $Repo checkout --detach origin/integration/media-chat`.
+Findes worktree'et allerede: `git -C $Repo fetch origin; git -C $Repo checkout --detach origin/main`.
 
 **0.2 Hvad står der i env-filen?** [antagelse: `KALIV_MEDIA_JOBS_API=1` og de to billedprofiler står der fra 17/11]
 
@@ -258,23 +259,41 @@ er en produktafgørelse, ikke en teknisk detalje.
 **2.1 APK fra CI** [repo; samme vej som 19/8 og 20/8]
 
 ```powershell
-gh workflow run candidate-apk.yml -R Ternedal/ModelRig --ref integration/media-chat -f ref=integration/media-chat
+gh workflow run candidate-apk.yml -R Ternedal/ModelRig --ref main
 Start-Sleep 10; gh run watch (gh run list -R Ternedal/ModelRig --workflow candidate-apk.yml -L 1 --json databaseId --jq '.[0].databaseId') -R Ternedal/ModelRig --exit-status
 ```
 
-`--ref` skal med: uden den registreres kørslen på `main`, og `headSha` nedenfor
-viser så `main` i stedet for det, der blev bygget. Bygget tager ca. 4 minutter.
+`--ref main` bygger `main`s hoved. Bygget tager ca. 4 minutter.
 
-Når kørslen er grøn — og **kun** hvis `headSha` er integrationsgrenens hoved
-(20/11 gav `-L 1` en kørsel fra 14/11, fordi den nye ikke var startet endnu):
+Blokken henter kun en APK, der er bygget fra `main`s nuværende hoved og er
+afsluttet grønt; ellers stopper den med en fejl og henter ingenting (20/11 gav
+`-L 1` en kørsel fra 14/11, fordi den nye ikke var startet endnu — derfor vælges
+kørslen på SHA, ikke på rækkefølge):
 
 ```powershell
-$run = gh run list -R Ternedal/ModelRig --workflow candidate-apk.yml -L 1 --json databaseId,conclusion,headSha | ConvertFrom-Json; $run
-gh run download $run[0].databaseId -R Ternedal/ModelRig -D "$env:TEMP\kaliv-apk"
-$apk = Get-ChildItem "$env:TEMP\kaliv-apk" -Recurse -Filter app-debug.apk | Select-Object -First 1; $apk.FullName
-(Get-NetIPAddress -AddressFamily IPv4 | Where-Object PrefixOrigin -eq Dhcp).IPAddress
-python -m http.server 8000 --directory $apk.DirectoryName
+& {
+    $main = (git ls-remote https://github.com/Ternedal/ModelRig refs/heads/main) -split '\s+' | Select-Object -First 1
+    if ($main -notmatch '^[0-9a-f]{40}$') { throw "kunne ikke aflaese main's hoved" }
+    $runs = gh run list -R Ternedal/ModelRig --workflow candidate-apk.yml -L 20 --json databaseId,status,conclusion,headSha | ConvertFrom-Json
+    $run = $runs | Where-Object { $_.headSha -eq $main -and $_.status -eq 'completed' -and $_.conclusion -eq 'success' } | Select-Object -First 1
+    if (-not $run) {
+        $runs | Select-Object -First 5 | Format-Table databaseId, status, conclusion, headSha | Out-Host
+        throw "ingen afsluttet, groen candidate-apk-koersel for main $main - APK'en hentes ikke"
+    }
+    "APK fra koersel $($run.databaseId), bygget fra $($run.headSha)"
+    Remove-Item "$env:TEMP\kaliv-apk" -Recurse -Force -ErrorAction SilentlyContinue
+    gh run download $run.databaseId -R Ternedal/ModelRig -D "$env:TEMP\kaliv-apk"
+    if ($LASTEXITCODE -ne 0) { throw "download fejlede" }
+    $apk = Get-ChildItem "$env:TEMP\kaliv-apk" -Recurse -Filter app-debug.apk | Select-Object -First 1
+    if (-not $apk) { throw "ingen app-debug.apk i det hentede artefakt" }
+    $apk.FullName
+    (Get-NetIPAddress -AddressFamily IPv4 | Where-Object PrefixOrigin -eq Dhcp).IPAddress
+    python -m http.server 8000 --directory $apk.DirectoryName
+}
 ```
+
+Blokken er én samlet kommando (`& { … }`), så en `throw` stopper alt efter den —
+også når den indsættes linje for linje i et vindue.
 
 Telefon, Chrome: `http://<rig-ip>:8000/app-debug.apk` → installér (se risiko 3).
 Par mod dev-appliancen som 17/11 (parringen fra release-appliancen gælder ikke).
