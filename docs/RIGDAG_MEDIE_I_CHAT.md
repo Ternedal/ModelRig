@@ -4,9 +4,10 @@
 i chat-turen, boblerne i Android og desktop, og billede-til-video. Trin for trin
 og i den rækkefølge, der afslører mest tidligst. Udskiftede værdier står som `<…>`.
 
-> **Status:** samlet 20/11-2026. **Intet her er kørt på riggen.** Koden ligger
-> som drafts (#2448, #2449, #2457–#2461, #2463, #2464) og er samlet i grenen
-> `integration/media-chat` (#2462, må ikke merges), hvor CI kører på helheden.
+> **Status:** samlet 20/11-2026, landet på `main` 22/11-2026 gennem #2462
+> (merge-commit `30b95e6a494c0606ccc276cb76b3d56189b67b95`). Køreplanen køres
+> derfor fra `main`; grenen `integration/media-chat` er afløst. Hvad der faktisk
+> er kørt på riggen 21/11, står i `docs/MEDIA_VIDEO_RIG_QUALIFICATION.md` §7.
 > Udviklingskanalen er **ikke evidens**: ingen gate læser noget herfra.
 
 Hver kommandoblok er mærket med, hvad den hviler på:
@@ -70,16 +71,16 @@ sit eget worktree.
 
 Nyt, **ikke-elevated** PowerShell 7-vindue.
 
-**0.1 Worktree på integrationsgrenen** [repo]
+**0.1 Worktree på `main`** [repo]
 
 ```powershell
 $Main = "C:\Users\an001\Desktop\ModelRig-git"; $Repo = "C:\Users\an001\Desktop\ModelRig-media"
 git -C $Main fetch origin
-git -C $Main worktree add --detach $Repo origin/integration/media-chat
+git -C $Main worktree add --detach $Repo origin/main
 git -C $Repo log --oneline -1
 ```
 
-Findes worktree'et allerede: `git -C $Repo fetch origin; git -C $Repo checkout --detach origin/integration/media-chat`.
+Findes worktree'et allerede: `git -C $Repo fetch origin; git -C $Repo checkout --detach origin/main`.
 
 **0.2 Hvad står der i env-filen?** [antagelse: `KALIV_MEDIA_JOBS_API=1` og de to billedprofiler står der fra 17/11]
 
@@ -258,7 +259,7 @@ er en produktafgørelse, ikke en teknisk detalje.
 **2.1 APK fra CI** [repo; samme vej som 19/8 og 20/8]
 
 ```powershell
-gh workflow run candidate-apk.yml -R Ternedal/ModelRig --ref integration/media-chat -f ref=integration/media-chat
+gh workflow run candidate-apk.yml -R Ternedal/ModelRig --ref main
 Start-Sleep 10; gh run watch (gh run list -R Ternedal/ModelRig --workflow candidate-apk.yml -L 1 --json databaseId --jq '.[0].databaseId') -R Ternedal/ModelRig --exit-status
 ```
 
