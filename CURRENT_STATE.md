@@ -68,6 +68,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_EGRESS_GATE` | `` |
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` |
 | `KALIV_HOME_RIG_PILOT` | `0` |
+| `KALIV_IMAGE_TOOL_ENABLED` | `` |
 | `KALIV_MAX_UPLOAD_MB` | `25` |
 | `KALIV_MEDIA_EXECUTOR` | `(unset)` |
 | `KALIV_MEDIA_JOBS_API` | `0` |
@@ -79,6 +80,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_TOOLS_DIR` | `(unset)` |
 | `KALIV_TOOLS_ENABLED` | `0` |
 | `KALIV_TOOL_ISOLATION` | `` |
+| `KALIV_VIDEO_TOOL_ENABLED` | `0` |
 | `KALIV_VISIONRIG_SENSOR_CONTROL` | `0` |
 | `KALIV_VISIONRIG_URL` | `http://127.0.0.1:8110` |
 | `KALIV_VISION_MODEL` | `(unset)` |
@@ -321,6 +323,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_present_context.py`
 - `tests/worker_consciousness_core_profile_source.py`
 - `tests/worker_consciousness_core_profile_step.py`
+- `tests/worker_consciousness_core_quiet_import.py`
 - `tests/worker_consciousness_core_recovery_completion.py`
 - `tests/worker_consciousness_core_reducer.py`
 - `tests/worker_consciousness_core_response_guidance.py`
@@ -381,6 +384,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_hardening_stream_disconnect.py`
 - `tests/worker_home_rig_e2e_fixture.py`
 - `tests/worker_home_rig_runtime.py`
+- `tests/worker_image_generate_tool.py`
+- `tests/worker_image_generate_turn.py`
 - `tests/worker_image_gpu_admission.py`
 - `tests/worker_image_job_store.py`
 - `tests/worker_jobs.py`
@@ -396,6 +401,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_kaliv_software_exact_green_qualifier.py`
 - `tests/worker_kaliv_voicerig_physical_qualifier.py`
 - `tests/worker_lease_dir_acl.py`
+- `tests/worker_media_chat_chain.py`
 - `tests/worker_media_executor.py`
 - `tests/worker_media_executor_image_to_video.py`
 - `tests/worker_media_executor_main.py`
@@ -483,6 +489,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_tools_guardrail.py`
 - `tests/worker_tools_readtools.py`
 - `tests/worker_unit.py`
+- `tests/worker_video_generate_tool.py`
 - `tests/worker_vision.py`
 - `tests/worker_voice_asr_startup_race.py`
 - `tests/worker_voice_baseline.py`
@@ -579,6 +586,8 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_kaliv_v1_rig_smoke.py`
 - `tests/workflow_kaliv_vr_renderer.py`
 - `tests/workflow_launcher_bytecode.py`
+- `tests/workflow_media_chat_probe.py`
+- `tests/workflow_media_env_set.py`
 - `tests/workflow_media_gallery_asset.py`
 - `tests/workflow_media_gallery_catalog.py`
 - `tests/workflow_media_gallery_contract_fixture.py`
