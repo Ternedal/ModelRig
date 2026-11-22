@@ -11,15 +11,18 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests" / "support"))
 
 from scripts import kaliv_system_release_gate as gate  # noqa: E402
 from scripts import kaliv_v1_gate_board as tool  # noqa: E402
+from source_code import code_of  # noqa: E402
 
 passed = failed = 0
 
@@ -72,7 +75,7 @@ for name in gate.V1_GATES:
             expected = "STALE"
         check(status(tool.board("v1", PINS, {name: ref}), name)["status"] == expected,
               f"{name} / {ref[:24]}: the board repeats the gate's own answer ({expected})")
-source = (ROOT / "scripts" / "kaliv_v1_gate_board.py").read_text(encoding="utf-8")
+source = code_of(ROOT / "scripts" / "kaliv_v1_gate_board.py")  # code only: a commented-out line must not satisfy a check
 check("re.compile" not in source.split("_SHA = ")[1].split("\n", 1)[1], "no evidence-ref pattern of its own (only the SHA form of a pin)")
 check('"PASS"' not in source.replace('{"status": "PASS", "evidence_refs": [ref]}', ""),
       "the board never prints or stores PASS; PASS appears only in the manifest it hands the gate")
@@ -122,7 +125,10 @@ check(code == 2 and "pin" in err.getvalue(), "a bad pin is a usage error (exit 2
 
 # 7. The V1 rig plan tells the operator to look at the board before the rig day.
 plan = (ROOT / "docs" / "RIGDAG_V1.md").read_text(encoding="utf-8")
-check("kaliv_v1_gate_board.py" in plan, "RIGDAG_V1 points to the board")
+# A runbook, not source: the pointer has to be in a command block the operator can paste.
+blocks = re.findall(r"```powershell\n(.*?)```", plan, flags=re.S)
+check(any("scripts\\kaliv_v1_gate_board.py" in block and "--release-scope v1" in block for block in blocks),
+      "RIGDAG_V1 has the board as a pasteable command")
 
 print(f"\n===== KALIV V1 GATE BOARD: {passed} passed, {failed} failed =====")
 sys.exit(1 if failed else 0)

@@ -32,5 +32,6 @@
 /home/claude/modelrig/scripts/stage-a-voice-test.ps1
 /home/claude/modelrig/scripts/start-dev-appliance.ps1
 /home/claude/modelrig/scripts/start-stage-a-validation-stack.ps1
+/home/claude/modelrig/configure-repository-authority-ruleset.ps1
 /home/claude/modelrig/configure-repository-authority.ps1
 /home/claude/modelrig/verify-repository-authority.ps1
