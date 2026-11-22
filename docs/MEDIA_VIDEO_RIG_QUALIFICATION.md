@@ -249,7 +249,7 @@ Anders listened to the text-to-video clip: the sound is fine. Pins written by th
 - **Switching model on the one card costs about 90 s each way**: a warm clip is 64 s, the same clip after a picture is 152 s. That is the price of one 12 GB card for both; it is not a fault.
 - **Found and fixed (#2478):** before the fix the first picture after an LTX clip failed after 0.3 s with `gpu_busy` — `stop()` gave up the GPU while ComfyUI's own process (the venv launcher's child, ~44 GiB) was still being torn down. After the fix: 4 of 4 jobs in `--suite i2v --rounds 2` run directly after an LTX clip.
 - Host RAM: ComfyUI used about 44 GiB. The run had the Job Object limit raised to 64 GiB; whether the default 48 GiB is enough was not tried.
-- Not done: the clip heard on the phone, the spatial upscale stage, more than two rounds.
+- Not done: the spatial upscale stage, more than two rounds.
 
 ### 8.2 Longer clips, and the same rig on 64 GB (22 November 2026, dev channel)
 
@@ -271,6 +271,8 @@ About 20 s of rendering per second of clip. Lowest free VRAM is the same at 2, 5
 | Text → 9.6 s clip, warm | 199 s |
 | Picture (RealVisXL) after an LTX clip | 115 s |
 | Picture → 4.8 s clip (LTX loaded again) | 234 s |
+
+**On the phone** (Android, the APK from 21 November, same afternoon): Anders asked for a picture and for video in the app and reports that picture, video and sound all work. That is his report of what he saw and heard, not a measurement; the landscape viewer fix is not in that APK.
 
 All four completed, so LTX-2.3 runs within a 40 GiB host-memory limit on this rig; the warm 10 s clip is 8 s slower than on 98 GiB. Every figure in 8.1 was measured with 98 GiB and a 64 GiB limit.
 
