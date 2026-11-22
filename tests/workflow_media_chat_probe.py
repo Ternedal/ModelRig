@@ -496,6 +496,11 @@ with appliance([turn("image_generate", A)], {A: lifecycle(A)}) as fake:
 
 # 8. main, and the plan
 print("== 8. main ==")
+length_cases = probe.suite_cases("video-length", 2)
+check([c["id"] for c in length_cases] == ["video-5s.r1", "video-5s.r2", "control"]
+      and all(c["message"] == probe.VIDEO_LENGTH_MESSAGE and c["expect"] == "video_generate" for c in length_cases[:2])
+      and "5 sekunder" in probe.VIDEO_LENGTH_MESSAGE,
+      "video-length: one video case per round that names a length, plus the control")
 turns = [turn("video_generate", A, kind="video"), turn(None)]
 with appliance(turns, {A: lifecycle(A)}) as fake, tempfile.TemporaryDirectory() as tmp:
     out = io.StringIO()
@@ -521,7 +526,7 @@ check(len(probe.suite_cases("image", 3)) == 13 and probe.suite_cases("image", 3)
       "rounds repeat the tool cases; the control runs once, last")
 
 plan = code_of(ROOT / "docs" / "RIGDAG_MEDIE_I_CHAT.md")
-for message in probe.IMAGE_MESSAGES + (probe.VIDEO_MESSAGE, probe.ANIMATE_MESSAGE, probe.CONTROL_MESSAGE):
+for message in probe.IMAGE_MESSAGES + (probe.VIDEO_MESSAGE, probe.VIDEO_LENGTH_MESSAGE, probe.ANIMATE_MESSAGE, probe.CONTROL_MESSAGE):
     check(message in plan, f"the plan lists the probe's message: {message}")
 check("scripts\\media_chat_probe.py" in plan or "scripts/media_chat_probe.py" in plan, "the plan tells how to run the probe")
 
