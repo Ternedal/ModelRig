@@ -69,6 +69,15 @@ from .media_generation_contract import (GenerationCancelled, GenerationError, Ge
 from .media_generation_profiles import ModelProfile, validate_request
 
 MIME = "video/mp4"
+
+
+def _job_cost(request: GenerationRequest) -> int:
+    """How large a job is for the warm VRAM check: pixels x frames. Requests are validated before
+    they get here; anything else is 0, which the supervisor treats as 'do not use the warm path'."""
+    values = (request.width, request.height, request.frames)
+    if any(type(value) is not int or value <= 0 for value in values):
+        return 0
+    return request.width * request.height * request.frames
 COPY_CHUNK = 1024 * 1024
 DRAIN_SECONDS = 30  # how long an interrupted job may take to leave ComfyUI's queue
 _log = logging.getLogger("kaliv.media.comfy")
@@ -177,9 +186,16 @@ class ComfyVideoAdapter:
         budget = self.supervisor.start()
         if not self._version_ok(budget):
             self.supervisor.stop()  # proven stop: the lease goes with ComfyUI
-            raise GenerationError("ComfyUI version does not match the profile pin")
+            raise GenerationError("comfyui_version_mismatch: ComfyUI version does not match the profile pin")
         self._verified_weights = verified
         self._template = template
+
+    def _job_kind(self, request: GenerationRequest) -> str:
+        """What a job is, for the warm VRAM check: the profile (its models and settings), the exact
+        workflow (the template's SHA-256) and the task. Proof from one kind says nothing about
+        another, even at the same size."""
+        template = self._template.sha256 if self._template is not None else ""
+        return f"{self.profile.profile_id}|{template}|{request.task}"
 
     def _weights_still_verified(self) -> None:
         """Before every job: the files hashed at load are still those files, and the lookup is
@@ -245,6 +261,8 @@ class ComfyVideoAdapter:
         try:
             mime = self._render_and_hand_over(request, sink_file, before, owned, should_cancel, source_png, staged)
             handed_over = True
+            # This job succeeded at this size: the proof the next job's VRAM check may lean on.
+            self.supervisor.note_idle(_job_cost(request), self._job_kind(request))  # never raises
             return mime
         finally:
             if (handed_over or self._sink_failed) and self._holding is not None:
@@ -318,8 +336,8 @@ class ComfyVideoAdapter:
                               owned: list, should_cancel: Callable[[], bool] | None = None,
                               source_png: bytes | None = None, staged: list | None = None) -> str:
         try:
-            if not self._version_ok(self.supervisor.check_budget()):
-                raise GenerationError("ComfyUI version does not match the profile pin")
+            if not self._version_ok(self.supervisor.check_budget(_job_cost(request), self._job_kind(request))):
+                raise GenerationError("comfyui_version_mismatch: ComfyUI version does not match the profile pin")
             self._weights_still_verified()
             if not self.supervisor.queue_is_empty():
                 raise GenerationError("ComfyUI queue is not empty: refusing to share it")

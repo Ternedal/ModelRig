@@ -231,16 +231,39 @@ class VideoEntryPointTests(unittest.TestCase):
         self.assertEqual(first.folders["output"], str(self.comfy / "cuda0" / "output"))
         self.assertEqual(second.folders["output"], str(self.comfy / "cuda1" / "output"))
         self.assertFalse(set(first.folders.values()) & set(second.folders.values()))
+        # How much host RAM one ComfyUI may commit: unset is the supervisor's default (48 GiB); a
+        # 29 GB checkpoint (LTX-2.3) needs the operator to be able to raise it, in whole GiB.
+        self.assertIsNone(first.host_memory_gib)
+        self.assertEqual(_video_config({**self.env, "KALIV_COMFY_HOST_MEMORY_GIB": "64"}, video, work, "GPU-0", "cuda:0").host_memory_gib, 64.0)
+        for bad in ("0", "65", "48.5", "-1", "many", "6 4"):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ExecutorConfigError, "KALIV_COMFY_HOST_MEMORY_GIB"):
+                _video_config({**self.env, "KALIV_COMFY_HOST_MEMORY_GIB": bad}, video, work, "GPU-0", "cuda:0")
         # A GPU without its own folders is refused, never pointed at another GPU's.
         shutil.rmtree(self.comfy / "cuda1")
         with self.assertRaisesRegex(ExecutorConfigError, "KALIV_COMFY_DIR/cuda1/input"):
             _video_config(self.env, video, work, "GPU-1", "cuda:1")
 
-    def test_unpinned_image_to_video_or_clashing_profiles_are_refused(self):
+    def test_image_to_video_profiles_are_served_with_the_owner_gated_reader(self):
+        # 20/11: image_to_video is served. A pinned profile that lists it builds an executor whose
+        # source reader is the owner-gated one (media_source_image), not None and not a path.
+        self.write_video_profile(tasks=["text_to_video", "image_to_video"])
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            executor = self.build()
+            self.assertIsNotNone(executor.source_reader)
+            from app.media_generation_contract import SourceImageUnavailable
+            # Another owner's asset, an unknown asset: refused by ownership before any disk read.
+            with self.assertRaises(SourceImageUnavailable):
+                executor.source_reader("someone-else", "img_unknown")
+            with self.assertRaises(SourceImageUnavailable):
+                executor.source_reader("installation", "img_unknown")
+            # The reader validates the id shape itself; ownership fails first for a non-id too.
+            with self.assertRaises((SourceImageUnavailable, ValueError)):
+                executor.source_reader("installation", "../etc/passwd")
+
+    def test_unpinned_or_clashing_profiles_are_refused(self):
         cases = {
             "no version pin": dict(comfyui_version=None),
             "no weight pins": dict(weights=[]),
-            "image to video": dict(tasks=["text_to_video", "image_to_video"]),
         }
         for label, options in cases.items():
             with self.subTest(label), patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
@@ -329,6 +352,16 @@ class VideoEntryPointTests(unittest.TestCase):
             kinds = sorted(i["kind"] for i in self.gallery()["items"])
             self.assertEqual([store.get(j, "anders")["state"] for j in (image, video)], ["completed", "completed"])
             self.assertEqual(kinds, ["image", "video"])
+
+    def test_comfyui_writes_its_log_in_its_own_folder_in_the_work_area(self):
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            store = self.store()
+            job = store.submit("anders", "a paper boat", profile_id="wan-a", params=VIDEO_PARAMS)["job_id"]
+            executor = self.build()
+            self.assertEqual(executor.run(max_steps=2, idle_sleep=lambda: None), 0)
+            self.assertEqual(store.get(job, "anders")["state"], "completed")
+        log = Path(self.env["KALIV_COMFY_DIR"], "cuda0", "comfyui.log")
+        self.assertTrue(log.is_file(), "ComfyUI's output is kept beside its folders")
 
     def test_a_render_past_the_profile_deadline_is_stopped_and_nothing_is_published(self):
         self.write_video_profile(max_render_seconds=10)  # the profile minimum
