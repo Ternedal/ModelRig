@@ -315,7 +315,8 @@ def _choose_profile(service, requested: str | None, env: Mapping[str, str], *,
 def _submit_media_job(clean: dict, *, service_getter: Callable[[], object] | None, env: Mapping[str, str] | None,
                       modality: str, task: str | None, profile_env: str, schema: str, kind: str,
                       params_keys: tuple[str, ...], text: Callable[[str, str], str],
-                      source_job_id: str | None = None) -> str:
+                      source_job_id: str | None = None,
+                      resolve: Callable[[object, dict], str | None] | None = None) -> str:
     """The shared path for image_generate and video_generate: queue one job, answer as text.
 
     Every rig-side condition is a text result with a code; only the caller's
@@ -344,6 +345,12 @@ def _submit_media_job(clean: dict, *, service_getter: Callable[[], object] | Non
     if code is not None:
         return _refused(code, modality, optional)
 
+    if resolve is not None:
+        # A wish that only the chosen profile can turn into a parameter (a length in seconds ->
+        # frames at that profile's frame rate). Returns a refusal code, or None after filling clean.
+        code = resolve(service.profiles[profile_id], clean)
+        if code is not None:
+            return _refused(code, modality, optional)
     try:
         body = SubmitRequest(profile_id=profile_id, prompt=clean["prompt"], task=task,
                              **{key: clean.get(key) for key in params_keys})

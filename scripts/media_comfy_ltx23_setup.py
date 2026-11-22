@@ -150,7 +150,7 @@ def profile(pins: list, revision: str, template_sha: str, *, width: int, height:
         "qualification": "candidate", "license": "ltx-2-community-license",
         "backend_options": {"template_name": template_name, "template_sha256": template_sha, "fps": fps,
                             "max_render_seconds": 3600, "max_output_bytes": 268435456, "port": port,
-                            "comfyui_version": "0.46.2", "weights": pins, "sound": True},
+                            "comfyui_version": "0.46.2", "weights": pins, "sound": True, "frame_step": 8},
     }
 
 
