@@ -379,20 +379,25 @@ Blokkene her er dem, der blev kørt på riggen 22/11 [kørt 22/11]; tallene stå
 
 **6.1 Env** — LTX som standard for video, Wan stadig slået til. Kommalisten giver
 én standardprofil pr. opgave; RAM-loftet stopper ComfyUI, før Windows løber tør
-(40 passer til 64 GB RAM; 22/11 formiddag kørte 98 GB med 64):
+(40 passer til 64 GB RAM; 22/11 formiddag kørte 98 GB med 64).
+
+Filen omskrives ikke fra skallen: `scripts\media_env_set.py` fjerner kun de
+nævnte nøgler og tilføjer dem igen, lader alle andre linjer stå byte for byte
+(også æ/ø/å, uanset filens tegnsæt), tager først en backup under et nyt navn
+(`modelrig.env.bak-<UTC-tid>`, aldrig oven i en ældre) og bytter først filen ud,
+når den nye er skrevet og kontrolleret. [repo; 22/11 blev nøglerne sat med
+`Set-Content`, som denne blok afløser — selve værktøjet er ikke kørt på riggen]
 
 ```powershell
-$EnvFile = "C:\Rig\ModelRig\modelrig.env"
-Copy-Item $EnvFile "$EnvFile.bak-ltx"
-$t = Get-Content $EnvFile | Where-Object { $_ -notmatch '^(KALIV_MEDIA_PROFILES_ENABLED|KALIV_VIDEO_TOOL_PROFILE|KALIV_COMFY_HOST_MEMORY_GIB)=' }
-$t += 'KALIV_MEDIA_PROFILES_ENABLED=sdxl-base-1-0,realvisxl-4-0,wan21-t2v-1p3b-gpu1,wan22-ti2v-5b-gpu1,ltx23-t2v-av-gpu1,ltx23-i2v-av-gpu1'
-$t += 'KALIV_VIDEO_TOOL_PROFILE=ltx23-t2v-av-gpu1,ltx23-i2v-av-gpu1'
-$t += 'KALIV_COMFY_HOST_MEMORY_GIB=40'
-Set-Content $EnvFile $t -Encoding ascii
-Select-String -Path $EnvFile -Pattern '^KALIV_(MEDIA_PROFILES|VIDEO_TOOL|COMFY_HOST)' | ForEach-Object Line
+cd C:\Users\an001\Desktop\ModelRig-media
+python scripts\media_env_set.py --file C:\Rig\ModelRig\modelrig.env `
+  "KALIV_MEDIA_PROFILES_ENABLED=sdxl-base-1-0,realvisxl-4-0,wan21-t2v-1p3b-gpu1,wan22-ti2v-5b-gpu1,ltx23-t2v-av-gpu1,ltx23-i2v-av-gpu1" `
+  "KALIV_VIDEO_TOOL_PROFILE=ltx23-t2v-av-gpu1,ltx23-i2v-av-gpu1" `
+  "KALIV_COMFY_HOST_MEMORY_GIB=40"
 ```
 
-Tilbage til før: `Copy-Item C:\Rig\ModelRig\modelrig.env.bak-ltx C:\Rig\ModelRig\modelrig.env`.
+Den skriver de tre linjer og `BACKUP <sti>`. Tilbage til før: kopiér netop den
+backup oven i `modelrig.env`. `AFVIST` eller `FEJL` betyder, at filen ikke er rørt.
 
 **6.2 Start** — fire vinduer, i denne rækkefølge. Hver blok er selvstændig: et nyt
 vindue kender hverken `$Repo`, `$GenPy` eller tokenet (det kostede tre fejlkørsler 22/11).
@@ -419,7 +424,7 @@ Executoren (ikke administrator, lad stå; `exit=73` = en gammel executor lever e
 $GenPy = "C:\Kaliv\media-venv\Scripts\python.exe"; $Repo = "C:\Users\an001\Desktop\ModelRig-media"; $EnvFile = "C:\Rig\ModelRig\modelrig.env"
 Get-Content $EnvFile | Where-Object { $_ -match '^(KALIV_MEDIA|KALIV_GPU|KALIV_COMFY|CUDA_)' } | ForEach-Object { $k,$v = (($_ -split '#')[0]) -split '=',2; [Environment]::SetEnvironmentVariable($k.Trim(), $v.Trim(), 'Process') }
 $env:KALIV_MEDIA_EXECUTOR = "1"; $env:HF_HUB_OFFLINE = "1"; $env:TRANSFORMERS_OFFLINE = "1"
-Push-Location "$Repo\worker"; & $GenPy -u -m app.media_executor_main --device cuda:1 2>&1 | Tee-Object "$env:TEMP\media-executor.log"; "exit=$LASTEXITCODE"; Pop-Location
+Push-Location "$Repo\worker"; try { & $GenPy -u -m app.media_executor_main --device cuda:1 2>&1 | Tee-Object "$env:TEMP\media-executor.log"; "exit=$LASTEXITCODE" } finally { Pop-Location }
 ```
 
 Probe (token og mappe sættes i samme blok):
