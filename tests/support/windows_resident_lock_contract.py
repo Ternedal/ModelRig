@@ -146,6 +146,38 @@ if WINDOWS:
 else:
     print("  SKIP: Job Object kill-on-close case is Windows-only (POSIX keeps the orphan; tested in worker_comfy_supervisor)")
 
+# 4b. Windows only: launched through a venv (as ComfyUI is on the rig), python.exe is a starter and
+#     the interpreter that takes the lock is its child. The proof then names a pid that is not the
+#     spawned one -- but it is in the spawned process's Job Object, and that is what the supervisor
+#     accepts (rig 21/11: proof pid 1904, spawned pid 5372, every start refused).
+if WINDOWS:
+    import venv
+    from app.windows_job import attached_job_process_ids, close_attached_job, JobLimits, spawn_in_job
+    venv_dir = os.path.join(work, "venv")
+    venv.EnvBuilder(with_pip=False, symlinks=False).create(venv_dir)
+    venv_python = os.path.join(venv_dir, "Scripts", "python.exe")
+    marker = os.path.join(work, "started-venv")
+    argv = [venv_python, LAUNCHER, "--resident-lock", lock, "--", main_py, marker, "60"]
+    proc = spawn_in_job(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                        env=env, limits=JobLimits(active_process_limit=4))
+    check(wait_until(lambda: os.path.exists(marker), 60), "stand-in ComfyUI started through a venv's python.exe")
+    try:
+        proof = json.load(open(lock + ".proof", encoding="ascii"))
+    except (OSError, ValueError):
+        proof = {}
+    members = attached_job_process_ids(proc)
+    print(f"  INFO: spawned pid {proc.pid}, proof pid {proof.get('pid')}, job members {sorted(members)}")
+    check(proc.pid in members, "the spawned process is in its job")
+    check(proof.get("token") == TOKEN and proof.get("pid") in members,
+          "the process that holds the lock is in the spawned process's job")
+    check(os.getpid() not in members, "the supervisor itself is not in the job")
+    close_attached_job(proc)
+    proc.wait(timeout=30)
+    check(wait_until(lambda: not resident_is_held(GPU, lease_dir=lease_dir), 10),
+          "closing the job released the lock the venv child held")
+else:
+    print("  SKIP: the venv starter case is Windows-only")
+
 # 5. The executor lock (G2, #2296): held by a live process, a second process is refused; once the
 #    holder is killed, the OS releases it and the next executor gets it. Same primitive as the lease.
 holder = subprocess.Popen(

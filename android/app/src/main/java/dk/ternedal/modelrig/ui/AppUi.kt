@@ -720,6 +720,14 @@ private data class Msg(
     // Epoch-ms for turens oprettelse (capslinjens klokkeslaet). null for
     // indlaest historik, hvor DB'en ikke gemmer tid pr. besked.
     val at: Long? = System.currentTimeMillis(),
+    // #2419: billedjob turen satte i koe via image_generate (job-id'er fra
+    // riggens `media_jobs`). Én boble pr. id under svaret; persisteret paa
+    // message.media_jobs, saa boblen kommer igen efter genstart.
+    val mediaJobs: List<dk.ternedal.modelrig.net.MediaJobRef> = emptyList(),
+    // Riggen afviste et billede/klip i denne tur (media_refusals) og satte intet i koe:
+    // linjen under svaret siger hvorfor, med riggens egen kode. Ikke persisteret -- det
+    // er en oplysning om turen, ikke en del af samtalen.
+    val mediaNotice: String? = null,
 )
 
 /**
@@ -1517,14 +1525,20 @@ private fun ChatScreen(
         convId = openConvId
         if (openConvId != null) {
             val loaded = withContext(Dispatchers.IO) {
-                db.conversationMeta(openConvId) to db.loadMessages(openConvId)
+                db.conversationMeta(openConvId) to db.loadMessagesWithMedia(openConvId)
             }
             val (meta, msgs) = loaded
             // Strip emojis from OLD assistant replies on load too. The finalize-time
             // strip only cleans new replies; without this, opening a conversation
             // made before the persona/strip landed still shows the old 🌟✨ filler.
-            msgs.forEach { (role, content) ->
-                messages.add(Msg(role, if (role == "assistant") stripEmojis(content) else content, at = null))
+            // #2419: stored image-job ids come back as bubbles, which re-poll the rig.
+            msgs.forEach { m ->
+                messages.add(
+                    Msg(
+                        m.role, if (m.role == "assistant") stripEmojis(m.content) else m.content,
+                        at = null, mediaJobs = m.mediaJobs,
+                    ),
+                )
             }
             if (meta != null) {
                 // NB: for cloud we deliberately do NOT restore the model from
@@ -1560,6 +1574,8 @@ private fun ChatScreen(
         val sys = (if (useCloud) store.cloudSystem else store.rigSystem).trim()
         val convo = messages.filter { !it.error }.map { it.role to it.text }
         val history = trimHistory(sys, convo)
+        // The pictures this conversation holds, for the rig's "det billede" (#2459).
+        val pictureJobs = dk.ternedal.modelrig.ui.chat.MediaTurnJobs.pictures(messages.map { it.mediaJobs })
         val idx = messages.size
         messages.add(Msg("assistant", "", streaming = true, status = TurnStatus.forPlan(turnPlan)))
         val rigModel = currentModel
@@ -1608,6 +1624,12 @@ private fun ChatScreen(
                 scope.launch {
                     val cur = messages.getOrNull(idx) ?: return@launch
                     messages[idx] = cur.copy(personLabel = label)
+                }
+            }
+            val onMediaJobs: (List<dk.ternedal.modelrig.net.MediaJobRef>) -> Unit = { ids ->
+                scope.launch {
+                    val cur = messages.getOrNull(idx) ?: return@launch
+                    messages[idx] = cur.copy(mediaJobs = ids)
                 }
             }
             // Riggens egen fase erstatter startgaettet fra TurnStatus.forPlan.
@@ -1683,9 +1705,14 @@ private fun ChatScreen(
                                     system = sys,
                                     registerCall = hook,
                                     onPhase = onPhase,
+                                    conversationImageJobs = pictureJobs,
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.context.isNotEmpty()) onContext(turn.context)
+                            if (turn.mediaJobs.isNotEmpty()) onMediaJobs(turn.mediaJobs)
+                            dk.ternedal.modelrig.ui.chat.MediaRefusalNotice.text(turn.mediaRefusals, turn.mediaJobs.size)?.let { notice ->
+                                scope.launch { val cur = messages.getOrNull(idx) ?: return@launch; messages[idx] = cur.copy(mediaNotice = notice) }
+                            }
                             turn.personName?.let { name ->
                                 onPerson(if (turn.personRevision != null) "$name \u00b7 ${turn.personRevision}" else name)
                             }
@@ -1735,8 +1762,9 @@ private fun ChatScreen(
                 }.exceptionOrNull()
             }
             activeCall = null
-            // A parked write proposal: surface the card. Nothing has executed.
-            proposal?.let { pendingTool = it }
+            // A parked write proposal: surface the card. Nothing has executed. The card carries no
+            // media references: what the turn queued before it is saved with this turn, below.
+            proposal?.let { pendingTool = it.copy(mediaJobs = emptyList()) }
             // The list can have been replaced mid-stream (a real conversation
             // switch). Then there is nothing on screen to finish; bail rather
             // than index past the end. The reply is not persisted in that
@@ -1753,10 +1781,22 @@ private fun ChatScreen(
             // A pending tool proposal produces no answer yet: the card is on
             // screen and nothing has run. Persisting an empty assistant turn
             // would leave a blank bubble in the history forever.
-            if ((err == null || cancelled) && finalText.isNotBlank()) {
-                withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText) }
+            // ...but a turn that queued a picture or a clip is kept even without words: its
+            // bubble is on screen, and the row is what makes the job this conversation's.
+            // A parked turn's references come from the proposal itself: they must not depend on
+            // the bubble update having run, because a card that expires or an app that is closed
+            // would otherwise take a rendering job out of the conversation.
+            val jobs = proposal?.mediaJobs ?: messages[idx].mediaJobs
+            val saved = (err == null || cancelled) &&
+                dk.ternedal.modelrig.ui.chat.MediaTurnJobs.worthSaving(finalText, jobs)
+            if (saved) {
+                withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText, jobs) }
             }
-            if (proposal != null) messages.removeAt(idx)
+            if (proposal != null) {
+                // Nothing to show yet -- unless the turn queued media: then its bubble stays.
+                if (saved && jobs.isNotEmpty()) messages[idx] = messages[idx].copy(mediaJobs = jobs)
+                else messages.removeAt(idx)
+            }
             busy = false
         }
     }
@@ -1784,6 +1824,9 @@ private fun ChatScreen(
         val sys = (if (useCloud) store.cloudSystem else store.rigSystem).trim()
         val convo = messages.filterIndexed { idx2, mm -> idx2 != i && !mm.error }.map { it.role to it.text }
         val history = trimHistory(sys, convo)
+        val pictureJobs = dk.ternedal.modelrig.ui.chat.MediaTurnJobs.pictures(
+            messages.filterIndexed { idx2, _ -> idx2 != i }.map { it.mediaJobs },
+        )
         val rigModel = currentModel
         val cModel = cloudModel
         val srcFilter = ragSourceFilter
@@ -1806,6 +1849,9 @@ private fun ChatScreen(
             }
             val onPersonRetry: (String) -> Unit = { label ->
                 scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(personLabel = label) }
+            }
+            val onMediaJobsRetry: (List<dk.ternedal.modelrig.net.MediaJobRef>) -> Unit = { ids ->
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(mediaJobs = ids) }
             }
             val onPhase: (String) -> Unit = { name ->
                 TurnStatus.forPhase(name)?.let { label ->
@@ -1839,9 +1885,14 @@ private fun ChatScreen(
                                     system = sys,
                                     registerCall = hook,
                                     onPhase = onPhase,
+                                    conversationImageJobs = pictureJobs,
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.context.isNotEmpty()) onContext(turn.context)
+                            if (turn.mediaJobs.isNotEmpty()) onMediaJobsRetry(turn.mediaJobs)
+                            dk.ternedal.modelrig.ui.chat.MediaRefusalNotice.text(turn.mediaRefusals, turn.mediaJobs.size)?.let { notice ->
+                                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(mediaNotice = notice) }
+                            }
                             turn.personName?.let { name ->
                                 onPersonRetry(if (turn.personRevision != null) "$name \u00b7 ${turn.personRevision}" else name)
                             }
@@ -1884,8 +1935,8 @@ private fun ChatScreen(
                 }.exceptionOrNull()
             }
             activeCall = null
-            // Same as the main path: a parked write proposal surfaces the card.
-            proposal?.let { pendingTool = it }
+            // Same as the main path: a parked write proposal surfaces the card, without references.
+            proposal?.let { pendingTool = it.copy(mediaJobs = emptyList()) }
             val cur = messages.getOrNull(i) ?: run { busy = false; return@launch }
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[i] = when {
@@ -1896,8 +1947,11 @@ private fun ChatScreen(
             val finalText = messages[i].text
             // Mirror the main path: a parked proposal has no answer yet --
             // never persist a blank assistant turn.
-            if (cidNow != null && (err == null || cancelled) && finalText.isNotBlank()) {
-                withContext(Dispatchers.IO) { db.addMessage(cidNow, "assistant", finalText) }
+            val jobs = proposal?.mediaJobs ?: messages[i].mediaJobs
+            if (cidNow != null && (err == null || cancelled) &&
+                dk.ternedal.modelrig.ui.chat.MediaTurnJobs.worthSaving(finalText, jobs)) {
+                if (proposal != null) messages[i] = messages[i].copy(mediaJobs = jobs)
+                withContext(Dispatchers.IO) { db.addMessage(cidNow, "assistant", finalText, jobs) }
             }
             busy = false
         }
@@ -2616,6 +2670,48 @@ private fun ChatScreen(
                             body = { MarkdownText(m.text, color = KalivTheme.colors.textBody) },
                             onRetry = if (m.error) ({ retry(i) }) else null,
                         )
+                        m.mediaNotice?.let { notice ->
+                            dk.ternedal.modelrig.ui.chat.ImageJobBubbleContent(
+                                dk.ternedal.modelrig.ui.chat.ImageJobPhase.Ended(notice),
+                                modifier = Modifier.padding(start = 15.dp),
+                            )
+                        }
+                        if (m.mediaJobs.isNotEmpty()) {
+                            // #2419: én boble pr. billedjob. Klienterne bygges mod den parrede
+                            // oprindelse; kan de ikke (ikke parret, afvist oprindelse), siger
+                            // boblen det i stedet for at gaette.
+                            val mediaClients = remember(store.baseUrl, store.token) {
+                                runCatching {
+                                    dk.ternedal.modelrig.net.MediaJobClient(store.baseUrl, store.token) to
+                                        dk.ternedal.modelrig.net.MediaGalleryClient(store.baseUrl, store.token)
+                                }
+                            }
+                            m.mediaJobs.forEach { ref ->
+                                mediaClients.fold(
+                                    onSuccess = { (jobs, gallery) ->
+                                        if (ref.kind == dk.ternedal.modelrig.net.MediaJobRef.Kind.VIDEO) {
+                                            dk.ternedal.modelrig.ui.chat.VideoJobBubble(
+                                                jobId = ref.jobId, jobs = jobs, gallery = gallery,
+                                                modifier = Modifier.padding(start = 15.dp),
+                                            )
+                                        } else {
+                                            dk.ternedal.modelrig.ui.chat.ImageJobBubble(
+                                                jobId = ref.jobId, jobs = jobs, gallery = gallery,
+                                                modifier = Modifier.padding(start = 15.dp),
+                                            )
+                                        }
+                                    },
+                                    onFailure = {
+                                        dk.ternedal.modelrig.ui.chat.ImageJobBubbleContent(
+                                            dk.ternedal.modelrig.ui.chat.ImageJobPhase.Ended(
+                                                "Billedet ligger i galleriet, n\u00e5r det er klar",
+                                            ),
+                                            modifier = Modifier.padding(start = 15.dp),
+                                        )
+                                    },
+                                )
+                            }
+                        }
                         if (m.context.isNotEmpty() && !m.streaming) {
                             var showCitations by remember(m.at) { mutableStateOf(false) }
                             Text(
@@ -2806,8 +2902,14 @@ private fun ChatScreen(
                                 // expiry; this just stops offering a dead button.
                                 if (pendingTool?.confirmationId == prop.confirmationId) {
                                     pendingTool = null
-                                    messages.add(Msg("assistant",
-                                        "Bekræftelsen udløb. Handlingen blev ikke udført."))
+                                    // Saved like any other answer: after a restart the conversation
+                                    // should still say that nothing was done. (A card carries no media
+                                    // references any more; they were saved when they arrived.)
+                                    val expired = "Bekræftelsen udløb. Handlingen blev ikke udført."
+                                    messages.add(Msg("assistant", expired, mediaJobs = prop.mediaJobs))
+                                    convId?.let { id ->
+                                        withContext(Dispatchers.IO) { db.addMessage(id, "assistant", expired, prop.mediaJobs) }
+                                    }
                                 }
                             }
                             if (remaining > 0) {
@@ -2831,12 +2933,26 @@ private fun ChatScreen(
                                         }
                                         toolBusy = false
                                         val next = r.getOrNull()
+                                        // #2465: media the turn queued BEFORE the card rides on the card's
+                                        // turn; what it queued after the approval rides on the answer. The
+                                        // rig starts a new list per call, so the app keeps the union -- else
+                                        // a picture that is already rendering never gets its bubble.
+                                        val carried = dk.ternedal.modelrig.ui.chat.MediaTurnJobs
+                                            .across(prop.mediaJobs, next?.mediaJobs.orEmpty())
                                         if (next?.status == "confirmation_required") {
                                             // Agent v2: an approved write may continue the
                                             // chain, and the NEXT write comes back as its own
                                             // confirmation card. Show it instead of ending the
                                             // turn -- one approval never authorises the next write.
-                                            pendingTool = next
+                                            // What was queued between the two cards is saved and
+                                            // shown now: the next card may expire, or never be seen.
+                                            if (carried.isNotEmpty()) {
+                                                messages.add(Msg("assistant", "", mediaJobs = carried))
+                                                convId?.let { id ->
+                                                    withContext(Dispatchers.IO) { db.addMessage(id, "assistant", "", carried) }
+                                                }
+                                            }
+                                            pendingTool = next?.copy(mediaJobs = emptyList())
                                         } else {
                                             pendingTool = null
                                             val text = next?.answer
@@ -2847,15 +2963,15 @@ private fun ChatScreen(
                                                         "Bekræftelsen udløb. Handlingen blev ikke udført."
                                                     else friendlyError(e)
                                                 } ?: ""
-                                            if (text.isNotBlank()) {
-                                                messages.add(Msg("assistant", text))
+                                            if (dk.ternedal.modelrig.ui.chat.MediaTurnJobs.worthSaving(text, carried)) {
+                                                messages.add(Msg("assistant", text, mediaJobs = carried))
                                                 // Persist it. What you approved, and what
                                                 // Kaliv did about it, belongs in the
                                                 // conversation -- not only in RAM until the
                                                 // next app restart.
                                                 convId?.let { id ->
                                                     withContext(Dispatchers.IO) {
-                                                        db.addMessage(id, "assistant", text)
+                                                        db.addMessage(id, "assistant", text, carried)
                                                     }
                                                 }
                                             }

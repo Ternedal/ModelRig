@@ -4,6 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -38,6 +39,11 @@ private data class ToolChatRequest(
     val history: List<ToolMsg> = emptyList(),
     val system: String? = null,
     val conversation_id: String? = null,
+    // The image jobs shown in this conversation, oldest first. With it the rig's
+    // video_generate takes "det billede" to mean this conversation's newest picture; without
+    // it, the owner's newest anywhere (#2459). Null is "not said" and is left out of the
+    // request; an empty list says the conversation has none.
+    val conversation_image_jobs: List<String>? = null,
 )
 
 @Serializable
@@ -66,7 +72,22 @@ data class ToolTurn(
     // longer has to keep a tool-name table that goes stale.
     val risk: String = "",
     val impact: String = "",
-)
+    // #2419: the media jobs this turn queued (image_generate / video_generate),
+    // additive and absent on older rigs. Kept as raw JSON on purpose: a
+    // malformed entry must never make the whole turn undecodable -- the answer
+    // stands, and DesktopMediaContract.refs() keeps only well-formed references.
+    val media_jobs: JsonElement? = null,
+    // Media tool calls the rig refused this turn, with its code. Raw JSON for the same
+    // reason as media_jobs: a malformed entry never costs the answer.
+    val media_refusals: JsonElement? = null,
+) {
+    /** The well-formed job references of this turn, for the chat's media bubbles. */
+    fun mediaJobRefs(): List<DesktopMediaJobRef> = DesktopMediaContract.refs(media_jobs)
+
+    /** The line under the answer when the rig refused and nothing was queued; else null. */
+    fun mediaRefusalNotice(): String? =
+        DesktopMediaContract.refusalNotice(DesktopMediaContract.refusals(media_refusals), mediaJobRefs().size)
+}
 
 @Serializable
 data class AuditEntry(
@@ -153,6 +174,7 @@ class ToolsClient(baseUrl: String, private val bearer: String?) {
         model: String?,
         history: List<Pair<String, String>>,
         system: String?,
+        conversationImageJobs: List<String>? = null,
     ): ToolTurn {
         val body = json.encodeToString(
             ToolChatRequest(
@@ -160,6 +182,7 @@ class ToolsClient(baseUrl: String, private val bearer: String?) {
                 model = model,
                 history = history.map { ToolMsg(it.first, it.second) },
                 system = system?.takeIf { it.isNotBlank() },
+                conversation_image_jobs = conversationImageJobs,
             ),
         )
         val req = builder("/api/v1/tools/chat")
@@ -192,6 +215,7 @@ class ToolsClient(baseUrl: String, private val bearer: String?) {
         model: String?,
         history: List<Pair<String, String>>,
         system: String?,
+        conversationImageJobs: List<String>? = null,
         onPhase: (String) -> Unit = {},
     ): ToolTurn {
         val body = json.encodeToString(
@@ -200,6 +224,7 @@ class ToolsClient(baseUrl: String, private val bearer: String?) {
                 model = model,
                 history = history.map { ToolMsg(it.first, it.second) },
                 system = system?.takeIf { it.isNotBlank() },
+                conversation_image_jobs = conversationImageJobs,
             ),
         )
         val req = builder("/api/v1/tools/chat/stream")
