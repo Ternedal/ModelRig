@@ -30,6 +30,7 @@ from app.media_job_api import (OWNER, MediaJobService, MediaJobsUnavailable, bui
 from worker_media_generation_profiles import image_profile, video_profile  # noqa: E402
 
 SECRET = "s" * 40
+EXECUTOR = "GPU-" + "0" * 8 + "-0000-0000-0000-" + "0" * 12 + ":" + "a" * 16  # a valid executor instance
 INSTANCE = "GPU-6a7f0c2e-1b2d-4c3e-8f9a-0123456789ab:0123456789abcdef"
 HEADERS = {"X-Internal-Media-Secret": SECRET}
 PROMPT = "a red bicycle under a streetlight"
@@ -66,7 +67,92 @@ class RouteTests(unittest.TestCase):
         self.assertNotIn("prompt", job)
         row = self.store.get(job["id"], OWNER)
         self.assertEqual((row["owner"], row["prompt"]), ("installation", PROMPT), "the gallery's owner (#2365)")
-        self.assertEqual(json.loads(row["params"]), {"width": 1024, "height": 1024, "steps": 20})
+        # The resolved task is stored with the parameters (20/11), so the executor never re-derives it.
+        self.assertEqual(json.loads(row["params"]), {"width": 1024, "height": 1024, "steps": 20, "task": "text_to_image"})
+
+    def test_recent_lists_the_newest_jobs_with_their_kind_and_nothing_private(self):
+        # #2475: a client that died between the rig's answer and its own save finds its job here.
+        self.assertEqual(self.client.get("/internal/media/jobs/recent", headers=HEADERS).json(),
+                         {"schema": "kaliv-media-job-list/v1", "jobs": []})
+        first = self.submit().json()["id"]
+        time.sleep(0.01)
+        with patch.object(self.service, "video_enabled", True):
+            second = self.client.post("/internal/media/jobs", headers=HEADERS,
+                                      json={"profile_id": "wan-t2v", "prompt": PROMPT, "task": "text_to_video"}).json()["id"]
+        body = self.client.get("/internal/media/jobs/recent", headers=HEADERS).json()
+        self.assertEqual([(j["id"], j["kind"], j["state"]) for j in body["jobs"]],
+                         [(second, "video", "queued"), (first, "image", "queued")], "newest first, each with its kind")
+        status = self.client.get(f"/internal/media/jobs/{first}", headers=HEADERS).json()
+        self.assertEqual({k: v for k, v in body["jobs"][1].items() if k != "kind"},
+                         {k: v for k, v in status.items() if k != "translated_prompt"},
+                         "an entry is what status shows for that job without translated_prompt, plus kind")
+        # #2481 review (P2): status may show the rendered prompt of the one job asked about; the
+        # list must not hand out the rendered prompts of twenty.
+        import sqlite3
+        db = sqlite3.connect(str(self.tmp / "jobs.sqlite3"))
+        db.execute("UPDATE image_jobs SET effective_prompt=? WHERE id=?", ("a translated secret prompt", first))
+        db.commit(); db.close()
+        self.assertEqual(self.client.get(f"/internal/media/jobs/{first}", headers=HEADERS).json()["translated_prompt"],
+                         "a translated secret prompt", "status still shows it for that one job")
+        listed = self.client.get("/internal/media/jobs/recent", headers=HEADERS)
+        self.assertNotIn("translated secret prompt", listed.text)
+        self.assertTrue(all("translated_prompt" not in entry for entry in listed.json()["jobs"]))
+        body = listed.json()
+        raw = json.dumps(body)
+        for private in (PROMPT, "params", "owner", "claimed", "832", "sdxl-base"):
+            self.assertNotIn(private, raw)
+        # a job whose profile is no longer enabled is still listed; its kind is unknown
+        del self.service.profiles["wan-t2v"]
+        kinds = {j["id"]: j["kind"] for j in self.client.get("/internal/media/jobs/recent", headers=HEADERS).json()["jobs"]}
+        self.assertEqual(kinds, {second: None, first: "image"})
+
+    def test_recent_and_status_agree_on_a_job_that_expired_in_the_queue(self):
+        # #2481 review (Codex P2): with no executor running nothing expires a stale queued job;
+        # status did it on read and the list did not, so one job was "expired" and "queued" at once.
+        stale = self.submit().json()["id"]
+        import sqlite3
+        db = sqlite3.connect(str(self.tmp / "jobs.sqlite3"))
+        db.execute("UPDATE image_jobs SET created=created-? WHERE id=?", (QUEUED_MAX_AGE_S + 60, stale))
+        db.commit(); db.close()
+        fresh = self.submit().json()["id"]
+        db = sqlite3.connect(str(self.tmp / "jobs.sqlite3"))
+        db.execute("UPDATE image_jobs SET state='queued', error=NULL WHERE id=?", (stale,))  # as if never looked at
+        db.commit(); db.close()
+        listed = {j["id"]: j for j in self.client.get("/internal/media/jobs/recent", headers=HEADERS).json()["jobs"]}
+        self.assertEqual(listed[stale]["state"], "expired", "the list expires it instead of calling it queued")
+        self.assertEqual(listed[fresh]["state"], "queued", "a job inside its deadline is untouched")
+        status = self.client.get(f"/internal/media/jobs/{stale}", headers=HEADERS).json()
+        self.assertEqual((listed[stale]["state"], listed[stale]["error"]), (status["state"], status["error"]))
+
+    def test_recent_is_bounded_owner_bound_and_behind_the_secret(self):
+        from app.image_job_store import RECENT_MAX, ImageJobError
+        from app.media_job_api import RECENT_LIMIT
+        self.assertEqual(self.client.get("/internal/media/jobs/recent").status_code, 401)
+        self.assertEqual(self.client.get("/internal/media/jobs/recent", headers={"X-Internal-Media-Secret": "x" * 40}).status_code, 401)
+        other = self.store.submit("someone-else", PROMPT, profile_id="sdxl-a", params={})["job_id"]
+        mine = self.submit().json()["id"]
+        listed = [j["id"] for j in self.client.get("/internal/media/jobs/recent", headers=HEADERS).json()["jobs"]]
+        self.assertEqual(listed, [mine], "another owner's job is never listed")
+        self.assertNotIn(other, listed)
+        self.assertLessEqual(RECENT_LIMIT, RECENT_MAX)
+        for bad in (0, -1, RECENT_MAX + 1, True, "20", 2.0):
+            with self.assertRaises(ImageJobError):
+                self.store.recent_for(OWNER, bad)
+        # the list never grows with the table
+        import sqlite3
+        db = sqlite3.connect(str(self.tmp / "jobs.sqlite3"))
+        row = db.execute("SELECT * FROM image_jobs WHERE id=?", (mine,)).fetchone()
+        names = [d[0] for d in db.execute("SELECT * FROM image_jobs LIMIT 1").description]
+        for n in range(RECENT_LIMIT + 15):
+            values = dict(zip(names, row))
+            values.update(id=f"{n:032x}", state="completed", created=values["created"] + n + 1)
+            db.execute(f"INSERT INTO image_jobs ({','.join(names)}) VALUES ({','.join('?' * len(names))})", list(values.values()))
+        db.commit(); db.close()
+        jobs = self.client.get("/internal/media/jobs/recent", headers=HEADERS).json()["jobs"]
+        self.assertEqual(len(jobs), RECENT_LIMIT)
+        self.assertEqual(jobs[0]["id"], f"{RECENT_LIMIT + 14:032x}", "the newest is first")
+        # 'recent' is not read as a job id by the status route
+        self.assertEqual(self.client.get("/internal/media/jobs/recent", headers=HEADERS).json()["schema"], "kaliv-media-job-list/v1")
 
     def test_profiles_are_filtered_versioned_and_do_not_expose_model_details(self):
         response = self.client.get("/internal/media/jobs/profiles", headers=HEADERS)
@@ -87,7 +173,9 @@ class RouteTests(unittest.TestCase):
         enabled = client_for(video_service).get("/internal/media/jobs/profiles", headers=HEADERS)
         self.assertEqual(enabled.status_code, 200)
         self.assertEqual([p["profile_id"] for p in enabled.json()["profiles"]], ["sdxl-a", "wan-t2v"])
-        self.assertNotIn("image_to_video", enabled.text)
+        # image_to_video is served since the owner-gated reader was wired (20/11): advertised as the
+        # profile lists it.
+        self.assertEqual(enabled.json()["profiles"][1]["tasks"], ["image_to_video", "text_to_video"])
 
     def test_profiles_never_advertise_a_prompt_longer_than_submit_accepts(self):
         from dataclasses import replace
@@ -147,7 +235,7 @@ class RouteTests(unittest.TestCase):
             ({"steps": 41}, "invalid_request"),
             ({"seed": -1}, "invalid_request"),
             ({"frames": 10}, "invalid_request"),
-            ({"task": "image_to_image"}, "invalid_request"),
+            ({"task": "image_to_image"}, "task_not_served"),
             ({"prompt": "x" * 501}, "invalid_request"),
             ({"input_asset_id": "abc"}, "invalid_request"),
         ]
@@ -162,16 +250,42 @@ class RouteTests(unittest.TestCase):
         with self.store._db() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM image_jobs").fetchone()[0], 0)
 
-    def test_video_needs_its_switch_and_image_to_video_is_not_served(self):
+    def test_video_needs_its_switch_and_image_to_video_needs_an_owned_source(self):
         response = self.submit(profile_id="wan-t2v")
         self.assertEqual((response.status_code, response.json()["detail"]), (400, "video_not_enabled"))
         video = client_for(MediaJobService(self.store, self.profiles, SECRET, video_enabled=True))
         ok = video.post("/internal/media/jobs", json={"profile_id": "wan-t2v", "prompt": PROMPT, "task": "text_to_video"},
                         headers=HEADERS)
         self.assertEqual(ok.status_code, 202, ok.text)
+        # No task named and no source: the text task, never the alphabetical first (image_to_video).
+        default = video.post("/internal/media/jobs", json={"profile_id": "wan-t2v", "prompt": PROMPT}, headers=HEADERS)
+        self.assertEqual(default.status_code, 202, default.text)
+        # image_to_video: the source must be a completed asset of THIS owner -- checked at submit.
+        refused = video.post("/internal/media/jobs", headers=HEADERS, json={
+            "profile_id": "wan-t2v", "prompt": PROMPT, "task": "image_to_video"})
+        self.assertEqual((refused.status_code, refused.json()["detail"]), (400, "invalid_request"), "no source")
         refused = video.post("/internal/media/jobs", headers=HEADERS, json={
             "profile_id": "wan-t2v", "prompt": PROMPT, "task": "image_to_video", "input_asset_id": "a" * 24})
-        self.assertEqual((refused.status_code, refused.json()["detail"]), (400, "task_not_served"))
+        self.assertEqual((refused.status_code, refused.json()["detail"]), (400, "source_not_found"), "unknown source")
+        # Another owner's completed asset is not ours either.
+        theirs = self.store.submit("someone-else", PROMPT, profile_id="sdxl-a")["job_id"]
+        self.assertEqual(self.store.claim_for(["sdxl-a"], EXECUTOR)["id"], theirs)
+        self.assertTrue(self.store.begin_publish(theirs, EXECUTOR))
+        self.assertTrue(self.store.complete(theirs, EXECUTOR, "img_theirs"))
+        refused = video.post("/internal/media/jobs", headers=HEADERS, json={
+            "profile_id": "wan-t2v", "prompt": PROMPT, "task": "image_to_video", "input_asset_id": "img_theirs"})
+        self.assertEqual((refused.status_code, refused.json()["detail"]), (400, "source_not_found"))
+        # Our own completed asset: accepted, and a missing task defaults to image_to_video when a source is given.
+        mine = self.store.submit(OWNER, PROMPT, profile_id="sdxl-a")["job_id"]
+        self.assertEqual(self.store.claim_for(["sdxl-a"], EXECUTOR)["id"], mine)
+        self.assertTrue(self.store.begin_publish(mine, EXECUTOR))
+        self.assertTrue(self.store.complete(mine, EXECUTOR, "img_mine"))
+        accepted = video.post("/internal/media/jobs", headers=HEADERS, json={
+            "profile_id": "wan-t2v", "prompt": PROMPT, "input_asset_id": "img_mine"})
+        self.assertEqual(accepted.status_code, 202, accepted.text)
+        row = self.store.get(accepted.json()["id"], OWNER)
+        params = json.loads(row["params"]) if isinstance(row.get("params"), str) else row["params"]
+        self.assertEqual((params.get("task"), params.get("input_asset_id")), ("image_to_video", "img_mine"))
 
     def test_queue_and_active_limits_are_429_codes(self):
         for _ in range(3):
