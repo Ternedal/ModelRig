@@ -255,6 +255,44 @@ func TestMediaJobProfilesRouteRequiresBearerAndIsDefaultOff(t *testing.T) {
 	}
 }
 
+func TestMediaJobRecentRouteRequiresBearerIsDefaultOffAndCarriesNothingToTheWorker(t *testing.T) {
+	var hits []mediaJobsHit
+	worker := mediaJobsWorker(t, &hits)
+	off := mediaJobsHandler(t, worker.URL, "0", mediaJobsTestSecret)
+	rec := doMediaJobs(off, http.MethodGet, "/api/v1/media/jobs/recent", mediaJobsTestToken, "", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("disabled recent route: %d", rec.Code)
+	}
+	on := mediaJobsHandler(t, worker.URL, "1", mediaJobsTestSecret)
+	for _, token := range []string{"", "wrong-token"} {
+		rec = doMediaJobs(on, http.MethodGet, "/api/v1/media/jobs/recent", token, "", nil)
+		if rec.Code != http.StatusUnauthorized || rec.Header().Get("Cache-Control") != "private, no-store" {
+			t.Fatalf("unauthorized recent route: %d, cache=%q", rec.Code, rec.Header().Get("Cache-Control"))
+		}
+	}
+	if len(hits) != 0 {
+		t.Fatalf("recent route forwarded without authentication: %+v", hits)
+	}
+	// "recent" is a route of its own, not a job id: it reaches the list, with no query and no owner.
+	rec = doMediaJobs(on, http.MethodGet, "/api/v1/media/jobs/recent?owner=spoof&limit=100000", mediaJobsTestToken, "", nil)
+	if rec.Code != http.StatusAccepted || len(hits) != 1 {
+		t.Fatalf("recent route: status=%d hits=%d", rec.Code, len(hits))
+	}
+	hit := hits[0]
+	if hit.Method != http.MethodGet || hit.Path != "/internal/media/jobs/recent" || hit.RawQuery != "" ||
+		hit.Secret != mediaJobsTestSecret || hit.Owner != "" {
+		t.Fatalf("recent forwarding boundary: %+v", hit)
+	}
+	if rec.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("recent route cache=%q", rec.Header().Get("Cache-Control"))
+	}
+	// Only GET lists; the same path with POST is not a route.
+	rec = doMediaJobs(on, http.MethodPost, "/api/v1/media/jobs/recent", mediaJobsTestToken, "{}", map[string]string{"Content-Type": "application/json"})
+	if rec.Code == http.StatusAccepted || len(hits) != 1 {
+		t.Fatalf("POST to the recent route reached the worker: status=%d hits=%d", rec.Code, len(hits))
+	}
+}
+
 func TestMediaJobWorkerAuthFailuresDoNotMasqueradeAsDevicePairingFailures(t *testing.T) {
 	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
@@ -302,7 +340,6 @@ func TestMediaJobWorkerOutageDoesNotLeakLoopbackURL(t *testing.T) {
 		t.Fatalf("outage response cache=%q", rec.Header().Get("Cache-Control"))
 	}
 }
-
 
 func TestMediaJobUpstreamBadGatewayBodyIsRedacted(t *testing.T) {
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

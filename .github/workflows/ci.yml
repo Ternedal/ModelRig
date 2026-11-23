@@ -320,6 +320,20 @@ jobs:
       - name: Install platform + build-tools
         if: steps.scope.outputs.relevant == 'true'
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      # Robolectric downloads its android-all runtime jars (SDK 35 and 36) from Maven Central
+      # while the tests run, outside Gradle. On 22 Nov 2026 that fetch failed twice on main with
+      # the code unchanged (HTTP 429, then an IOException in MavenArtifactFetcher: 10 of 731
+      # tests "failed" in classMethod). Keeping the jars between runs removes the download from
+      # every run but the first after a Robolectric bump. The key names the Robolectric version
+      # line in build.gradle.kts, so a bump starts from an empty cache.
+      - name: Cache Robolectric's android-all jars
+        if: steps.scope.outputs.relevant == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-android-all-${{ hashFiles('android/app/build.gradle.kts') }}
+          restore-keys: |
+            robolectric-android-all-
       - name: Compile Android Kotlin and run unit tests
         if: steps.scope.outputs.relevant == 'true'
         working-directory: android

@@ -65,7 +65,7 @@ from typing import Callable, Mapping
 from .comfy_supervisor import ComfyVramShortage
 from .diffusers_image_adapter import GpuResourcesRetained
 from .gpu_lease import ExecutorAlreadyRunning, GpuBusy, acquire_executor_lock, normalize_gpu_uuid
-from .image_gpu_admission import GpuMemoryShortage
+from .image_gpu_admission import GpuMemoryShortage, budget_detail
 from .image_job_store import ImageJobStore
 from .media_generation_contract import (ArtifactSink, ArtifactSinkUnavailable, GenerationCancelled, GenerationError,
                                         GenerationRequest, JobKeyedArtifactSink, JobKeyedStagedSink,
@@ -253,14 +253,30 @@ class MediaExecutor:
                     released = adapter.close() is True
                 except Exception:
                     released = False
-                self.events.append(f"failed_load:{profile.profile_id}:{released}")
+                # The reason as a code (rig 21/11: a refused ComfyUI start was readable nowhere).
+                self.events.append(f"failed_load:{profile.profile_id}:{released}:{_event_code(exc)}")
+                self._reported = exc  # the job's own handler does not report it a second time
                 if not released:
                     self._retained.append(adapter)
                     raise GpuResourcesRetained("a failed load did not prove its release; the executor must exit") from exc
                 raise  # released: GpuBusy -> "gpu_busy", anything else -> "generation_failed"
             self.adapter = adapter
             self.events.append(f"loaded:{profile.profile_id}")
+            self._budget_event("admitted", getattr(adapter, "admitted_budget", None),
+                               getattr(adapter, "admitted_nvml_used_mib", None))
         return self.adapter
+
+    def _budget_event(self, verdict: str, budget: object, nvml_used: object = None) -> None:
+        """What the admission probe measured, as one diagnostics event: ``gpu_budget:admitted,cuda1,
+        free_mib=…`` with NVML's ``nvml_used_mib`` beside it when it could be read. Only for
+        an adapter that measures (the in-process image adapter); never required, never able to
+        fail a job."""
+        try:
+            detail = budget_detail(budget, nvml_used)
+        except Exception:
+            detail = None
+        if detail is not None:
+            self.events.append(f"gpu_budget:{verdict},{detail}")
 
     def maybe_unload_idle(self) -> None:
         if self.adapter is not None and self.clock() - self.last_used >= self.idle_unload_s:
@@ -432,9 +448,10 @@ class MediaExecutor:
         except GpuBusy:
             self.store.fail(job_id, self.instance, GPU_BUSY)
             return "failed"
-        except _VRAM_SHORTAGE:  # before anything was submitted; a failed load proved its release
+        except _VRAM_SHORTAGE as shortage:  # before anything was submitted; a failed load proved its release
             outcome = self.store.defer(job_id, self.instance, max_wait_s=VRAM_MAX_WAIT_S, error=GPU_UNAVAILABLE)
             self.events.append(f"vram_short:{outcome}")
+            self._budget_event("short", getattr(shortage, "budget", None), getattr(shortage, "nvml_used_mib", None))
             if self.adapter is not None:
                 # The shortage came from a resident model's pre-job check: chat first means media
                 # gives the GPU back while it waits, not only when idle_unload_s expires (which
@@ -445,9 +462,13 @@ class MediaExecutor:
                 self._claim_not_before = self.clock() + VRAM_RETRY_S
                 return "deferred"
             return "failed" if outcome == "expired" else outcome
-        except Exception:
+        except Exception as exc:
             self.last_used = self.clock()
             # Never persist exception text. After the commit point it is a publication failure.
+            # The diagnostics stream gets the reason as a code, like every other event.
+            if exc is not getattr(self, "_reported", None):
+                self.events.append(f"job_error:{job_id}:{_event_code(exc)}")
+            self._reported = None
             self.store.fail(job_id, self.instance, PUBLICATION_FAILED if publishing else FAILED)
             return "failed"
         # The artifact is durable. If its completion cannot be recorded, the job stays publishing
