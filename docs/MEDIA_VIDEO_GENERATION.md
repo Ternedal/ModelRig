@@ -1,6 +1,6 @@
 # Video generation (ComfyUI) — slice 2 of #2296
 
-**Status:** text-to-video is wired into `media_executor_main` behind its own switch, `KALIV_MEDIA_VIDEO=1`. It is default-off (`docs/MEDIA_EXECUTOR.md`, "Video"). Image-to-video is not served by the entry point. Nothing has been proven on the rig.
+**Status:** text-to-video is wired into `media_executor_main` behind its own switch, `KALIV_MEDIA_VIDEO=1`. It is default-off (`docs/MEDIA_EXECUTOR.md`, "Video"). Image-to-video is served through the same switch when the profile lists it (#2366: owner-gated reader wired in the entry point; `video_generate` takes `source_image_job_id`). Nothing has been proven on the rig.
 **Ownership (6490545753):**
 - Claude owns the supervisor, the adapter, the template binding and the profiles.
 - ChatGPT owns the storage side (`ExternalMediaSink`, the gallery index), the gallery and the routes.
@@ -128,7 +128,7 @@ An actor with write access to the volume could delete files directly anyway.
 
 ## Image-to-video, the generator side (#2296 6635978072)
 
-**Status:** this is the adapter and the template only, and it is default-off. The executor does not call it yet. That needs ChatGPT's `SourceImageUnavailable` seam in the owner-gated reader, so that an asset-level refusal fails the job instead of exiting 75.
+**Status:** default-off with the rest of video. The executor calls it when the profile lists `image_to_video`: the entry point wires `read_owned_source_png` as the source reader, and its `SourceImageUnavailable` fails the job (`source_image_unavailable`) while a volume-level `ArtifactSinkUnavailable` is exit 75 (`docs/MEDIA_EXECUTOR.md`, "Image-to-video"). Not proven on the rig.
 
 - **Template.** `__KALIV_VIDEO_IMAGE__`, used only on `LoadImage`'s `image` input, makes a template image-to-video. Such a template renders `image_to_video` and nothing else; a template without the slot renders `text_to_video` and nothing else. The profile must list the template's task.
 - **Input.** `render_to(request, sink, source_png=bytes)` requires the source exactly for `image_to_video`. Before anything touches disk, the decode is bounded: a PNG signature, an IHDR as the first chunk, and at most 4096 px per side (so at most 16.8 MP), within 64 MiB. Full container validation stays with ChatGPT's reader.

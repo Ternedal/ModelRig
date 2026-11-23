@@ -8,7 +8,10 @@ graph structure, and the graph itself never comes from a request.
 
 Slot markers are whole input values. Each must appear exactly once, under an
 input name from its allowlist, and no other string in the graph may contain
-the marker prefix.
+the marker prefix. Two additions for graphs that render sound with the picture
+(LTX-2.3, rig 21/11): an integer slot may sit on a PrimitiveInt's "value", so
+one number can reach several nodes, and the steps slot may be left out by a
+template whose schedule is part of the graph.
 
 Image-to-video (#2296 6635978072): a template that contains __KALIV_VIDEO_IMAGE__
 (on an input named "image", i.e. LoadImage) renders image_to_video and nothing
@@ -44,6 +47,19 @@ SLOTS: Mapping[str, tuple[str, frozenset[str]]] = {
     "__KALIV_VIDEO_SEED__": ("seed", frozenset({"seed", "noise_seed"})),
 }
 IMAGE_MARKER = "__KALIV_VIDEO_IMAGE__"
+# The one request field a template may leave out. A distilled model runs a schedule that is part
+# of the graph (LTX-2.3: a fixed list of sigmas), so there is no step count to fill in. Such a
+# template renders its own schedule whatever the request says; a slot wired to nothing would
+# only pretend otherwise.
+OPTIONAL_SLOTS = frozenset({"__KALIV_VIDEO_STEPS__"})
+# A number that several nodes need (LTX-2.3: the frame count goes to the video latent and to the
+# audio latent, the frame rate to three nodes) cannot sit on one of them, and a marker appears
+# exactly once. ComfyUI's own answer is a primitive node that fans the value out; its input is
+# called "value" whatever it carries, so that name is allowed on these classes only, and only
+# for the integer slots.
+FANOUT_CLASSES = frozenset({"PrimitiveInt"})
+FANOUT_INPUT = "value"
+FANOUT_FIELDS = frozenset({"width", "height", "fps", "frames", "steps", "seed"})
 # The image slot is the one optional slot: its presence makes the template image_to_video.
 _ALL_SLOTS: Mapping[str, tuple[str, frozenset[str]]] = {**SLOTS, IMAGE_MARKER: ("image", frozenset({"image"}))}
 # What the adapter names the source file it stages; bind() accepts nothing else.
@@ -168,7 +184,9 @@ def load_template(raw: bytes, expected_sha256: str, *, pinned_files=None) -> Wor
         for input_name, value in inputs.items():
             if isinstance(value, str) and value in _ALL_SLOTS:
                 field, allowed = _ALL_SLOTS[value]
-                if input_name not in allowed:
+                fans_out = (input_name == FANOUT_INPUT and field in FANOUT_FIELDS
+                            and node["class_type"] in FANOUT_CLASSES)
+                if input_name not in allowed and not fans_out:
                     raise _fail(f"{value} may not fill input {input_name!r}")
                 if value == IMAGE_MARKER and node["class_type"] != "LoadImage":
                     raise _fail(f"{IMAGE_MARKER} may only fill LoadImage's image input")
@@ -181,7 +199,7 @@ def load_template(raw: bytes, expected_sha256: str, *, pinned_files=None) -> Wor
                 raise _fail("a slot marker cannot be an input name")
         if "_meta" in node and any(MARKER_PREFIX in text for text in _strings(node["_meta"])):
             raise _fail("a slot marker cannot sit in _meta")
-    missing = sorted(set(SLOTS) - set(found))
+    missing = sorted(set(SLOTS) - OPTIONAL_SLOTS - set(found))
     if missing:
         raise _fail(f"missing slots {missing}")
     if pinned_files is not None:
