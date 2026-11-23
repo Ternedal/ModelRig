@@ -147,7 +147,7 @@ No profile ships enabled, and nothing in this document changes a default.
 
 8. **Promote.** Only after 7 may the profile become `rig-qualified`.
 
-**Route status.** The submit/status/cancel routes (`POST /api/v1/media/jobs`, `GET …/{id}`, `POST …/{id}/cancel`) and the gallery API are on main and were used from the Android app in the first rig run; the earlier note that steps 7 and 8 were blocked on them is obsolete.
+**Route status.** The submit/status/cancel routes (`POST /api/v1/media/jobs`, `GET …/{id}`, `POST …/{id}/cancel`) and the gallery API are on main and were used from the Android app in the first rig run; the earlier note that steps 7 and 8 were blocked on them is obsolete. `GET /api/v1/media/jobs/recent` (#2475) lists the installation's 20 newest jobs, newest first, each as the status view without `translated_prompt`, plus `kind` (`image`/`video`, null when the profile is no longer enabled): what a client reconciles against when it lost its own record of a job. It carries no prompt and no parameters, takes no query, and does not know which conversation a job belongs to. No client calls it yet.
 
 **Development channel.** `START_DEV_APPLIANCE.cmd` starts backend and worker, **not** the executor (no supervisor runs in that channel). Start it by hand, as the same account and the same elevation you administer it from, from `worker\` with the media venv:
 
