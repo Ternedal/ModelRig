@@ -519,19 +519,25 @@ siger derfor ikke, at et job overlever et klientnedbrud i almindelighed.
 (`max_owner_active=3` i `image_job_store.submit`; der er ingen indstilling for
 den). At skrive fire beskeder hurtigt afhænger af, hvor hurtigt riggen bliver
 færdig, og tæller ikke. Stop executoren (Ctrl+C) — så bliver job stående i kø —
-og kør i vindue C (`$B` og `$H` fra 1.3):
+og kør i vindue C (`$B` og `$H` fra 1.3). Blokken er **én** sætning (`& { … }`):
+stopper et tjek den, bliver resten ikke kørt. `$ids` rummer de job, der faktisk
+blev lagt i kø, også hvis blokken stopper undervejs, og en kørsel, der stopper
+på "allerede aktive", rører ikke `$ids` fra en tidligere kørsel:
 
 ```powershell
-$img = ((Invoke-RestMethod "$B/api/v1/media/jobs/profiles" -Headers $H).profiles | Where-Object modality -eq 'image' | Select-Object -First 1).profile_id
-if (-not $img) { throw 'F2 IKKE KØRT: ingen billedprofil er slået til' }
-$before = @((Invoke-RestMethod "$B/api/v1/media/jobs/recent" -Headers $H).jobs | Where-Object state -in 'queued','running','publishing')
-if ($before.Count -ne 0) { throw "F2 IKKE KØRT: $($before.Count) job er allerede aktive - vent eller annullér dem først" }
-$body = @{ profile_id = $img; prompt = 'en rød cykel ved en sø' } | ConvertTo-Json
-$ids = 1..3 | ForEach-Object { (Invoke-RestMethod "$B/api/v1/media/jobs" -Method Post -Headers $H -ContentType 'application/json' -Body $body).id }
-$queued = @((Invoke-RestMethod "$B/api/v1/media/jobs/recent" -Headers $H).jobs | Where-Object { $_.id -in $ids -and $_.state -eq 'queued' })
-if ($queued.Count -ne 3) { throw "F2 IKKE KØRT: $($queued.Count) af 3 står i kø (kører executoren?)" }
-$r = Invoke-WebRequest "$B/api/v1/media/jobs" -Method Post -Headers $H -ContentType 'application/json' -Body $body -SkipHttpErrorCheck
-"fjerde: HTTP $($r.StatusCode) $($r.Content)"
+& {
+    $img = ((Invoke-RestMethod "$B/api/v1/media/jobs/profiles" -Headers $H).profiles | Where-Object modality -eq 'image' | Select-Object -First 1).profile_id
+    if (-not $img) { throw 'F2 IKKE KØRT: ingen billedprofil er slået til' }
+    $before = @((Invoke-RestMethod "$B/api/v1/media/jobs/recent" -Headers $H).jobs | Where-Object state -in 'queued','running','publishing')
+    if ($before.Count -ne 0) { throw "F2 IKKE KØRT: $($before.Count) job er allerede aktive - vent eller annullér dem først" }
+    $global:ids = @()
+    $body = @{ profile_id = $img; prompt = 'en rød cykel ved en sø' } | ConvertTo-Json
+    1..3 | ForEach-Object { $global:ids += (Invoke-RestMethod "$B/api/v1/media/jobs" -Method Post -Headers $H -ContentType 'application/json' -Body $body).id }
+    $queued = @((Invoke-RestMethod "$B/api/v1/media/jobs/recent" -Headers $H).jobs | Where-Object { $_.id -in $ids -and $_.state -eq 'queued' })
+    if ($queued.Count -ne 3) { throw "F2 IKKE KØRT: $($queued.Count) af 3 står i kø (kører executoren?)" }
+    $r = Invoke-WebRequest "$B/api/v1/media/jobs" -Method Post -Headers $H -ContentType 'application/json' -Body $body -SkipHttpErrorCheck
+    "fjerde: HTTP $($r.StatusCode) $($r.Content)"
+}
 ```
 
 Forventet sidste linje: `fjerde: HTTP 429` med `active_limit`. Bed **nu** — mens de
@@ -542,7 +548,8 @@ Ryd derefter op, **før** executoren startes, så de tre ikke bliver renderet:
 $ids | ForEach-Object { (Invoke-RestMethod "$B/api/v1/media/jobs/$_/cancel" -Method Post -Headers $H).result }
 ```
 
-Forventet: `cancelled` tre gange. Start executoren igen som i 6.2. Stoppede blokken
+Forventet: `cancelled` tre gange (færre eller ingen linjer, hvis blokken stoppede,
+før alle tre lå i kø). Start executoren igen som i 6.2. Stoppede blokken
 med `F2 IKKE KØRT`, er F2 **ikke kørt** — det er ikke en fejl i kæden; ryd op, og
 stil den op igen. Fik den fjerde indsendelse andet end 429 `active_limit`, mens de
 tre stod i kø, er F2 **fejlet**.
