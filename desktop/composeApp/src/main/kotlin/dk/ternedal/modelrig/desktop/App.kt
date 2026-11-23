@@ -74,6 +74,10 @@ import dk.ternedal.modelrig.desktop.data.DesktopSettingSaveResult
 import dk.ternedal.modelrig.desktop.net.ChatMessage
 import dk.ternedal.modelrig.desktop.net.ChatResult
 import dk.ternedal.modelrig.desktop.net.ChatRouter
+import dk.ternedal.modelrig.desktop.net.DesktopMediaClient
+import dk.ternedal.modelrig.desktop.net.DesktopMediaContract
+import dk.ternedal.modelrig.desktop.net.DesktopMediaJobRef
+import dk.ternedal.modelrig.desktop.net.DesktopMediaSource
 import dk.ternedal.modelrig.desktop.net.OllamaClient
 import dk.ternedal.modelrig.desktop.net.RagClient
 import dk.ternedal.modelrig.desktop.net.ToolsClient
@@ -120,6 +124,12 @@ private data class UiMessage(
     // For the guide's identity row ("Kaliv · 14:32"). Loaded messages carry the
     // stored created_at; new ones stamp now.
     val at: Long = System.currentTimeMillis(),
+    // #2419: the picture/clip jobs this assistant message queued on the rig;
+    // each gets a media bubble under the text. Job ids only, never the prompt.
+    val mediaJobs: List<DesktopMediaJobRef> = emptyList(),
+    // The rig refused a picture/clip in this turn and queued nothing: one line saying why.
+    // Not stored -- it describes the turn, not the conversation.
+    val mediaNotice: String? = null,
 )
 
 
@@ -174,6 +184,9 @@ fun App() {
         // In-memory only: a confirmation continues under the exact endpoint/auth
         // snapshot that minted it. This is never persisted or rendered.
         var pendingCardTurnConfig by remember { mutableStateOf<KalivChatTurnConfig?>(null) }
+        // #2465: media the turn queued before the card (and before earlier cards of the same
+        // chain). The rig starts a new list per call; the answer after the decision gets the union.
+        var pendingCardJobs by remember { mutableStateOf<List<DesktopMediaJobRef>>(emptyList()) }
         var pendingCardError by remember { mutableStateOf<String?>(null) }
         var showAudit by remember { mutableStateOf(false) }
         var showControlCenter by remember { mutableStateOf(false) }
@@ -242,7 +255,9 @@ fun App() {
                     // to a conversation restored/replaced by this publication.
                     lastSource = null
                     messages.clear()
-                    loaded.forEach { (role, content, at) -> messages.add(UiMessage(role, content, at = at)) }
+                    loaded.forEach { (role, content, at, media) ->
+                        messages.add(UiMessage(role, content, at = at, mediaJobs = DesktopMediaContract.decodeRefs(media)))
+                    }
                     convId = latest
                 }
             }
@@ -295,6 +310,8 @@ fun App() {
             conversationPublicationEpoch.advance()
             // History for the tools path: the turns BEFORE this message --
             // the worker gets the new message in its own field (Android parity).
+            // Which pictures this conversation holds, before this turn: the rig's "det billede".
+            val pictureJobs = DesktopMediaContract.conversationImageJobs(messages.map { it.mediaJobs })
             val priorPairs = messages
                 .filter { it.role == "user" || it.role == "assistant" }
                 .map { it.role to it.text }
@@ -319,7 +336,7 @@ fun App() {
                     val res = withContext(Dispatchers.IO) {
                         runCatching {
                             ToolsClient(turnConfig.localUrl, turnConfig.deviceToken.ifBlank { null })
-                                .toolsChatStream(text, turnConfig.localModel, priorPairs, sysT) { name ->
+                                .toolsChatStream(text, turnConfig.localModel, priorPairs, sysT, conversationImageJobs = pictureJobs) { name ->
                                     // Riggens egen fase undervejs. En vaerktoejstur
                                     // var foer en lukket doer: een statisk tekst og
                                     // ingen tegn paa liv foer svaret landede.
@@ -340,18 +357,35 @@ fun App() {
                         lastSource = ChatResult.Source.LOCAL
                         when (turn.status) {
                             "confirmation_required" -> {
+                                // Media the turn queued before the card is rendering regardless of
+                                // the decision, and the card lives in memory only: show the bubbles
+                                // and save the references now. The card carries none.
+                                val queued = turn.mediaJobRefs()
                                 messages[assistantIdxT] = messages[assistantIdxT].copy(
                                     text = "⚙ Kaliv foreslår: ${turn.summary.ifBlank { turn.tool }}",
-                                    streaming = false,
+                                    streaming = false, mediaJobs = queued,
                                 )
+                                if (queued.isNotEmpty()) withContext(Dispatchers.IO) {
+                                    db.addMessage(cid, "assistant", DesktopMediaContract.QUEUED_BEFORE_CARD_TEXT,
+                                        DesktopMediaContract.encodeRefs(queued))
+                                }
                                 pendingCardError = null
                                 pendingCardTurnConfig = turnConfig
+                                pendingCardJobs = emptyList()
                                 pendingCard = turn
                             }
                             else -> {
                                 val ans = turn.answer.ifBlank { "(tomt svar, status: ${turn.status})" }
-                                messages[assistantIdxT] = messages[assistantIdxT].copy(text = ans, streaming = false)
-                                withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", ans) }
+                                // #2419: jobs the turn queued (image_generate / video_generate)
+                                // follow the message, on screen and in the stored conversation.
+                                val jobs = turn.mediaJobRefs()
+                                messages[assistantIdxT] = messages[assistantIdxT].copy(
+                                    text = ans, streaming = false, mediaJobs = jobs,
+                                    mediaNotice = turn.mediaRefusalNotice(),
+                                )
+                                withContext(Dispatchers.IO) {
+                                    db.addMessage(cid, "assistant", ans, DesktopMediaContract.encodeRefs(jobs))
+                                }
                             }
                         }
                     }.onFailure { e ->
@@ -740,7 +774,11 @@ fun App() {
                                             // reply-source badge; stale loads leave UI state alone.
                                             lastSource = null
                                             messages.clear()
-                                            loaded.forEach { (role, content, at) -> messages.add(UiMessage(role, content, at = at)) }
+                                            loaded.forEach { (role, content, at, media) ->
+                                                messages.add(
+                                                    UiMessage(role, content, at = at, mediaJobs = DesktopMediaContract.decodeRefs(media)),
+                                                )
+                                            }
                                             convId = id
                                             showConvos = false
                                         }
@@ -810,9 +848,15 @@ fun App() {
                 // Center the conversation in wide windows instead of letting it
                 // sprawl edge-to-edge -- the single biggest "designed vs form"
                 // signal at desktop sizes.
+                // #2419: the media bubbles ask the same rig, with the same device token, as
+                // the tools turn that queued the job. No usable address -> no client; the
+                // bubble says so instead of guessing.
+                val mediaSource: DesktopMediaSource? = remember(localUrl, deviceToken) {
+                    runCatching { DesktopMediaClient(localUrl, deviceToken.ifBlank { null }) }.getOrNull()
+                }
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                     LazyColumn(Modifier.fillMaxHeight().widthIn(max = 920.dp).fillMaxWidth()) {
-                        items(messages) { m -> MessageBubble(m) }
+                        items(messages) { m -> MessageBubble(m, mediaSource) }
                     }
                 }
             }
@@ -910,6 +954,17 @@ fun App() {
                             // A chained write gets its own authoritative card. One
                             // approval never authorises the next write.
                             pendingCard = next
+                            // Queued between two cards: saved and shown now, for the same reason.
+                            val between = DesktopMediaContract.across(pendingCardJobs, next.mediaJobRefs())
+                            pendingCardJobs = emptyList()
+                            if (between.isNotEmpty()) {
+                                messages.add(UiMessage("assistant", DesktopMediaContract.QUEUED_BEFORE_CARD_TEXT, mediaJobs = between))
+                                val cidNow = convId
+                                if (cidNow != null) withContext(Dispatchers.IO) {
+                                    db.addMessage(cidNow, "assistant", DesktopMediaContract.QUEUED_BEFORE_CARD_TEXT,
+                                        DesktopMediaContract.encodeRefs(between))
+                                }
+                            }
                             pendingCardError = null
                         } else {
                             // Only a successful worker acknowledgement may clear the card.
@@ -917,9 +972,15 @@ fun App() {
                             pendingCardTurnConfig = null
                             pendingCardError = null
                             val text = next.answer.ifBlank { if (approve) "Udført." else "Afvist." }
-                            messages.add(UiMessage("assistant", text))
+                            // A turn that continued after the approval may have queued media too,
+                            // and what it queued before the card is already rendering.
+                            val jobs = DesktopMediaContract.across(pendingCardJobs, next.mediaJobRefs())
+                            pendingCardJobs = emptyList()
+                            messages.add(UiMessage("assistant", text, mediaJobs = jobs, mediaNotice = next.mediaRefusalNotice()))
                             val cid = convId
-                            if (cid != null) withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", text) }
+                            if (cid != null) withContext(Dispatchers.IO) {
+                                db.addMessage(cid, "assistant", text, DesktopMediaContract.encodeRefs(jobs))
+                            }
                         }
                     }.onFailure { e ->
                         // Worker authority is unresolved: keep the card visible for retry/deny.
@@ -1207,7 +1268,7 @@ private fun SendGlyphDesktop(color: Color) {
 }
 
 @Composable
-private fun MessageBubble(m: UiMessage) {
+private fun MessageBubble(m: UiMessage, mediaSource: DesktopMediaSource? = null) {
     val isUser = m.role == "user"
     // Design guide (assets/design/kaliv-ui-guide): assistant messages carry an
     // identity row ("ankh Kaliv · 14:32", meta 12sp muted) above a SURFACE
@@ -1279,6 +1340,16 @@ private fun MessageBubble(m: UiMessage) {
                         else -> MarkdownText(m.text, color = fg)
                     }
                 }
+            }
+            // #2419: what the turn asked the rig to generate, under the message it belongs to.
+            if (!isUser && !m.streaming) {
+                m.mediaNotice?.let { notice ->
+                    Text(
+                        notice, color = KalivTheme.colors.TextMuted, fontSize = 13.sp, lineHeight = 19.sp,
+                        modifier = Modifier.padding(top = 6.dp, start = 4.dp),
+                    )
+                }
+                m.mediaJobs.forEach { ref -> KalivMediaJobBubble(ref, mediaSource) }
             }
         }
     }
