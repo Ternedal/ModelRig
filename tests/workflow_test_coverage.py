@@ -310,15 +310,76 @@ check(
     and 'stage_b_slice in ("midchain", "downstream")' in stage_b_driver,
     "midchain/downstream consume only a validated preloaded proof+ledger root",
 )
-for label, source in (
-    ("midchain", midchain_driver),
-    ("downstream", downstream_driver),
-):
-    check(
-        "_REQUIRED_SHARD_COUNT = 3" in source
-        and "_CONTRACT_FILES[index - 1 :: total]" in source,
-        f"{label} uses the locked three-way strided shard partition",
-    )
+check(
+    "_REQUIRED_SHARD_COUNT = 3" in midchain_driver
+    and "_CONTRACT_FILES[index - 1 :: total]" in midchain_driver,
+    "midchain uses the locked three-way strided shard partition",
+)
+# #1682: downstream shards are cost-weighted. The table must name exactly the
+# contracts, every contract must land in exactly one shard, each shard must be
+# non-empty and keep _CONTRACT_FILES order, and the CPU load must be balanced
+# to within 15 % -- otherwise the table has drifted and needs refreshing.
+check(
+    "_REQUIRED_SHARD_COUNT = 3" in downstream_driver
+    and "_CONTRACT_COST_SECONDS = {" in downstream_driver
+    and "_shard_assignment(total)[index]" in downstream_driver
+    and "_CONTRACT_FILES[index - 1 :: total]" not in downstream_driver,
+    "downstream uses the cost-weighted three-way shard partition, not the strided one",
+)
+_downstream_spec = importlib.util.spec_from_file_location(
+    "stage_b_downstream_partition_under_test",
+    root / "tests/support/rsi_pilot_exact_task_release_transaction_contract.py",
+)
+assert _downstream_spec is not None and _downstream_spec.loader is not None
+_downstream_module = importlib.util.module_from_spec(_downstream_spec)
+_downstream_spec.loader.exec_module(_downstream_module)
+_ds_assignment = _downstream_module._shard_assignment()
+_ds_all = [f for index in sorted(_ds_assignment) for f in _ds_assignment[index]]
+check(
+    sorted(_ds_assignment) == [1, 2, 3]
+    and len(_ds_all) == len(set(_ds_all)) == len(_downstream_module._CONTRACT_FILES)
+    and set(_ds_all) == set(_downstream_module._CONTRACT_FILES)
+    and all(_ds_assignment[i] for i in (1, 2, 3)),
+    "downstream shards execute every contract exactly once, none empty",
+)
+check(
+    set(_downstream_module._CONTRACT_COST_SECONDS) == set(_downstream_module._CONTRACT_FILES)
+    and all(isinstance(v, int) and v > 0 for v in _downstream_module._CONTRACT_COST_SECONDS.values()),
+    "downstream cost table names exactly the contracts, with positive integer seconds",
+)
+_ds_loads = [
+    sum(_downstream_module._CONTRACT_COST_SECONDS[f] for f in _ds_assignment[i]) for i in (1, 2, 3)
+]
+check(
+    max(_ds_loads) <= min(_ds_loads) * 1.15,
+    f"downstream shard loads are balanced within 15 % (CPU-minutes {[round(l / 60) for l in _ds_loads]})",
+)
+check(
+    all(
+        list(_ds_assignment[i])
+        == [f for f in _downstream_module._CONTRACT_FILES if f in _ds_assignment[i]]
+        for i in (1, 2, 3)
+    ),
+    "each downstream shard keeps the original contract order",
+)
+_old_ds_shard = os.environ.get("MODELRIG_STAGE_B_CONTRACT_SHARD")
+try:
+    _ds_selected = {}
+    for _shard in ("1/3", "2/3", "3/3"):
+        os.environ["MODELRIG_STAGE_B_CONTRACT_SHARD"] = _shard
+        _ds_selected[_shard] = _downstream_module._selected_contract_files()
+    os.environ.pop("MODELRIG_STAGE_B_CONTRACT_SHARD", None)
+    _ds_unsharded = _downstream_module._selected_contract_files()
+finally:
+    if _old_ds_shard is None:
+        os.environ.pop("MODELRIG_STAGE_B_CONTRACT_SHARD", None)
+    else:
+        os.environ["MODELRIG_STAGE_B_CONTRACT_SHARD"] = _old_ds_shard
+check(
+    _ds_selected == {f"{i}/3": _ds_assignment[i] for i in (1, 2, 3)}
+    and _ds_unsharded == _downstream_module._CONTRACT_FILES,
+    "the shard env selects the weighted partition; no shard runs everything",
+)
 
 command = (
     "PYTHONPATH=devcontrol/src python3 -m unittest discover "
