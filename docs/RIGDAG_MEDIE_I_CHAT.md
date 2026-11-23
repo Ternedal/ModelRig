@@ -28,6 +28,8 @@ Hver kommandoblok er mærket med, hvad den hviler på:
    og kan ikke klares på samme aften som trin 1–3.
 4. **Trin 6, video med lyd** (LTX-2.3) bygger oven på trin 4–5 og har sine egne
    vægte (41 GB) og sit eget RAM-loft.
+5. **Trin 7, acceptforløbet**, er det eneste, der må kaldes fysisk accept: succes,
+   fejl og genstart på én kandidat-SHA, på telefon og desktop.
 
 **Hvornår:** ikke mens en V1-gate eller soaken kører — dev-appliancen bruger
 samme porte (8080/8099). Kandidat-checkoutet til V1 røres ikke: testen kører fra
@@ -426,8 +428,11 @@ Executoren (ikke administrator, lad stå; `exit=73` = en gammel executor lever e
 $GenPy = "C:\Kaliv\media-venv\Scripts\python.exe"; $Repo = "C:\Users\an001\Desktop\ModelRig-media"; $EnvFile = "C:\Rig\ModelRig\modelrig.env"
 Get-Content $EnvFile | Where-Object { $_ -match '^(KALIV_MEDIA|KALIV_GPU|KALIV_COMFY|CUDA_)' } | ForEach-Object { $k,$v = (($_ -split '#')[0]) -split '=',2; [Environment]::SetEnvironmentVariable($k.Trim(), $v.Trim(), 'Process') }
 $env:KALIV_MEDIA_EXECUTOR = "1"; $env:HF_HUB_OFFLINE = "1"; $env:TRANSFORMERS_OFFLINE = "1"
-Push-Location "$Repo\worker"; try { & $GenPy -u -m app.media_executor_main --device cuda:1 2>&1 | Tee-Object "$env:TEMP\media-executor.log"; "exit=$LASTEXITCODE" } finally { Pop-Location }
+Push-Location "$Repo\worker"; try { & $GenPy -u -m app.media_executor_main --device cuda:1 2>&1 | Tee-Object "$env:TEMP\media-executor.log" -Append; "exit=$LASTEXITCODE" } finally { Pop-Location }
 ```
+
+`-Append` er med vilje: uden den overskriver hver genstart loggen fra den forrige
+kørsel, og så kan hverken fejlsøgning eller 7.3 se, hvad der skete før genstarten.
 
 Probe (token og mappe sættes i samme blok):
 
@@ -449,6 +454,176 @@ python scripts\media_chat_probe.py --suite i2v --rounds 2 --job-timeout 3600 --r
 - [ ] Skift af kliplængde: `scripts\media_comfy_ltx23_setup.py run --frames N` (8n+1) mod en manuel ComfyUI skriver den målte længde som profilens loft. Stop executoren først, og genstart den bagefter.
 
 Executor-loggens sidste linjer, når noget fejler: `Get-Content "$env:TEMP\media-executor.log" -Tail 30`.
+
+## 7. Acceptforløb på én kandidat-SHA — succes, fejl og genstart
+
+Spor A, slice A1 (#2264). Afsnit 1–6 viser, at kæden **kan** virke. Dette afsnit er
+det, der kan kaldes accepteret: ét forløb på **én** commit, hvor også det, der går
+galt, er set. **Intet her er kørt** [repo: hver forventet tekst er læst i koden på
+`main`, ikke set på riggen]. Grøn CI er ikke en fysisk PASS, og et forløb på en
+anden commit end kandidaten tæller ikke.
+
+**7.0 Før du starter — skriv det ned**
+
+| | |
+|---|---|
+| Kandidat-SHA (worktree: `git log --oneline -1`) | |
+| APK: `candidate-apk`-kørslens `headSha` (skal være samme SHA, se 2.1) | |
+| Desktop bygget fra samme SHA | |
+| Profiler slået til (`KALIV_MEDIA_PROFILES_ENABLED`) | |
+| Dato, hvem | |
+
+Læg først en eventuel gammel executor-log til side, så forløbets log kun er
+forløbets (executoren skal være stoppet):
+
+```powershell
+if (Test-Path "$env:TEMP\media-executor.log") { Move-Item "$env:TEMP\media-executor.log" "$env:TEMP\media-executor-foer-$(Get-Date -Format yyyyMMdd-HHmmss).log" }
+```
+
+Start som i 6.2. Hav executor-vinduet synligt hele vejen. F1 og F5 genstarter
+executoren; 6.2's blok skriver videre i samme log (`-Append`), så alt fra S1 til
+F8 står i én fil, når 7.3 søger i den.
+
+**7.1 Succes** — hver på telefonen **og** på desktop:
+
+| # | Gør | Forventet | Tlf. | Desktop |
+|---|---|---|---|---|
+| S1 | `lav et billede af en rød cykel ved en sø` | boble "I kø på riggen" → "Genererer …" → billedet | | |
+| S2 | `lav en video af en papirbåd der driver over en dam` | videoboble → klip, **med lyd** når standardprofilen er LTX | | |
+| S3 | efter S1: `lav en video af det billede` | klippet starter fra S1's billede | | |
+| S4 | `lav en video på 5 sekunder af en papirbåd der driver over en dam` | klip på ca. 5 s (afspil det; jobtiden er omtrent det halve af S2) | | |
+| S5 | Vent, til S2's boble **står i samtalen**. Luk så appen helt, mens klippet renderer, og åbn samtalen igen | boblen er der stadig og følger jobbet til klippet | | |
+| S6 | Åbn galleriet | S1–S4 ligger der | | |
+
+S5 dækker **kun** en klient, der allerede har gemt jobbet (boblen var synlig, før
+appen blev lukket). Vinduet, hvor klienten dør, efter riggen har svaret, men før
+klienten har gemt jobbet lokalt, er **ikke** med: der mister klienten pegepinden,
+og ingen klient henter i dag jobbet tilbage (#2475 — riggen har listen
+`GET /api/v1/media/jobs/recent`, klienterne bruger den ikke endnu). Et bestået S5
+siger derfor ikke, at et job overlever et klientnedbrud i almindelighed.
+
+**7.2 Fejl — hver skal ende i en besked, et menneske kan forstå, og aldrig i en boble, der hænger**
+
+| # | Sådan fremkaldes den | Forventet på riggen | Forventet i chatten |
+|---|---|---|---|
+| F1 Executor nede | Stop executoren (Ctrl+C). Bed om et billede. | Jobbet bliver stående `queued`; intet i executor-loggen | Boble "I kø på riggen" — og den bliver der. Start executoren: jobbet køres. (Uden start: "Udløbet: riggen nåede ikke at starte jobbet inden for et døgn" efter 24 timer — **vent ikke på det**, notér kun at boblen står i kø.) |
+| F2 For mange på én gang | Blokken **F2** under tabellen: executoren stoppet, præcis tre job lagt i kø via API'et, derefter ét forsøg via API og ét i chatten | API: fjerde indsendelse giver HTTP 429 `active_limit`. Worker-log: `media_tool=refused modality=image code=owner_limit` | Svaret siger, at riggen er optaget, og at man kan bede igen, når et er færdigt. **Ingen** ny boble. |
+| F3 Afvist argument | `lav et billede i 4000 gange 4000 pixels af en rød cykel` | `media_tool=refused … code=invalid_request optional=width,height` i worker-loggen, eller modellen prøver igen uden størrelsen og får et job | Enten et billede i riggens størrelse eller et svar om, at det ikke kunne lade sig gøre. Aldrig en boble uden job. |
+| F4 Intet billede at animere | I en **ny** samtale: `lav en video af det billede` | intet job (`no_source_image`) | Svaret siger, at der ikke er noget færdigt billede |
+| F5 Executor dræbt midt i et job | Bed om en video; når executor-loggen viser `loaded`, luk executor-vinduet. Start executoren igen. | Ved start: `recovered` med 1; jobbet er `failed` med `interrupted_by_restart` | Boblen: "Afbrudt: riggen genstartede". Indtil executoren er startet igen, står der "Genererer …" — det er forventet. |
+| F6 Worker genstartet midt i et job | Bed om en video; genstart dev-appliancen (vindue A), mens den renderer | Jobbet fortsætter i executoren og bliver `completed` | Boblen kan vise "Riggen svarer ikke; klippet ligger i galleriet, når det er klar" med **Prøv igen**; efter Prøv igen kommer klippet |
+| F7 Uden parring | På riggen: `Invoke-WebRequest http://127.0.0.1:8080/api/v1/media/jobs/recent -SkipHttpErrorCheck` (uden token) | HTTP 401, `Cache-Control: private, no-store` | — |
+| F8 Værktøj slukket | `KALIV_VIDEO_TOOL_ENABLED=0`, genstart vindue A, bed om en video | `video_generate` står ikke i 1.3's liste | Et tekstsvar; ingen boble, ingen påstand om et klip |
+
+**F2 — sådan stilles den op.** Kvoten er tre aktive job pr. installation
+(`max_owner_active=3` i `image_job_store.submit`; der er ingen indstilling for
+den). At skrive fire beskeder hurtigt afhænger af, hvor hurtigt riggen bliver
+færdig, og tæller ikke. Stop executoren (Ctrl+C) — så bliver job stående i kø —
+og kør i vindue C (`$B` og `$H` fra 1.3). Blokken er **én** sætning (`& { … }`):
+stopper et tjek den, bliver resten ikke kørt. `$ids` rummer de job, der faktisk
+blev lagt i kø, også hvis blokken stopper undervejs, og en kørsel, der stopper
+på "allerede aktive", rører ikke `$ids` fra en tidligere kørsel:
+
+```powershell
+& {
+    $img = ((Invoke-RestMethod "$B/api/v1/media/jobs/profiles" -Headers $H).profiles | Where-Object modality -eq 'image' | Select-Object -First 1).profile_id
+    if (-not $img) { throw 'F2 IKKE KØRT: ingen billedprofil er slået til' }
+    $before = @((Invoke-RestMethod "$B/api/v1/media/jobs/recent" -Headers $H).jobs | Where-Object state -in 'queued','running','publishing')
+    if ($before.Count -ne 0) { throw "F2 IKKE KØRT: $($before.Count) job er allerede aktive - vent eller annullér dem først" }
+    $global:ids = @()
+    $body = @{ profile_id = $img; prompt = 'en rød cykel ved en sø' } | ConvertTo-Json
+    1..3 | ForEach-Object { $global:ids += (Invoke-RestMethod "$B/api/v1/media/jobs" -Method Post -Headers $H -ContentType 'application/json' -Body $body).id }
+    $queued = @((Invoke-RestMethod "$B/api/v1/media/jobs/recent" -Headers $H).jobs | Where-Object { $_.id -in $ids -and $_.state -eq 'queued' })
+    if ($queued.Count -ne 3) { throw "F2 IKKE KØRT: $($queued.Count) af 3 står i kø (kører executoren?)" }
+    $r = Invoke-WebRequest "$B/api/v1/media/jobs" -Method Post -Headers $H -ContentType 'application/json' -Body $body -SkipHttpErrorCheck
+    "fjerde: HTTP $($r.StatusCode) $($r.Content)"
+}
+```
+
+Forventet sidste linje: `fjerde: HTTP 429` med `active_limit`. Bed **nu** — mens de
+tre står i kø — om et billede i chatten (telefon og desktop) og notér svaret.
+Ryd derefter op, **før** executoren startes, så de tre ikke bliver renderet:
+
+```powershell
+$ids | ForEach-Object { (Invoke-RestMethod "$B/api/v1/media/jobs/$_/cancel" -Method Post -Headers $H).result }
+```
+
+Forventet: `cancelled` tre gange (færre eller ingen linjer, hvis blokken stoppede,
+før alle tre lå i kø). Start executoren igen som i 6.2. Stoppede blokken
+med `F2 IKKE KØRT`, er F2 **ikke kørt** — det er ikke en fejl i kæden; ryd op, og
+stil den op igen. Fik den fjerde indsendelse andet end 429 `active_limit`, mens de
+tre stod i kø, er F2 **fejlet**.
+
+`output_has_no_sound` (en lydprofil, hvis klip mangler lydspor) kan ikke fremkaldes
+uden at ændre en profil eller en graf; den er dækket af
+`tests/worker_comfy_video_adapter.py` og regnes **ikke** som fysisk set.
+
+**7.3 Loggene må ikke indeholde det, brugeren skrev** — efter 7.1 og 7.2, i executor-vinduet:
+
+```powershell
+$needles = 'rød cykel', 'red bicycle', 'papirbåd', 'paper boat'
+$logs = "$env:TEMP\media-executor.log", "C:\Kaliv\media-work\comfy\cuda1\comfyui.log"
+foreach ($log in $logs) { foreach ($n in $needles) { $hits = @(Select-String -Path $log -SimpleMatch $n -ErrorAction SilentlyContinue); "{0,-60} {1,-14} {2} linjer" -f $log, $n, $hits.Count } }
+```
+
+Tjek først, at loggen dækker hele forløbet — den skal indeholde lige så mange
+`recovered`-linjer, som executoren er startet (mindst fire: start, efter F1, efter F2, efter F5):
+
+```powershell
+@(Select-String -Path "$env:TEMP\media-executor.log" -SimpleMatch '"event": "recovered"').Count
+```
+
+Viser den færre, er en del af forløbet ikke i loggen, og 7.3 kan ikke bestås på den.
+
+Forventet: 0 linjer i `media-executor.log` (den skriver job-id, profil og koder).
+`comfyui.log` er ComfyUI's egen log; finder blokken prompten dér, så notér det
+som et fund med linjen — det er ikke afgjort, hvad den log må indeholde.
+Kør samme søgning mod dev-appliancens worker-log, hvis den skrives til en fil.
+
+**7.4 Dommen**
+
+Hvert tilfælde får præcis én af tre:
+
+- **PASS** — set på kandidat-SHA'en, og resultatet er det, der står under "Forventet".
+- **FAIL** — kørt, og resultatet var noget andet. Skriv, hvad der faktisk skete.
+- **IKKE KØRT** — ikke forsøgt, eller opstillingen blev ikke etableret (fx `F2 IKKE KØRT`).
+
+En noteret afvigelse er **FAIL**, ikke PASS: at den er skrevet ned, gør den ikke
+bestået. Hvor "Forventet" selv nævner to udfald (F3, F6), er begge PASS — alt
+andet er FAIL.
+
+| Tilfælde | Tlf. | Desktop | Afvigelse (hvad skete der faktisk) |
+|---|---|---|---|
+| S1 | | | |
+| S2 | | | |
+| S3 | | | |
+| S4 | | | |
+| S5 | | | |
+| S6 | | | |
+| F1 | | | |
+| F2 (API-delen: én kolonne er nok) | | | |
+| F3 | | | |
+| F4 | | | |
+| F5 | | | |
+| F6 | | | |
+| F7 (kun riggen) | — | — | |
+| F8 | | | |
+| 7.3: ingen prompt i executor-loggen, og loggen dækker forløbet | — | — | |
+
+F7 og 7.3 har ét resultat; skriv det i afvigelseskolonnen som PASS/FAIL/IKKE KØRT.
+
+| | |
+|---|---|
+| Rapporter gemt: `media-chat-*.json`, executor-log, F2-blokkens output, skærmbilleder af F2, F5 og F6 | |
+| **Samlet** | |
+
+Medie-i-chat er **fysisk accepteret på den SHA** kun, når **hver** række ovenfor er
+PASS på både telefon og desktop (hvor rækken har begge), og rapporterne er gemt.
+Én FAIL eller én IKKE KØRT giver samlet **IKKE ACCEPTERET** — der er ingen
+valgfrie tilfælde. Accepten gælder det, tilfældene dækker: ikke det tabte-pegepind-
+vindue under S5 (#2475) og ikke `output_has_no_sound`. Det er en accept af denne
+kæde på udviklingskanalen — ikke en V1-gate og ikke en kvalificering af
+profilerne, som fortsat er `candidate`.
 
 ## Hvad der skal med hjem
 
