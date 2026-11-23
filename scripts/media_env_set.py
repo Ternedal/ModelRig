@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""Set a few KEY=VALUE lines in an env file without disturbing anything else in it.
+
+    python scripts/media_env_set.py --file C:\\Rig\\ModelRig\\modelrig.env KEY=VALUE [KEY=VALUE ...]
+
+For the rig's modelrig.env (#2479 review): rewriting the whole file from a shell
+(``Set-Content -Encoding ascii``) loses every non-ASCII byte in it, and a backup under a fixed
+name is overwritten by the second run, so "roll back" stops meaning "back to the original".
+
+What this does instead:
+- Every line that is not one of the named keys keeps its exact bytes: the file's encoding is
+  never interpreted, so it cannot be damaged. (UTF-16 with a byte-order mark is decoded and
+  written back as the same UTF-16; without a mark it is refused rather than guessed.)
+- Existing ``KEY=`` lines for the named keys are removed and one new line per key is appended,
+  with the file's own line ending.
+- A backup is made first under a name that does not exist yet (``<file>.bak-<UTC time>``,
+  created exclusively) -- an earlier backup is never overwritten.
+- The backup and the replacement are never readable by more accounts than the original
+  (POSIX: created owner-only, given the original's mode after writing; Windows: given the
+  original's DACL before writing): the file can hold secrets. An original that is read-only
+  even to its owner is handled too.
+- The new content is written to a temporary file beside the original, read back and checked
+  (each key exactly once with its value, every other line unchanged and in order), and only
+  then moved into place in one step. On any failure the original is untouched.
+
+Keys are ``[A-Z][A-Z0-9_]*``; values are printable ASCII without line breaks. Nothing else is
+accepted, so what is appended is the same bytes in every encoding this handles.
+Exit: 0 written (or nothing to change), 2 refused (bad argument, unreadable or UTF-16 without
+a mark), 1 failed. Standard library only.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import sys
+import time
+from pathlib import Path
+
+KEY = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
+VALUE = re.compile(r"[\x20-\x7e]{0,2000}")
+UTF16 = {b"\xff\xfe": "utf-16-le", b"\xfe\xff": "utf-16-be"}
+
+
+class Refused(Exception):
+    pass
+
+
+def parse_pairs(items: list[str]) -> dict[str, str]:
+    pairs: dict[str, str] = {}
+    for item in items:
+        key, sep, value = item.partition("=")
+        if not sep or not KEY.fullmatch(key) or not VALUE.fullmatch(value) or value != value.strip():
+            raise Refused(f"not a KEY=VALUE this tool sets: {item[:60]!r}")
+        if key in pairs:
+            raise Refused(f"{key} is given twice")
+        pairs[key] = value
+    if not pairs:
+        raise Refused("no KEY=VALUE given")
+    return pairs
+
+
+def _split(data: bytes, newline: bytes) -> list[bytes]:
+    """Lines with their endings kept, so joining them gives the same bytes back."""
+    lines = data.split(newline)
+    out = [line + newline for line in lines[:-1]]
+    if lines[-1]:
+        out.append(lines[-1])
+    return out
+
+
+def rewrite(data: bytes, pairs: dict[str, str]) -> bytes:
+    """The file's bytes with the keys set. Pure: the encoding rules live here, the file handling
+    in ``apply``."""
+    mark = data[:2] if data[:2] in UTF16 else b""
+    if mark:
+        codec = UTF16[mark]
+        try:
+            text = data[2:].decode(codec)
+        except UnicodeDecodeError:
+            raise Refused("the file has a UTF-16 mark but is not valid UTF-16") from None
+        body = rewrite(text.encode("utf-8"), pairs).decode("utf-8")
+        return mark + body.encode(codec)
+    if b"\x00" in data:
+        raise Refused("the file contains NUL bytes (UTF-16 without a byte-order mark?): not guessed at")
+    bom = b"\xef\xbb\xbf" if data.startswith(b"\xef\xbb\xbf") else b""
+    rest = data[len(bom):]
+    newline = b"\r\n" if rest.count(b"\r\n") * 2 >= rest.count(b"\n") and b"\r\n" in rest else b"\n"
+    heads = tuple(key.encode("ascii") + b"=" for key in pairs)
+    kept = [line for line in _split(rest, b"\n") if not line.lstrip(b" \t").startswith(heads)]
+    if kept and not kept[-1].endswith(b"\n"):
+        kept[-1] += newline
+    added = [f"{key}={value}".encode("ascii") + newline for key, value in pairs.items()]
+    return bom + b"".join(kept) + b"".join(added)
+
+
+def verify(before: bytes, after: bytes, pairs: dict[str, str]) -> None:
+    """What was written is what was meant: each key once, with its value; all else untouched."""
+    def text_lines(data: bytes) -> list[bytes]:
+        if data[:2] in UTF16:
+            data = data[2:].decode(UTF16[data[:2]]).encode("utf-8")
+        elif data.startswith(b"\xef\xbb\xbf"):
+            data = data[3:]
+        return [line.rstrip(b"\r") for line in data.split(b"\n")]
+
+    heads = {key: key.encode("ascii") + b"=" for key in pairs}
+
+    def others(lines: list[bytes]) -> list[bytes]:
+        kept = [line for line in lines if not line.lstrip(b" \t").startswith(tuple(heads.values()))]
+        while kept and kept[-1] == b"":
+            kept.pop()
+        return kept
+    new = text_lines(after)
+    for key, value in pairs.items():
+        found = [line for line in new if line.lstrip(b" \t").startswith(heads[key])]
+        if found != [heads[key] + value.encode("ascii")]:
+            raise RuntimeError(f"verification failed for {key}")
+    if others(text_lines(before)) != others(new):
+        raise RuntimeError("verification failed: a line that was not asked for changed")
+
+
+def _copy_windows_dacl(source: Path, target: Path) -> None:
+    """Give ``target`` the discretionary ACL of ``source``, including whether it is protected
+    from inheritance. Raises when Windows refuses: a copy that may be readable by more accounts
+    than the original must not be filled with the original's content."""
+    import ctypes
+    from ctypes import wintypes
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    SE_FILE_OBJECT, DACL, PROTECTED, UNPROTECTED, SE_DACL_PROTECTED = 1, 0x4, 0x80000000, 0x20000000, 0x1000
+    advapi.GetNamedSecurityInfoW.argtypes = [wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD, ctypes.c_void_p, ctypes.c_void_p,
+                                             ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+    advapi.GetNamedSecurityInfoW.restype = wintypes.DWORD
+    advapi.GetSecurityDescriptorControl.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.WORD), ctypes.POINTER(wintypes.DWORD)]
+    advapi.GetSecurityDescriptorControl.restype = wintypes.BOOL
+    advapi.SetNamedSecurityInfoW.argtypes = [wintypes.LPWSTR, ctypes.c_int, wintypes.DWORD, ctypes.c_void_p, ctypes.c_void_p,
+                                             ctypes.c_void_p, ctypes.c_void_p]
+    advapi.SetNamedSecurityInfoW.restype = wintypes.DWORD
+    kernel.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel.LocalFree.restype = ctypes.c_void_p
+    dacl, descriptor = ctypes.c_void_p(), ctypes.c_void_p()
+    status = advapi.GetNamedSecurityInfoW(str(source), SE_FILE_OBJECT, DACL, None, None, ctypes.byref(dacl), None,
+                                          ctypes.byref(descriptor))
+    if status != 0:
+        raise RuntimeError(f"could not read the file's access list (error {status})")
+    try:
+        control, revision = wintypes.WORD(), wintypes.DWORD()
+        if not advapi.GetSecurityDescriptorControl(descriptor, ctypes.byref(control), ctypes.byref(revision)):
+            raise RuntimeError(f"could not read the file's access list (error {ctypes.get_last_error()})")
+        if not dacl.value:
+            raise RuntimeError("the file has no access list (everyone has access): not copied")
+        flags = DACL | (PROTECTED if control.value & SE_DACL_PROTECTED else UNPROTECTED)
+        status = advapi.SetNamedSecurityInfoW(str(target), SE_FILE_OBJECT, flags, None, None, dacl, None)
+        if status != 0:
+            raise RuntimeError(f"could not set the access list on {target.name} (error {status})")
+    finally:
+        kernel.LocalFree(descriptor)
+
+
+def write_like(original: Path, target: Path, data: bytes) -> None:
+    """Create ``target`` exclusively, holding ``data``, with the access restrictions of
+    ``original`` (#2479 review: modelrig.env can hold secrets, and a backup or replacement with
+    default permissions would expose them). At no moment is it readable by more than the original.
+
+    The content is written through the descriptor the file was created with, so an original
+    that is read-only even to its owner (mode 0400, or a DACL that grants read alone) can still
+    be copied: the restriction applies to later opens, not to the handle already held.
+
+    POSIX: created 0600, written, then given the original's exact mode (and its owner and group
+    when this process may set them). Windows: created, given the original's DACL -- before any
+    content, since the directory's inherited list may be wider -- then written.
+    FileExistsError passes through untouched; any other failure removes the file again.
+    """
+    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
+    try:
+        try:
+            if os.name == "nt":
+                _copy_windows_dacl(original, target)
+            view = memoryview(data)
+            while view:
+                view = view[os.write(descriptor, view):]
+            os.fsync(descriptor)
+            if os.name != "nt":
+                info = os.stat(original)
+                try:
+                    os.fchown(descriptor, info.st_uid, info.st_gid)
+                except PermissionError:
+                    pass  # not ours to give away; the mode below is still the original's
+                os.fchmod(descriptor, info.st_mode & 0o7777)
+        finally:
+            os.close(descriptor)
+    except BaseException:
+        try:
+            os.unlink(target)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def write_backup(path: Path, stamp: str, data: bytes) -> Path:
+    """The original's bytes under a name that did not exist, never over an earlier backup."""
+    for attempt in range(1000):
+        candidate = path.with_name(f"{path.name}.bak-{stamp}" + (f"-{attempt}" if attempt else ""))
+        try:
+            write_like(path, candidate, data)
+            return candidate
+        except FileExistsError:
+            continue
+    raise RuntimeError("no free backup name")
+
+
+def apply(path: Path, pairs: dict[str, str], *, stamp: str | None = None) -> tuple[Path | None, bool]:
+    """``(backup, changed)``. Nothing is written when the file already says what is asked."""
+    if path.is_symlink() or not path.is_file():
+        raise Refused(f"not a regular file: {path}")
+    before = path.read_bytes()
+    after = rewrite(before, pairs)
+    verify(before, after, pairs)
+    if after == before:
+        return None, False
+    temporary = path.with_name(f"{path.name}.tmp-{os.getpid()}")
+    backup = write_backup(path, stamp or time.strftime("%Y%m%d-%H%M%S", time.gmtime()), before)
+    try:
+        if backup.read_bytes() != before:
+            raise RuntimeError("the backup does not match the original")
+        write_like(path, temporary, after)
+        verify(before, temporary.read_bytes(), pairs)
+        if path.read_bytes() != before:
+            raise RuntimeError("the file changed while it was being edited; nothing was replaced")
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    return backup, True
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--file", required=True)
+    parser.add_argument("pairs", nargs="+", metavar="KEY=VALUE")
+    args = parser.parse_args(argv)
+    try:
+        pairs = parse_pairs(args.pairs)
+        backup, changed = apply(Path(args.file), pairs)
+    except Refused as exc:
+        print(f"AFVIST: {exc}", file=sys.stderr)
+        return 2
+    except (OSError, RuntimeError) as exc:
+        print(f"FEJL: {exc} - filen er ikke aendret", file=sys.stderr)
+        return 1
+    for key, value in pairs.items():
+        print(f"{key}={value}")
+    print(f"BACKUP {backup}" if changed else "UAENDRET: filen sagde det allerede")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

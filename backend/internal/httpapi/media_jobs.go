@@ -150,6 +150,13 @@ func (s *server) handleMediaJobProfiles(w http.ResponseWriter, r *http.Request) 
 	s.forwardMediaJobs(w, r, "/internal/media/jobs/profiles")
 }
 
+// handleMediaJobRecent lists the installation's newest media jobs (#2475): what a
+// client reconciles against after losing its own record of a job. No id, no body
+// and no query reach the worker; the worker bounds the list itself.
+func (s *server) handleMediaJobRecent(w http.ResponseWriter, r *http.Request) {
+	s.forwardMediaJobs(w, r, "/internal/media/jobs/recent")
+}
+
 func (s *server) handleMediaJobStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if !validMediaJobID(id) {
@@ -174,6 +181,7 @@ func (s *server) registerMediaJobRoutes() {
 	}
 	s.mux.Handle("POST /api/v1/media/jobs", mediaJobsNoStore(s.authMW(http.HandlerFunc(s.handleMediaJobSubmit))))
 	s.mux.Handle("GET /api/v1/media/jobs/profiles", mediaJobsNoStore(s.authMW(http.HandlerFunc(s.handleMediaJobProfiles))))
+	s.mux.Handle("GET /api/v1/media/jobs/recent", mediaJobsNoStore(s.authMW(http.HandlerFunc(s.handleMediaJobRecent))))
 	s.mux.Handle("GET /api/v1/media/jobs/{id}", mediaJobsNoStore(s.authMW(http.HandlerFunc(s.handleMediaJobStatus))))
 	s.mux.Handle("POST /api/v1/media/jobs/{id}/cancel", mediaJobsNoStore(s.authMW(http.HandlerFunc(s.handleMediaJobCancel))))
 }

@@ -527,7 +527,7 @@ class ExecutorTests(unittest.TestCase):
         self.assertEqual(ex.step(), "failed")
         self.assertEqual(self.state(job)["error"], "generation_failed")
         self.assertTrue(lease_free(GPU_A, self.lease_dir), "close() released what load() took")
-        self.assertEqual(ex.events[-2], "failed_load:sdxl-a:True")
+        self.assertEqual(ex.events[-2], "failed_load:sdxl-a:True:RuntimeError")
         self.assertTrue(ex.events[-1].startswith("job:") and ":sdxl-a:failed:" in ex.events[-1])
 
     def test_a_failed_load_without_proven_release_is_fatal_and_nothing_more_is_claimed(self):
@@ -834,6 +834,43 @@ class VramWaitTests(unittest.TestCase):
         self.assertEqual(ex.step(), "completed")
         self.assertEqual(self.store.get(job, "anders")["state"], "completed")
 
+    def test_the_diagnostics_say_what_the_admission_probe_measured(self):
+        # Rig 20/11: jobs ran on a card Ollama held 8 GB of and nothing recorded what the probe saw.
+        from app.image_gpu_admission import GpuBudget, GpuMemoryShortage
+        gib = 1024**3
+        short = [True]
+
+        def factory(profile):
+            error = (GpuMemoryShortage("insufficient free VRAM after reservation", GpuBudget(1, 12 * gib, 4 * gib, gib, 3 * gib))
+                     if short[0] else None)
+            if error is not None:
+                error.nvml_used_mib = 8149
+            adapter = FakeImageAdapter(profile, lease_dir=self.lease_dir, gpu_uuid=GPU_A, load_error=error, log=self.log)
+            adapter.admitted_budget = GpuBudget(1, 12 * gib, 11 * gib, gib, 10 * gib)
+            return adapter
+        ex = ExecutorTests.executor(self, [self.image()], factory=factory)
+        self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "deferred")
+        self.assertIn("gpu_budget:short,cuda1,free_mib=4096,reserved_mib=1024,usable_mib=3072,total_mib=12288,nvml_used_mib=8149",
+                      list(ex.events), "NVML's reading rides beside the probe's when it was taken")
+        short[0] = False
+        self.clock.now += 30
+        self.assertEqual(ex.step(), "completed")
+        events = list(ex.events)
+        self.assertIn("gpu_budget:admitted,cuda1,free_mib=11264,reserved_mib=1024,usable_mib=10240,total_mib=12288", events)
+        self.assertLess(events.index("loaded:sdxl-a"), events.index(
+            "gpu_budget:admitted,cuda1,free_mib=11264,reserved_mib=1024,usable_mib=10240,total_mib=12288"))
+
+    def test_an_adapter_that_measures_nothing_adds_no_budget_event(self):
+        short = [True]
+        ex = self.executor(short)  # a bare shortage, an adapter without admitted_budget
+        self.submit("sdxl-a")
+        self.assertEqual(ex.step(), "deferred")
+        short[0] = False
+        self.clock.now += 30
+        self.assertEqual(ex.step(), "completed")
+        self.assertFalse([e for e in ex.events if e.startswith("gpu_budget")])
+
     def test_after_ten_minutes_of_waiting_the_job_fails_gpu_unavailable(self):
         short = [True]
         ex = self.executor(short)
@@ -1107,7 +1144,7 @@ class VideoExecutorTests(unittest.TestCase):
         self.assertEqual(ex.step(), "failed")
         self.assertEqual(self.store.get(job, "anders")["error"], "generation_failed")
         self.assertIsNone(ex.adapter)
-        self.assertIn("failed_load:wan-t2v:True", ex.events, "close() proved the stop, so it continues")
+        self.assertIn("failed_load:wan-t2v:True:comfyui_version_mismatch", ex.events, "close() proved the stop, so it continues")
         self.assertEqual(ex.step(), "idle")
 
     def test_video_adoption_is_job_keyed_when_the_staged_sink_offers_it(self):

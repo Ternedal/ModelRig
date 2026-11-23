@@ -833,7 +833,75 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     tiende ikke dit arbejde. `git status --short` før `git add`, og vær
     særligt mistroisk efter en testkørsel — suiter skriver tilstand.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 18/11)
+## 9. Kø — hvem har bolden (16/7, opdateret 22/11)
+
+### 22/11: billede, video og lyd i chatten er på `main` — og hvad landingen lærte os
+
+**[22/11 19:1x — main = `5f07fd96` (merge-commit af #2482). Landet samme dag,
+hver på Anders' `Kør merge <fuld sha>` efter SHA-bundet ACCEPT fra ChatGPT:
+#2462 (billede og video i chatten, #2419), #2478, #2477, #2476, #2480, #2479,
+#2481, #2482.]**
+
+**Beslutninger (Anders):**
+- **Landingspausen fra 20/11 er løftet for medie-i-chat** (21/11 22:23): main
+  flyttede fra `ef0473d`, så V1 skal kvalificeres på en ny commit. Pausen gælder
+  fortsat BodyRig/VisionRig/VoiceRig, som ikke er rørt.
+- **Lyd på video er et krav** (21/11: "der skal lyd på, ellers er det jo
+  ligemeget"). Modellen er LTX-2.3 (billede og lyd i ét gennemløb, kernenoder i
+  ComfyUI 0.46.2, LTX-2 Community License). Wan-profilerne står ved siden af og
+  er stumme.
+
+**Hvad der virker — målt på riggen 22/11, udviklingskanal, IKKE evidens**
+(`docs/MEDIA_VIDEO_RIG_QUALIFICATION.md` §8.1–8.2; begge LTX-profiler er stadig
+`candidate`, intet er promoveret): tekst → klip med lyd og billede → klip med
+lyd gennem hele kæden (`/tools/chat` → `video_generate` → executor → ComfyUI →
+galleri → Android), 10 s fra tekst på ca. 200 s varm, 5 s fra billede på ca.
+235 s inkl. modelskift. Anders har set og hørt det på telefonen. Riggen mistede
+en RAM-blok samme dag (64 GB tilbage af 98); LTX kører med
+`KALIV_COMFY_HOST_MEMORY_GIB=40`. Rig-forløbet står som blokke i
+`docs/RIGDAG_MEDIE_I_CHAT.md` §6.
+
+**Bolden:**
+- **Anders:** `candidate-apk` fra `main` (landskabs-rettelsen i videoviseren er
+  ikke set på telefon); om Ollama skal bindes varigt til GPU 0 med kontekst 8192
+  (alle målinger hviler på det); #2475 (luk, eller byg klientdelen — hvert
+  færdigt job ligger allerede i galleriet, så intet arbejde er tabt); #2445.
+- **Næste rig-gang:** `--suite video-length` (bruger qwen3:14b `seconds`?) og
+  `scripts\media_env_set.py` på riggen (kun kørt på Windows i CI).
+
+**Sådan lander en PR på `main` nu — hvert punkt kostede mindst én ekstra review-runde 22/11:**
+1. **Ready-for-review starter de krævede checks forfra — og Stage B for første
+   gang.** `exact-head-core` kører også på drafts (`opened`/`synchronize`); et rødt
+   eller manglende `exact-head-core` på en draft er derfor en rigtig fejl og skal
+   undersøges med det samme. Men `ready_for_review` er selv en trigger: den
+   igangværende kørsel annulleres (ses som `cancelled`, ikke som en fejl), en ny
+   starter, og `stage-b-slices`, som springes over på drafts og på docs-only,
+   kører nu. Indtil den nye kørsel er grøn, afvises merge med "N of 14 required
+   status checks are in progress".
+2. **Codex reviewer først, når PR'en er sat klar** — altså EFTER ChatGPT's
+   ACCEPT på draften. To PR'er fik et reelt P2 dér (#2479: backup med
+   standardrettigheder; #2481: listen og status uenige om et udløbet job), og
+   uløste tråde blokerer merge ("All comments must be resolved"). Sæt PR'en klar
+   og vent på Codex, FØR der bedes om ACCEPT — ellers reviewes samme SHA to gange.
+3. **`legacy-merge-tree-equivalence` kræver grenen helt opdateret mod `main`**
+   ("behind" → "14 of 14 required status checks are expected"). Lander PR A, skal
+   PR B flettes med `main` og får ny SHA og dermed ny ACCEPT og nyt go. Land i
+   rækkefølge, og bed først om ACCEPT på B, når A er inde.
+4. **En ny testfil skal stå i `CURRENT_STATE.md`** (`python3
+   scripts/current_state.py`), ellers fejler `tests/workflow_current_state.py` i
+   `test / test`. Kør drift-testen lokalt, før der pushes en ny `tests/workflow_*.py`.
+5. **Sandboxen kører som root, og root ignorerer filrettigheder.** En fejl, der
+   kun rammer en almindelig bruger (0400-filen i #2479), er usynlig her; test den
+   i en barneproces med `subprocess.run(..., user=65534)`.
+6. **Windows-adfærd kan afprøves uden riggen:** en kontrakt i
+   `tests/support/windows_*_contract.py`, tilføjet i `_tests.yml`
+   (`test-windows-tool-isolation`) og i `tests/workflow_test_coverage.py`, kører
+   på rigtig Windows i CI på få minutter.
+7. **`android-compile` kan blive rød uden kodeændring**, når Robolectric ikke kan
+   hente sine `android-all`-jars fra Maven Central (to gange 22/11). #2482 gemmer
+   dem i en cache; indtil en kørsel har ramt cachen, er midlet en genkørsel, og
+   den kan kun Anders starte (Claude får 403 på rerun, dispatch og sletning af grene).
+
 
 ### 19/11: merge-queue-sporet er på main; freeze har fået en kontakt
 

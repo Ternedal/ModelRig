@@ -19,7 +19,15 @@ class ImageGpuAdmissionError(RuntimeError):
 
 class GpuMemoryShortage(ImageGpuAdmissionError):
     """Not enough free VRAM right now -- another process (Ollama, typically) holds it. Transient:
-    the executor puts the job back in the queue instead of failing it (G4, Anders 5 Nov 2026)."""
+    the executor puts the job back in the queue instead of failing it (G4, Anders 5 Nov 2026).
+
+    ``budget`` is what the probe measured when it said no, and ``nvml_used_mib`` what NVML
+    said at the same moment (set by the caller that asked it), for the diagnostics stream."""
+
+    def __init__(self, message: str, budget: "GpuBudget | None" = None):
+        super().__init__(message)
+        self.budget = budget
+        self.nvml_used_mib: int | None = None
 
 
 @dataclass(frozen=True)
@@ -63,6 +71,51 @@ def inspect_cuda_budget(index: int, *, reserve_gib: float = 3.0,
         raise ImageGpuAdmissionError("CUDA memory probe failed") from exc
     reserved = int(reserve_gib * 1024**3)
     usable = max(0, free - reserved)
+    budget = GpuBudget(index, total, free, reserved, usable)
     if usable < int(min_usable_gib * 1024**3):
-        raise GpuMemoryShortage("insufficient free VRAM after reservation")
-    return GpuBudget(index, total, free, reserved, usable)
+        raise GpuMemoryShortage("insufficient free VRAM after reservation", budget)
+    return budget
+
+
+def nvml_used_mib(index: int) -> int | None:
+    """What NVML (the source ``nvidia-smi`` reads) says is in use on this GPU, in MiB, or None
+    when it cannot say.
+
+    A second opinion for the diagnostics stream, taken next to the admission probe. Under
+    Windows' WDDM driver model ``cudaMemGetInfo`` answers from Windows' own GPU memory manager,
+    which can oversubscribe a card; NVML counts what every process holds. When the two disagree,
+    this is where it shows. Asked through torch (``torch.cuda.device_memory_used``, which needs
+    the NVML bindings installed): this slice starts no process. Never an admission input, and
+    never able to fail a load.
+    """
+    if type(index) is not int or index < 0:
+        return None
+    try:
+        import torch
+        read = getattr(torch.cuda, "device_memory_used", None)
+        if read is None:
+            return None
+        used = read(index)
+        if type(used) is not int or used < 0:
+            return None
+        value = used // (1024 * 1024)
+        return value if value < 10**7 else None
+    except Exception:
+        return None
+
+
+def budget_detail(budget: object, nvml_used: object = None) -> str | None:
+    """A measured budget as one diagnostics detail in MiB, or None for anything that is not one.
+
+    Rig 20/11: a job started on a card that another process held 8 GB of, and nothing said
+    what the admission probe had seen. Numbers only -- no path, no name.
+    """
+    if not isinstance(budget, GpuBudget):
+        return None
+    mib = 1024 * 1024
+    detail = (f"cuda{budget.index},free_mib={budget.free_bytes // mib},reserved_mib={budget.reserved_bytes // mib},"
+              f"usable_mib={budget.usable_bytes // mib},total_mib={budget.total_bytes // mib}")
+    if type(nvml_used) is int and 0 <= nvml_used < 10**7:
+        # NVML's "used" at the same moment: free_mib + nvml_used_mib should be about total_mib.
+        detail += f",nvml_used_mib={nvml_used}"
+    return detail
