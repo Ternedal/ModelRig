@@ -65,6 +65,128 @@ def request(**overrides) -> GenerationRequest:
 
 
 class TemplateTests(unittest.TestCase):
+    def test_a_number_several_nodes_need_may_sit_on_a_primitive(self):
+        # LTX-2.3 renders sound with the picture: the frame count goes to the video latent and to
+        # the audio latent, the frame rate to three nodes. A marker appears once, so it sits on
+        # ComfyUI's own fan-out node, whose input is called "value".
+        graph = json.loads(raw())
+        graph["7"]["inputs"]["length"] = ["20", 0]
+        graph["9"]["inputs"]["fps"] = ["21", 0]
+        graph["20"] = {"class_type": "PrimitiveInt", "inputs": {"value": "__KALIV_VIDEO_FRAMES__"}}
+        graph["21"] = {"class_type": "PrimitiveInt", "inputs": {"value": "__KALIV_VIDEO_FPS__"}}
+        graph["22"] = {"class_type": "LTXVEmptyLatentAudio", "inputs": {"frames_number": ["20", 0], "frame_rate": ["21", 0]}}
+        template = load_template(raw(graph), sha(raw(graph)))
+        bound = template.bind(request(frames=49), fps=25)
+        self.assertEqual((bound["20"]["inputs"]["value"], bound["21"]["inputs"]["value"]), (49, 25))
+        self.assertEqual(bound["22"]["inputs"]["frames_number"], ["20", 0], "links are untouched")
+        # only on that class, and never for the prompt or the picture
+        for class_type in ("PrimitiveString", "PrimitiveFloat", "KSampler", "Reroute"):
+            other = json.loads(raw(graph))
+            other["20"]["class_type"] = class_type
+            with self.subTest(class_type), self.assertRaisesRegex(GenerationError, "may not fill input 'value'"):
+                load_template(raw(other), sha(raw(other)))
+        for marker in ("__KALIV_VIDEO_PROMPT__", "__KALIV_VIDEO_IMAGE__"):
+            other = json.loads(raw())
+            other["30"] = {"class_type": "PrimitiveInt", "inputs": {"value": marker}}
+            if marker == "__KALIV_VIDEO_PROMPT__":
+                other["6"]["inputs"]["text"] = ["30", 0]
+            with self.subTest(marker), self.assertRaisesRegex(GenerationError, "may not fill input 'value'"):
+                load_template(raw(other), sha(raw(other)))
+        twice = json.loads(raw(graph))
+        twice["23"] = {"class_type": "PrimitiveInt", "inputs": {"value": "__KALIV_VIDEO_FRAMES__"}}
+        with self.assertRaisesRegex(GenerationError, "more than once"):
+            load_template(raw(twice), sha(raw(twice)))
+
+    def test_the_ltx23_rig_helper_builds_a_template_the_adapter_accepts(self):
+        # scripts/media_comfy_ltx23_setup.py: video WITH sound, to be tried on the rig. Not run
+        # anywhere yet -- this only proves that what it would write passes the repository's checks.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("ltx23", ROOT / "scripts" / "media_comfy_ltx23_setup.py")
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        pins = [target for _repo, _name, target in helper.FILES]
+        data = helper.template_bytes()
+        template = load_template(data, sha(data), pinned_files=pins)
+        self.assertEqual(template.task, "text_to_video")
+        self.assertEqual(sorted(template.slots), sorted(m for m in (
+            "__KALIV_VIDEO_PROMPT__", "__KALIV_VIDEO_WIDTH__", "__KALIV_VIDEO_HEIGHT__", "__KALIV_VIDEO_FPS__",
+            "__KALIV_VIDEO_FRAMES__", "__KALIV_VIDEO_SEED__")), "its schedule is in the graph: no steps slot")
+        graph = template.bind(request(profile_id=helper.PROFILE_ID, width=768, height=512, frames=49, steps=8), fps=25)
+        self.assertEqual((graph["20"]["inputs"]["value"], graph["21"]["inputs"]["value"]), (49, 25))
+        self.assertEqual(graph["19"]["inputs"]["audio"], ["18", 0], "the muxer gets the decoded sound")
+        self.assertEqual(helper.bound({"FRAMES": 49, "FPS": 25, "WIDTH": 768, "HEIGHT": 512, "SEED": 1, "PROMPT": "x"})["7"]["inputs"]["width"], 768)
+        self.assertFalse([v for n in helper.bound({"FRAMES": 49, "FPS": 25, "WIDTH": 768, "HEIGHT": 512, "SEED": 1, "PROMPT": "x"}).values()
+                          for v in n["inputs"].values() if isinstance(v, str) and "KALIV" in v], "the direct test leaves no marker")
+        from app.media_generation_profiles import parse_profile
+        made = helper.profile([{"path": p, "sha256": "a" * 64, "bytes": 1} for p in pins], "b" * 40, sha(data),
+                              width=768, height=512, frames=49, fps=25)
+        parsed = parse_profile(made)
+        self.assertEqual((parsed.qualification, parsed.license, sorted(parsed.tasks)), ("candidate", "ltx-2-community-license", ["text_to_video"]))
+        self.assertTrue(parsed.backend_options.sound, "the sound profile promises sound, so a silent clip fails the job")
+        # image-to-video with sound: the same files, the picture written into the video latent
+        data = helper.template_bytes("image_to_video")
+        animated = load_template(data, sha(data), pinned_files=pins)
+        self.assertEqual(animated.task, "image_to_video")
+        self.assertEqual(animated.slots["__KALIV_VIDEO_IMAGE__"], ("26", "image"))
+        graph = animated.bind(request(profile_id="ltx23-i2v-av-gpu1", task="image_to_video", width=640, height=640,
+                                      frames=49, steps=8, input_asset_id="a" * 32),
+                              fps=25, source_file="kaliv-src-0123456789abcdef.png")
+        self.assertEqual((graph["24"]["inputs"]["value"], graph["25"]["inputs"]["value"]), (640, 640))
+        self.assertEqual(graph["26"]["inputs"]["image"], "kaliv-src-0123456789abcdef.png")
+        self.assertEqual(graph["10"]["inputs"]["video_latent"], ["29", 0], "the clip starts from the picture")
+        made = helper.profile([{"path": p, "sha256": "a" * 64, "bytes": 1} for p in pins], "b" * 40, sha(data),
+                              width=640, height=640, frames=49, fps=25, task="image_to_video")
+        parsed = parse_profile(made)
+        self.assertEqual((parsed.profile_id, sorted(parsed.tasks), parsed.backend_options.port),
+                         ("ltx23-i2v-av-gpu1", ["image_to_video"], 8192))
+        # the helper reports what the adapter decides: a handler box inside moov > trak > mdia
+        def box(kind, payload):
+            return (8 + len(payload)).to_bytes(4, "big") + kind + payload
+
+        def track(kind):
+            return box(b"trak", box(b"mdia", box(b"hdlr", b"\x00" * 8 + kind + b"\x00" * 13)))
+        ftyp = box(b"ftyp", b"isom\x00\x00\x02\x00")
+        self.assertTrue(helper.has_sound_track(ftyp + box(b"moov", track(b"vide") + track(b"soun"))))
+        self.assertFalse(helper.has_sound_track(ftyp + box(b"moov", track(b"vide"))))
+        self.assertFalse(helper.has_sound_track(ftyp + box(b"mdat", track(b"soun")) + box(b"moov", track(b"vide"))))
+        self.assertFalse(helper.has_sound_track(b"soun but no handler box"))
+
+    def test_a_template_with_its_own_schedule_may_leave_the_steps_slot_out(self):
+        # A distilled model's schedule is part of the graph (LTX-2.3: a list of sigmas).
+        graph = json.loads(raw())
+        del graph["3"]["inputs"]["steps"]
+        template = load_template(raw(graph), sha(raw(graph)))
+        self.assertNotIn("__KALIV_VIDEO_STEPS__", template.slots)
+        bound = template.bind(request(steps=20), fps=16)
+        self.assertNotIn("steps", bound["3"]["inputs"], "nothing in the graph takes the request's step count")
+        # every other slot is still required
+        for marker_input, node in (("seed", "3"), ("text", "6"), ("width", "7"), ("height", "7"), ("length", "7"), ("fps", "9")):
+            missing = json.loads(raw())
+            del missing[node]["inputs"][marker_input]
+            with self.subTest(marker_input), self.assertRaisesRegex(GenerationError, "missing slots"):
+                load_template(raw(missing), sha(raw(missing)))
+
+    def test_the_templates_that_ran_on_the_rig_are_the_ones_in_the_repository(self):
+        # docs/MEDIA_VIDEO_RIG_QUALIFICATION.md §7: byte for byte what ran on 21 November 2026.
+        folder = ROOT / "deploy" / "media" / "comfy-templates"
+        cases = {
+            "wan21-t2v-1p3b.json": ("4cd0d604b4728159eb351f84992819eaf2730bad7b4187889697e2020b798369", "text_to_video",
+                                    ["diffusion_models/wan2.1_t2v_1.3B_fp16.safetensors",
+                                     "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "vae/wan_2.1_vae.safetensors"]),
+            "wan22-ti2v-5b.json": ("62402da4ec636592c416cc05e7a8bd81be5baa9b205a403ebaae752ebe58e4d5", "image_to_video",
+                                   ["diffusion_models/wan2.2_ti2v_5B_fp16.safetensors",
+                                    "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "vae/wan2.2_vae.safetensors"]),
+        }
+        self.assertEqual(sorted(p.name for p in folder.glob("*.json")), sorted(cases))
+        for name, (sha, task, pins) in cases.items():
+            with self.subTest(name):
+                template = load_template((folder / name).read_bytes(), sha, pinned_files=pins)
+                self.assertEqual(template.task, task)
+                save = [n["inputs"] for n in template.graph.values() if n["class_type"] == "SaveVideo"]
+                self.assertEqual(len(save), 1)
+                self.assertEqual((save[0]["format"], save[0]["format.codec"]), ("mp4", "h264"))
+                self.assertNotIn("/", save[0]["filename_prefix"], "one plain .mp4 in the output root")
+
     def test_a_pinned_template_may_only_load_pinned_model_files(self):
         load_template(raw(), sha(raw()), pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors"])
         with self.assertRaisesRegex(GenerationError, "not pinned"):
@@ -271,6 +393,95 @@ class AdapterTests(unittest.TestCase):
         except GpuBusy:
             return False
 
+    def test_a_profile_that_promises_sound_refuses_a_silent_clip(self):
+        # Anders, 21 Nov 2026: "der skal lyd på". A sound profile's clip without a sound track is a
+        # failed job, not a finished one the user has to play to find out.
+        silent = self.adapter(profile=self.profile(sound=True))
+        silent.load()
+        sink = io.BytesIO()
+        with self.assertRaisesRegex(GenerationError, "^output_has_no_sound:"):
+            silent.render_to(request(), sink)
+        silent.close()
+        with_sound = self.adapter(fake={"FAKE_COMFY_SOUND": "1"}, profile=self.profile(sound=True))
+        with_sound.load()
+        sink = io.BytesIO()
+        self.assertEqual(with_sound.render_to(request(), sink), "video/mp4")
+        self.assertIn(b"soun", sink.getvalue())
+        with_sound.close()
+        # a profile that promises nothing publishes either kind
+        plain = self.adapter(fake={"FAKE_COMFY_SOUND": "1"})
+        plain.load()
+        self.assertEqual(plain.render_to(request(), io.BytesIO()), "video/mp4")
+
+    def test_bytes_that_look_like_a_sound_handler_are_not_a_sound_track(self):
+        # #2477 review (P2): the scan searched for "hdlr....soun" anywhere, so the same bytes in
+        # mdat or in metadata passed a silent clip. Only moov > trak > mdia > hdlr counts.
+        decoy = self.adapter(fake={"FAKE_COMFY_SOUND": "decoy"}, profile=self.profile(sound=True))
+        decoy.load()
+        sink = io.BytesIO()
+        with self.assertRaisesRegex(GenerationError, "^output_has_no_sound:"):
+            decoy.render_to(request(), sink)
+        decoy.close()
+
+    def test_the_sound_track_scan_walks_the_boxes(self):
+        from app.comfy_video_adapter import _SoundTrackScan
+
+        def box(kind, payload, wide=False):
+            if wide:
+                return b"\x00\x00\x00\x01" + kind + (16 + len(payload)).to_bytes(8, "big") + payload
+            return (8 + len(payload)).to_bytes(4, "big") + kind + payload
+
+        def hdlr(handler):
+            return box(b"hdlr", b"\x00" * 8 + handler + b"\x00" * 13)
+
+        def track(handler, **kw):
+            return box(b"trak", box(b"tkhd", b"\x00" * 12) + box(b"mdia", box(b"mdhd", b"\x00" * 12) + hdlr(handler)), **kw)
+
+        def scan(data, size=None):
+            found = _SoundTrackScan()
+            for at in range(0, len(data), size or max(len(data), 1)):
+                found.feed(data[at:at + (size or len(data))])
+            return found.found
+
+        ftyp = box(b"ftyp", b"isom\x00\x00\x02\x00isomiso2")
+        bait = hdlr(b"soun")
+        with_sound = ftyp + box(b"mdat", b"\x07" * 50) + box(b"moov", track(b"vide") + track(b"soun"))
+        cases = {
+            "moov after mdat": (with_sound, True),
+            "moov before mdat": (ftyp + box(b"moov", track(b"soun") + track(b"vide")) + box(b"mdat", b"\x07" * 50), True),
+            "64-bit box sizes": (ftyp + box(b"mdat", b"\x07" * 9, wide=True) + box(b"moov", track(b"soun", wide=True), wide=True), True),
+            "video only": (ftyp + box(b"mdat", b"\x07" * 50) + box(b"moov", track(b"vide")), False),
+            "the bytes inside mdat": (ftyp + box(b"mdat", bait) + box(b"moov", track(b"vide")), False),
+            "the bytes in udta": (ftyp + box(b"moov", track(b"vide") + box(b"udta", bait)), False),
+            "an hdlr directly under moov": (ftyp + box(b"moov", track(b"vide") + bait), False),
+            "an hdlr under trak, outside mdia": (ftyp + box(b"moov", box(b"trak", bait)), False),
+            "a trak outside moov": (ftyp + track(b"soun") + box(b"moov", track(b"vide")), False),
+            "meta's handler": (ftyp + box(b"moov", track(b"vide") + box(b"meta", b"\x00" * 4 + bait)), False),
+            "mdat to the end of the file": (ftyp + box(b"moov", track(b"vide")) + b"\x00\x00\x00\x00mdat" + bait, False),
+            "a box smaller than its header": (ftyp + b"\x00\x00\x00\x04moov" + box(b"moov", track(b"soun")), False),
+            "a child past its parent": (ftyp + box(b"moov", b"\x00\x00\xff\xfftrak") + box(b"moov", track(b"soun")), False),
+            "a handler box cut short": (ftyp + box(b"moov", box(b"trak", box(b"mdia", box(b"hdlr", b"\x00" * 4)))), False),
+            "zero padding after ftyp": (ftyp + b"\x00" * 64, False),
+            "empty": (b"", False),
+        }
+        for name, (data, expected) in cases.items():
+            for size in (None, 1, 3, 7, 16):
+                with self.subTest(case=name, chunk=size):
+                    self.assertEqual(scan(data, size), expected)
+        for cut in range(1, len(with_sound)):  # every split point of a real clip
+            found = _SoundTrackScan()
+            found.feed(with_sound[:cut]); found.feed(with_sound[cut:])
+            self.assertTrue(found.found, f"split at {cut}")
+        skipping = _SoundTrackScan()  # mdat is passed, not kept: memory does not follow the clip's size
+        skipping.feed(ftyp + (8 + 5_000_000).to_bytes(4, "big") + b"mdat")
+        for _ in range(5):
+            skipping.feed(b"\x07" * 1_000_000)
+            self.assertLessEqual(len(skipping._buffer), 16)
+        skipping.feed(box(b"moov", track(b"soun")))
+        self.assertTrue(skipping.found)
+        with self.assertRaisesRegex(Exception, "backend_options.sound must be true or false"):
+            self.profile(sound="yes")
+
     def test_end_to_end_text_to_video(self):
         adapter = self.adapter()
         adapter.load()
@@ -287,6 +498,40 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(adapter.render_to(request(seed=8), io.BytesIO()), "video/mp4")
         adapter.close()
         self.assertTrue(self.lease_is_free())
+
+    def test_a_warm_comfyui_takes_the_next_job_without_a_restart(self):
+        # Rig 21/11: a ComfyUI that keeps its models reports 5 of 12 GiB free; the next job read
+        # that as a shortage and ComfyUI was closed and started again for every clip.
+        from app.comfy_supervisor import ComfyVramShortage
+        adapter = self.adapter()
+        adapter.load()
+        pid = adapter.supervisor.pid
+        self.assertIsNone(adapter.supervisor._idle_free_bytes)
+        Path(self.state, "vram_free_gib").write_text("5")  # what the fake reports from now on
+        with self.assertRaises(ComfyVramShortage):
+            adapter.render_to(request(), io.BytesIO())  # no job has succeeded in it yet: strict
+        Path(self.state, "vram_free_gib").unlink()
+        self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
+        self.assertEqual(adapter.supervisor._idle_job_cost, 832 * 480 * 33, "the proof is taken when the job has succeeded, with its size")
+        kind = adapter.supervisor._idle_job_kind
+        self.assertEqual(kind, f"wan-t2v|{adapter._template.sha256}|text_to_video", "and with what it was: profile, workflow, task")
+        Path(self.state, "vram_free_gib").write_text("5")
+        adapter.supervisor.note_idle(832 * 480 * 33, kind)  # as after a job whose models stayed loaded
+        self.assertEqual(adapter.render_to(request(seed=8), io.BytesIO()), "video/mp4")
+        self.assertEqual(adapter.supervisor.pid, pid, "the same ComfyUI rendered both")
+        # #2462 review: a job larger than the one that proved it does not lean on that proof
+        adapter.supervisor.note_idle(832 * 480 * 17, kind)
+        with self.assertRaises(ComfyVramShortage):
+            adapter.render_to(request(seed=9), io.BytesIO())  # 33 frames after a 17-frame job
+        # ...nor does a job of another kind: proof from image-to-video says nothing about text-to-video
+        adapter.supervisor.note_idle(832 * 480 * 33, kind.replace("text_to_video", "image_to_video"))
+        with self.assertRaises(ComfyVramShortage):
+            adapter.render_to(request(seed=9), io.BytesIO())
+        adapter.supervisor.note_idle(832 * 480 * 33, kind)
+        Path(self.state, "vram_free_gib").write_text("3")  # somebody else took 2 GiB since
+        with self.assertRaises(ComfyVramShortage):
+            adapter.render_to(request(seed=9), io.BytesIO())
+        adapter.close()
 
     def test_end_to_end_into_a_staged_sink(self):
         """The #2296 seam: with sink.staged(".mp4") as out: mime = render_to(req, out); sink.adopt(out, mime)."""

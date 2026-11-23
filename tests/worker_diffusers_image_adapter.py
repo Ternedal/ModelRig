@@ -245,6 +245,29 @@ class AdapterTests(unittest.TestCase):
         budget.assert_not_called()
         self.assertEqual(self.calls, [])
 
+    def test_the_probe_and_nvml_are_read_together_for_the_diagnostics(self):
+        # Rig 20/11: a load was admitted on a card another process held 8 GB of, and nothing kept the numbers.
+        from app.image_gpu_admission import GpuBudget, GpuMemoryShortage
+        gib = 1024**3
+        admitted = GpuBudget(1, 12 * gib, 11 * gib, 2 * gib, 9 * gib)
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget", return_value=admitted), \
+                patch("app.diffusers_image_adapter.nvml_used_mib", return_value=8149) as smi, \
+                patch.dict(sys.modules, fake_modules(self.calls)):
+            adapter = self.adapter()
+            adapter.load()
+        smi.assert_called_once_with(1)
+        self.assertEqual((adapter.admitted_budget, adapter.admitted_nvml_used_mib), (admitted, 8149))
+        adapter.close()
+
+        short = GpuMemoryShortage("insufficient free VRAM after reservation", GpuBudget(1, 12 * gib, 4 * gib, 2 * gib, 2 * gib))
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget", side_effect=short), \
+                patch("app.diffusers_image_adapter.nvml_used_mib", return_value=8149), \
+                patch.dict(sys.modules, fake_modules(self.calls)), self.assertRaises(GpuMemoryShortage) as caught:
+            self.adapter().load()
+        self.assertEqual(caught.exception.nvml_used_mib, 8149, "the refusal carries the second opinion too")
+        with acquire_gpu_lease(GPU1, lease_dir=self.lease_dir):
+            pass  # and the lease was released
+
     def test_budget_is_checked_while_the_lease_is_held(self):
         seen = []
 
