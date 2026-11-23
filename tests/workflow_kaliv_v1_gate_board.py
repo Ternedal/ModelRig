@@ -125,10 +125,31 @@ check(code == 2 and "pin" in err.getvalue(), "a bad pin is a usage error (exit 2
 
 # 7. The V1 rig plan tells the operator to look at the board before the rig day.
 plan = (ROOT / "docs" / "RIGDAG_V1.md").read_text(encoding="utf-8")
-# A runbook, not source: the pointer has to be in a command block the operator can paste.
-blocks = re.findall(r"```powershell\n(.*?)```", plan, flags=re.S)
-check(any("scripts\\kaliv_v1_gate_board.py" in block and "--release-scope v1" in block for block in blocks),
-      "RIGDAG_V1 has the board as a pasteable command")
+# The runbook's block must be runnable as written (#2485 review, P2): a "<sha>" placeholder is
+# not an argument PowerShell accepts, and refs shown as if they were required lead the operator
+# to pass dummy ones, which turns MISSING into STALE.
+blocks = [block for block in re.findall(r"```powershell\n(.*?)```", plan, flags=re.S) if "kaliv_v1_gate_board.py" in block]
+check(len(blocks) == 1, "RIGDAG_V1 has exactly one command block for the board")
+block = blocks[0] if blocks else ""
+call = block[block.find("python scripts"):]
+check("<" not in block and ">" not in block, "no angle-bracket placeholders anywhere in the block")
+names = re.findall(r"^\s*\$(\w+Sha)\s*=\s*''\s*$", block, flags=re.M)
+check(names == ["modelrigSha", "bodyrigSha", "visionrigSha", "voicerigSha"], "the four pins are variables the operator fills in")
+check(all(f"--{flag}-sha ${name}" in call for flag, name in zip(("modelrig", "bodyrig", "visionrig", "voicerig"), names)),
+      "each pin variable is what the command passes")
+check("throw" in block and "'^[0-9a-f]{40}$'" in block and block.find("throw") < block.find("python scripts"),
+      "the block stops before the call when a pin is not a full SHA")
+check(re.search(r"^\s*\$refs = @\(\)\s*$", block, flags=re.M) is not None and call.rstrip().endswith("@refs"),
+      "refs are an empty list by default and are passed by splatting")
+check("-ref" not in "\n".join(line for line in call.splitlines() if not line.lstrip().startswith("#")),
+      "the command itself names no evidence-ref argument: none is shown as required")
+# ... and the arguments it does pass are ones the tool has, with nothing required left out.
+parser_flags = set(re.findall(r"--[a-z][a-z-]+", call))
+required = {"--release-scope", "--modelrig-sha", "--bodyrig-sha", "--visionrig-sha", "--voicerig-sha"}
+check(parser_flags == required, f"the command passes exactly the required arguments (got {sorted(parser_flags)})")
+with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+    code = tool.main(["--release-scope", "v1", "--modelrig-sha", M, "--bodyrig-sha", B, "--visionrig-sha", V, "--voicerig-sha", O])
+check(code == 0, "those arguments alone make a board (every ref is optional)")
 
 print(f"\n===== KALIV V1 GATE BOARD: {passed} passed, {failed} failed =====")
 sys.exit(1 if failed else 0)

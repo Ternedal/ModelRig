@@ -39,13 +39,26 @@ der noget andet dér, gælder den. Udskiftede værdier står som `<…>`.
 - **Hvor står hver gate mod netop de pins?** Brættet siger det gate for gate med
   slutgatens egne regler — `MISSING` (ingen ref), `STALE` (ref'en binder til andre
   pins og skal tages om) eller `REF_BINDS` (ref'ens form og pins godtages; filen
-  bag den er ikke tjekket). Det er et overblik, ikke en kvalifikation:
+  bag den er ikke tjekket). Det er et overblik, ikke en kvalifikation.
+
+  Sæt de fire pins (de samme som i manifestet til sidst). Blokken stopper, hvis en
+  af dem ikke er en fuld SHA:
 
   ```powershell
+  $modelrigSha  = ''
+  $bodyrigSha   = ''
+  $visionrigSha = ''
+  $voicerigSha  = ''
+  # Kun refs, du faktisk har fra en rapport. Lad listen stå tom, hvis du ingen har:
+  # en opdigtet ref viser gaten som STALE i stedet for MISSING.
+  # Eksempel: $refs = @('--software-exact-green-ref', $greenRef, '--repository-authority-ref', $authorityRef)
+  $refs = @()
+  foreach ($pin in $modelrigSha, $bodyrigSha, $visionrigSha, $voicerigSha) {
+      if ($pin -notmatch '^[0-9a-f]{40}$') { throw "saet alle fire pins til en fuld SHA foer braettet koeres" }
+  }
   python scripts\kaliv_v1_gate_board.py --release-scope v1 `
-    --modelrig-sha <modelrig-sha> --bodyrig-sha <bodyrig-sha> `
-    --visionrig-sha <visionrig-sha> --voicerig-sha <voicerig-sha> `
-    --software-exact-green-ref <ref, hvis du har en> --repository-authority-ref <ref, hvis du har en>
+    --modelrig-sha $modelrigSha --bodyrig-sha $bodyrigSha `
+    --visionrig-sha $visionrigSha --voicerig-sha $voicerigSha @refs
   ```
 
 ## 1. Gate 2 — `consciousness_live_lifecycle`
