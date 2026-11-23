@@ -41,7 +41,9 @@ DEFAULT_UI_RESTRICTIONS = (
     | JOB_OBJECT_UILIMIT_EXITWINDOWS
 )
 
+JOB_OBJECT_BASIC_PROCESS_ID_LIST = 3
 JOB_OBJECT_BASIC_UI_RESTRICTIONS = 4
+MAX_JOB_PROCESS_IDS = 64  # JobLimits caps active_process_limit at 64
 JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
 MIN_PROCESS_MEMORY_BYTES = 64 * 1024 * 1024
 MAX_PROCESS_MEMORY_BYTES = 64 * 1024 * 1024 * 1024
@@ -119,6 +121,16 @@ class _JOBOBJECT_BASIC_UI_RESTRICTIONS(ctypes.Structure):
     _fields_ = [("UIRestrictionsClass", ctypes.c_uint32)]
 
 
+def _process_id_list(capacity: int):
+    class _JOBOBJECT_BASIC_PROCESS_ID_LIST(ctypes.Structure):
+        _fields_ = [
+            ("NumberOfAssignedProcesses", ctypes.c_uint32),
+            ("NumberOfProcessIdsInList", ctypes.c_uint32),
+            ("ProcessIdList", ctypes.c_size_t * capacity),
+        ]
+    return _JOBOBJECT_BASIC_PROCESS_ID_LIST()
+
+
 def _extended_limits(limits: JobLimits) -> _JOBOBJECT_EXTENDED_LIMIT_INFORMATION:
     info = _JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
     info.BasicLimitInformation.LimitFlags = (
@@ -149,6 +161,14 @@ class NativeWindowsJobApi:
             ctypes.c_uint32,
         ]
         kernel32.SetInformationJobObject.restype = ctypes.c_int
+        kernel32.QueryInformationJobObject.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+        ]
+        kernel32.QueryInformationJobObject.restype = ctypes.c_int
         kernel32.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
         kernel32.AssignProcessToJobObject.restype = ctypes.c_int
         kernel32.TerminateJobObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
@@ -198,6 +218,20 @@ class NativeWindowsJobApi:
             ctypes.c_void_p(job_handle), ctypes.c_void_p(process_handle)
         ):
             raise self._last_error("AssignProcessToJobObject")
+
+    def process_ids(self, handle: int) -> list[int]:
+        """The ids of the processes that are in the job right now."""
+        info = _process_id_list(MAX_JOB_PROCESS_IDS)
+        ok = self._kernel32.QueryInformationJobObject(
+            ctypes.c_void_p(handle),
+            JOB_OBJECT_BASIC_PROCESS_ID_LIST,
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+            None,
+        )
+        if not ok:
+            raise self._last_error("QueryInformationJobObject(process id list)")
+        return [int(info.ProcessIdList[i]) for i in range(min(info.NumberOfProcessIdsInList, MAX_JOB_PROCESS_IDS))]
 
     def resume_process(self, process_handle: int) -> None:
         status = int(self._ntdll.NtResumeProcess(ctypes.c_void_p(process_handle)))
@@ -250,6 +284,20 @@ class WindowsJob:
             raise WindowsIsolationError("spawned process exposes no valid Windows handle")
         self._api.assign_process(self._handle, process_handle)
         self._api.resume_process(process_handle)
+
+    def process_ids(self) -> frozenset[int]:
+        """Every process in this job: the spawned one and whatever it started.
+
+        A process is in the job only by being created inside it, so membership proves descent
+        from the process this job was built around. Rig 21/11: a venv's ``python.exe`` on Windows
+        is a starter that runs the real interpreter as its child, so the pid that does the work
+        is not the pid ``Popen`` returned."""
+        if self._handle is None:
+            raise WindowsIsolationError("cannot query a closed Job Object")
+        ids = self._api.process_ids(self._handle)
+        if not isinstance(ids, list) or any(isinstance(i, bool) or not isinstance(i, int) or i <= 0 for i in ids):
+            raise WindowsIsolationError("the Job Object returned an invalid process id list")
+        return frozenset(ids)
 
     def terminate(self, exit_code: int = 1) -> None:
         if self._handle is None or self._terminated:
@@ -342,6 +390,18 @@ def spawn_in_job(
         except Exception:
             pass
         raise
+
+
+def attached_job_process_ids(process: Any) -> frozenset[int]:
+    """The process ids in the job ``spawn_in_job`` attached to ``process``; empty if there is none
+    or it cannot be read (the caller then has only the pid it spawned)."""
+    job = getattr(process, "_kaliv_windows_job", None)
+    if not isinstance(job, WindowsJob):
+        return frozenset()
+    try:
+        return job.process_ids()
+    except WindowsIsolationError:
+        return frozenset()
 
 
 def terminate_attached_job(process: Any, exit_code: int = 1) -> bool:

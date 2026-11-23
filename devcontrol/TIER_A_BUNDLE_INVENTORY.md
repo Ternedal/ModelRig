@@ -8,7 +8,7 @@ This report is generated from the exact `_TIER_A_BUNDLE_FILES` tuple in `devcont
 
 | Files | Bytes | Physical lines | Top-level classes | Top-level functions | Local import edges |
 |---:|---:|---:|---:|---:|---:|
-| 50 | 634933 | 17241 | 152 | 191 | 163 |
+| 50 | 637615 | 17301 | 152 | 193 | 163 |
 
 ## Per-file measurements
 
@@ -17,7 +17,7 @@ Local import fan-out counts distinct direct imports that resolve to another file
 | Path | Bytes | Lines | Classes | Functions | Fan-out | Responsibility signals |
 |---|---:|---:|---:|---:|---:|---|
 | `worker/app/__init__.py` | 0 | 0 | 0 | 0 | 0 | — |
-| `worker/app/windows_job.py` | 13288 | 365 | 8 | 5 | 0 | — |
+| `worker/app/windows_job.py` | 15970 | 425 | 8 | 7 | 0 | — |
 | `worker/app/windows_restricted.py` | 29682 | 859 | 13 | 8 | 1 | canonicalization, hashing, path_validation |
 | `worker/app/windows_capture.py` | 22208 | 591 | 7 | 4 | 2 | canonicalization, hashing, path_validation |
 | `worker/app/windows_runtime_guard.py` | 26116 | 713 | 9 | 0 | 2 | canonicalization, hashing, path_validation |

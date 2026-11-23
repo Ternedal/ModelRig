@@ -62,7 +62,7 @@ _TOP_KEYS = frozenset({
 _COMFY_OPTION_KEYS = frozenset({
     "template_name", "template_sha256", "fps", "max_render_seconds", "max_output_bytes", "port",
 })
-_COMFY_OPTIONAL_KEYS = frozenset({"comfyui_version", "weights"})  # pins (G3, #2296 6634996133)
+_COMFY_OPTIONAL_KEYS = frozenset({"comfyui_version", "weights", "sound", "frame_step"})  # pins (G3, #2296 6634996133)
 _TEMPLATE_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}\.json")
 _COMFY_VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}")
 _WEIGHT_SEGMENT = r"[A-Za-z0-9_][A-Za-z0-9._-]{0,127}"
@@ -122,6 +122,12 @@ class ComfyOptions:
     port: int
     comfyui_version: str | None = None
     weights: tuple[WeightPin, ...] = ()
+    # The profile promises a clip WITH sound (Anders, 21 Nov 2026: "der skal lyd på"). The adapter
+    # then refuses an output without a sound track instead of publishing a silent clip as done.
+    sound: bool = False
+    # The model's frame grid: a clip has k*frame_step + 1 frames (LTX-2.3: 8, Wan: 4). Only used
+    # to turn a length in seconds into a frame count the graph renders as asked; 1 = any count.
+    frame_step: int = 1
 
 
 @dataclass(frozen=True)
@@ -169,6 +175,37 @@ def _strict_number(value: object, low: float, high: float, name: str, *, low_ope
 def _string(value: object, pattern: re.Pattern[str], name: str) -> str:
     if not isinstance(value, str) or not pattern.fullmatch(value):
         raise _fail(f"{name} is malformed")
+    return value
+
+
+def frames_for_seconds(profile: "ModelProfile", seconds: float) -> tuple[int, bool]:
+    """``(frames, shortened)`` for a clip of about ``seconds`` on a video profile.
+
+    The frame count is the largest one on the profile's grid (k*frame_step + 1) that does not
+    exceed seconds * fps, at least one grid step, at most the profile's ``max_frames`` (itself
+    taken down to the grid). ``shortened`` says the profile's limit cut the wish by more than
+    half a second -- the caller tells the user instead of delivering a shorter clip silently.
+    """
+    options = profile.backend_options
+    fps = getattr(options, "fps", None)
+    limit = profile.limits.max_frames
+    if profile.modality != "video" or type(fps) is not int or fps < 1 or type(limit) is not int:
+        raise GenerationError("a length in seconds needs a video profile with a frame rate")
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or seconds <= 0:
+        raise GenerationError("seconds must be a positive number")
+    step = getattr(options, "frame_step", 1)
+
+    def on_grid(count: int) -> int:
+        return max(1, (max(count, 1) - 1) // step * step + 1)
+    longest = on_grid(limit)
+    wanted = max(on_grid(int(min(seconds, 86400) * fps)), min(step + 1, longest))
+    frames = min(wanted, longest)
+    return frames, seconds - frames / fps > 0.5 and frames == longest
+
+
+def _sound_flag(value: object) -> bool:
+    if not isinstance(value, bool):
+        raise _fail("backend_options.sound must be true or false")
     return value
 
 
@@ -290,6 +327,9 @@ def parse_profile(obj: object) -> ModelProfile:
             comfyui_version=(_string(options["comfyui_version"], _COMFY_VERSION, "backend_options.comfyui_version")
                              if "comfyui_version" in options else None),
             weights=_weight_pins(options["weights"]) if "weights" in options else (),
+            sound=_sound_flag(options["sound"]) if "sound" in options else False,
+            frame_step=_strict_int(options["frame_step"], 1, 64, "backend_options.frame_step")
+            if "frame_step" in options else 1,
         )
         if qualification == "rig-qualified" and (backend_options.comfyui_version is None or not backend_options.weights):
             raise _fail("a rig-qualified comfyui profile must pin comfyui_version and weights")
