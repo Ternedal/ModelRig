@@ -68,14 +68,23 @@ class CloudCurrentMessageOnlyTest {
             val prior = listOf("user" to "Mit lokale kodeord er kodeord-7731", "assistant" to "Det husker jeg.")
             val client = ModelRigClient(server.url("/").toString())
 
-            client.toolsChat("hvad er klokken", cloudBaseUrl = "https://ollama.com", cloudKey = "k", history = prior)
+            val pictures = listOf("0123456789abcdef0123456789abcdef")
+            client.toolsChat(
+                "hvad er klokken", cloudBaseUrl = "https://ollama.com", cloudKey = "k", history = prior,
+                conversationImageJobs = pictures,
+            )
             val cloud = JSONObject(server.takeRequest().body.readUtf8())
             assertFalse(cloud.has("history"))
             assertFalse(cloud.toString().contains("kodeord-7731"))
+            assertFalse("a cloud turn says nothing about the conversation's pictures", cloud.has("conversation_image_jobs"))
 
-            client.toolsChat("hvad er klokken", history = prior)
+            client.toolsChat("hvad er klokken", history = prior, conversationImageJobs = pictures)
             val local = JSONObject(server.takeRequest().body.readUtf8())
             assertEquals("local tools turn keeps its history (control)", 2, local.getJSONArray("history").length())
+            assertEquals(
+                "a local tools turn names the conversation's pictures (#2459)",
+                pictures[0], local.getJSONArray("conversation_image_jobs").getString(0),
+            )
         } finally {
             server.shutdown()
         }

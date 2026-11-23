@@ -2,6 +2,7 @@ package dk.ternedal.modelrig.net
 
 import dk.ternedal.modelrig.net.MediaGalleryContractTest.Companion.image
 import dk.ternedal.modelrig.net.MediaGalleryContractTest.Companion.page
+import dk.ternedal.modelrig.net.MediaGalleryContractTest.Companion.video
 import dk.ternedal.modelrig.net.MediaGalleryException.Reason
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -200,6 +201,53 @@ class MediaGalleryClientTest {
         )!!
         assertEquals(Reason.NOT_FOUND, assertThrows(MediaGalleryException::class.java) { client.thumbnail(bare) }.reason)
         assertEquals(0, server.requestCount)
+    }
+
+    private fun clipItem(size: Int) = MediaGalleryContract.parseItem(video("clip").put("size_bytes", size))!!
+
+    @Test
+    fun `videoInto streams exactly the listed size with the bearer, into the caller's stream`() {
+        val data = ByteArray(300_000) { (it % 13).toByte() }
+        server.enqueue(bytes(data, "video/mp4"))
+        val out = java.io.ByteArrayOutputStream()
+        client.videoInto(clipItem(data.size), out)
+        assertArrayEquals(data, out.toByteArray())
+        val request = server.takeRequest(1, TimeUnit.SECONDS)!!
+        assertEquals("/api/v1/media/clip", request.path)
+        assertEquals("Bearer device-token", request.getHeader("Authorization"))
+        assertTrue(request.getHeader("Accept")!!.startsWith("video/"))
+    }
+
+    @Test
+    fun `videoInto refuses a body that disagrees with the listed size, a wrong type, and a clip over the cap`() {
+        val data = ByteArray(1_000) { 1 }
+        server.enqueue(bytes(data, "video/mp4"))
+        val longer = assertThrows(MediaGalleryException::class.java) { client.videoInto(clipItem(500), java.io.ByteArrayOutputStream()) }
+        assertEquals(Reason.TOO_LARGE, longer.reason)
+        server.enqueue(bytes(data, "video/mp4"))
+        val shorter = assertThrows(MediaGalleryException::class.java) { client.videoInto(clipItem(2_000), java.io.ByteArrayOutputStream()) }
+        assertEquals(Reason.PROTOCOL, shorter.reason)
+        server.enqueue(bytes(data, "text/html"))
+        val html = assertThrows(MediaGalleryException::class.java) { client.videoInto(clipItem(1_000), java.io.ByteArrayOutputStream()) }
+        assertEquals(Reason.PROTOCOL, html.reason)
+        val before = server.requestCount
+        val huge = MediaGalleryContract.parseItem(video("big").put("size_bytes", MediaGalleryClient.VIDEO_MAX_BYTES + 1))!!
+        assertEquals(Reason.TOO_LARGE, assertThrows(MediaGalleryException::class.java) { client.videoInto(huge, java.io.ByteArrayOutputStream()) }.reason)
+        assertEquals(before, server.requestCount)
+        assertThrows(IllegalArgumentException::class.java) { client.videoInto(item, java.io.ByteArrayOutputStream()) }
+    }
+
+    @Test
+    fun `videoInto never follows a redirect`() {
+        val elsewhere = MockWebServer().apply { start() }
+        try {
+            server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", elsewhere.url("/steal").toString()))
+            val e = assertThrows(MediaGalleryException::class.java) { client.videoInto(clipItem(10), java.io.ByteArrayOutputStream()) }
+            assertEquals(Reason.REDIRECT_REFUSED, e.reason)
+            assertEquals(0, elsewhere.requestCount)
+        } finally {
+            elsewhere.shutdown()
+        }
     }
 
     @Test

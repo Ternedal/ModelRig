@@ -69,6 +69,15 @@ from .media_generation_contract import (GenerationCancelled, GenerationError, Ge
 from .media_generation_profiles import ModelProfile, validate_request
 
 MIME = "video/mp4"
+
+
+def _job_cost(request: GenerationRequest) -> int:
+    """How large a job is for the warm VRAM check: pixels x frames. Requests are validated before
+    they get here; anything else is 0, which the supervisor treats as 'do not use the warm path'."""
+    values = (request.width, request.height, request.frames)
+    if any(type(value) is not int or value <= 0 for value in values):
+        return 0
+    return request.width * request.height * request.frames
 COPY_CHUNK = 1024 * 1024
 DRAIN_SECONDS = 30  # how long an interrupted job may take to leave ComfyUI's queue
 _log = logging.getLogger("kaliv.media.comfy")
@@ -104,6 +113,89 @@ def check_source_png(data: object) -> None:
             return
         offset += 12 + length
     raise GenerationError("the source image is not a complete PNG")
+
+
+class _SoundTrackScan:
+    """Does an MP4 stream declare a sound track? Fed chunk by chunk while the file is copied.
+
+    The boxes are walked, not searched (#2477 review: a search for the bytes ``hdlr....soun``
+    also matches them inside ``mdat`` or metadata, and a silent clip would pass). Only
+    ``moov > trak > mdia > hdlr`` counts, with handler type ``soun`` (ISO 14496-12 8.4.3: the
+    handler box is version/flags(4) pre_defined(4) handler_type(4) ...). Every other box is
+    skipped by its declared size without being read into memory, so ``mdat`` costs nothing and
+    ``moov`` may come before or after it.
+
+    A stream whose boxes do not add up (a size smaller than its header, a child that runs past
+    its parent) ends the walk: nothing after that point can be trusted, and a track found
+    before it stands. It is a check on what the container declares, not a decode.
+    """
+    _PATH = (b"moov", b"trak", b"mdia")
+
+    def __init__(self) -> None:
+        self.found = False
+        self._done = False          # found, or the structure broke: stop looking
+        self._buffer = b""          # only ever a partial box header (and a handler box's first 12 bytes)
+        self._position = 0          # stream offset of the first byte in _buffer
+        self._skip = 0              # bytes of an uninteresting box still to pass
+        self._open: list[int] = []  # end offsets of the open moov / trak / mdia
+
+    def feed(self, chunk: bytes) -> None:
+        if self._done or not chunk:
+            return
+        data = self._buffer + chunk
+        at = 0
+        while not self._done:
+            if self._skip:
+                step = min(self._skip, len(data) - at)
+                at += step
+                self._skip -= step
+                if self._skip:
+                    break
+            here = self._position + at
+            while self._open and here >= self._open[-1]:
+                self._open.pop()
+            if len(data) - at < 8:
+                break
+            size = int.from_bytes(data[at:at + 4], "big")
+            kind = data[at + 4:at + 8]
+            header = 8
+            if size == 1:  # 64-bit size follows the type
+                if len(data) - at < 16:
+                    break
+                size = int.from_bytes(data[at + 8:at + 16], "big")
+                header = 16
+            if size == 0:  # "to the end of the file": legal for the last top-level box only
+                if self._open:
+                    self._done = True
+                    break
+                size = None
+            elif size < header or (self._open and here + size > self._open[-1]):
+                self._done = True
+                break
+            depth = len(self._open)
+            if size is not None and depth < len(self._PATH) and kind == self._PATH[depth]:
+                self._open.append(here + size)
+                at += header
+                continue
+            if size is not None and depth == len(self._PATH) and kind == b"hdlr":
+                if size < header + 12:
+                    self._done = True
+                    break
+                if len(data) - at < header + 12:
+                    break
+                if data[at + header + 8:at + header + 12] == b"soun":
+                    self.found = self._done = True
+                    break
+                at += header + 12
+                self._skip = size - header - 12
+                continue
+            if size is None:  # the rest of the stream is this one box: nothing more to find
+                self._done = True
+                break
+            at += header
+            self._skip = size - header
+        self._position += at
+        self._buffer = b"" if self._done else data[at:]
 
 
 class ComfyVideoAdapter:
@@ -177,9 +269,16 @@ class ComfyVideoAdapter:
         budget = self.supervisor.start()
         if not self._version_ok(budget):
             self.supervisor.stop()  # proven stop: the lease goes with ComfyUI
-            raise GenerationError("ComfyUI version does not match the profile pin")
+            raise GenerationError("comfyui_version_mismatch: ComfyUI version does not match the profile pin")
         self._verified_weights = verified
         self._template = template
+
+    def _job_kind(self, request: GenerationRequest) -> str:
+        """What a job is, for the warm VRAM check: the profile (its models and settings), the exact
+        workflow (the template's SHA-256) and the task. Proof from one kind says nothing about
+        another, even at the same size."""
+        template = self._template.sha256 if self._template is not None else ""
+        return f"{self.profile.profile_id}|{template}|{request.task}"
 
     def _weights_still_verified(self) -> None:
         """Before every job: the files hashed at load are still those files, and the lookup is
@@ -245,6 +344,8 @@ class ComfyVideoAdapter:
         try:
             mime = self._render_and_hand_over(request, sink_file, before, owned, should_cancel, source_png, staged)
             handed_over = True
+            # This job succeeded at this size: the proof the next job's VRAM check may lean on.
+            self.supervisor.note_idle(_job_cost(request), self._job_kind(request))  # never raises
             return mime
         finally:
             if (handed_over or self._sink_failed) and self._holding is not None:
@@ -318,8 +419,8 @@ class ComfyVideoAdapter:
                               owned: list, should_cancel: Callable[[], bool] | None = None,
                               source_png: bytes | None = None, staged: list | None = None) -> str:
         try:
-            if not self._version_ok(self.supervisor.check_budget()):
-                raise GenerationError("ComfyUI version does not match the profile pin")
+            if not self._version_ok(self.supervisor.check_budget(_job_cost(request), self._job_kind(request))):
+                raise GenerationError("comfyui_version_mismatch: ComfyUI version does not match the profile pin")
             self._weights_still_verified()
             if not self.supervisor.queue_is_empty():
                 raise GenerationError("ComfyUI queue is not empty: refusing to share it")
@@ -625,6 +726,8 @@ class ComfyVideoAdapter:
             self._to_sink(sink_file.write, header)
             digest.update(header)
             copied = len(header)
+            sound = _SoundTrackScan()
+            sound.feed(header)
             while True:
                 chunk = handle.read(COPY_CHUNK)
                 if not chunk:
@@ -634,10 +737,15 @@ class ComfyVideoAdapter:
                     raise GenerationError("ComfyUI output grew past the size cap")
                 self._to_sink(sink_file.write, chunk)
                 digest.update(chunk)
+                sound.feed(chunk)
             last = os.fstat(handle.fileno())
         if (copied != first.st_size or last.st_size != first.st_size
                 or last.st_mtime_ns != first.st_mtime_ns or last.st_ino != first.st_ino):
             raise GenerationError("ComfyUI output changed while it was copied")
+        # A profile that promises sound must not publish a silent clip as finished: the user asked
+        # for sound and would only find out by playing it. Raised before the bytes are adopted.
+        if self.options.sound and not sound.found:
+            raise GenerationError("output_has_no_sound: the profile promises a sound track and the clip has none")
         self._to_sink(sink_file.flush)
         # The bytes must be durable on the publication volume before anything relies on them
         # (Anders, 6 Nov: work on C:, publish to Z:). A delayed write error (disk full, I/O error)
