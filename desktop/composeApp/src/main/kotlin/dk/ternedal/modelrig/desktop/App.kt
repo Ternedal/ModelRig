@@ -1064,8 +1064,14 @@ private fun ConversationsPanel(
     onNew: () -> Unit,
     onDeleted: (Long) -> Unit,
 ) {
-    var convos by remember { mutableStateOf(runCatching { db.listConversations() }.getOrElse { emptyList() }) }
-    var panelError by remember { mutableStateOf<String?>(null) }
+    // #973: a storage failure on load is a state of its own, never an empty list
+    // that reads as "no conversations"; every later failure is fixed Danish copy
+    // chosen by the operation, never the exception's text.
+    var listState by remember { mutableStateOf(loadConversationList { db.listConversations() }) }
+    val convos = listState.conversations
+    var panelError by remember {
+        mutableStateOf(if (listState is ConversationListState.Failed) presentConversationStoreError(ConversationStoreOperation.LOAD) else null)
+    }
     var query by remember { mutableStateOf("") }
     var renamingId by remember { mutableStateOf<Long?>(null) }
     var renameText by remember { mutableStateOf("") }
@@ -1091,7 +1097,7 @@ private fun ConversationsPanel(
                     Text("+ Ny", color = if (presentation.contextMutationEnabled) KalivTheme.colors.Signal else KalivTheme.colors.TextMuted, fontSize = 12.sp)
                 }
             }
-            panelError?.let { Spacer(Modifier.height(4.dp)); Text("Fejl: $it", color = KalivTheme.colors.Danger, fontSize = 11.sp) }
+            panelError?.let { Spacer(Modifier.height(4.dp)); Text(it, color = KalivTheme.colors.Danger, fontSize = 11.sp) }
             presentation.lockMessage?.let {
                 Spacer(Modifier.height(4.dp))
                 Text(it, color = KalivTheme.colors.TextMuted, fontSize = 11.sp)
@@ -1103,7 +1109,9 @@ private fun ConversationsPanel(
                 singleLine = true, modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(8.dp))
-            if (convos.isEmpty()) {
+            if (listState is ConversationListState.Failed) {
+                // The error line above already says what happened; no "none yet" on top of it.
+            } else if (convos.isEmpty()) {
                 Text("Ingen samtaler endnu", color = KalivTheme.colors.TextMuted, fontSize = 13.sp)
             } else if (shown.isEmpty()) {
                 Text("Ingen match på \"$query\"", color = KalivTheme.colors.TextMuted, fontSize = 13.sp)
@@ -1119,8 +1127,9 @@ private fun ConversationsPanel(
                             TextButton(onClick = {
                                 runCatching {
                                     db.renameConversation(c.id, renameText.trim())
-                                    convos = db.listConversations()
-                                }.onFailure { panelError = it.message }
+                                    listState = loadConversationList { db.listConversations() }
+                                    panelError = if (listState is ConversationListState.Failed) presentConversationStoreError(ConversationStoreOperation.LOAD) else null
+                                }.onFailure { panelError = presentConversationStoreError(ConversationStoreOperation.RENAME) }
                                 renamingId = null
                             }) { Text("Gem", color = KalivTheme.colors.Signal, fontSize = 12.sp) }
                             TextButton(onClick = { renamingId = null }) {
@@ -1149,7 +1158,8 @@ private fun ConversationsPanel(
                                 runCatching {
                                     clipboard.setText(AnnotatedString(db.conversationAsMarkdown(c.id)))
                                     copiedId = c.id
-                                }.onFailure { panelError = it.message }
+                                    panelError = null
+                                }.onFailure { panelError = presentConversationStoreError(ConversationStoreOperation.COPY) }
                             }) {
                                 Text(if (copiedId == c.id) "Kopieret" else "Kopiér", color = KalivTheme.colors.Signal, fontSize = 12.sp)
                             }
@@ -1162,8 +1172,9 @@ private fun ConversationsPanel(
                                             // Every successful delete invalidates pending conversation
                                             // loads; the parent clears the view as well when this was active.
                                             onDeleted(c.id)
-                                            convos = db.listConversations()
-                                        }.onFailure { panelError = it.message }
+                                            listState = loadConversationList { db.listConversations() }
+                                            panelError = if (listState is ConversationListState.Failed) presentConversationStoreError(ConversationStoreOperation.LOAD) else null
+                                        }.onFailure { panelError = presentConversationStoreError(ConversationStoreOperation.DELETE) }
                                     }
                                 },
                             ) {
