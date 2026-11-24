@@ -1503,10 +1503,13 @@ private fun SettingsCard(
  */
 @Composable
 private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, onApply: (String) -> Unit) {
-    var presets by remember { mutableStateOf(runCatching { db.listPresets(source) }.getOrElse { emptyList() }) }
+    // Same rule as the conversation browser (#973): a failed load is said, not shown
+    // as "no presets"; failures use fixed copy, never the exception's text.
+    val initialPresets = remember { runCatching { db.listPresets(source) } }
+    var presets by remember { mutableStateOf(initialPresets.getOrElse { emptyList() }) }
     var saving by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
-    var presetError by remember { mutableStateOf<String?>(null) }
+    var presetErrors by remember { mutableStateOf(PresetErrorState(loadFailed = initialPresets.isFailure)) }
 
     Spacer(Modifier.height(4.dp))
     Row(
@@ -1524,10 +1527,15 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
                     ) { Text(p.name, color = KalivTheme.colors.TextHigh, fontSize = 12.sp) }
                     TextButton(
                         onClick = {
-                            runCatching {
-                                db.deletePreset(p.id)
-                                presets = db.listPresets(source)
-                            }.onFailure { presetError = "Kunne ikke slette: ${it.message}" }
+                            val outcome = mutatePresetsThenReload(
+                                PresetStoreOperation.DELETE,
+                                mutate = { db.deletePreset(p.id) },
+                                reload = { db.listPresets(source) },
+                            )
+                            // Deleted but not reloaded: the row is gone from the store, so it
+                            // leaves the list too; the LOAD error says the rest is unconfirmed.
+                            presets = outcome.presets ?: if (outcome.mutated) presets.filterNot { it.id == p.id } else presets
+                            presetErrors = presetErrors.afterMutation(outcome)
                         },
                         contentPadding = PaddingValues(start = 4.dp, end = 12.dp),
                     ) { Text("✕", color = KalivTheme.colors.TextMuted, fontSize = 11.sp) }
@@ -1537,7 +1545,7 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
         }
         TextButton(
             enabled = currentPrompt.isNotBlank(),
-            onClick = { saving = !saving; presetError = null },
+            onClick = { saving = !saving; presetErrors = presetErrors.afterFormToggle() },
             contentPadding = PaddingValues(horizontal = 8.dp),
         ) {
             Text(
@@ -1560,16 +1568,21 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
             TextButton(
                 enabled = newName.isNotBlank(),
                 onClick = {
-                    runCatching {
-                        db.savePreset(source, newName.trim(), currentPrompt)
-                        presets = db.listPresets(source)
-                        newName = ""; saving = false
-                    }.onFailure { presetError = "Kunne ikke gemme: ${it.message}" }
+                    val outcome = mutatePresetsThenReload(
+                        PresetStoreOperation.SAVE,
+                        mutate = { db.savePreset(source, newName.trim(), currentPrompt) },
+                        reload = { db.listPresets(source) },
+                    )
+                    outcome.presets?.let { presets = it }
+                    presetErrors = presetErrors.afterMutation(outcome)
+                    // Saved is saved, whether or not the list could be read back: the form
+                    // closes, so a second press cannot insert the same preset again.
+                    if (outcome.mutated) { newName = ""; saving = false }
                 },
             ) { Text("Gem", color = if (newName.isNotBlank()) KalivTheme.colors.Signal else KalivTheme.colors.TextMuted, fontWeight = FontWeight.Bold) }
         }
     }
-    presetError?.let { Text(it, color = KalivTheme.colors.Danger, fontSize = 11.sp) }
+    presetErrors.messages.forEach { Text(it, color = KalivTheme.colors.Danger, fontSize = 11.sp) }
 }
 
 /**
