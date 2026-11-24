@@ -1510,7 +1510,7 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
     var saving by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     var presetError by remember {
-        mutableStateOf(if (initialPresets.isFailure) presentPresetStoreError(PresetStoreOperation.LOAD) else null)
+        mutableStateOf(if (initialPresets.isFailure) PresetStoreOperation.LOAD else null)
     }
 
     Spacer(Modifier.height(4.dp))
@@ -1529,11 +1529,15 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
                     ) { Text(p.name, color = KalivTheme.colors.TextHigh, fontSize = 12.sp) }
                     TextButton(
                         onClick = {
-                            runCatching {
-                                db.deletePreset(p.id)
-                                presets = db.listPresets(source)
-                                presetError = null
-                            }.onFailure { presetError = presentPresetStoreError(PresetStoreOperation.DELETE) }
+                            val outcome = mutatePresetsThenReload(
+                                PresetStoreOperation.DELETE,
+                                mutate = { db.deletePreset(p.id) },
+                                reload = { db.listPresets(source) },
+                            )
+                            // Deleted but not reloaded: the row is gone from the store, so it
+                            // leaves the list too; the LOAD error says the rest is unconfirmed.
+                            presets = outcome.presets ?: if (outcome.mutated) presets.filterNot { it.id == p.id } else presets
+                            presetError = outcome.error
                         },
                         contentPadding = PaddingValues(start = 4.dp, end = 12.dp),
                     ) { Text("✕", color = KalivTheme.colors.TextMuted, fontSize = 11.sp) }
@@ -1543,7 +1547,7 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
         }
         TextButton(
             enabled = currentPrompt.isNotBlank(),
-            onClick = { saving = !saving; presetError = null },
+            onClick = { saving = !saving; presetError = presetErrorAfterFormToggle(presetError) },
             contentPadding = PaddingValues(horizontal = 8.dp),
         ) {
             Text(
@@ -1566,17 +1570,21 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
             TextButton(
                 enabled = newName.isNotBlank(),
                 onClick = {
-                    runCatching {
-                        db.savePreset(source, newName.trim(), currentPrompt)
-                        presets = db.listPresets(source)
-                        presetError = null
-                        newName = ""; saving = false
-                    }.onFailure { presetError = presentPresetStoreError(PresetStoreOperation.SAVE) }
+                    val outcome = mutatePresetsThenReload(
+                        PresetStoreOperation.SAVE,
+                        mutate = { db.savePreset(source, newName.trim(), currentPrompt) },
+                        reload = { db.listPresets(source) },
+                    )
+                    outcome.presets?.let { presets = it }
+                    presetError = outcome.error
+                    // Saved is saved, whether or not the list could be read back: the form
+                    // closes, so a second press cannot insert the same preset again.
+                    if (outcome.mutated) { newName = ""; saving = false }
                 },
             ) { Text("Gem", color = if (newName.isNotBlank()) KalivTheme.colors.Signal else KalivTheme.colors.TextMuted, fontWeight = FontWeight.Bold) }
         }
     }
-    presetError?.let { Text(it, color = KalivTheme.colors.Danger, fontSize = 11.sp) }
+    presetError?.let { Text(presentPresetStoreError(it), color = KalivTheme.colors.Danger, fontSize = 11.sp) }
 }
 
 /**
