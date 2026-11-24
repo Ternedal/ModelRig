@@ -79,7 +79,78 @@ _CONTRACT_FILES = (
 )
 
 _CONTRACT_SHARD_ENV = "MODELRIG_STAGE_B_CONTRACT_SHARD"
-_REQUIRED_SHARD_COUNT = 3
+_REQUIRED_SHARD_COUNT = 4
+
+# Measured wall seconds per contract (#1682): exact-head run 44609234933 on main
+# `ef0473d`, 20/11/2026, two contracts in flight per hosted shard. Equal file
+# counts were not equal work -- the strided partition gave 158 / 81 / 116 min of
+# shard wall time, because the late contracts rebuild deeper provenance. These
+# costs decide membership (longest first onto the least-loaded shard). With four
+# hosted shards (the chain's critical path was downstream, so one more runner
+# buys ~30 min of wall time) they carry ~167 / 176 / 176 / 172 CPU-minutes,
+# i.e. under 90 min of wall each with two in flight. Refresh from the
+# "PASS: <file> (<s>s)" lines of a green run when it drifts; the coverage gate
+# refuses a table that does not name exactly the contracts above, and a
+# partition more than 15 % apart.
+_CONTRACT_COST_SECONDS = {
+    "rsi_pilot_exact_task_release_transaction_contract_base.py": 1183,
+    "rsi_pilot_exact_task_release_recovery_stage_b_driver.py": 610,
+    "rsi_pilot_exact_task_post_release_attestation_contract.py": 2496,
+    "rsi_pilot_exact_task_deploy_readiness_evaluation_contract.py": 1187,
+    "rsi_pilot_exact_task_staging_deployment_plan_contract.py": 1029,
+    "rsi_pilot_exact_task_staging_deployment_state_observation_contract.py": 818,
+    "rsi_pilot_exact_task_staging_deployment_authorization_contract.py": 1150,
+    "rsi_pilot_exact_task_staging_deployment_transaction_stage_b_driver.py": 603,
+    "rsi_pilot_exact_task_staging_deployment_recovery_stage_b_driver.py": 790,
+    "rsi_pilot_exact_task_post_staging_deployment_attestation_contract.py": 2685,
+    "rsi_pilot_exact_task_staging_deployment_status_plan_contract.py": 1020,
+    "rsi_pilot_exact_task_staging_deployment_status_state_observation_contract.py": 1342,
+    "rsi_pilot_exact_task_staging_deployment_status_authorization_contract.py": 1892,
+    "rsi_pilot_exact_task_staging_deployment_status_transaction_contract.py": 1020,
+    "rsi_pilot_exact_task_staging_deployment_status_recovery_stage_b_driver.py": 1343,
+    "rsi_pilot_exact_task_post_staging_deployment_status_attestation_contract.py": 2630,
+    "rsi_pilot_exact_task_staging_runtime_verification_contract.py": 1013,
+    "rsi_pilot_exact_task_staging_runtime_build_identity_contract.py": 1335,
+    "rsi_pilot_exact_task_staging_success_status_plan_contract.py": 1847,
+    "rsi_pilot_exact_task_staging_success_status_state_observation_contract.py": 1008,
+    "rsi_pilot_exact_task_staging_success_status_authorization_contract.py": 1343,
+    "rsi_pilot_exact_task_staging_success_status_transaction_contract.py": 1875,
+    "rsi_pilot_exact_task_staging_success_status_recovery_contract.py": 1434,
+    "rsi_pilot_exact_task_post_staging_success_status_attestation_contract.py": 1348,
+    "rsi_pilot_exact_task_production_activation_readiness_contract.py": 1854,
+    "rsi_pilot_exact_task_production_activation_authorization_contract.py": 1030,
+    "rsi_pilot_exact_task_production_activation_transaction_stage_b_driver.py": 1347,
+    "rsi_pilot_exact_task_production_activation_recovery_stage_b_driver.py": 1097,
+    "rsi_pilot_exact_task_post_production_activation_attestation_stage_b_driver.py": 593,
+    "rsi_pilot_exact_task_product_pilot_start_requirements_contract.py": 1338,
+    "rsi_pilot_exact_task_product_pilot_tail_stage_b_driver.py": 1092,
+}
+
+
+def _shard_assignment(total: int = _REQUIRED_SHARD_COUNT) -> dict[int, tuple[str, ...]]:
+    """Deterministic cost-weighted partition: every contract in exactly one shard.
+
+    Longest-processing-time-first onto the least-loaded shard; ties broken by
+    file name, then lowest shard index. Within a shard the original
+    _CONTRACT_FILES order is kept, so the deep-provenance contracts still start
+    after the shallow ones they build on.
+    """
+    missing = set(_CONTRACT_FILES) - set(_CONTRACT_COST_SECONDS)
+    extra = set(_CONTRACT_COST_SECONDS) - set(_CONTRACT_FILES)
+    if missing or extra:
+        raise AssertionError(
+            f"Stage-B contract cost table drifted: missing={sorted(missing)} extra={sorted(extra)}"
+        )
+    load = {index: 0 for index in range(1, total + 1)}
+    members: dict[int, set[str]] = {index: set() for index in range(1, total + 1)}
+    for filename in sorted(_CONTRACT_FILES, key=lambda f: (-_CONTRACT_COST_SECONDS[f], f)):
+        target = min(load, key=lambda index: (load[index], index))
+        members[target].add(filename)
+        load[target] += _CONTRACT_COST_SECONDS[filename]
+    return {
+        index: tuple(f for f in _CONTRACT_FILES if f in members[index])
+        for index in range(1, total + 1)
+    }
 
 
 def _selected_contract_files() -> tuple[str, ...]:
@@ -92,13 +163,13 @@ def _selected_contract_files() -> tuple[str, ...]:
         total = int(total_text)
     except (ValueError, TypeError) as exc:
         raise AssertionError(
-            f"invalid Stage-B contract shard {raw!r}; expected 1/3, 2/3, or 3/3"
+            f"invalid Stage-B contract shard {raw!r}; expected 1/4 … 4/4"
         ) from exc
     if total != _REQUIRED_SHARD_COUNT or not 1 <= index <= total:
         raise AssertionError(
-            f"invalid Stage-B contract shard {raw!r}; expected 1/3, 2/3, or 3/3"
+            f"invalid Stage-B contract shard {raw!r}; expected 1/4 … 4/4"
         )
-    selected = _CONTRACT_FILES[index - 1 :: total]
+    selected = _shard_assignment(total)[index]
     if not selected:
         raise AssertionError(f"Stage-B contract shard {raw!r} selected no contracts")
     return selected
