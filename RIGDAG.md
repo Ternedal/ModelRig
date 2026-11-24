@@ -44,7 +44,7 @@ fast-forwardet ind i main, og main er siden gået 35+ commits videre. Checkout
 for:
 
 ```powershell
-cd C:\Users\admin\Desktop\ModelRig-git
+cd C:\Users\an001\Desktop\ModelRig-git
 git fetch origin --tags
 git checkout <tag>             # fx det seneste, se VERSION eller GitHub releases
 git rev-parse --short HEAD     # skriv den ned; beviserne bindes til den
@@ -85,7 +85,7 @@ Om flagene:
 ### 4. Hent et token — nyt vindue
 
 ```powershell
-cd C:\Users\admin\Desktop\ModelRig-git
+cd C:\Users\an001\Desktop\ModelRig-git
 $env:PYTHONDONTWRITEBYTECODE = "1"
 $env:KALIV_SCHEDULER_APPROVAL_SECRET = "kaliv-pilot-approval-secret-2026-07-26-abcdef"
 $c = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8080/api/v1/pair/start"

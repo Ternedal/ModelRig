@@ -66,7 +66,7 @@ kræver source 2.0.20 gendannet før en ny kampagne.
 ## Release-checkout
 
 ```powershell
-cd C:\Users\admin\Desktop\ModelRig-git
+cd C:\Users\an001\Desktop\ModelRig-git
 git fetch --tags origin
 git switch --detach v2.0.21
 if ((git rev-parse HEAD).Trim().Length -ne 40) { throw "Ugyldig release-SHA" }
