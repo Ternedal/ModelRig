@@ -334,6 +334,27 @@ jobs:
           key: robolectric-android-all-${{ hashFiles('android/app/build.gradle.kts') }}
           restore-keys: |
             robolectric-android-all-
+      # Everything else the build needs is resolved by Gradle itself, and nothing kept it between
+      # runs: each run fetched the whole dependency set from Maven Central and Google. On 23 Nov
+      # 2026 #2491 failed in testDebugUnitTest with "Could not GET" on
+      # org.robolectric:nativeruntime-dist-compat-1.0.19.jar while the cache above was a hit -
+      # that jar is a Gradle dependency, not one of Robolectric's own downloads. Keeping Gradle's
+      # module cache and the wrapper distribution removes those fetches from every run whose
+      # build files are unchanged. A changed build file starts from the newest older cache and
+      # downloads only what is missing, so this narrows the exposure; it does not remove it.
+      # The lock and gc files are per-process state and are left out.
+      - name: Cache Gradle's resolved dependencies
+        if: steps.scope.outputs.relevant == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper/dists
+            !~/.gradle/caches/modules-2/modules-2.lock
+            !~/.gradle/caches/modules-2/gc.properties
+          key: gradle-android-deps-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle.properties', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-android-deps-
       - name: Compile Android Kotlin and run unit tests
         if: steps.scope.outputs.relevant == 'true'
         working-directory: android
