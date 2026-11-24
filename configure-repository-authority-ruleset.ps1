@@ -199,14 +199,20 @@ if (-not $Apply) {
 $tempPath = Join-Path ([IO.Path]::GetTempPath()) ("modelrig-repository-ruleset-" + [Guid]::NewGuid().ToString("N") + ".json")
 try {
     $rulesetJson | Set-Content -LiteralPath $tempPath -Encoding utf8NoBOM
-    @(& gh api `
+    $response = @(& gh api `
         --method $method `
         -H "Accept: application/vnd.github+json" `
         -H "X-GitHub-Api-Version: 2026-03-10" `
         $apiPath `
-        --input $tempPath 2>&1) | Out-Null
+        --input $tempPath 2>&1)
     if ($LASTEXITCODE -ne 0) {
-        throw "GitHub ruleset write failed. The authenticated gh identity must have repository Administration: write."
+        # Show GitHub's own answer. 19/11: the generic permission text hid a
+        # 422 "Invalid rule 'merge_queue'" (merge queue is organization-only;
+        # this repository is user-owned) and cost a second diagnostic run.
+        $body = ($response | ForEach-Object { "$_" }) -join [Environment]::NewLine
+        throw ("GitHub ruleset write failed ($method $apiPath). Response:" + [Environment]::NewLine + $body + [Environment]::NewLine +
+            "If the response is a 403, the authenticated gh identity needs repository Administration: write. " +
+            "If it is 422 'Invalid rule ''merge_queue''', GitHub offers merge queues only in organization-owned repositories.")
     }
 }
 finally {

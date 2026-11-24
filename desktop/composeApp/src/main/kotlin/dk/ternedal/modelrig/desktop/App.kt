@@ -357,6 +357,8 @@ fun App() {
                         lastSource = ChatResult.Source.LOCAL
                         when (turn.status) {
                             "confirmation_required" -> {
+                                // #966: the bubble carries the same source truth as the
+                                // toolbar -- a Tools reply is the rig's, visibly.
                                 // Media the turn queued before the card is rendering regardless of
                                 // the decision, and the card lives in memory only: show the bubbles
                                 // and save the references now. The card carries none.
@@ -364,6 +366,7 @@ fun App() {
                                 messages[assistantIdxT] = messages[assistantIdxT].copy(
                                     text = "⚙ Kaliv foreslår: ${turn.summary.ifBlank { turn.tool }}",
                                     streaming = false, mediaJobs = queued,
+                                    source = toolsReplySource(),
                                 )
                                 if (queued.isNotEmpty()) withContext(Dispatchers.IO) {
                                     db.addMessage(cid, "assistant", DesktopMediaContract.QUEUED_BEFORE_CARD_TEXT,
@@ -382,6 +385,7 @@ fun App() {
                                 messages[assistantIdxT] = messages[assistantIdxT].copy(
                                     text = ans, streaming = false, mediaJobs = jobs,
                                     mediaNotice = turn.mediaRefusalNotice(),
+                                    source = toolsReplySource(),
                                 )
                                 withContext(Dispatchers.IO) {
                                     db.addMessage(cid, "assistant", ans, DesktopMediaContract.encodeRefs(jobs))
@@ -958,7 +962,8 @@ fun App() {
                             val between = DesktopMediaContract.across(pendingCardJobs, next.mediaJobRefs())
                             pendingCardJobs = emptyList()
                             if (between.isNotEmpty()) {
-                                messages.add(UiMessage("assistant", DesktopMediaContract.QUEUED_BEFORE_CARD_TEXT, mediaJobs = between))
+                                messages.add(UiMessage("assistant", DesktopMediaContract.QUEUED_BEFORE_CARD_TEXT, mediaJobs = between,
+                                    source = toolsReplySource()))
                                 val cidNow = convId
                                 if (cidNow != null) withContext(Dispatchers.IO) {
                                     db.addMessage(cidNow, "assistant", DesktopMediaContract.QUEUED_BEFORE_CARD_TEXT,
@@ -976,7 +981,8 @@ fun App() {
                             // and what it queued before the card is already rendering.
                             val jobs = DesktopMediaContract.across(pendingCardJobs, next.mediaJobRefs())
                             pendingCardJobs = emptyList()
-                            messages.add(UiMessage("assistant", text, mediaJobs = jobs, mediaNotice = next.mediaRefusalNotice()))
+                            messages.add(UiMessage("assistant", text, mediaJobs = jobs, mediaNotice = next.mediaRefusalNotice(),
+                                source = toolsReplySource()))
                             val cid = convId
                             if (cid != null) withContext(Dispatchers.IO) {
                                 db.addMessage(cid, "assistant", text, DesktopMediaContract.encodeRefs(jobs))
