@@ -63,12 +63,41 @@ internal fun mutatePresetsThenReload(
 }
 
 /**
- * Opening or closing the save form dismisses a failed save or delete -- the user
- * has moved on from that attempt. It never dismisses a failed load: the list on
- * screen is still not the store's, and only a reload that succeeds changes that.
+ * What the preset row has to say about its store, as two independent facts.
+ *
+ * [loadFailed] is about the list on screen: it is not the store's, and it stays
+ * so until a reload succeeds. [mutation] is about the last save or delete the
+ * user attempted. One nullable field for both let a failed save replace a
+ * failed load, and closing the form then cleared the only thing left -- the row
+ * went back to looking like a store with no presets in it.
  */
-internal fun presetErrorAfterFormToggle(current: PresetStoreOperation?): PresetStoreOperation? =
-    current.takeIf { it == PresetStoreOperation.LOAD }
+internal data class PresetErrorState(
+    val loadFailed: Boolean = false,
+    val mutation: PresetStoreOperation? = null,
+) {
+    init {
+        require(mutation != PresetStoreOperation.LOAD) { "a failed load is loadFailed, not a mutation" }
+    }
+
+    /**
+     * A mutation that failed says so and leaves the load state alone: nothing was
+     * read. A mutation that succeeded was followed by a reload, and that reload
+     * is the newest word on whether the list is the store's.
+     */
+    fun afterMutation(outcome: PresetMutationOutcome): PresetErrorState =
+        if (!outcome.mutated) copy(mutation = outcome.error)
+        else PresetErrorState(loadFailed = outcome.presets == null, mutation = null)
+
+    /** Opening or closing the save form dismisses the last attempt, never the load state. */
+    fun afterFormToggle(): PresetErrorState = copy(mutation = null)
+
+    /** The sentences to show, the standing condition first. */
+    val messages: List<String>
+        get() = listOfNotNull(
+            if (loadFailed) presentPresetStoreError(PresetStoreOperation.LOAD) else null,
+            mutation?.let(::presentPresetStoreError),
+        )
+}
 
 /** The browser's list state: loaded (possibly empty) or failed -- never an empty list standing in for a failure. */
 sealed class ConversationListState {
