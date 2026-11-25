@@ -85,6 +85,14 @@ Køen kræver en ruleset (ikke klassisk protection), og den rapporterer kun chec
 | Q8 | Venter køen på Stage B? | Ja: `stage-b-verdict` er required i kø-tilstand (D3) | Codex P1 på rev. 2; Claude rev. 3 |
 | Q7 | D7's håndhævelse | Defineret her, leveret i en separat PR (trin 4) med egen ejer og negative tests; indtil da gælder dagens aftale-baserede freeze | ChatGPT-review 18/11; Claude rev. 2 |
 
+## 8. Hvad dokumentet bevidst ikke gør
+
+- Det ændrer ikke, *hvad* der kvalificerer en release (gates 1–10, ADR-SYS-001) eller hvad evidens binder til (ADR-SYS-002). Det ændrer kun, hvordan et kvalificeret commit bliver `main`.
+- Det rører ikke søsterrepoernes beskyttelse.
+- Det lover ikke, at en freeze er maskinelt håndhævet i køen, før D7's implementerings-PR er landet (Q7).
+- Det lover ikke kortere Stage B. Kæden er stadig ~3,5 t for kode; køen sørger bare for, at den betales én gang pr. landing.
+- Det fjerner ikke menneskelig accept: ACCEPT i tråden er stadig kravet for at sætte en PR i køen (D6), og kun Anders eller den session, han har givet landing til, gør det.
+
 ## 9. Trin 3 afvist 19/11: merge queue er organisationsejet — beslutning udestår
 
 **Observeret (riggen, PowerShell 7.7, `gh` som ejer med `repo`-scope, main = `ef0473d`):** `verify-repository-authority.ps1` PASS (klassisk). Dry-run PASS: offline gate 10 på det versionerede ruleset, 16 kontekster, `bypass_actors: []`, `merge_queue` MERGE/1/1/1/ALLGREEN/360. `-Apply` → scriptets generiske fejl (det skjulte API-svaret; rettes i #2446). Samme payload sendt direkte: `422 Validation Failed`, `errors: ["Invalid rule 'merge_queue': "]`. Intet ændret på GitHub.
@@ -103,11 +111,3 @@ Køen kræver en ruleset (ikke klassisk protection), og den rapporterer kun chec
 **Claudes anbefaling:** B nu, A som beslutning efter V1-tag. Ikke flytte et repo midt i en kampagne, hvis evidens og updater er bundet til URL'er.
 
 **Fravalgt:** ruleset med `required_status_checks` uden *strict* og uden kø. Det ville fjerne `behind`-sløjfen, men lande merge-commits, ingen CI har set — præcis det, evaluatoren afviser ("hverken strict eller kø"), og det, ADR-SYS-002 D4 kun kan *konstatere*, ikke forhindre.
-
-## 8. Hvad dokumentet bevidst ikke gør
-
-- Det ændrer ikke, *hvad* der kvalificerer en release (gates 1–10, ADR-SYS-001) eller hvad evidens binder til (ADR-SYS-002). Det ændrer kun, hvordan et kvalificeret commit bliver `main`.
-- Det rører ikke søsterrepoernes beskyttelse.
-- Det lover ikke, at en freeze er maskinelt håndhævet i køen, før D7's implementerings-PR er landet (Q7).
-- Det lover ikke kortere Stage B. Kæden er stadig ~3,5 t for kode; køen sørger bare for, at den betales én gang pr. landing.
-- Det fjerner ikke menneskelig accept: ACCEPT i tråden er stadig kravet for at sætte en PR i køen (D6), og kun Anders eller den session, han har givet landing til, gør det.

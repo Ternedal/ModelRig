@@ -31,6 +31,13 @@ updates:
     directory: /android
     schedule: { interval: weekly }
     open-pull-requests-limit: 3
+    groups:
+      # CameraX releases core, camera2, lifecycle and view as one version and they are
+      # declared as one in android/app/build.gradle.kts. #2487 moved only camera-lifecycle
+      # (1.4.2 -> 1.7.0), which would have left camera-view 1.4.2 on a newer core. One PR
+      # moves all four; it still needs the phone camera tried before it lands.
+      camerax:
+        patterns: ["androidx.camera:*"]
   - package-ecosystem: gradle
     directory: /desktop
     schedule: { interval: weekly }
