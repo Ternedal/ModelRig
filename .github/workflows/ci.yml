@@ -390,6 +390,24 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      # Same exposure android-compile had before #2493: every run resolved the whole dependency
+      # set from Maven Central, Google and the JetBrains Compose repository, so one failed GET
+      # reds a job that has nothing to do with the change. Keep Gradle's module cache and the
+      # wrapper distribution between runs whose build files are unchanged. A changed build file
+      # starts from the newest older cache and downloads only what is missing: the exposure is
+      # narrowed, not removed. Its own key - the desktop and Android dependency sets differ.
+      - name: Cache Gradle's resolved dependencies
+        if: steps.scope.outputs.relevant == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper/dists
+            !~/.gradle/caches/modules-2/modules-2.lock
+            !~/.gradle/caches/modules-2/gc.properties
+          key: gradle-desktop-deps-${{ hashFiles('desktop/**/*.gradle.kts', 'desktop/gradle.properties', 'desktop/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-desktop-deps-
       - name: Compile desktop Kotlin and run unit tests
         if: steps.scope.outputs.relevant == 'true'
         working-directory: desktop
