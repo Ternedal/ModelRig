@@ -322,12 +322,35 @@ def evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | No
     could leave half a secret that no longer matches."""
     checks = _evaluate(env, probes, expect_version=expect_version, expect_sha=expect_sha,
                        planner_model=planner_model, require_video=require_video)
-    return [{"status": item["status"], "check": item["check"],
+    return [{"status": item["status"], "check": item["check"] if fixed_id(item["check"]) else UNKNOWN_CHECK,
              "detail": scrub(item["detail"], env)[:MAX_TEXT], "fix": scrub(item["fix"], env)[:MAX_TEXT]} for item in checks]
 
 
 MAX_TEXT = 600
-CHECK_ID = re.compile(r"[^a-z0-9_.-]")
+# The check ids are a closed set written in this file. Nothing a profile file, the work-area
+# check or the env file says is ever part of one: an id is machine-readable and is not masked, so
+# it must not be able to carry a value (ChatGPT on #2503). A profile id or a file name belongs in
+# `detail`. The one variable part is the device, and only as cuda:N from the supervisor's rule.
+CHECK_IDS = frozenset({
+    "KALIV_TOOLS_ENABLED", "KALIV_MEDIA_JOBS_API", "KALIV_IMAGE_TOOL_ENABLED", "video", "KALIV_MEDIA_INTERNAL_SECRET",
+    "KALIV_MEDIA_EXECUTOR", "KALIV_MEDIA_EXECUTOR_DEVICES", "KALIV_MEDIA_EXECUTOR_PYTHON", "KALIV_MEDIA_EXECUTOR_APP_DIR",
+    "executor-kilde", "executor-kilde: version", "executor-kilde: commit", "executor-kilde: ændringer", "tjekkets eget checkout",
+    "medie-python: torch", "profiler", "profil: enhed", "profil: skabelon", "billedprofil",
+    "KALIV_IMAGE_TOOL_PROFILE", "KALIV_VIDEO_TOOL_PROFILE", "video: text_to_video", "video: image_to_video",
+    "KALIV_COMFY_PYTHON", "KALIV_COMFY_MAIN", "KALIV_COMFY_DIR", "KALIV_COMFY_TEMPLATE_DIR", "KALIV_COMFY_HOST_MEMORY_GIB",
+    "arbejdsområde", "arbejdsområde, jobdatabase og medievolumen", "nvidia-smi", "ollama", "ollama: model", "appliance",
+    "miljø uden for env-filen",
+})
+# The parts of app.media_preflight's check names that are its own words (before any ":").
+WORK_AREA_PARTS = ("work_area", "job_db_folder_in_work_area", "private", "publication_volume", "separate_disks",
+                   "free_space", "same_account")
+CHECK_IDS |= {f"arbejdsområde: {part}" for part in (*WORK_AREA_PARTS, "andet")}
+DEVICE_CHECK = re.compile(r"^(?:executor cuda:(?:0|[1-9][0-9]?): (?:profiler|video|egen startkontrol)|gpu cuda:(?:0|[1-9][0-9]?))$")
+UNKNOWN_CHECK = "ukendt kontrol"
+
+
+def fixed_id(check: str) -> bool:
+    return check in CHECK_IDS or bool(DEVICE_CHECK.match(check))
 
 
 def readiness(checks: list[dict]) -> dict:
@@ -479,7 +502,7 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
         report.add(OK, "profiler", ", ".join(f"{pid} ({p.modality}, {p.qualification})" for pid, p in sorted(enabled.items())))
         for pid, profile in sorted(enabled.items()):
             if devices and not set(profile.resources.devices) & set(devices):
-                report.add(FAIL, f"profil {pid}: enhed", f"kører på {','.join(profile.resources.devices)}, men executorerne er {','.join(devices)}",
+                report.add(FAIL, "profil: enhed", f"{pid} kører på {','.join(profile.resources.devices)}, men executorerne er {','.join(devices)}",
                            "ingen executor tager dens job: ret profilens devices eller KALIV_MEDIA_EXECUTOR_DEVICES")
         for device in devices:
             mine = sorted(pid for pid, p in enabled.items() if device in p.resources.devices)
@@ -529,12 +552,12 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
             path = os.path.join(template_dir, options.template_name)
             digest = probes.sha256(path) if probes.is_file(path) else None
             if digest is None:
-                report.add(FAIL, f"profil {pid}: skabelon", f"{options.template_name} mangler i {template_dir}", "læg skabelonen dér")
+                report.add(FAIL, "profil: skabelon", f"{pid}: {options.template_name} mangler i {template_dir}", "læg skabelonen dér")
             elif digest != options.template_sha256:
-                report.add(FAIL, f"profil {pid}: skabelon", f"{options.template_name} har sha256 {digest[:12]}, profilen pinner {options.template_sha256[:12]}",
+                report.add(FAIL, "profil: skabelon", f"{pid}: {options.template_name} har sha256 {digest[:12]}, profilen pinner {options.template_sha256[:12]}",
                            "skabelon og profil skal stamme fra samme opsætning")
             else:
-                report.add(OK, f"profil {pid}: skabelon", options.template_name)
+                report.add(OK, "profil: skabelon", f"{pid}: {options.template_name}")
         ram = probes.total_ram_gib()
         limit = get("KALIV_COMFY_HOST_MEMORY_GIB")
         if limit and ram:
@@ -554,8 +577,10 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
         failed = [c for c in area.get("checks", []) if not c.get("ok")]
         if failed:
             for item in failed:
-                # The check's name is an identifier of app.media_preflight; its detail is free text.
-                report.add(FAIL, "arbejdsområde: " + CHECK_ID.sub("_", str(item.get("check")).lower())[:40],
+                # Of the check's name only its own word is used, and only if it is one this file
+                # knows; what follows a ":" there is a file name or a pid. Its detail is free text.
+                part = str(item.get("check")).split(":", 1)[0]
+                report.add(FAIL, "arbejdsområde: " + (part if part in WORK_AREA_PARTS else "andet"),
                            controlled(str(item.get("detail")), (), env, "ikke opfyldt"), "se docs/MEDIA_WORK_AREA.md og docs/MEDIA_VOLUME.md")
         else:
             report.add(OK, "arbejdsområde, jobdatabase og medievolumen", f"{len(area.get('checks', []))} kontroller bestået")

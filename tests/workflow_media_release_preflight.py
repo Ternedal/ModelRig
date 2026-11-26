@@ -166,7 +166,7 @@ check("a correctly configured rig has no FAIL and no WARN",
       not found[preflight.FAIL] and not found[preflight.WARN], found[preflight.FAIL] + found[preflight.WARN])
 names = [item["check"] for item in found[preflight.OK]]
 for expected in ("KALIV_MEDIA_EXECUTOR", "executor-kilde", "medie-python: torch", "profiler", "video: text_to_video",
-                 "video: image_to_video", "profil ltx-t2v: skabelon", "KALIV_COMFY_HOST_MEMORY_GIB",
+                 "video: image_to_video", "profil: skabelon", "KALIV_COMFY_HOST_MEMORY_GIB",
                  "arbejdsområde, jobdatabase og medievolumen", "gpu cuda:1", "ollama", "appliance"):
     check(f"the pass names {expected}", expected in names, names)
 check("without --expect-* the source is reported, not judged",
@@ -245,7 +245,8 @@ item = only_fail(rig, "profiler")
 check("candidate profiles without the allow switch are refused, with the switch named",
       "ikke rig-kvalificeret" in item["detail"] and "KALIV_MEDIA_ALLOW_CANDIDATE_PROFILES" in item["detail"], item)
 rig = Rig(); rig.write_profile(image_profile(profile_id="realvis", resources={"min_usable_gib": 8, "reserve_gib": 1, "devices": ["cuda:0"], "cpu_offload": False}))
-check("a profile on a card no executor serves is a FAIL", "cuda:0" in only_fail(rig, "profil realvis: enhed")["detail"])
+check("a profile on a card no executor serves is a FAIL", "cuda:0" in only_fail(rig, "profil: enhed")["detail"] and
+      only_fail(rig, "profil: enhed")["detail"].startswith("realvis "))
 rig = Rig(); rig.env["KALIV_IMAGE_TOOL_PROFILE"] = "ltx-t2v"
 only_fail(rig, "KALIV_IMAGE_TOOL_PROFILE")
 check("an image-tool default that is a video profile is a FAIL", True)
@@ -265,9 +266,10 @@ check("a task nobody serves is a WARN, not a FAIL",
 
 # 6. ComfyUI: paths, and templates pinned by the profile.
 rig = Rig(); (rig.templates / "ltx-t2v.json").write_text("{\"edited\": true}")
-check("an edited template no longer matches its profile's pin", "sha256" in only_fail(rig, "profil ltx-t2v: skabelon")["detail"])
+check("an edited template no longer matches its profile's pin", "sha256" in only_fail(rig, "profil: skabelon")["detail"] and
+      only_fail(rig, "profil: skabelon")["detail"].startswith("ltx-t2v: "))
 rig = Rig(); (rig.templates / "ltx-i2v.json").unlink()
-only_fail(rig, "profil ltx-i2v: skabelon")
+check("...the profile is named in the detail, not in the id", only_fail(rig, "profil: skabelon")["detail"].startswith("ltx-i2v: "))
 check("a missing template is a FAIL", True)
 rig = Rig(); rig.env["KALIV_COMFY_MAIN"] = str(rig.tmp / "nope.py")
 only_fail(rig, "KALIV_COMFY_MAIN")
@@ -288,9 +290,10 @@ check("a failed work-area check is named by its id; its free text is not repeate
       item["detail"] == "ikke opfyldt" and "media_volume_marker_missing" not in json.dumps(item), item)
 rig = Rig(); rig.area = {"ok": False, "checks": [{"check": "private:Media Jobs.db\x1b[2J", "ok": False,
                                                     "detail": f"KALIV_MEDIA_JOB_DB is not private ({SECRET})"}]}
-item = only_fail(rig, "arbejdsområde: private_media_jobs.db")
-check("...its id is reduced to an identifier, and of its text only the key name is kept",
-      item["check"] == "arbejdsområde: private_media_jobs.db__2j" and item["detail"] == "ikke opfyldt; nævner: KALIV_MEDIA_JOB_DB", item)
+item = only_fail(rig, "arbejdsområde: private")
+check("...of its name only the component's own word is used, and of its text only the key name",
+      item["check"] == "arbejdsområde: private" and item["detail"] == "ikke opfyldt; nævner: KALIV_MEDIA_JOB_DB", item)
+
 rig = Rig(); rig.area = RuntimeError("boom")
 only_fail(rig, "arbejdsområde")
 check("a work-area preflight that raises is a FAIL, not a crash", True)
@@ -386,6 +389,48 @@ check("the media Python is started with -B (it would write __pycache__ beside to
       len(pythons) == 1 and pythons[0][1] == "-B", pythons)
 check("the start check is given the supervisor's interpreter and folder, not this script's",
       rig.start_args == (rig.env["KALIV_MEDIA_EXECUTOR_PYTHON"], rig.env["KALIV_MEDIA_EXECUTOR_APP_DIR"]), rig.start_args)
+
+# Check ids are a closed set (ChatGPT #2503, third review): a value can not ride in one.
+PLAIN = "zq9" * 12  # a value made only of characters the old identifier filter kept
+rig = Rig()
+rig.env["KALIV_MEDIA_INTERNAL_SECRET"] = PLAIN
+rig.area = {"ok": False, "checks": [{"check": PLAIN, "ok": False, "detail": "x"},
+                                    {"check": f"private:{PLAIN}", "ok": False, "detail": "x"},
+                                    {"check": f"free_space:{PLAIN}", "ok": False, "detail": PLAIN}]}
+for extra in ((), ("--json",)):
+    code, out, err = run_main(rig, *extra)
+    check(f"a secret in a work-area check name reaches neither id nor text, and the FAILs still exit 1 ({'json' if extra else 'text'})",
+          code == 1 and PLAIN[:10] not in out + err, out[-400:])
+ids = [f["check"] for f in rig.statuses()[preflight.FAIL] if f["check"].startswith("arbejdsområde")]
+check("...the three become fixed ids: andet, private, free_space",
+      ids == ["arbejdsområde: andet", "arbejdsområde: private", "arbejdsområde: free_space"], ids)
+rig = Rig()
+document = json.loads((rig.profiles / "realvis.json").read_text())
+document["profile_id"] = "zq9profileidstandin"
+(rig.profiles / "realvis.json").unlink()
+rig.write_profile(document)
+rig.env["KALIV_MEDIA_PROFILES_ENABLED"] = "zq9profileidstandin,ltx-t2v,ltx-i2v"
+rig.env["KALIV_IMAGE_TOOL_PROFILE"] = "zq9profileidstandin"
+rig.env["KALIV_MEDIA_EXECUTOR_DEVICES"] = "cuda:0"
+found = rig.evaluate()
+check("a profile id is never part of a check id (it is in the detail)",
+      not any("zq9profileidstandin" in f["check"] for f in found) and any("zq9profileidstandin" in f["detail"] for f in found),
+      [f["check"] for f in found])
+seen_ids: set[str] = set()
+for scenario in (Rig(), rig):
+    for expect in ({}, {"expect_version": "2.0.21", "expect_sha": SHA}):
+        seen_ids |= {f["check"] for f in scenario.evaluate(**expect)}
+check("every id a report carries is one of the fixed ids", all(preflight.fixed_id(i) for i in seen_ids) and len(seen_ids) > 20, sorted(seen_ids))
+real = preflight._evaluate
+try:
+    preflight._evaluate = lambda env, probes, **kw: [{"status": preflight.FAIL, "check": f"profil {SECRET}: ny", "detail": "d", "fix": ""}]
+    found = preflight.evaluate(rig.env, rig.probes())
+finally:
+    preflight._evaluate = real
+check("...and a rule that ever builds an id from a value is reported under a fixed id, still as a FAIL",
+      found == [{"status": preflight.FAIL, "check": preflight.UNKNOWN_CHECK, "detail": "d", "fix": ""}], found)
+check("the fixed device ids take cuda:N only", preflight.fixed_id("gpu cuda:1") and preflight.fixed_id("executor cuda:12: video")
+      and not preflight.fixed_id("gpu cuda:1 " + SECRET) and not preflight.fixed_id("executor cuda:x: video"))
 
 # 9b. Review of #2503 (Codex): what the executor refuses must be a FAIL here, in its own words.
 rig = Rig()
