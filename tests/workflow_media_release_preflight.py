@@ -405,7 +405,11 @@ import subprocess  # noqa: E402
 
 rig = Rig()
 env_file = rig.tmp / "bare.env"
-env_file.write_text("".join(f"{k}={v}\n" for k, v in rig.env.items()), encoding="utf-8")
+# The file gets a throwaway filler where the internal secret goes: the fixture's stand-in value is
+# never written to disk (CodeQL #2503: clear-text storage).
+lines = [f"{k}={v}\n" for k, v in rig.env.items() if k != "KALIV_MEDIA_INTERNAL_SECRET"]
+lines.append("KALIV_MEDIA_INTERNAL_SECRET=" + "filler-" * 6 + "\n")
+env_file.write_text("".join(lines), encoding="utf-8")
 blocker = ("import sys, importlib.abc, runpy\n"
            "class B(importlib.abc.MetaPathFinder):\n"
            "    def find_spec(self, name, path, target=None):\n"
