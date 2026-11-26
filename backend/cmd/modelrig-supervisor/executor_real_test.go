@@ -103,8 +103,30 @@ func exitCode(e *executorChild) (int, int) {
 	return e.p.lastCode, e.p.runs
 }
 
+// withoutMediaEnvironment removes every media variable the test process itself
+// inherited, for the length of the test. A child gets the supervisor's
+// environment plus the env file, so on a machine set up for media development
+// (CUDA_DEVICE_ORDER exported, say) the executor would get past the rule this
+// test expects it to stop at. What the test shows must come from the file.
+func withoutMediaEnvironment(t *testing.T) {
+	t.Helper()
+	for _, kv := range os.Environ() {
+		key, value, _ := strings.Cut(kv, "=")
+		upper := strings.ToUpper(key)
+		if !strings.HasPrefix(upper, "KALIV_") && !strings.HasPrefix(upper, "CUDA_") &&
+			!strings.HasPrefix(upper, "HF_") && !strings.HasPrefix(upper, "TRANSFORMERS_") {
+			continue
+		}
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Setenv(key, value) })
+	}
+}
+
 func TestSupervisorStartsTheRealMediaExecutorFromAnEnvFile(t *testing.T) {
 	python := realPython(t)
+	withoutMediaEnvironment(t)
 	appDir, err := filepath.Abs(filepath.Join("..", "..", "..", "worker"))
 	if err != nil {
 		t.Fatal(err)
