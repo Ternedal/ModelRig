@@ -84,6 +84,8 @@ class Rig:
         self.appliance = {"version": "2.0.21"}
         self.area = {"ok": True, "checks": [{"check": "work_area", "ok": True, "detail": "ok"}]}
         self.ram = 64.0
+        self.start: object = None  # what the executor's own start check says: None, (kind, text) or an Exception
+        self.started: list[str] = []
         self.commands: list[list[str]] = []
 
     def write_profile(self, profile: dict) -> None:
@@ -119,8 +121,14 @@ class Rig:
                 raise self.area
             return self.area
 
+        def start(env, device):
+            self.started.append(device)
+            if isinstance(self.start, Exception):
+                raise self.start
+            return self.start
+
         return preflight.Probes(run=run, http_json=http, work_area=area, total_ram_gib=lambda: self.ram,
-                                secret_ok=lambda value: value == SECRET)
+                                secret_ok=lambda value: value == SECRET, executor_start=start)
 
     def evaluate(self, **kwargs) -> list[dict]:
         return preflight.evaluate(self.env, self.probes(), **kwargs)
@@ -258,9 +266,9 @@ for key in ("KALIV_TOOLS_ENABLED", "KALIV_MEDIA_JOBS_API", "KALIV_IMAGE_TOOL_ENA
     rig = Rig(); rig.env[key] = "0"
     only_fail(rig, key)
     check(f"{key}=0 is the one FAIL", True)
-rig = Rig(); rig.env["KALIV_MEDIA_VIDEO"] = "0"
+rig = Rig(); rig.env["KALIV_VIDEO_TOOL_ENABLED"] = "0"  # the chat tool only; the executor still starts
 found = rig.statuses()
-check("video switched off is one WARN and no video FAIL",
+check("the video tool switched off is one WARN and no FAIL",
       not found[preflight.FAIL] and [w["check"] for w in found[preflight.WARN]] == ["video"], found)
 rig = Rig(); rig.env["KALIV_MEDIA_INTERNAL_SECRET"] = "short"
 fail = only_fail(rig, "KALIV_MEDIA_INTERNAL_SECRET")
@@ -325,6 +333,102 @@ with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
 check("an env file the supervisor would refuse exits 2 and says which line", code == 2 and "linje 2" in err.getvalue())
 commands = [" ".join(c[:2]) for c in rig.commands]
 check("it runs only read-only commands", all(c.startswith(("git -C", "nvidia-smi", str(rig.python))) for c in commands), commands)
+
+# 9b. Review of #2503 (Codex): what the executor refuses must be a FAIL here, in its own words.
+rig = Rig()
+rig.statuses()
+check("the executor's own start check is asked once per configured device", rig.started == ["cuda:1"], rig.started)
+rig = Rig()
+rig.env["KALIV_MEDIA_EXECUTOR_DEVICES"] = "cuda:0,cuda:1"
+for profile_id in ("realvis", "ltx-t2v", "ltx-i2v"):
+    document = json.loads((rig.profiles / f"{profile_id}.json").read_text())
+    document["resources"]["devices"] = ["cuda:0", "cuda:1"]
+    rig.write_profile(document)
+rig.statuses()
+check("...and for every device when there are two", rig.started == ["cuda:0", "cuda:1"], rig.started)
+rig = Rig()
+rig.start = ("config", "KALIV_COMFY_DIR/cuda1/input must be an existing folder in the work area (missing)")
+item = only_fail(rig, "egen startkontrol")
+check("a refusal by the executor (the per-device ComfyUI folders) is a FAIL that quotes it and names exit 78",
+      "cuda1/input" in item["detail"] and "78" in item["detail"], item)
+rig.start = ("volume", "the media volume is not mounted")
+check("a volume that is not there is a FAIL that names exit 75", "75" in only_fail(rig, "egen startkontrol")["detail"])
+rig.start = RuntimeError("boom " + SECRET)
+item = only_fail(rig, "egen startkontrol")
+check("a start check that itself breaks is a FAIL, never OK, and its message is not printed",
+      "RuntimeError" in item["detail"] and SECRET not in json.dumps(item), item)
+rig = Rig()
+rig.env["KALIV_MEDIA_PROFILES_ENABLED"] = ""
+fails = rig.statuses()[preflight.FAIL]
+check("no enabled profile at all is a FAIL (the loader returns an empty set, the executor refuses to start)",
+      any(f["check"] == "profiler" for f in fails) and any("cuda:1: profiler" in f["check"] for f in fails) is False, fails)
+rig = Rig()
+del rig.env["KALIV_MEDIA_PROFILES_ENABLED"]
+check("...and so is a missing KALIV_MEDIA_PROFILES_ENABLED", any(f["check"] == "profiler" for f in rig.statuses()[preflight.FAIL]))
+rig = Rig()
+rig.env["KALIV_MEDIA_VIDEO"] = "0"
+fails = rig.statuses()[preflight.FAIL]
+check("video profiles enabled on an executor's GPU with KALIV_MEDIA_VIDEO off stop the whole executor: FAIL, not WARN",
+      [f["check"] for f in fails] == ["executor cuda:1: video"] and "billeder" in fails[0]["detail"], fails)
+rig.env["KALIV_MEDIA_PROFILES_ENABLED"] = "realvis"
+rig.env.pop("KALIV_VIDEO_TOOL_PROFILE")
+found = rig.statuses()
+check("video off with no video profile enabled is still only a WARN", not found[preflight.FAIL] and
+      any(w["check"] == "video" for w in found[preflight.WARN]), found[preflight.FAIL])
+rig = Rig()
+rig.env["KALIV_MEDIA_EXECUTOR_DEVICES"] = "cuda:0,cuda:1"
+check("an executor device no enabled profile runs on is a FAIL for that device",
+      any(f["check"] == "executor cuda:0: profiler" for f in rig.statuses()[preflight.FAIL]))
+
+# 9c. The real start check, where it refuses before it looks at a disk: the text is the executor's
+#     own, and `build_from_env` refuses with the same words (it runs the same function).
+from app.media_executor import ExecutorConfigError  # noqa: E402
+from app.media_executor_main import build_from_env  # noqa: E402
+
+rig = Rig()
+for label, change in (("the executor switch off", {"KALIV_MEDIA_EXECUTOR": "0"}),
+                      ("no CUDA_DEVICE_ORDER in the env file", {})):
+    env = dict(rig.env, **change)
+    refusal = preflight._executor_start(env, "cuda:1")
+    try:
+        build_from_env("cuda:1", env)
+        built = None
+    except ExecutorConfigError as exc:
+        built = str(exc)
+    check(f"real start check, {label}: refused as configuration, in the words build_from_env uses",
+          refusal is not None and refusal[0] == "config" and refusal[1] == built, (refusal, built))
+check("...and the second one is the CUDA_DEVICE_ORDER rule the supervisor does not add for the executor",
+      "CUDA_DEVICE_ORDER" in refusal[1], refusal)
+
+# 9d. A bare Python: no FastAPI, no pydantic, no torch. The tool must still report, not crash.
+import subprocess  # noqa: E402
+
+rig = Rig()
+env_file = rig.tmp / "bare.env"
+env_file.write_text("".join(f"{k}={v}\n" for k, v in rig.env.items()), encoding="utf-8")
+blocker = ("import sys, importlib.abc, runpy\n"
+           "class B(importlib.abc.MetaPathFinder):\n"
+           "    def find_spec(self, name, path, target=None):\n"
+           "        if name.split('.')[0] in {'fastapi', 'pydantic', 'starlette', 'torch', 'httpx', 'uvicorn'}:\n"
+           "            raise ModuleNotFoundError(name)\n"
+           "sys.meta_path.insert(0, B())\n"
+           f"sys.argv = ['media_release_preflight.py', '--env-file', {str(env_file)!r}, '--json']\n"
+           f"runpy.run_path({str(ROOT / 'scripts' / 'media_release_preflight.py')!r}, run_name='__main__')\n")
+done = subprocess.run([sys.executable, "-c", blocker], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180)
+check("without FastAPI/pydantic/torch the tool exits 1 with a report, not a traceback",
+      done.returncode == 1 and "Traceback" not in done.stderr, (done.returncode, done.stderr[-400:]))
+bare = {item["check"]: item for item in json.loads(done.stdout)["checks"]}
+check("...the secret is judged (OK) without the API stack", bare["KALIV_MEDIA_INTERNAL_SECRET"]["status"] == "OK", bare["KALIV_MEDIA_INTERNAL_SECRET"])
+check("...the profiles are read by the worker's loader", bare["profiler"]["status"] == "OK", bare["profiler"])
+check("...and the executor's own start check ran and answered in its own words",
+      bare["executor cuda:1: egen startkontrol"]["status"] == "FAIL" and "CUDA_DEVICE_ORDER" in bare["executor cuda:1: egen startkontrol"]["detail"],
+      bare["executor cuda:1: egen startkontrol"])
+from app.media_job_api import MIN_SECRET_CHARS, _usable_secret  # noqa: E402  (after 9d: this imports FastAPI)
+
+check("the secret rule restated in the tool is the worker's: same length, same answers",
+      preflight.MIN_SECRET_CHARS == MIN_SECRET_CHARS and all(
+          preflight._secret_ok(v) == bool(_usable_secret(v))
+          for v in ("", "a" * 31, "a" * 32, "a" * 40 + "\n", "a" * 40 + "\r", SECRET, None, 5)))
 
 # 10. The real probes, on whatever machine this is (the Windows gate runs this file too): against
 #     the shipped example -- media off, nothing configured -- the tool runs to the end and reports.

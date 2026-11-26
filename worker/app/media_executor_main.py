@@ -302,12 +302,20 @@ class PinnedStagedVideoSink:
         return self._sink.adopt_for_job(handle, mime_type, job_key)
 
 
-def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
-                   adapter_factory: Callable[[ModelProfile], object] | None = None,
-                   volume_probe=None, work_probe=None, supervisor_class=None,
-                   image_adapter_factory: Callable[[ModelProfile], object] | None = None) -> MediaExecutor:
-    """Everything the executor needs, from the environment. Raises ExecutorConfigError or
-    ArtifactSinkUnavailable (the volume is not there); never creates a missing directory."""
+class StartConfig:
+    """What `check_start` established. Plain attributes; the executor is built from them."""
+
+    def __init__(self, **values):
+        self.__dict__.update(values)
+
+
+def check_start(device: str, env: Mapping[str, str] | None = None, *,
+                volume_probe=None, work_probe=None) -> StartConfig:
+    """Every start rule that only LOOKS: the switch, the GPU, the lease folder, the paths, the
+    profiles, the work area, the media volume, ComfyUI and the job database's file. Raises
+    ExecutorConfigError or ArtifactSinkUnavailable exactly as `build_from_env` does, in the same
+    order, and opens, creates and changes nothing -- so the rig preflight
+    (scripts/media_release_preflight.py) asks the executor's own question instead of a copy of it."""
     env = os.environ if env is None else env
     if env.get(SWITCH_ENV) != "1":
         raise ExecutorConfigError(f"{SWITCH_ENV}=1 is required: the media executor is off")
@@ -391,6 +399,22 @@ def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
             except ArtifactSinkUnavailable as exc:
                 raise ExecutorConfigError(f"{JOB_DB_ENV} is not private in the work area ({exc}); copy it "
                                           "into the work area instead of moving it") from None
+    return StartConfig(gpu_uuid=gpu_uuid, lease_dir=lease_dir, job_db=job_db, media_root=media_root,
+                       profiles=profiles, mine=mine, work=work, volume=volume, video_profiles=video_profiles,
+                       video=video, sink=sink, published_through=published_through, guard=guard)
+
+
+def build_from_env(device: str, env: Mapping[str, str] | None = None, *,
+                   adapter_factory: Callable[[ModelProfile], object] | None = None,
+                   volume_probe=None, work_probe=None, supervisor_class=None,
+                   image_adapter_factory: Callable[[ModelProfile], object] | None = None) -> MediaExecutor:
+    """Everything the executor needs, from the environment. Raises ExecutorConfigError or
+    ArtifactSinkUnavailable (the volume is not there); never creates a missing directory."""
+    env = os.environ if env is None else env
+    start = check_start(device, env, volume_probe=volume_probe, work_probe=work_probe)
+    gpu_uuid, lease_dir, job_db, media_root = start.gpu_uuid, start.lease_dir, start.job_db, start.media_root
+    mine, volume, video_profiles, video = start.mine, start.volume, start.video_profiles, start.video
+    sink, published_through, guard = start.sink, start.published_through, start.guard
     try:
         store = ImageJobStore(job_db, volume_guard=guard)
     except ImageJobError as exc:

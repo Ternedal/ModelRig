@@ -642,6 +642,13 @@ rettes. Den læser kun: env-filen, de filer den peger på, `nvidia-smi`,
 medie-miljøets `import torch`, Ollamas modelliste og appliancens `/healthz`. Den
 skriver intet, starter intet og viser ikke værdien af en hemmelighed.
 
+Linjen `executor cuda:N: egen startkontrol` er den, der afgør: den kører executorens
+egen kontrol (`check_start` — alt den ser på, før den rører jobdatabasen) mod
+env-filen og gengiver dens afvisning ordret. Det fanger også det, der hidtil kun
+har været sat i et PowerShell-vindue, fx `CUDA_DEVICE_ORDER=PCI_BUS_ID`,
+lease-mappen og ComfyUI-mapperne pr. kort. Scriptet kører i en almindelig Python
+3.11; det kræver hverken FastAPI eller torch.
+
 Fra et checkout, der har scriptet (her kandidat-checkouten):
 
 ```powershell

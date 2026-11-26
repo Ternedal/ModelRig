@@ -151,9 +151,28 @@ def _profiles(env: Mapping[str, str]):
     return enabled_profiles(load_profile_dir(env.get("KALIV_MEDIA_PROFILE_DIR", "")), env)
 
 
+MIN_SECRET_CHARS = 32  # app.media_job_api.MIN_SECRET_CHARS; pinned by the contract
+
+
 def _secret_ok(value: str) -> bool:
-    from app.media_job_api import _usable_secret
-    return bool(_usable_secret(value))
+    # The worker's rule (media_job_api._usable_secret), restated: that module imports FastAPI at
+    # the top, and this script must run in a bare Python (Codex #2503 4711014586).
+    return isinstance(value, str) and len(value) >= MIN_SECRET_CHARS and not any(c in value for c in "\r\n")
+
+
+def _executor_start(env: Mapping[str, str], device: str) -> "tuple[str, str] | None":
+    """The executor's own start rules for one device (`check_start`: it only looks). None when it
+    would start; otherwise (kind, text) with kind "config" (exit 78) or "volume" (exit 75)."""
+    from app.media_executor import ExecutorConfigError
+    from app.media_executor_main import check_start
+    from app.media_generation_contract import ArtifactSinkUnavailable
+    try:
+        check_start(device, env)
+    except ExecutorConfigError as exc:
+        return "config", str(exc)
+    except ArtifactSinkUnavailable as exc:
+        return "volume", str(exc)
+    return None
 
 
 @dataclass
@@ -171,6 +190,7 @@ class Probes:
     work_area: Callable[[Mapping[str, str]], dict] = _work_area
     profiles: Callable[[Mapping[str, str]], dict] = _profiles
     secret_ok: Callable[[str], bool] = _secret_ok
+    executor_start: Callable[..., "tuple[str, str] | None"] = _executor_start
 
 
 @dataclass
@@ -284,12 +304,29 @@ def evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | No
         enabled = dict(probes.profiles(env))
     except Exception as exc:  # GenerationError, OSError, ValueError -- reported, never raised
         report.add(FAIL, "profiler", f"afvist: {str(exc)[:200]}", "ret KALIV_MEDIA_PROFILE_DIR / KALIV_MEDIA_PROFILES_ENABLED / profilfilen")
+    else:
+        if not enabled:
+            # The loader returns {} for an empty list; every executor then refuses to start
+            # ("no enabled profile allows cuda:N") and the chat has nothing to submit to.
+            report.add(FAIL, "profiler", "ingen er slået til: KALIV_MEDIA_PROFILES_ENABLED er tom eller mangler",
+                       "sæt KALIV_MEDIA_PROFILES_ENABLED til profil-id'erne, adskilt af komma")
     if enabled:
         report.add(OK, "profiler", ", ".join(f"{pid} ({p.modality}, {p.qualification})" for pid, p in sorted(enabled.items())))
         for pid, profile in sorted(enabled.items()):
             if devices and not set(profile.resources.devices) & set(devices):
                 report.add(FAIL, f"profil {pid}: enhed", f"kører på {','.join(profile.resources.devices)}, men executorerne er {','.join(devices)}",
                            "ingen executor tager dens job: ret profilens devices eller KALIV_MEDIA_EXECUTOR_DEVICES")
+        for device in devices:
+            mine = sorted(pid for pid, p in enabled.items() if device in p.resources.devices)
+            video_here = [pid for pid in mine if enabled[pid].modality == "video"]
+            if not mine:
+                report.add(FAIL, f"executor {device}: profiler", "ingen slået-til profil kører på den: executoren starter ikke (exit 78)",
+                           f"tag {device} ud af KALIV_MEDIA_EXECUTOR_DEVICES eller slå en profil til, der kører på den")
+            elif video_here and get("KALIV_MEDIA_VIDEO") != "1":
+                # Not "video is off": the whole executor exits 78, so its image jobs stop too.
+                report.add(FAIL, f"executor {device}: video", f"videoprofilen {', '.join(video_here)} er slået til, men KALIV_MEDIA_VIDEO er ikke 1: "
+                           "executoren starter ikke (exit 78), heller ikke for billeder",
+                           "sæt KALIV_MEDIA_VIDEO=1, eller tag videoprofilen ud af KALIV_MEDIA_PROFILES_ENABLED")
         if not any(p.modality == "image" for p in enabled.values()):
             report.add(FAIL, "billedprofil", "ingen slået til: image_generate har intet at vælge", "tilføj en billedprofil til KALIV_MEDIA_PROFILES_ENABLED")
         for key, modality in (("KALIV_IMAGE_TOOL_PROFILE", "image"), ("KALIV_VIDEO_TOOL_PROFILE", "video")):
@@ -357,6 +394,25 @@ def evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | No
             report.add(OK, "arbejdsområde, jobdatabase og medievolumen", f"{len(area.get('checks', []))} kontroller bestået")
     except Exception as exc:
         report.add(FAIL, "arbejdsområde", f"kunne ikke kontrolleres: {type(exc).__name__}", "sæt KALIV_MEDIA_WORK_ROOT, _JOB_DB, _VOLUME_ROOT og _VOLUME_ID")
+
+    # --- 7b. the executor's own start rules, per device ------------------------------------------
+    # Everything above explains; this decides. `check_start` is the function the executor itself
+    # runs before it touches the job database, so a rule this script does not know about (the
+    # per-device ComfyUI folders, the lease folder, the GPU UUID, the offline flags, ...) is still
+    # caught, in the executor's own words.
+    for device in devices:
+        name = f"executor {device}: egen startkontrol"
+        try:
+            refusal = probes.executor_start(env, device)
+        except Exception as exc:  # the check itself broke: say so, never claim OK
+            report.add(FAIL, name, f"kunne ikke køres: {type(exc).__name__}", "kør scriptet fra et checkout af releasens commit")
+            continue
+        if refusal is None:
+            report.add(OK, name, "ville starte (alt den ser på før jobdatabasen)")
+        elif refusal[0] == "volume":
+            report.add(FAIL, name, f"medievolumen er ikke klar (exit 75): {refusal[1][:300]}", "tilslut medievolumen og kør igen")
+        else:
+            report.add(FAIL, name, f"afviser start (exit 78): {refusal[1][:300]}", "ret det, linjen nævner, i env-filen eller på disken")
 
     # --- 8. the GPUs, as the driver reports them now ---------------------------------------------
     code, out = probes.run(["nvidia-smi", "--query-gpu=index,memory.total,memory.used", "--format=csv,noheader,nounits"], 30.0)
