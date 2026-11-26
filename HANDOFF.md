@@ -852,11 +852,12 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
 
 ### 23–26/11: puljen ryddet, Stage B fra ca. 200 til ca. 150 minutter — og hvad målingerne lærte os
 
-**[26/11 09:3x — main = `64b163b8` (merge-commit af #2498), VERSION 2.0.21, alle
-checks grønne inkl. Stage B. Landet 23–26/11, hver på Anders' `Kør merge <fuld
-sha>` efter SHA-bundet ACCEPT fra ChatGPT: #2486, #2483, #2484, #2485, #2445,
-#2454, #2455, #2456, #2444, #2447, #2450, #2493, #2446, #2452, #2451, #2453,
-#2494, #2495, #2497, #2498.]**
+**[26/11 14:3x — main = `21e54a5e` (merge-commit af #2499), VERSION 2.0.21. Stage B
+var grøn på `64b163b8` (146 min); den kører på `21e54a5e`, mens dette skrives. Landet
+23–26/11, hver på Anders' `Kør merge <fuld sha>` efter SHA-bundet ACCEPT fra
+ChatGPT: #2486, #2483, #2484, #2485, #2445, #2454, #2455, #2456, #2444, #2447,
+#2450, #2493, #2446, #2452, #2451, #2453, #2494, #2495, #2497, #2498, #2323,
+#2500, #2499.]**
 
 **Hvad der er nyt på `main`:**
 - **Acceptforløb for medie-i-chat** (`docs/RIGDAG_MEDIE_I_CHAT.md` §7, #2486):
@@ -868,7 +869,15 @@ sha>` efter SHA-bundet ACCEPT fra ChatGPT: #2486, #2483, #2484, #2485, #2445,
   dagens pins: alle syv V1-gates MISSING. Det er forventet — kandidat-SHA og
   freeze er ikke valgt.
 - **Desktop:** fejl i samtale- og forudindstillingslageret vises som fejl i stedet
-  for som et tomt lager (#2451, #2453); Tools-svar mærkes som riggens (#2452).
+  for som et tomt lager (#2451, #2453); Tools-svar mærkes som riggens (#2452). De
+  syv lagerfejl skrives til `~/.modelrig/desktop.log` (#2499): tid, operationsnavn,
+  undtagelsens klasse, stakrammer og SQL-fejlkode — aldrig undtagelsens tekst.
+  Grænserne: størrelsesloftet (1 MB) gælder én skrivende proces, og privatlivet
+  hviler på, at operationsnavnet er en konstant. Ikke set i en kørende klient.
+- **Kildebilleder til billede→video** kontrolleres strammere som PNG (#2323):
+  farvetype/bitdybde, palette, sammenhængende billeddata, chunk-navne, lofter.
+  Afprøvet mod 84 ægte PNG-filer uden falske afvisninger — men ikke mod riggens
+  egne galleri-billeder. Første billede→video-job på riggen er prøven.
 - **Afhængigheder:** fastapi 0.165.0, pydantic 2.14.4, setup-go v7.1.0,
   codeql-action v4.39.4, desktop Gradle 9.9.2 (#2494, samlet). Dependabot
   ignorerer nu `nvidia-*` og `browser-use`-majors (#2445) og flytter
@@ -897,8 +906,9 @@ sha>` efter SHA-bundet ACCEPT fra ChatGPT: #2486, #2483, #2484, #2485, #2445,
   prøves på telefonen før landing); #2281 (APK-certifikat-pin: kræver verificeret
   signeringscertifikat og en hemmelighed); #2403/#2405 (VR, ingen ejer); de fire i
   konflikt (#2320, #2303, #2299, #2261).
-- **Åbent, ikke påbegyndt:** desktop har ingen log, så en lagerfejl kan vises,
-  men ikke fejlsøges (P3 fra #2451/#2453; kræver et valg om placering og indhold).
+- **Åbent, ikke påbegyndt:** klienten har ca. 120 andre steder, der fanger en fejl
+  og kasserer den; kun de syv lagerfejl logges. De to grænser for loggen ovenfor
+  skal også stå i klassens egen kommentar.
 
 **Det, landingerne 23–26/11 lærte os (i forlængelse af de syv punkter nedenfor):**
 8. **Push til en kladde, og vent, til kørslen findes, før den sættes klar.** Push
@@ -925,6 +935,14 @@ sha>` efter SHA-bundet ACCEPT fra ChatGPT: #2486, #2483, #2484, #2485, #2445,
 14. **En gammel PR, der fletter rent, kan stadig være i stykker.** #2323 flettede
     uden konflikt efter 1194 commits, men dens tests fejlede, fordi `main` havde
     ændret en fejltype. Kør PR'ens egne tests efter sammenfletningen.
+15. **Søg aldrig efter en kort talstreng i serialiseret output med tilfældige
+    id'er.** Min egen test fra #2481 krævede, at `"832"` ikke fandtes i et svar med
+    to hex-id'er og fire tidsstempler; den fejlede ca. 2,8 % af gangene og gjorde
+    det krævede `exact-head-core` rødt på PR'er, der ikke rørte koden (#2500).
+    Sammenlign felter: præcis de forventede nøgler, og værdier efter lighed.
+16. **En log, der lover privatliv, skriver ikke undtagelsens tekst.** Første
+    udgave af #2499 gjorde, og fik NO ACCEPT: en besked er fri tekst valgt af den,
+    der kastede. Klasse, kodelinje og strukturerede koder kommer fra koden selv.
 
 ### 22/11: billede, video og lyd i chatten er på `main` — og hvad landingen lærte os
 
