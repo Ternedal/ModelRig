@@ -19,7 +19,10 @@ It reads the env file, files it names, `nvidia-smi`, the media Python
 (`import torch`, and the executor's own start check run from the executor's
 own source), Ollama's tag list and the appliance's /healthz. It writes nothing
 (git without optional locks, Python with -B), starts nothing, talks to
-127.0.0.1 only (no proxy, no redirect) and prints no value of a secret.
+127.0.0.1 only (no proxy, no redirect) and prints no value of a secret: a
+text another component wrote (the executor's refusal, a loader's error) is
+never repeated -- only one of this file's own sentences and the key names it
+mentions -- so the output can be shared.
 
 Only the env file is read. A child of the supervisor also inherits the
 supervisor's own environment, which this cannot see. That cuts both ways: a
@@ -228,12 +231,54 @@ HIDDEN = "<skjult>"
 
 
 def scrub(text: str, env: Mapping[str, str]) -> str:
-    """One line, with every value of a secret-named key of the env file replaced. Applied to every
-    string of the report, whatever produced it: the executor's refusal, a loader's error, a path."""
+    """One line, with every value of a secret-named key of the env file replaced. Defence in depth
+    only, and only for the two presentation fields: no text another component wrote reaches the
+    report (see `controlled`), and a status or a check id is never passed through this."""
     for key, value in env.items():
         if SECRET_KEY.search(key) and len(value) >= 4:
             text = text.replace(value, HIDDEN)
     return "".join(ch if ch.isprintable() else " " for ch in text)
+
+
+# A name of a configuration key, optionally followed by fixed lower-case folder names the executor
+# appends itself (KALIV_COMFY_DIR/cuda1/input). Nothing else of a foreign text is ever shown.
+KEY_NAME = re.compile(r"(?<![A-Za-z0-9_])(?:KALIV|CUDA|HF|TRANSFORMERS|OLLAMA)_[A-Z0-9_]{1,60}(?:/[a-z0-9_-]{1,24}){0,3}(?![A-Za-z0-9_])")
+MAX_NAMES = 6
+
+# (what the component's text contains, what this says instead). First match wins.
+EXECUTOR_REASONS = (
+    ("the media executor is off", "executor-kontakten er slået fra"),
+    ("no GPU UUID is configured", "intet GPU-UUID er sat for enheden"),
+    ("no enabled profile allows", "ingen slået-til profil kører på enheden"),
+    ("are required (never a download)", "offline-flagene er ikke sat"),
+    ("must not be on the media volume", "arbejdsområdet ligger på medievolumen"),
+    ("must be an existing folder in the work area", "en mappe mangler i arbejdsområdet"),
+    ("is not private", "en fil eller mappe i arbejdsområdet er ikke privat"),
+    ("same ComfyUI port", "to profiler deler ComfyUI-port"),
+    ("must be an absolute path", "en sti er ikke absolut"),
+    ("must be an existing", "en fil eller mappe findes ikke"),
+)
+LOADER_REASONS = (
+    ("names unknown profiles", "KALIV_MEDIA_PROFILES_ENABLED nævner et id, der ikke findes i profilmappen"),
+    ("comma-separated list of distinct", "KALIV_MEDIA_PROFILES_ENABLED er ikke en kommaliste af forskellige id'er"),
+    ("are not rig-qualified", "en slået-til profil er ikke rig-kvalificeret (kandidater kræver den nævnte kontakt)"),
+)
+
+
+def controlled(text: str, reasons: tuple, env: Mapping[str, str], default: str = "anden grund") -> str:
+    """What a text written by another component (an exception of the executor, of the profile
+    loader, a line of the work-area check) is allowed to contribute to the report: one of this
+    file's own sentences, chosen by a fixed phrase, and the configuration KEY NAMES the text
+    mentions. Never a character of the text itself -- it may quote a value (ChatGPT on #2503).
+    A name is dropped if it is, or contains, a value from the env file."""
+    reason = next((ours for needle, ours in reasons if needle in text), default)
+    values = [value for value in env.values() if len(value) >= 4]
+    names: list[str] = []
+    for name in KEY_NAME.findall(text):
+        if name not in names and not any(value in name for value in values):
+            names.append(name)
+    shown = ", ".join(names[:MAX_NAMES]) + (" ..." if len(names) > MAX_NAMES else "")
+    return reason + (f"; nævner: {shown}" if names else "")
 
 
 @dataclass
@@ -270,10 +315,19 @@ def evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | No
              expect_sha: str | None = None, planner_model: str | None = None,
              require_video: bool = False) -> list[dict]:
     """The rules. Pure given `probes`; never prints and never raises on a bad configuration.
-    Every string that leaves here has been through `scrub`."""
+
+    `status` and `check` are the machine-readable part and leave exactly as the rules set them:
+    the exit code and `readiness` are computed from them, so nothing that edits text may touch
+    them. `detail` and `fix` are presentation: scrubbed first, cut to length after -- a cut first
+    could leave half a secret that no longer matches."""
     checks = _evaluate(env, probes, expect_version=expect_version, expect_sha=expect_sha,
                        planner_model=planner_model, require_video=require_video)
-    return [{key: scrub(value, env) if isinstance(value, str) else value for key, value in item.items()} for item in checks]
+    return [{"status": item["status"], "check": item["check"],
+             "detail": scrub(item["detail"], env)[:MAX_TEXT], "fix": scrub(item["fix"], env)[:MAX_TEXT]} for item in checks]
+
+
+MAX_TEXT = 600
+CHECK_ID = re.compile(r"[^a-z0-9_.-]")
 
 
 def readiness(checks: list[dict]) -> dict:
@@ -373,12 +427,22 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
         elif dirty_count or extra_count:
             report.add(drift, "executor-kilde: ændringer", f"{dirty_count} ændrede og {extra_count} ikke-sporede filer (worker/) i {repo}",
                        "executoren kører den kode, der ligger der, ikke releasens: git stash -u, eller brug et rent checkout")
+        # The profile rules, the task support and the work-area check below are run with the code
+        # beside THIS script, and they decide readiness too. Bound to a release, that code must be
+        # the release's as well: same commit as the executor's source, and unchanged.
         own = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         if os.path.normcase(os.path.realpath(own)) != os.path.normcase(os.path.realpath(repo)):
             code, own_head = probes.run([*GIT, "-C", own, "rev-parse", "HEAD"], 20.0)
-            if code != 0 or own_head.strip() != head:
-                report.add(WARN, "tjekkets eget checkout", f"dette script ligger i {own}, på en anden commit end executorens kilde",
-                           "startkontrollen er executorens egen; de forklarende linjer (profiler, arbejdsområde) kan afvige. Kør scriptet fra executorens checkout")
+            own_head = own_head.strip() if code == 0 else None
+            code, changed = probes.run([*GIT, "-C", own, "status", "--porcelain", "--untracked-files=all", "--", "worker", "scripts"], 30.0)
+            changed_count = len([line for line in changed.splitlines() if line.strip()]) if code == 0 else None
+            fix = f"kør scriptet fra executorens checkout: cd {repo}"
+            if own_head is None or own_head != head:
+                report.add(drift, "tjekkets eget checkout", f"dette script ligger i {own}, på en anden commit end executorens kilde: "
+                           "profil- og arbejdsområde-reglerne herunder er ikke nødvendigvis releasens", fix)
+            elif changed_count is None or changed_count:
+                report.add(drift, "tjekkets eget checkout", f"{changed_count if changed_count is not None else '?'} ændrede eller ikke-sporede filer "
+                           f"(worker/, scripts/) i {own}", fix)
 
     # --- 4. the media Python can see the GPUs it is told to use ---------------------------------
     highest = max((int(d.split(":")[1]) for d in devices), default=-1)
@@ -402,7 +466,9 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
     try:
         enabled = dict(probes.profiles(env))
     except Exception as exc:  # GenerationError, OSError, ValueError -- reported, never raised
-        report.add(FAIL, "profiler", f"afvist: {str(exc)[:200]}", "ret KALIV_MEDIA_PROFILE_DIR / KALIV_MEDIA_PROFILES_ENABLED / profilfilen")
+        report.add(FAIL, "profiler", f"afvist af profil-loaderen ({type(exc).__name__}): "
+                   + controlled(str(exc), LOADER_REASONS, env, "en profilfil eller profilmappen blev afvist"),
+                   "ret KALIV_MEDIA_PROFILE_DIR / KALIV_MEDIA_PROFILES_ENABLED / profilfilen")
     else:
         if not enabled:
             # The loader returns {} for an empty list; every executor then refuses to start
@@ -488,7 +554,9 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
         failed = [c for c in area.get("checks", []) if not c.get("ok")]
         if failed:
             for item in failed:
-                report.add(FAIL, f"arbejdsområde: {item.get('check')}", str(item.get("detail"))[:200], "se docs/MEDIA_WORK_AREA.md og docs/MEDIA_VOLUME.md")
+                # The check's name is an identifier of app.media_preflight; its detail is free text.
+                report.add(FAIL, "arbejdsområde: " + CHECK_ID.sub("_", str(item.get("check")).lower())[:40],
+                           controlled(str(item.get("detail")), (), env, "ikke opfyldt"), "se docs/MEDIA_WORK_AREA.md og docs/MEDIA_VOLUME.md")
         else:
             report.add(OK, "arbejdsområde, jobdatabase og medievolumen", f"{len(area.get('checks', []))} kontroller bestået")
     except Exception as exc:
@@ -498,7 +566,9 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
     # Everything above explains; this decides. `check_start` is the function the executor itself
     # runs before it touches the job database, so a rule this script does not know about (the
     # per-device ComfyUI folders, the lease folder, the GPU UUID, the offline flags, ...) is still
-    # caught, in the executor's own words.
+    # caught. Its words are not repeated (they may quote a value): the reason is one of this file's
+    # sentences plus the key names it mentions; the full text is in the executor's own log on the
+    # rig (logs\executor-cudaN.log) once the supervisor has tried to start it.
     for device in devices:
         name = f"executor {device}: egen startkontrol"
         if not app_dir or not (os.path.isabs(python) and probes.is_file(python)):
@@ -512,14 +582,16 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
         if refusal is None:
             report.add(OK, name, "ville starte (alt den ser på før jobdatabasen)")
         elif refusal[0] == "volume":
-            report.add(FAIL, name, f"medievolumen er ikke klar (exit 75): {refusal[1][:300]}", "tilslut medievolumen og kør igen")
+            report.add(FAIL, name, "medievolumen er ikke klar (exit 75): " + controlled(refusal[1], (), env, "den er ikke tilsluttet eller ikke den rigtige"),
+                       "tilslut medievolumen og kør igen")
         elif refusal[0] == "config":
-            report.add(FAIL, name, f"afviser start (exit 78): {refusal[1][:300]}", "ret det, linjen nævner, i env-filen eller på disken")
+            report.add(FAIL, name, "afviser start (exit 78): " + controlled(refusal[1], EXECUTOR_REASONS, env),
+                       "ret de nævnte nøgler i env-filen eller på disken; dens egen tekst står i logs\\executor-" + device.replace(":", "") + ".log efter et startforsøg")
         elif refusal[0] == "old":
             report.add(FAIL, name, "executorens kilde har ingen check_start: den er ældre end dette tjek",
                        "check releasens commit ud i KALIV_MEDIA_EXECUTOR_APP_DIR's checkout")
         else:
-            report.add(FAIL, name, f"kunne ikke køres ({refusal[1][:60]})", "kør medie-python i executorens mappe: python -c \"import app.media_executor_main\"")
+            report.add(FAIL, name, "kunne ikke køres (" + ("".join(re.findall(r"[A-Za-z0-9 ]", refusal[1])) or "?")[:40] + ")", "kør medie-python i executorens mappe: python -c \"import app.media_executor_main\"")
 
     # --- 8. the GPUs, as the driver reports them now ---------------------------------------------
     code, out = probes.run(["nvidia-smi", "--query-gpu=index,memory.total,memory.used", "--format=csv,noheader,nounits"], 30.0)
@@ -566,7 +638,7 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
     # window has and the file lacks is the nearest hint -- names only.
     stray = sorted(key for key in probes.process_env() if INHERITED.match(key) and key not in env)
     if stray:
-        report.add(INFO, "miljø uden for env-filen", f"sat i dette vindue, ikke i filen: {', '.join(stray)[:400]}",
+        report.add(INFO, "miljø uden for env-filen", f"sat i dette vindue, ikke i filen: {', '.join(stray[:20])}" + (" ..." if len(stray) > 20 else ""),
                    "")
     return report.checks
 

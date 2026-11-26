@@ -642,13 +642,18 @@ rettes. Den læser kun: env-filen, de filer den peger på, `nvidia-smi`,
 medie-miljøets `import torch`, Ollamas modelliste og appliancens `/healthz`. Den
 skriver intet (git uden valgfri låse, Python med `-B`), starter intet, taler kun
 med 127.0.0.1 (ingen proxy, ingen omdirigering) og viser ikke værdien af en
-hemmelighed: værdien af enhver nøgle med et hemmeligheds-navn erstattes i alt,
-den skriver ud.
+hemmelighed. Tekst, som en anden komponent har skrevet (executorens afvisning,
+profil-loaderens fejl, arbejdsområde-kontrollens detaljer), gengives aldrig: af
+den vises kun en af scriptets egne sætninger og navnene på de nøgler, teksten
+nævner. Oven i det erstattes værdien af enhver nøgle med et hemmeligheds-navn i
+det, scriptet selv skriver. Outputtet kan derfor deles.
 
 Linjen `executor cuda:N: egen startkontrol` er den, der afgør: den kører executorens
 egen kontrol (`check_start` — alt den ser på, før den rører jobdatabasen) med
 medie-miljøets Python i `KALIV_MEDIA_EXECUTOR_APP_DIR` — altså den kode, der
-faktisk ville starte, ikke scriptets eget checkout — og gengiver dens afvisning. Det fanger også det, der hidtil kun
+faktisk ville starte, ikke scriptets eget checkout. Ved en afvisning står
+årsagen i scriptets ord med de nøgler, executoren nævner; executorens egen tekst
+står i `logs\executor-cudaN.log` efter et startforsøg. Det fanger også det, der hidtil kun
 har været sat i et PowerShell-vindue, fx `CUDA_DEVICE_ORDER=PCI_BUS_ID`,
 lease-mappen og ComfyUI-mapperne pr. kort. Scriptet kører i en almindelig Python
 3.11; det kræver hverken FastAPI eller torch.
@@ -682,7 +687,10 @@ Næstsidste linje tæller dem; den sidste siger, hvad der er klar: billede, og h
 videoopgaver. Uden `--require-video` er video, der er slået fra, kun en `WARN`, og
 sidste linje skriver så `IKKE klar: …` for klippene. Bundet til en release
 (`--expect-sha`) er ændrede eller ikke-sporede filer i executorens `worker\` en
-`FAIL`: så er det ikke releasens kode, der kører.
+`FAIL`: så er det ikke releasens kode, der kører. Det samme gælder scriptets eget
+checkout, hvis det er et andet end executorens: profil- og arbejdsområde-reglerne
+køres derfra, så det skal stå på samme commit og være uændret. Nemmest er at køre
+scriptet fra executorens checkout.
 
 **Ingen FAIL er ikke en kvalifikation og ikke et job** — første billede og første
 klip fra den udgivne appliance er stadig prøven (§7).

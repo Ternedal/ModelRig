@@ -82,6 +82,7 @@ class Rig:
         self.env = dict(self.plain_env, KALIV_MEDIA_INTERNAL_SECRET=SECRET)
         self.head, self.dirty, self.untracked = SHA, "", ""
         self.own_head: str | None = None  # HEAD of the checkout the script itself lies in; None: same as `head`
+        self.own_changed = ""  # `git status` of that checkout
         self.process_env: dict[str, str] = {}
         self.torch = {"torch": "2.8.0+cu126", "cuda": True, "count": 2}
         self.smi = "0, 12288, 1400\n1, 12288, 120\n"
@@ -111,6 +112,8 @@ class Rig:
                 elsewhere = str(self.repo) not in cmd
                 return 0, (self.own_head if elsewhere and self.own_head else self.head) + "\n"
             if cmd[0] == "git" and "status" in cmd:
+                if str(self.repo) not in cmd:
+                    return 0, self.own_changed
                 return 0, self.untracked if "--untracked-files=all" in cmd else self.dirty
             if cmd[0] == "nvidia-smi":
                 return (0, self.smi) if self.smi is not None else (127, "FileNotFoundError")
@@ -200,10 +203,20 @@ fail = only_fail(rig, "executor-kilde: ændringer", expect_version="2.0.21", exp
 check("...and so is an untracked file beside the executor's code", "1 ikke-sporede" in fail["detail"], fail)
 check("...which is looked for under worker/ with untracked files listed",
       any("--untracked-files=all" in c and c[-2:] == ["--", "worker"] for c in rig.commands), rig.commands)
+# The profile, task and work-area rules run from the script's own checkout and decide readiness
+# too, so bound to a release that checkout must be the release as well (ChatGPT #2503, re-review).
 rig = Rig(); rig.own_head = "e" * 40
-warns = rig.statuses(expect_version="2.0.21", expect_sha=SHA)[preflight.WARN]
-check("a script run from a checkout on another commit than the executor's source is a WARN",
+warns = rig.statuses()[preflight.WARN]
+check("unbound, a script run from a checkout on another commit than the executor's source is a WARN",
       [w["check"] for w in warns] == ["tjekkets eget checkout"], warns)
+fail = only_fail(rig, "tjekkets eget checkout", expect_version="2.0.21", expect_sha=SHA)
+check("bound to a release it is a FAIL, with the folder to run from", str(rig.repo) in fail["fix"], fail)
+rig = Rig(); rig.own_changed = " M worker/app/media_generation_profiles.py\n?? scripts/x.py\n"
+check("...and so is the same commit with changed or untracked files under worker/ or scripts/",
+      only_fail(rig, "tjekkets eget checkout", expect_version="2.0.21", expect_sha=SHA)["detail"].startswith("2 "))
+check("...which unbound is a WARN", [w["check"] for w in rig.statuses()[preflight.WARN]] == ["tjekkets eget checkout"])
+check("...and is asked of the script's checkout, under worker/ and scripts/",
+      any(c[-3:] == ["--", "worker", "scripts"] and str(ROOT) in c for c in rig.commands), rig.commands)
 
 # 4. The media Python and the GPUs.
 rig = Rig(); rig.torch = {"torch": "2.8.0", "cuda": True, "count": 1}
@@ -223,9 +236,14 @@ check("no nvidia-smi is a FAIL", any(f["check"] == "nvidia-smi" for f in rig.sta
 
 # 5. Profiles, with the worker's own loader.
 rig = Rig(); rig.env["KALIV_MEDIA_PROFILES_ENABLED"] = "realvis,missing"
-check("an unknown enabled profile is refused by the worker's own rule", "unknown profiles" in only_fail(rig, "profiler")["detail"])
+item = only_fail(rig, "profiler")
+check("an unknown enabled profile is refused by the worker's own rule, told in this file's words with the key it names",
+      "GenerationError" in item["detail"] and "ikke findes i profilmappen" in item["detail"]
+      and "KALIV_MEDIA_PROFILES_ENABLED" in item["detail"] and "unknown profiles" not in item["detail"], item)
 rig = Rig(); rig.env["KALIV_MEDIA_ALLOW_CANDIDATE_PROFILES"] = "0"
-check("candidate profiles without the allow switch are refused", "not rig-qualified" in only_fail(rig, "profiler")["detail"])
+item = only_fail(rig, "profiler")
+check("candidate profiles without the allow switch are refused, with the switch named",
+      "ikke rig-kvalificeret" in item["detail"] and "KALIV_MEDIA_ALLOW_CANDIDATE_PROFILES" in item["detail"], item)
 rig = Rig(); rig.write_profile(image_profile(profile_id="realvis", resources={"min_usable_gib": 8, "reserve_gib": 1, "devices": ["cuda:0"], "cpu_offload": False}))
 check("a profile on a card no executor serves is a FAIL", "cuda:0" in only_fail(rig, "profil realvis: enhed")["detail"])
 rig = Rig(); rig.env["KALIV_IMAGE_TOOL_PROFILE"] = "ltx-t2v"
@@ -265,8 +283,14 @@ check("with no ComfyUI profile enabled the ComfyUI keys are not required", not r
 # 7. Work area, Ollama, appliance, switches, secret.
 rig = Rig(); rig.area = {"ok": False, "checks": [{"check": "work_area", "ok": True, "detail": "ok"},
                                                     {"check": "publication_volume", "ok": False, "detail": "media_volume_marker_missing"}]}
-check("a failed work-area check is passed on with its reason code",
-      "media_volume_marker_missing" in only_fail(rig, "arbejdsområde: publication_volume")["detail"])
+item = only_fail(rig, "arbejdsområde: publication_volume")
+check("a failed work-area check is named by its id; its free text is not repeated",
+      item["detail"] == "ikke opfyldt" and "media_volume_marker_missing" not in json.dumps(item), item)
+rig = Rig(); rig.area = {"ok": False, "checks": [{"check": "private:Media Jobs.db\x1b[2J", "ok": False,
+                                                    "detail": f"KALIV_MEDIA_JOB_DB is not private ({SECRET})"}]}
+item = only_fail(rig, "arbejdsområde: private_media_jobs.db")
+check("...its id is reduced to an identifier, and of its text only the key name is kept",
+      item["check"] == "arbejdsområde: private_media_jobs.db__2j" and item["detail"] == "ikke opfyldt; nævner: KALIV_MEDIA_JOB_DB", item)
 rig = Rig(); rig.area = RuntimeError("boom")
 only_fail(rig, "arbejdsområde")
 check("a work-area preflight that raises is a FAIL, not a crash", True)
@@ -378,29 +402,69 @@ check("...and for every device when there are two", rig.started == ["cuda:0", "c
 rig = Rig()
 rig.start = ("config", "KALIV_COMFY_DIR/cuda1/input must be an existing folder in the work area (missing)")
 item = only_fail(rig, "egen startkontrol")
-check("a refusal by the executor (the per-device ComfyUI folders) is a FAIL that quotes it and names exit 78",
-      "cuda1/input" in item["detail"] and "78" in item["detail"], item)
+check("a refusal by the executor (the per-device ComfyUI folders) is a FAIL with exit 78, this file's reason and the key it names",
+      item["detail"] == "afviser start (exit 78): en mappe mangler i arbejdsområdet; nævner: KALIV_COMFY_DIR/cuda1/input"
+      and "executor-cuda1.log" in item["fix"], item)
 rig.start = ("volume", "the media volume is not mounted")
 check("a volume that is not there is a FAIL that names exit 75", "75" in only_fail(rig, "egen startkontrol")["detail"])
+# No character of a foreign text reaches the report: not whole, not cut, not transformed.
 for kind in ("config", "volume"):
-    rig = Rig()
-    rig.start = (kind, f"refused: {SECRET} was seen\x1b[31m\nsecond line")
-    item = only_fail(rig, "egen startkontrol")
-    for extra in ((), ("--json",)):
-        _, out, err = run_main(rig, *extra)
-        check(f"a secret inside the executor's {kind} refusal is replaced, not printed ({'json' if extra else 'text'})",
-              SECRET not in out + err and preflight.HIDDEN in out and "\x1b" not in out and "second line" in out, out[-300:])
+    for label, text in (("whole", f"KALIV_MEDIA_JOB_DB refused: {SECRET} was seen\x1b[31m\nsecond line"),
+                        ("across where a cut would fall", "x" * 290 + SECRET + " KALIV_MEDIA_WORK_ROOT"),
+                        ("transformed", "token " + SECRET[::-1] + " " + SECRET.upper() + " " + SECRET[:20]),
+                        ("dressed as a key name", "KALIV_" + SECRET.upper() + " HF_TOKEN")):
+        rig = Rig()
+        rig.env["HF_TOKEN"] = "KALIV_PRETEND_KEY"
+        rig.start = (kind, text)
+        item = only_fail(rig, "egen startkontrol")
+        for extra in ((), ("--json",)):
+            _, out, err = run_main(rig, *extra)
+            shown = out + err
+            check(f"a secret {label} in the executor's {kind} refusal is not printed ({'json' if extra else 'text'})",
+                  SECRET not in shown and SECRET[:12] not in shown and SECRET[::-1] not in shown and SECRET.upper() not in shown
+                  and "second line" not in shown and "refused" not in shown and "\x1b" not in shown, shown[-300:])
+rig = Rig()
+rig.env["HF_TOKEN"] = "KALIV_PRETEND_KEY"
+rig.start = ("config", "KALIV_PRETEND_KEY and KALIV_PRETEND_KEY/cuda1 and KALIV_MEDIA_WORK_ROOT must be an absolute path")
+check("a key-name-shaped token that is a value of the env file is dropped; the real key name is kept",
+      only_fail(rig, "egen startkontrol")["detail"] == "afviser start (exit 78): en sti er ikke absolut; nævner: KALIV_MEDIA_WORK_ROOT")
+rig.start = ("config", " ".join(f"KALIV_KEY_{n}" for n in range(40)))
+check("the list of key names is bounded", only_fail(rig, "egen startkontrol")["detail"].count("KALIV_KEY_") == preflight.MAX_NAMES)
 rig = Rig()
 refusing = rig.probes()
 
 
 def loader_refuses(env):
-    raise ValueError("bad profile near " + SECRET)
+    raise ValueError("x" * 190 + SECRET + " in KALIV_MEDIA_PROFILE_DIR")
 
 
 refusing.profiles = loader_refuses
-found = json.dumps(preflight.evaluate(rig.env, refusing))
-check("...and so is one inside any other error text (a loader that quotes it)", SECRET not in found and preflight.HIDDEN in found)
+found = preflight.evaluate(rig.env, refusing)
+item = [f for f in found if f["check"] == "profiler"][0]
+check("a loader error that quotes a secret (across the old cut) contributes its class and the key name only",
+      SECRET[:8] not in json.dumps(found) and item["detail"] ==
+      "afvist af profil-loaderen (ValueError): en profilfil eller profilmappen blev afvist; nævner: KALIV_MEDIA_PROFILE_DIR", item)
+
+# The masking is presentation only: it can never change a verdict (ChatGPT #2503, re-review).
+for word in ("FAIL", "WARN", "OK  ", "INFO", "profiler", "video"):
+    rig = Rig()
+    rig.env["KALIV_MEDIA_INTERNAL_SECRET"] = word
+    rig.env["KALIV_MEDIA_EXECUTOR"] = "0"
+    probes = rig.probes()
+    probes.secret_ok = lambda value: False
+    found = preflight.evaluate(rig.env, probes)
+    check(f"a secret whose value is {word!r}: every status is still one of the four and every check id is unchanged",
+          all(f["status"] in (preflight.OK, preflight.WARN, preflight.FAIL, preflight.INFO) for f in found)
+          and not any(preflight.HIDDEN in f["check"] for f in found)
+          and sum(f["status"] == preflight.FAIL for f in found) >= 2 and preflight.readiness(found)["image"] is False, found[:3])
+    code, out, _ = run_main(rig, "--json")
+    check(f"...and the command still exits 1 and reports nothing ready ({word!r})",
+          code == 1 and json.loads(out)["ready"] == {"image": False, "text_to_video": False, "image_to_video": False})
+rig = Rig()
+rig.env["KALIV_MEDIA_EXECUTOR_PYTHON"] = str(rig.tmp / ("p" * 700) / SECRET)
+item = [f for f in rig.evaluate() if f["check"] == "KALIV_MEDIA_EXECUTOR_PYTHON"][0]
+check("a text of this file's own is masked before it is cut: no part of a secret past the limit survives",
+      len(item["detail"]) <= preflight.MAX_TEXT and SECRET[:6] not in item["detail"], item["detail"][-80:])
 rig = Rig()
 rig.start = ("old", "")
 check("an executor source without check_start is a FAIL that says it is older than this check",
