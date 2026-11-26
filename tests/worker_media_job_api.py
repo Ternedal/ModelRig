@@ -98,8 +98,20 @@ class RouteTests(unittest.TestCase):
         self.assertNotIn("translated secret prompt", listed.text)
         self.assertTrue(all("translated_prompt" not in entry for entry in listed.json()["jobs"]))
         body = listed.json()
+        # An entry carries exactly the public status fields plus kind. Compared as a set of keys:
+        # the earlier form searched the serialised JSON for "832" (the video profile's width), and
+        # a random job id such as a83af38c1ec24c0d832da3608ba1bed2 or a timestamp can contain it -
+        # the suite went red a few times in a hundred with nothing wrong (26 Nov 2026: #2323, #2499).
+        public = {"schema", "id", "state", "profile_id", "asset_id", "asset_url", "error",
+                  "cancel_requested", "created", "updated", "kind"}
+        for entry in body["jobs"]:
+            self.assertEqual(set(entry), public)
+            self.assertFalse(any(isinstance(v, (dict, list)) for v in entry.values()),
+                             "no nested value that could carry request parameters")
+            self.assertNotIn(832, entry.values())
+        # Free text that cannot occur in a hex id or a timestamp may still be searched for.
         raw = json.dumps(body)
-        for private in (PROMPT, "params", "owner", "claimed", "832", "sdxl-base"):
+        for private in (PROMPT, "params", "owner", "claimed", "sdxl-base"):
             self.assertNotIn(private, raw)
         # a job whose profile is no longer enabled is still listed; its kind is unknown
         del self.service.profiles["wan-t2v"]
