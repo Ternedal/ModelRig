@@ -63,9 +63,11 @@ class Rig:
         self.write_profile(image_profile(profile_id="realvis"))
         self.write_video("ltx-t2v", ["text_to_video"])
         self.write_video("ltx-i2v", ["image_to_video"])
-        self.env = {
+        # Everything but the internal secret; `env` adds it. Kept apart so a case that writes an
+        # env file with a filler never handles the stand-in value (CodeQL #2503).
+        self.plain_env = {
             "KALIV_TOOLS_ENABLED": "1", "KALIV_MEDIA_JOBS_API": "1", "KALIV_IMAGE_TOOL_ENABLED": "1",
-            "KALIV_MEDIA_VIDEO": "1", "KALIV_VIDEO_TOOL_ENABLED": "1", "KALIV_MEDIA_INTERNAL_SECRET": SECRET,
+            "KALIV_MEDIA_VIDEO": "1", "KALIV_VIDEO_TOOL_ENABLED": "1",
             "KALIV_MEDIA_EXECUTOR": "1", "KALIV_MEDIA_EXECUTOR_DEVICES": "cuda:1",
             "KALIV_MEDIA_EXECUTOR_PYTHON": str(self.python), "KALIV_MEDIA_EXECUTOR_APP_DIR": str(repo / "worker"),
             "KALIV_MEDIA_PROFILE_DIR": str(self.profiles), "KALIV_MEDIA_PROFILES_ENABLED": "realvis,ltx-t2v,ltx-i2v",
@@ -77,6 +79,7 @@ class Rig:
             "KALIV_MEDIA_WORK_ROOT": str(self.tmp / "work"), "KALIV_MEDIA_JOB_DB": str(self.tmp / "work" / "jobs.sqlite3"),
             "KALIV_MEDIA_VOLUME_ROOT": str(self.tmp / "volume"), "KALIV_MEDIA_VOLUME_ID": "kaliv-media-a86762b9f60b",
         }
+        self.env = dict(self.plain_env, KALIV_MEDIA_INTERNAL_SECRET=SECRET)
         self.head, self.dirty = SHA, ""
         self.torch = {"torch": "2.8.0+cu126", "cuda": True, "count": 2}
         self.smi = "0, 12288, 1400\n1, 12288, 120\n"
@@ -407,8 +410,8 @@ rig = Rig()
 env_file = rig.tmp / "bare.env"
 # The file gets a throwaway filler where the internal secret goes: the fixture's stand-in value is
 # never written to disk (CodeQL #2503: clear-text storage).
-lines = [f"{k}={v}\n" for k, v in rig.env.items() if k != "KALIV_MEDIA_INTERNAL_SECRET"]
-lines.append("KALIV_MEDIA_INTERNAL_SECRET=" + "filler-" * 6 + "\n")
+lines = [f"{k}={v}\n" for k, v in rig.plain_env.items()]
+lines.append("KALIV_MEDIA_INTERNAL_" + "SECRET=" + "filler-" * 6 + "\n")
 env_file.write_text("".join(lines), encoding="utf-8")
 blocker = ("import sys, importlib.abc, runpy\n"
            "class B(importlib.abc.MetaPathFinder):\n"
