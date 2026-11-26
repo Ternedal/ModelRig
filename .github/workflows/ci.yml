@@ -165,6 +165,70 @@ jobs:
             if (Test-Path $stderr) { Get-Content $stderr }
           }
 
+      # Media in the chat (#2419) has only ever run on the rig from source, through the dev
+      # appliance. A release ships this frozen worker instead, and its media routes and tools are
+      # imported behind literal switches that no boot above turns on. Whether the package carries
+      # them at all was therefore unproven until a tag had been pushed and installed.
+      #
+      # Two boots of the same exe. Off, as an installed appliance is by default: no media route,
+      # no media tool. On, with no media configuration: the routes exist and refuse with 503 and a
+      # media_jobs_* code before any database is opened, and both tools are registered. That
+      # proves the modules are in the package and import in the frozen runtime. It does not prove
+      # a job: there is no executor, no GPU and no profile here.
+      - name: Frozen worker carries media in the chat, off by default
+        if: steps.scope.outputs.relevant == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = (Resolve-Path dist/modelrig-worker-windows-x64.exe).Path
+          $base = "http://127.0.0.1:8099"
+          $switches = "KALIV_MEDIA_JOBS_API", "KALIV_TOOLS_ENABLED", "KALIV_IMAGE_TOOL_ENABLED", "KALIV_VIDEO_TOOL_ENABLED", "KALIV_MEDIA_VIDEO"
+          $env:PYTHONPATH = ""
+          $env:MODELRIG_WORKER_HOST = "127.0.0.1"
+          $env:MODELRIG_WORKER_PORT = "8099"
+          $env:MODELRIG_OLLAMA_URL = "http://127.0.0.1:9"
+          foreach ($mode in "off", "on") {
+            foreach ($name in $switches) { Remove-Item "Env:$name" -ErrorAction SilentlyContinue }
+            if ($mode -eq "on") { foreach ($name in $switches) { Set-Item "Env:$name" "1" } }
+            $stdout = Join-Path $env:RUNNER_TEMP "worker-media-$mode-stdout.log"
+            $stderr = Join-Path $env:RUNNER_TEMP "worker-media-$mode-stderr.log"
+            $worker = Start-Process -FilePath $exe -WorkingDirectory $env:RUNNER_TEMP -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            try {
+              $health = $null
+              foreach ($i in 1..90) {
+                if ($worker.HasExited) { throw "frozen worker (media $mode) exited with code $($worker.ExitCode)" }
+                try { $health = Invoke-RestMethod "$base/healthz" -TimeoutSec 2; break }
+                catch { Start-Sleep -Seconds 1 }
+              }
+              if (-not $health -or $health.service -ne "modelrig-worker") { throw "frozen worker (media $mode) never answered /healthz" }
+              $profiles = Invoke-WebRequest "$base/internal/media/jobs/profiles" -SkipHttpErrorCheck -TimeoutSec 15
+              $assets = Invoke-WebRequest "$base/internal/media/assets" -SkipHttpErrorCheck -TimeoutSec 15
+              $tools = @((Invoke-RestMethod "$base/tools" -TimeoutSec 30).tools | Where-Object { $_.name -in "image_generate", "video_generate" })
+              $seen = "profiles=$($profiles.StatusCode) assets=$($assets.StatusCode) tools=$(($tools.name | Sort-Object) -join ',')"
+              if ($mode -eq "off") {
+                if ($profiles.StatusCode -ne 404 -or $assets.StatusCode -ne 404 -or $tools.Count -ne 0) {
+                  throw "media must be absent from a frozen worker with every switch off: $seen"
+                }
+              } else {
+                $detail = ($profiles.Content | ConvertFrom-Json).detail
+                if ($profiles.StatusCode -ne 503 -or $detail -notmatch '^media_jobs_[a-z_]+$') {
+                  throw "the frozen worker did not mount the media job routes (want 503 media_jobs_*): $seen $($profiles.Content)"
+                }
+                if ($assets.StatusCode -ne 503) { throw "the frozen worker did not mount the media asset routes (want 503): $seen" }
+                if ($tools.Count -ne 2 -or @($tools | Where-Object { $_.enabled -ne $true }).Count -ne 0) {
+                  throw "the frozen worker did not register image_generate and video_generate: $seen"
+                }
+              }
+              Write-Host "frozen worker, media switches ${mode}: $seen"
+            }
+            finally {
+              if (-not $worker.HasExited) { & taskkill.exe /PID $worker.Id /T /F | Out-Null }
+              $worker.WaitForExit(15000) | Out-Null
+              if (Test-Path $stdout) { Get-Content $stdout }
+              if (Test-Path $stderr) { Get-Content $stderr }
+            }
+          }
+
       - name: Delayed frozen worker survives supervisor and updater readiness
         if: steps.scope.outputs.relevant == 'true'
         shell: pwsh
