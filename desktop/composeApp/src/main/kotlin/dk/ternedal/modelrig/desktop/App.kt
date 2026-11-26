@@ -1067,7 +1067,7 @@ private fun ConversationsPanel(
     // #973: a storage failure on load is a state of its own, never an empty list
     // that reads as "no conversations"; every later failure is fixed Danish copy
     // chosen by the operation, never the exception's text.
-    var listState by remember { mutableStateOf(loadConversationList { db.listConversations() }) }
+    var listState by remember { mutableStateOf(loadConversationList(::recordConversationLoadFailure) { db.listConversations() }) }
     val convos = listState.conversations
     var panelError by remember {
         mutableStateOf(if (listState is ConversationListState.Failed) presentConversationStoreError(ConversationStoreOperation.LOAD) else null)
@@ -1127,9 +1127,12 @@ private fun ConversationsPanel(
                             TextButton(onClick = {
                                 runCatching {
                                     db.renameConversation(c.id, renameText.trim())
-                                    listState = loadConversationList { db.listConversations() }
+                                    listState = loadConversationList(::recordConversationLoadFailure) { db.listConversations() }
                                     panelError = if (listState is ConversationListState.Failed) presentConversationStoreError(ConversationStoreOperation.LOAD) else null
-                                }.onFailure { panelError = presentConversationStoreError(ConversationStoreOperation.RENAME) }
+                                }.onFailure {
+                                    DesktopDiagnostics.record(ConversationStoreOperation.RENAME.diagnosticName, it)
+                                    panelError = presentConversationStoreError(ConversationStoreOperation.RENAME)
+                                }
                                 renamingId = null
                             }) { Text("Gem", color = KalivTheme.colors.Signal, fontSize = 12.sp) }
                             TextButton(onClick = { renamingId = null }) {
@@ -1159,7 +1162,10 @@ private fun ConversationsPanel(
                                     clipboard.setText(AnnotatedString(db.conversationAsMarkdown(c.id)))
                                     copiedId = c.id
                                     panelError = null
-                                }.onFailure { panelError = presentConversationStoreError(ConversationStoreOperation.COPY) }
+                                }.onFailure {
+                                    DesktopDiagnostics.record(ConversationStoreOperation.COPY.diagnosticName, it)
+                                    panelError = presentConversationStoreError(ConversationStoreOperation.COPY)
+                                }
                             }) {
                                 Text(if (copiedId == c.id) "Kopieret" else "Kopiér", color = KalivTheme.colors.Signal, fontSize = 12.sp)
                             }
@@ -1172,9 +1178,12 @@ private fun ConversationsPanel(
                                             // Every successful delete invalidates pending conversation
                                             // loads; the parent clears the view as well when this was active.
                                             onDeleted(c.id)
-                                            listState = loadConversationList { db.listConversations() }
+                                            listState = loadConversationList(::recordConversationLoadFailure) { db.listConversations() }
                                             panelError = if (listState is ConversationListState.Failed) presentConversationStoreError(ConversationStoreOperation.LOAD) else null
-                                        }.onFailure { panelError = presentConversationStoreError(ConversationStoreOperation.DELETE) }
+                                        }.onFailure {
+                                            DesktopDiagnostics.record(ConversationStoreOperation.DELETE.diagnosticName, it)
+                                            panelError = presentConversationStoreError(ConversationStoreOperation.DELETE)
+                                        }
                                     }
                                 },
                             ) {
@@ -1505,7 +1514,9 @@ private fun SettingsCard(
 private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, onApply: (String) -> Unit) {
     // Same rule as the conversation browser (#973): a failed load is said, not shown
     // as "no presets"; failures use fixed copy, never the exception's text.
-    val initialPresets = remember { runCatching { db.listPresets(source) } }
+    val initialPresets = remember {
+        runCatching { db.listPresets(source) }.onFailure(::recordPresetLoadFailure)
+    }
     var presets by remember { mutableStateOf(initialPresets.getOrElse { emptyList() }) }
     var saving by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
@@ -1531,6 +1542,7 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
                                 PresetStoreOperation.DELETE,
                                 mutate = { db.deletePreset(p.id) },
                                 reload = { db.listPresets(source) },
+                                onFailure = ::recordPresetFailure,
                             )
                             // Deleted but not reloaded: the row is gone from the store, so it
                             // leaves the list too; the LOAD error says the rest is unconfirmed.
@@ -1572,6 +1584,7 @@ private fun PresetRow(db: DesktopChatDb, source: String, currentPrompt: String, 
                         PresetStoreOperation.SAVE,
                         mutate = { db.savePreset(source, newName.trim(), currentPrompt) },
                         reload = { db.listPresets(source) },
+                        onFailure = ::recordPresetFailure,
                     )
                     outcome.presets?.let { presets = it }
                     presetErrors = presetErrors.afterMutation(outcome)
@@ -1870,3 +1883,11 @@ private fun SecretField(label: String, value: String, onChange: (String) -> Unit
         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
     )
 }
+
+private fun recordConversationLoadFailure(error: Throwable) =
+    DesktopDiagnostics.record(ConversationStoreOperation.LOAD.diagnosticName, error)
+
+private fun recordPresetFailure(operation: PresetStoreOperation, error: Throwable) =
+    DesktopDiagnostics.record(operation.diagnosticName, error)
+
+private fun recordPresetLoadFailure(error: Throwable) = recordPresetFailure(PresetStoreOperation.LOAD, error)
