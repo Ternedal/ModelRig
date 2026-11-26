@@ -625,6 +625,53 @@ vindue under S5 (#2475) og ikke `output_has_no_sound`. Det er en accept af denne
 kæde på udviklingskanalen — ikke en V1-gate og ikke en kvalificering af
 profilerne, som fortsat er `candidate`.
 
+## 8. Medie fra en udgivet appliance — tjek før du sætter tid af
+
+Alt ovenfor er kørt fra kildekoden med executoren startet i hånden. I en release
+er tre ting anderledes, og ingen af dem er set på riggen:
+
+- **Supervisoren starter executoren** ud fra fire nøgler i env-filen
+  (`KALIV_MEDIA_EXECUTOR`, `_DEVICES`, `_PYTHON`, `_APP_DIR`).
+- **Executoren kører stadig fra et kilde-checkout** (`_APP_DIR`), fordi torch ikke
+  er i den pakkede worker. Det checkout skal stå på releasens egen commit.
+- **Alle kontakter læses fra env-filen**, ikke fra et PowerShell-vindue.
+
+En fejl i en af dem viser sig som "der sker ingenting". `scripts\media_release_preflight.py`
+stiller de samme spørgsmål på forhånd, på få sekunder, og skriver hvad der skal
+rettes. Den læser kun: env-filen, de filer den peger på, `nvidia-smi`,
+medie-miljøets `import torch`, Ollamas modelliste og appliancens `/healthz`. Den
+skriver intet, starter intet og viser ikke værdien af en hemmelighed.
+
+Fra et checkout, der har scriptet (her kandidat-checkouten):
+
+```powershell
+cd C:\Users\an001\Desktop\ModelRig-git
+py -3.11 scripts\media_release_preflight.py --env-file C:\Rig\ModelRig\modelrig.env --planner-model qwen3:14b 2>&1 | Tee-Object $env:TEMP\media-release-preflight.txt
+```
+
+Når tagget findes, bindes executorens kilde til det (blokken stopper, hvis tagget
+ikke er hentet):
+
+```powershell
+cd C:\Users\an001\Desktop\ModelRig-git
+$tag = 'v2.0.21'
+$sha = (git rev-parse "$tag^{commit}").Trim()
+if ($sha -notmatch '^[0-9a-f]{40}$') { throw "$tag er ikke hentet: git fetch --force origin tag $tag" }
+py -3.11 scripts\media_release_preflight.py --env-file C:\Rig\ModelRig\modelrig.env --planner-model qwen3:14b --expect-version $tag.TrimStart('v') --expect-sha $sha 2>&1 | Tee-Object $env:TEMP\media-release-preflight.txt
+```
+
+| Linje | Betyder |
+|---|---|
+| `OK` | som en release kræver det |
+| `WARN` | virker, men er værd at se på (fx hukommelse i brug på executorens kort) |
+| `FAIL` | releasen laver ikke billede/video sådan; linjen under (`->`) siger hvad der skal ændres |
+| `INFO` | oplysning, ikke en dom (fx at appliancen ikke kører lige nu) |
+
+Sidste linje tæller dem. **Ingen FAIL er ikke en kvalifikation og ikke et job** —
+første billede og første klip fra den udgivne appliance er stadig prøven (§7).
+Tjekket læser kun env-filen: en nøgle, der kun er sat i supervisorens eget miljø,
+meldes som manglende, selv om appliancen ville se den.
+
 ## Hvad der skal med hjem
 
 Skriv det som én kommentar på #2419:
