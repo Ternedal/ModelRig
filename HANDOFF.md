@@ -848,7 +848,109 @@ streams) → Worker :8099 (RAG · voice · tools · eval) → Ollama :11434 (lok
     tiende ikke dit arbejde. `git status --short` før `git add`, og vær
     særligt mistroisk efter en testkørsel — suiter skriver tilstand.
 
-## 9. Kø — hvem har bolden (16/7, opdateret 22/11)
+## 9. Kø — hvem har bolden (16/7, opdateret 26/11)
+
+### 23–26/11: puljen ryddet, Stage B fra ca. 200 til ca. 150 minutter — og hvad målingerne lærte os
+
+**[26/11 14:3x — main = `21e54a5e` (merge-commit af #2499), VERSION 2.0.21. Stage B
+var grøn på `64b163b8` (146 min); den kører på `21e54a5e`, mens dette skrives. Landet
+23–26/11, hver på Anders' `Kør merge <fuld sha>` efter SHA-bundet ACCEPT fra
+ChatGPT: #2486, #2483, #2484, #2485, #2445, #2454, #2455, #2456, #2444, #2447,
+#2450, #2493, #2446, #2452, #2451, #2453, #2494, #2495, #2497, #2498, #2323,
+#2500, #2499.]**
+
+**Hvad der er nyt på `main`:**
+- **Acceptforløb for medie-i-chat** (`docs/RIGDAG_MEDIE_I_CHAT.md` §7, #2486):
+  seks succes- og otte fejltilfælde med PASS / FAIL / IKKE KØRT pr. klient. Intet
+  i §7 er kørt fysisk. F2-blokken er kørt ordret med PowerShell mod workerens
+  rigtige job-router; resten er læst mod koden.
+- **V1-gate-tavlen** (`scripts/kaliv_v1_gate_board.py`, `docs/RIGDAG_V1.md` §0,
+  #2485): viser pr. gate, om evidensen mangler, er forældet eller binder. På
+  dagens pins: alle syv V1-gates MISSING. Det er forventet — kandidat-SHA og
+  freeze er ikke valgt.
+- **Desktop:** fejl i samtale- og forudindstillingslageret vises som fejl i stedet
+  for som et tomt lager (#2451, #2453); Tools-svar mærkes som riggens (#2452). De
+  syv lagerfejl skrives til `~/.modelrig/desktop.log` (#2499): tid, operationsnavn,
+  undtagelsens klasse, stakrammer og SQL-fejlkode — aldrig undtagelsens tekst.
+  Grænserne: størrelsesloftet (1 MB) gælder én skrivende proces og filer, loggen
+  selv har oprettet, og privatlivet hviler på, at operationsnavnet er en konstant.
+  Ikke set i en kørende klient.
+- **Kildebilleder til billede→video** kontrolleres strammere som PNG (#2323):
+  farvetype/bitdybde, palette, sammenhængende billeddata, chunk-navne, lofter.
+  Afprøvet mod 84 ægte PNG-filer uden falske afvisninger — men ikke mod riggens
+  egne galleri-billeder. Første billede→video-job på riggen er prøven.
+- **Afhængigheder:** fastapi 0.165.0, pydantic 2.14.4, setup-go v7.1.0,
+  codeql-action v4.39.4, desktop Gradle 9.9.2 (#2494, samlet). Dependabot
+  ignorerer nu `nvidia-*` og `browser-use`-majors (#2445) og flytter
+  `androidx.camera:*` som én gruppe (#2495) — bekræftet af #2496.
+
+**Stage B — målt, ikke skønnet** (tider pr. del fra job-loggene; tabeller på #2264):
+- Kæden er `stage-b-admission` (alle venter på den) → otte parallelle dele → dom.
+- **#2497 er den ene ændring med en målt strukturel gevinst:** admission kørte to
+  tunge kontrakter efter hinanden, selv om de intet deler. Side om side: 43 → 26
+  min på en hurtig runner, ca. 75 → 50 på en langsom — altså 17–34 min pr. kørsel.
+- **Observeret start → dom:** 202 / 198 / 205 min i tre kørsler før, 149 / 146 i
+  to kørsler efter. Forskellen (ca. 50 min) er større end #2497's bidrag; resten
+  er runner-hastighed i netop de kørsler og kan ikke tilskrives en ændring. To
+  målinger er for lidt til at kalde 150 min det nye niveau.
+- **Omfordelingen (#2454–#2456) jævnede delene ud, men forkortede ikke kæden.**
+  Tre af fire downstream-dele ligger på 63–87 min; den fjerde er hver gang
+  1,5–2× langsommere, og det er ikke den samme. Det er runneren, ikke tabellen.
+- **Runner-hastigheden svinger ca. 2×** mellem kørsler, og 30–45 % når mange
+  Stage B-kørsler ligger samtidig. Sammenlign aldrig en rolig kørsel med en
+  belastet; sammenlign kontrakt-tider (`PASS: <fil> (<s>)`) mod en kontrakt i
+  samme job. Min første konklusion om stakken var forkert af netop den grund.
+- #2498 hævede hængevagten på admission's dybe barn fra 3000 til 5400 s (82 %
+  brugt på en langsom runner uden fejl).
+- `android-compile` og `desktop-compile` gemmer nu Gradles afhængigheder (#2493,
+  #2495). Hit er set i `main`'s egne kørsler for begge (Android på `6c6ca44a`,
+  desktop på `21e54a5e`). At en ramt kørsel intet henter udefra, er målt på de to
+  PR'ers egen CI (0 `Download`-linjer), ikke på `main`. At cachen forhindrer en
+  reel fejlet hentning, er ikke set — det kræver, at Maven Central svigter igen.
+
+**Bolden:**
+- **Anders:** kandidat-SHA + freeze (`main` flytter sig ved hver landing);
+  rig-kørslen af §7 og V1-gates; #2496 (CameraX 1.4.2 → 1.7.0 — kameraet skal
+  prøves på telefonen før landing); #2281 (APK-certifikat-pin: kræver verificeret
+  signeringscertifikat og en hemmelighed); #2403/#2405 (VR, ingen ejer); de fire i
+  konflikt (#2320, #2303, #2299, #2261).
+- **Åbent, ikke påbegyndt:** klienten har ca. 120 andre steder, der fanger en fejl
+  og kasserer den; kun de syv lagerfejl logges. De to grænser for loggen ovenfor
+  skal også stå i klassens egen kommentar.
+
+**Det, landingerne 23–26/11 lærte os (i forlængelse af de syv punkter nedenfor):**
+8. **Push til en kladde, og vent, til kørslen findes, før den sættes klar.** Push
+   og `ready_for_review` inden for få sekunder gav på #2323 en `clean` PR med
+   grøn `stage-b-verdict`, hvor Stage B aldrig kørte: pushets `synchronize` blev
+   leveret to minutter senere med øjebliksbilledet `draft=true`, sprang
+   `stage-b-slices` over og annullerede den rigtige kørsel. Tjek, at
+   `stage-b-slices / stage-b-admission` faktisk er i gang på head.
+9. **`stage-b-verdict` er ikke et krævet check.** En kode-PR kan merges, mens
+   Stage B kører; `main` kører den altid bagefter. Vent på Stage B på PR-head,
+   når ændringen rører Stage B selv, eller når ChatGPT kræver det.
+10. **En flake i et krævet check kan genudløses uden ny SHA:** luk og genåbn
+    PR'en (`reopened` er en trigger). SHA, ACCEPT og go består. Brugt på #2450
+    (Chromium hang), #2451 (runneren kunne ikke nå github.com) og #2323.
+11. **Sammenfletning af `main` i mange PR'er på én gang fylder runnerne.** Hver
+    kode-PR, der er sat klar, starter en fuld Stage B. Opdater kun den PR, der
+    står for tur.
+12. **Flere små Dependabot-PR'er landes som én** (cherry-pick af deres commits,
+    #2494): én reviewrunde og én Stage B i stedet for fem. Dependabot lukker selv
+    sine PR'er, når `main` har versionerne.
+13. **Kør runbook-blokke, før de kaldes klar.** PowerShell 7 kan hentes fra
+    GitHub i sandboxen; workerens router kan startes lokalt. Det fandt to fejl i
+    min egen F2-blok (#2486), som en læsning ikke havde fanget.
+14. **En gammel PR, der fletter rent, kan stadig være i stykker.** #2323 flettede
+    uden konflikt efter 1194 commits, men dens tests fejlede, fordi `main` havde
+    ændret en fejltype. Kør PR'ens egne tests efter sammenfletningen.
+15. **Søg aldrig efter en kort talstreng i serialiseret output med tilfældige
+    id'er.** Min egen test fra #2481 krævede, at `"832"` ikke fandtes i et svar med
+    to hex-id'er og fire tidsstempler; den fejlede ca. 2,8 % af gangene og gjorde
+    det krævede `exact-head-core` rødt på PR'er, der ikke rørte koden (#2500).
+    Sammenlign felter: præcis de forventede nøgler, og værdier efter lighed.
+16. **En log, der lover privatliv, skriver ikke undtagelsens tekst.** Første
+    udgave af #2499 gjorde, og fik NO ACCEPT: en besked er fri tekst valgt af den,
+    der kastede. Klasse, kodelinje og strukturerede koder kommer fra koden selv.
 
 ### 22/11: billede, video og lyd i chatten er på `main` — og hvad landingen lærte os
 
