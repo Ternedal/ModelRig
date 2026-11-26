@@ -872,8 +872,9 @@ ChatGPT: #2486, #2483, #2484, #2485, #2445, #2454, #2455, #2456, #2444, #2447,
   for som et tomt lager (#2451, #2453); Tools-svar mærkes som riggens (#2452). De
   syv lagerfejl skrives til `~/.modelrig/desktop.log` (#2499): tid, operationsnavn,
   undtagelsens klasse, stakrammer og SQL-fejlkode — aldrig undtagelsens tekst.
-  Grænserne: størrelsesloftet (1 MB) gælder én skrivende proces, og privatlivet
-  hviler på, at operationsnavnet er en konstant. Ikke set i en kørende klient.
+  Grænserne: størrelsesloftet (1 MB) gælder én skrivende proces og filer, loggen
+  selv har oprettet, og privatlivet hviler på, at operationsnavnet er en konstant.
+  Ikke set i en kørende klient.
 - **Kildebilleder til billede→video** kontrolleres strammere som PNG (#2323):
   farvetype/bitdybde, palette, sammenhængende billeddata, chunk-navne, lofter.
   Afprøvet mod 84 ægte PNG-filer uden falske afvisninger — men ikke mod riggens
@@ -885,9 +886,13 @@ ChatGPT: #2486, #2483, #2484, #2485, #2445, #2454, #2455, #2456, #2444, #2447,
 
 **Stage B — målt, ikke skønnet** (tider pr. del fra job-loggene; tabeller på #2264):
 - Kæden er `stage-b-admission` (alle venter på den) → otte parallelle dele → dom.
-- **#2497 er det, der flyttede noget:** admission kørte to tunge kontrakter efter
-  hinanden, selv om de intet deler. Side om side: 43 → 26 min på en hurtig runner,
-  ca. 75 → 50 på en langsom. Start → dom: 202 / 198 / 205 min før, 149 / 146 efter.
+- **#2497 er den ene ændring med en målt strukturel gevinst:** admission kørte to
+  tunge kontrakter efter hinanden, selv om de intet deler. Side om side: 43 → 26
+  min på en hurtig runner, ca. 75 → 50 på en langsom — altså 17–34 min pr. kørsel.
+- **Observeret start → dom:** 202 / 198 / 205 min i tre kørsler før, 149 / 146 i
+  to kørsler efter. Forskellen (ca. 50 min) er større end #2497's bidrag; resten
+  er runner-hastighed i netop de kørsler og kan ikke tilskrives en ændring. To
+  målinger er for lidt til at kalde 150 min det nye niveau.
 - **Omfordelingen (#2454–#2456) jævnede delene ud, men forkortede ikke kæden.**
   Tre af fire downstream-dele ligger på 63–87 min; den fjerde er hver gang
   1,5–2× langsommere, og det er ikke den samme. Det er runneren, ikke tabellen.
@@ -898,7 +903,10 @@ ChatGPT: #2486, #2483, #2484, #2485, #2445, #2454, #2455, #2456, #2444, #2447,
 - #2498 hævede hængevagten på admission's dybe barn fra 3000 til 5400 s (82 %
   brugt på en langsom runner uden fejl).
 - `android-compile` og `desktop-compile` gemmer nu Gradles afhængigheder (#2493,
-  #2495); hit er set på `main`, og en ramt kørsel henter intet udefra.
+  #2495). Hit er set i `main`'s egne kørsler for begge (Android på `6c6ca44a`,
+  desktop på `21e54a5e`). At en ramt kørsel intet henter udefra, er målt på de to
+  PR'ers egen CI (0 `Download`-linjer), ikke på `main`. At cachen forhindrer en
+  reel fejlet hentning, er ikke set — det kræver, at Maven Central svigter igen.
 
 **Bolden:**
 - **Anders:** kandidat-SHA + freeze (`main` flytter sig ved hver landing);
