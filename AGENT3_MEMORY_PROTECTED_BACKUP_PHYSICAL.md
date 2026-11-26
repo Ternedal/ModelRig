@@ -1,5 +1,16 @@
 # T-033 physical protected-memory backup/restore
 
+> **⚠️ Status 11/11-2026: the launcher cannot run in its current form.**
+> `START_AGENT3_MEMORY_BACKUP_PHYSICAL.cmd` is pinned to
+> `agent/t033-memory-protected-backup-physical-operator` (version 1.58.147), which
+> does not exist on origin (GitHub API: 404). The launcher's shared
+> `ensure_candidate` (`scripts/stage_a_one_click.retained`) runs
+> `git fetch origin main <branch>` and `git switch <branch>`, so it stops
+> fail-closed before any evidence is collected. During a campaign the entry
+> point is `START_PROOF_CAMPAIGN.cmd`, which runs `scripts/proof_t033_current.py`
+> bound to the current checkout (see the T-033 section in
+> `STAGED_PHYSICAL_PROMOTION.md`).
+
 **Status:** dormant Windows-rig operator and evidence gate. Nothing in this flow
 runs at worker startup, touches the active memory database, merges a branch,
 publishes a release or activates production.

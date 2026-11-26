@@ -6,7 +6,7 @@
 > code, so it cannot quietly become untrue. If a fact belongs here, teach
 > the generator to read it -- do not type it in.
 
-**Version:** 2.0.18
+**Version:** 2.0.21
 
 ## Tools the model can see
 
@@ -68,7 +68,10 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_EGRESS_GATE` | `` |
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` |
 | `KALIV_HOME_RIG_PILOT` | `0` |
+| `KALIV_IMAGE_TOOL_ENABLED` | `` |
 | `KALIV_MAX_UPLOAD_MB` | `25` |
+| `KALIV_MEDIA_EXECUTOR` | `(unset)` |
+| `KALIV_MEDIA_JOBS_API` | `0` |
 | `KALIV_PULL_READ_TIMEOUT_S` | `600` |
 | `KALIV_READ_CONNECTOR_PILOT` | `0` |
 | `KALIV_SCHEDULER` | `` |
@@ -77,6 +80,7 @@ are the same versioned values validated by worker, backend and clients.
 | `KALIV_TOOLS_DIR` | `(unset)` |
 | `KALIV_TOOLS_ENABLED` | `0` |
 | `KALIV_TOOL_ISOLATION` | `` |
+| `KALIV_VIDEO_TOOL_ENABLED` | `0` |
 | `KALIV_VISIONRIG_SENSOR_CONTROL` | `0` |
 | `KALIV_VISIONRIG_URL` | `http://127.0.0.1:8110` |
 | `KALIV_VISION_MODEL` | `(unset)` |
@@ -243,9 +247,11 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_browser_use_runtime_guard.py`
 - `tests/worker_build_identity.py`
 - `tests/worker_capability_schema_v2.py`
+- `tests/worker_comfy_image_to_video.py`
 - `tests/worker_comfy_resident_launcher.py`
 - `tests/worker_comfy_supervisor.py`
 - `tests/worker_comfy_video_adapter.py`
+- `tests/worker_comfy_weights.py`
 - `tests/worker_confirm_outbound_reads.py`
 - `tests/worker_confirmation_impact.py`
 - `tests/worker_consciousness_core_autonomous_checkpoint.py`
@@ -317,6 +323,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_consciousness_core_present_context.py`
 - `tests/worker_consciousness_core_profile_source.py`
 - `tests/worker_consciousness_core_profile_step.py`
+- `tests/worker_consciousness_core_quiet_import.py`
 - `tests/worker_consciousness_core_recovery_completion.py`
 - `tests/worker_consciousness_core_reducer.py`
 - `tests/worker_consciousness_core_response_guidance.py`
@@ -366,6 +373,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_diffusers_image_adapter.py`
 - `tests/worker_e2e_latency_runtime.py`
 - `tests/worker_e2e_latency_voice_mount.py`
+- `tests/worker_e2e_latency_voice_route.py`
 - `tests/worker_eval.py`
 - `tests/worker_file_capabilities.py`
 - `tests/worker_file_capabilities_audit.py`
@@ -376,20 +384,44 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_hardening_stream_disconnect.py`
 - `tests/worker_home_rig_e2e_fixture.py`
 - `tests/worker_home_rig_runtime.py`
+- `tests/worker_image_generate_tool.py`
+- `tests/worker_image_generate_turn.py`
 - `tests/worker_image_gpu_admission.py`
 - `tests/worker_image_job_store.py`
 - `tests/worker_jobs.py`
 - `tests/worker_kaliv_bodyrig_digital_twin_m6_qualifier.py`
 - `tests/worker_kaliv_bodyrig_photoreal_qualifier.py`
+- `tests/worker_kaliv_e2e_latency_voice_driver.py`
 - `tests/worker_kaliv_end_to_end_latency_qualifier.py`
+- `tests/worker_kaliv_recovery_soak_collector.py`
+- `tests/worker_kaliv_recovery_soak_qualification.py`
 - `tests/worker_kaliv_release_manifest_assembler.py`
+- `tests/worker_kaliv_repository_authority_assembler.py`
 - `tests/worker_kaliv_repository_authority_qualifier.py`
 - `tests/worker_kaliv_software_exact_green_qualifier.py`
 - `tests/worker_kaliv_voicerig_physical_qualifier.py`
+- `tests/worker_lease_dir_acl.py`
+- `tests/worker_media_chat_chain.py`
+- `tests/worker_media_executor.py`
+- `tests/worker_media_executor_image_to_video.py`
+- `tests/worker_media_executor_main.py`
+- `tests/worker_media_executor_main_video.py`
+- `tests/worker_media_gallery_api.py`
 - `tests/worker_media_generation_profiles.py`
 - `tests/worker_media_generation_reconciliation.py`
 - `tests/worker_media_generation_runner.py`
+- `tests/worker_media_image_env.py`
+- `tests/worker_media_job_api.py`
+- `tests/worker_media_job_to_gallery.py`
+- `tests/worker_media_preflight.py`
+- `tests/worker_media_prompt_translation.py`
+- `tests/worker_media_recovery_inventory.py`
+- `tests/worker_media_repair.py`
+- `tests/worker_media_security_properties.py`
 - `tests/worker_media_source_image.py`
+- `tests/worker_media_staged_video_sink.py`
+- `tests/worker_media_volume.py`
+- `tests/worker_media_work_area.py`
 - `tests/worker_migrate.py`
 - `tests/worker_netguard.py`
 - `tests/worker_occurrence_ledger.py`
@@ -403,6 +435,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_rag_benchmark.py`
 - `tests/worker_rag_cloud.py`
 - `tests/worker_rag_corpus_contract.py`
+- `tests/worker_rag_embed_batch.py`
 - `tests/worker_rag_pdf_lifecycle.py`
 - `tests/worker_rag_source_toggle.py`
 - `tests/worker_read_connector_data_sharing_identity.py`
@@ -456,6 +489,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/worker_tools_guardrail.py`
 - `tests/worker_tools_readtools.py`
 - `tests/worker_unit.py`
+- `tests/worker_video_generate_tool.py`
 - `tests/worker_vision.py`
 - `tests/worker_voice_asr_startup_race.py`
 - `tests/worker_voice_baseline.py`
@@ -509,6 +543,7 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_agent4_storage_boundary.py`
 - `tests/workflow_android_apk_certificate.py`
 - `tests/workflow_android_credential_commit.py`
+- `tests/workflow_android_media_entry.py`
 - `tests/workflow_android_palette_divergence.py`
 - `tests/workflow_android_scheduler_picker.py`
 - `tests/workflow_android_signing_audit.py`
@@ -524,10 +559,12 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_candidate_freeze.py`
 - `tests/workflow_candidate_gate.py`
 - `tests/workflow_chain_argument_check.py`
+- `tests/workflow_ci_pr_scope.py`
 - `tests/workflow_client_capability_gates.py`
 - `tests/workflow_client_microcopy_parity.py`
 - `tests/workflow_client_path_segments.py`
 - `tests/workflow_consciousness_core_contract.py`
+- `tests/workflow_consciousness_live_lifecycle_operator.py`
 - `tests/workflow_contract_adapter.py`
 - `tests/workflow_current_state.py`
 - `tests/workflow_data_sharing_decision.py`
@@ -540,15 +577,21 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_era_pins.py`
 - `tests/workflow_exact_head_concurrency.py`
 - `tests/workflow_freeze_check.py`
+- `tests/workflow_freeze_guard.py`
 - `tests/workflow_frozen_voice_package.py`
 - `tests/workflow_gates_read_code.py`
 - `tests/workflow_kaliv_delivery_report.py`
 - `tests/workflow_kaliv_env_parser.py`
 - `tests/workflow_kaliv_system_release_bind_consciousness.py`
+- `tests/workflow_kaliv_v1_gate_board.py`
 - `tests/workflow_kaliv_v1_rig_smoke.py`
 - `tests/workflow_kaliv_vr_renderer.py`
+- `tests/workflow_launcher_bytecode.py`
+- `tests/workflow_media_chat_probe.py`
+- `tests/workflow_media_env_set.py`
 - `tests/workflow_media_gallery_asset.py`
 - `tests/workflow_media_gallery_catalog.py`
+- `tests/workflow_media_gallery_contract_fixture.py`
 - `tests/workflow_media_gallery_index_writer.py`
 - `tests/workflow_media_gallery_range.py`
 - `tests/workflow_media_gallery_store.py`
@@ -575,9 +618,13 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_proof_scope_git_fail_closed.py`
 - `tests/workflow_ps1_encoding.py`
 - `tests/workflow_release.py`
+- `tests/workflow_release_fingerprint.py`
+- `tests/workflow_release_tag_guard.py`
 - `tests/workflow_remaining_physical_pilots.py`
 - `tests/workflow_repository_authority.py`
+- `tests/workflow_repository_authority_wrapper.py`
 - `tests/workflow_rig_preflight.py`
+- `tests/workflow_rig_simulator.py`
 - `tests/workflow_route_inventory.py`
 - `tests/workflow_runner_offline.py`
 - `tests/workflow_scheduler_m2_composition.py`
@@ -585,9 +632,11 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_scheduler_pilot_operator.py`
 - `tests/workflow_scheduler_pilot_wizard.py`
 - `tests/workflow_screen_insets.py`
+- `tests/workflow_software_exact_green_assembler.py`
 - `tests/workflow_spec_contract.py`
 - `tests/workflow_stack_starter_scheduler_env.py`
 - `tests/workflow_stage_a_checkpoint.py`
+- `tests/workflow_stage_a_dead_pin.py`
 - `tests/workflow_stage_a_one_click.py`
 - `tests/workflow_stage_a_operator_surface.py`
 - `tests/workflow_stage_a_phone_test.py`
@@ -597,9 +646,12 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_stage_a_scheduler_finalize.py`
 - `tests/workflow_stage_a_scheduler_publish.py`
 - `tests/workflow_stage_a_voice_test.py`
+- `tests/workflow_stage_b_admission_parallel.py`
 - `tests/workflow_stage_b_cache_manifest.py`
 - `tests/workflow_stage_b_one_click.py`
 - `tests/workflow_stage_b_physical_gate.py`
+- `tests/workflow_stage_b_reboot_proof.py`
+- `tests/workflow_stage_b_verdict.py`
 - `tests/workflow_stage_b_weighted_sharding.py`
 - `tests/workflow_staged_promotion_runbook.py`
 - `tests/workflow_stale_check.py`
@@ -608,8 +660,11 @@ Run by glob, so a file that matches is a file that runs
 - `tests/workflow_t037_read_connector_boundary.py`
 - `tests/workflow_test_coverage.py`
 - `tests/workflow_updater_status_consistency.py`
+- `tests/workflow_validation_stack_v1_gates.py`
 - `tests/workflow_voice_change_observations.py`
 - `tests/workflow_voice_runtime_preflight.py`
 - `tests/workflow_voicerig_cross_repo_contract.py`
+- `tests/workflow_wav_check.py`
 - `tests/workflow_web_research_parity.py`
+- `tests/workflow_windows_lease_dir_acl_junction.py`
 - `tests/workflow_worker_entrypoints.py`

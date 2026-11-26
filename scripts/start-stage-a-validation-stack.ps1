@@ -29,7 +29,26 @@ param(
     [switch]$HeadlessWorker,
 
     [switch]$WorkerOnly,
-    [switch]$EnableTaskUi
+    [switch]$EnableTaskUi,
+
+    # V1 gate 2 (consciousness_live_lifecycle) only. Needs -EnableScheduler:
+    # the autonomous scheduler, whose tick forms lived continuity after the
+    # restart, is mounted only with KALIV_SCHEDULER=1.
+    [switch]$EnableConsciousnessLifecycle,
+    [string]$ConsciousnessProfileFile,
+
+    # V1 gate 8 (end_to_end_latency): mounts the voice qualification routes
+    # bound to this checkout's HEAD. V1 gate 3 (visionrig_physical_perception):
+    # mounts VisionRig's admission route. Both need the live Consciousness
+    # session; without -EnableConsciousnessLifecycle the live-cycle flags and
+    # the profile are written for them.
+    [switch]$EnableE2eLatency,
+    [switch]$EnableVisionRigAdmission,
+
+    # Dry run for the rig simulator (and for checking a rig-day command line):
+    # write the worker cmd exactly as a real start would, print it between
+    # markers and stop -- no port waits, no backend build, nothing started.
+    [switch]$WriteWorkerCmdOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -155,6 +174,9 @@ if (-not [Net.IPAddress]::TryParse($BackendHost, [ref]$parsedAddress)) {
 if ($EnableScheduler -and [string]::IsNullOrWhiteSpace($SchedulerDataDir)) {
     throw "SchedulerDataDir er påkrævet, når scheduleren aktiveres."
 }
+if ($EnableConsciousnessLifecycle -and -not $EnableScheduler) {
+    throw "-EnableConsciousnessLifecycle kræver -EnableScheduler: den autonome scheduler monteres kun med KALIV_SCHEDULER=1."
+}
 if (($EnableScheduler -or $EnableSchedulerApi) -and ([string]$SchedulerApprovalSecret).Length -lt 32) {
     throw "SchedulerApprovalSecret skal være mindst 32 tegn for scheduler-testen."
 }
@@ -167,13 +189,76 @@ $schedulerValue = if ($EnableScheduler) { "1" } else { "0" }
 $schedulerApiValue = if ($EnableSchedulerApi) { "1" } else { "0" }
 $schedulerEnv = ""
 # T-023's task-UI qualification only: the flag is default-off by design, and
-# the generated cmd files build an explicit env, so process inheritance never
-# reaches the worker (#753 -- the campaign's T-023 died on operator_disabled).
+# what the generated cmd sets is the authority for it (#753 -- the campaign's
+# T-023 died on operator_disabled). Note: the cmd still INHERITS everything
+# else from this shell; only the variables it sets are overridden. Stray
+# KALIV_* names are reported after the worker cmd is written.
 # Defined HERE, outside both scheduler branches: an earlier version of this
 # line was spliced into the middle of the scheduler here-string assignment,
 # which silently dropped KALIV_SCHEDULER, the DB paths and the approval
 # secret from the worker cmd whenever -EnableScheduler was set (#785).
 $taskUiEnv = if ($EnableTaskUi) { 'set "KALIV_AGENT3_TASK_UI=1"' } else { '' }
+# V1 gate 2: the lifecycle flags, the qualification snapshot and the profile
+# file, written into the worker cmd like the task-ui flag (no inheritance).
+function Resolve-ConsciousnessProfile {
+    $path = if ([string]::IsNullOrWhiteSpace($ConsciousnessProfileFile)) {
+        Join-Path $repoRoot "deploy\consciousness-dev-profile.json"
+    } else {
+        [IO.Path]::GetFullPath($ConsciousnessProfileFile)
+    }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "ConsciousnessProfileFile findes ikke: $path"
+    }
+    return $path
+}
+$consciousnessEnv = ''
+if ($EnableConsciousnessLifecycle) {
+    $escapedProfile = Escape-CmdValue (Resolve-ConsciousnessProfile)
+    $consciousnessEnv = @"
+set "KALIV_CONSCIOUSNESS_CORE_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_CHAT_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_TURN_COGNITION_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_SLEEP_LIFECYCLE_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_UNPLANNED_LIVENESS_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_POLICY_CHECKPOINT_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_AUTONOMOUS_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_AUTONOMOUS_SCHEDULER_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_AUTONOMOUS_CHECKPOINT_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_CONTINUOUS_LOOP_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_QUALIFICATION_EVIDENCE_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_PROFILE_FILE=$escapedProfile"
+"@
+}
+# V1 gates 8 and 3: written into the worker cmd like the gate 2 block, never
+# inherited. The live session is docs/consciousness-core/LIVE_CYCLE_QUALIFICATION.md;
+# with -EnableConsciousnessLifecycle it is already part of $consciousnessEnv.
+$liveSessionEnv = ''
+if (($EnableE2eLatency -or $EnableVisionRigAdmission) -and -not $EnableConsciousnessLifecycle) {
+    $escapedLiveProfile = Escape-CmdValue (Resolve-ConsciousnessProfile)
+    $liveSessionEnv = @"
+set "KALIV_CONSCIOUSNESS_CORE_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_CHAT_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED=1"
+set "KALIV_CONSCIOUSNESS_PROFILE_FILE=$escapedLiveProfile"
+"@
+}
+$e2eLatencyEnv = ''
+if ($EnableE2eLatency) {
+    $candidateSha = ([string](& git -C $repoRoot rev-parse HEAD)).Trim()
+    if ($LASTEXITCODE -ne 0 -or $candidateSha -notmatch '^[0-9a-f]{40}$') {
+        throw "-EnableE2eLatency: kunne ikke laese kandidatens HEAD-SHA."
+    }
+    $escapedE2eRoot = Escape-CmdValue (Join-Path $repoRoot "validation\e2e-latency")
+    $e2eLatencyEnv = @"
+set "KALIV_E2E_LATENCY_QUALIFICATION_ENABLED=1"
+set "KALIV_E2E_LATENCY_CANDIDATE_GIT_SHA=$candidateSha"
+set "KALIV_E2E_LATENCY_EVIDENCE_ROOT=$escapedE2eRoot"
+"@
+}
+$visionRigEnv = if ($EnableVisionRigAdmission) { 'set "KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED=1"' } else { '' }
 $workerCommand = 'python -u -m uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099'
 $resolvedWorkerLog = $null
 $resolvedSchedulerDir = $null
@@ -216,8 +301,33 @@ set "KALIV_TOOLS_ENABLED=1"
 set "KALIV_AGENT3_PLANNER_MODEL=$PlannerModel"
 set "KALIV_AGENT3_VALIDATION_REPORT=$escapedReport"
 $schedulerEnv
+$consciousnessEnv
+$liveSessionEnv
+$e2eLatencyEnv
+$visionRigEnv
 $workerCommand
 "@ | Set-Content -LiteralPath $workerCmd -Encoding ASCII
+
+# cmd.exe started from this shell inherits this shell's environment; only the
+# variables the worker cmd sets itself are overridden. A KALIV_* left in this
+# window from an earlier attempt therefore reaches the worker. Name each one.
+$setInWorkerCmd = @(Get-Content -LiteralPath $workerCmd | ForEach-Object {
+    if ($_ -match '^set "([A-Za-z_][A-Za-z0-9_]*)=') { $Matches[1] }
+})
+$inheritedKaliv = @(Get-ChildItem Env: | Where-Object {
+    $_.Name -like 'KALIV_*' -and $setInWorkerCmd -notcontains $_.Name
+} | ForEach-Object { $_.Name } | Sort-Object)
+if ($inheritedKaliv.Count -gt 0) {
+    Write-Warning ("Arvet fra dette vindue og ikke sat af worker-cmd'en - naar workeren: " + ($inheritedKaliv -join ', ') + ". Start fra et nyt vindue, hvis det ikke er meningen.")
+}
+
+if ($WriteWorkerCmdOnly) {
+    Write-Output ("INHERITED-KALIV: " + $(if ($inheritedKaliv.Count -gt 0) { $inheritedKaliv -join ',' } else { 'none' }))
+    Write-Output "WORKER-CMD-BEGIN $workerCmd"
+    Get-Content -LiteralPath $workerCmd | Write-Output
+    Write-Output "WORKER-CMD-END"
+    return
+}
 
 if ($WorkerOnly) {
     Wait-PortFree -Port 8099 -Label "worker"

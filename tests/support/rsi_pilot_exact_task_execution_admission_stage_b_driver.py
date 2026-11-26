@@ -2,8 +2,18 @@
 
 ADR-DC-030..031 qualify as two shallow isolated contracts with at most two workers.
 ADR-DC-032 and ADR-DC-033 then qualify together in one isolated shared-provenance
-child. The focused ADR-DC-033 nonce-reuse guard, ADR-DC-034..066 midchain, and
-ADR-DC-067..097 downstream chain run as sibling phases afterwards.
+child, and the focused ADR-DC-033 nonce-reuse guard qualifies beside it: two isolated
+processes, started together. The ADR-DC-034..066 midchain and ADR-DC-067..097
+downstream chain run as sibling phases afterwards.
+
+The shared-provenance child and the nonce guard share nothing on disk. The child
+never reads the Stage-B proof cache; the guard builds its own proof and is the phase
+that publishes that cache. Run one after the other they were about nine tenths of
+the admission job, which every other Stage-B slice waits for. Measured on two cores,
+25 Nov 2026, same commit: 3151 s in sequence (1755 + 1396), 1729 s side by side
+(1729 and 1382) - neither contract got slower. The verdict is unchanged: both run in
+full, and either failing fails admission. What changes is that a failing child no
+longer stops the guard from starting; the failure is reported when both have ended.
 
 Keeping the downstream drivers outside the nonce guard preserves the locked
 transitive Stage-B entrypoint without recursively nesting their internally
@@ -22,7 +32,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 _DEFAULT_TIMEOUT_SECONDS = 1800
-_SHARED_DEEP_CHAIN_TIMEOUT_SECONDS = 3000
+# A hang guard, not a performance budget. 3000 s was set on 1 Oct 2026; the child has
+# since been measured at 1254-1273 s on a fast hosted runner and 2195 and 2464 s on
+# slow ones (#2497, 25 Nov 2026: 82 % of the bound, with nothing wrong). One runner a
+# fifth slower than the slowest seen would have failed a whole Stage-B run on time
+# alone. 5400 s is a little over twice the slowest observation, and since the child
+# runs beside the nonce guard (7200 s) it does not lengthen admission's worst case.
+_SHARED_DEEP_CHAIN_TIMEOUT_SECONDS = 5400
 _NONCE_REUSE_TIMEOUT_SECONDS = 7200
 _FULL_PHASE_TIMEOUT_SECONDS = 19800
 _SHARDED_PHASE_TIMEOUT_SECONDS = 18000
@@ -78,10 +94,12 @@ def _timeout_for(filename: str) -> int:
     return _DEFAULT_TIMEOUT_SECONDS
 
 
-def _run_contract_file(filename: str) -> tuple[str, int, float, str]:
+def _run_contract_file(
+    filename: str, base_env: dict[str, str] | None = None
+) -> tuple[str, int, float, str]:
     path = SUPPORT / filename
     started = time.monotonic()
-    env = os.environ.copy()
+    env = dict(os.environ if base_env is None else base_env)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
     timeout = _timeout_for(filename)
@@ -190,9 +208,59 @@ def _run_admission_prefix() -> None:
 
     _raise_failures("shallow standalone phase", _SHALLOW_CONTRACT_FILES, shallow_results)
 
-    _run_serial_phase(
-        "phase 1b/3, ADR-DC-032 -> ADR-DC-033 shared-provenance isolated child",
-        _SHARED_DEEP_CHAIN_FILE,
+
+def _run_shared_child_beside_nonce_guard(
+    previous_proof_cache: str | None, previous_start_ledger: str | None
+) -> None:
+    """Phase 1b and phase 2a as two isolated processes started together.
+
+    Each gets the environment it had when they ran in sequence. The nonce guard
+    inherits the proof-cache and start-ledger targets the caller has just set. The
+    shared-provenance child ran before those were set, so it gets them as they were
+    before: it must not find a cache target and decide to use it.
+    """
+    guard_env = dict(os.environ)
+    child_env = dict(guard_env)
+    for name, previous in (
+        ("MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE", previous_proof_cache),
+        ("MODELRIG_STAGE_B_START_LEDGER_ROOT", previous_start_ledger),
+    ):
+        if previous is None:
+            child_env.pop(name, None)
+        else:
+            child_env[name] = previous
+    phases = (
+        (
+            "phase 1b/3, ADR-DC-032 -> ADR-DC-033 shared-provenance isolated child",
+            _SHARED_DEEP_CHAIN_FILE,
+            child_env,
+        ),
+        ("phase 2a/3, focused ADR-DC-033 nonce-reuse guard", _NONCE_REUSE_FILE, guard_env),
+    )
+    print(
+        "Stage-B exact-task admission chain: phases 1b/3 and 2a/3 side by side, "
+        f"{len(phases)} isolated workers",
+        flush=True,
+    )
+    results: dict[str, tuple[int, float, str]] = {}
+    with ThreadPoolExecutor(max_workers=len(phases)) as executor:
+        futures = {}
+        for phase, filename, env in phases:
+            print(f"Stage-B exact-task admission chain: {phase}", flush=True)
+            print(
+                f"  START: {filename} ({_timeout_for(filename)}s bound)",
+                flush=True,
+            )
+            futures[executor.submit(_run_contract_file, filename, env)] = filename
+        for future in as_completed(futures):
+            filename, returncode, elapsed, output = future.result()
+            results[filename] = (returncode, elapsed, output)
+            status = "PASS" if returncode == 0 else f"FAIL({returncode})"
+            print(f"  {status}: {filename} ({elapsed:.1f}s)", flush=True)
+    _raise_failures(
+        "shared-provenance child and nonce-reuse guard",
+        tuple(filename for _, filename, _ in phases),
+        results,
     )
 
 
@@ -294,10 +362,17 @@ def _run_cached_slice(stage_b_slice: str) -> None:
     os.environ["MODELRIG_STAGE_B_ADMISSION_PROOF_CACHE"] = str(proof_cache_path)
     os.environ["MODELRIG_STAGE_B_START_LEDGER_ROOT"] = str(start_ledger_root)
     try:
-        _run_serial_phase(
-            "phase 2a/3, focused ADR-DC-033 nonce-reuse guard",
-            _NONCE_REUSE_FILE,
-        )
+        if stage_b_slice in ("all", "admission"):
+            _run_shared_child_beside_nonce_guard(
+                previous_proof_cache, previous_start_ledger
+            )
+        else:
+            # A midchain or downstream slice without a published cache builds its
+            # own; the shared-provenance child is admission's and is not run here.
+            _run_serial_phase(
+                "phase 2a/3, focused ADR-DC-033 nonce-reuse guard",
+                _NONCE_REUSE_FILE,
+            )
         if not proof_cache_path.is_file():
             raise AssertionError(
                 "Stage-B ADR-033 nonce guard did not publish the shared proof cache"

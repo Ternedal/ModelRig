@@ -42,6 +42,7 @@ import dk.ternedal.modelrig.R
 import dk.ternedal.modelrig.data.ChatDb
 import dk.ternedal.modelrig.data.TokenStore
 import dk.ternedal.modelrig.net.CloudClient
+import dk.ternedal.modelrig.logic.CloudFallbackPolicy
 import dk.ternedal.modelrig.logic.TurnInput
 import dk.ternedal.modelrig.logic.TurnRouter
 import dk.ternedal.modelrig.logic.TurnStatus
@@ -719,6 +720,14 @@ private data class Msg(
     // Epoch-ms for turens oprettelse (capslinjens klokkeslaet). null for
     // indlaest historik, hvor DB'en ikke gemmer tid pr. besked.
     val at: Long? = System.currentTimeMillis(),
+    // #2419: billedjob turen satte i koe via image_generate (job-id'er fra
+    // riggens `media_jobs`). Én boble pr. id under svaret; persisteret paa
+    // message.media_jobs, saa boblen kommer igen efter genstart.
+    val mediaJobs: List<dk.ternedal.modelrig.net.MediaJobRef> = emptyList(),
+    // Riggen afviste et billede/klip i denne tur (media_refusals) og satte intet i koe:
+    // linjen under svaret siger hvorfor, med riggens egen kode. Ikke persisteret -- det
+    // er en oplysning om turen, ikke en del af samtalen.
+    val mediaNotice: String? = null,
 )
 
 /**
@@ -954,15 +963,19 @@ private fun ChatScreen(
         }
     }
     // Tap-to-stop (v1.13.0). Until now a voice turn could not be interrupted
-    // at all: barge-in is off by default and uncalibrated. Two mechanisms,
-    // because a turn has two phases with different escape routes:
-    //   voiceJob   -- cancels the coroutine (covers the rig round-trip)
-    //   playbackStop -- a flag playWav's write loop checks between chunks;
-    //                   cancelling a coroutine cannot interrupt the blocking
-    //                   AudioTrack write, so the flag is what actually stops
-    //                   the sound.
+    // at all: barge-in is off by default and uncalibrated. Three mechanisms,
+    // because a turn has phases with different escape routes:
+    //   voiceJob          -- cancels the coroutine
+    //   voiceCancellation -- one per turn. Its stopFlag is the flag playWav's
+    //                        write loop checks between chunks (cancelling a
+    //                        coroutine cannot interrupt the blocking AudioTrack
+    //                        write), and it cancels the turn's own OkHttp call:
+    //                        coroutine cancellation does not interrupt a
+    //                        blocking execute(), so without it the stream kept
+    //                        reading and calling back after Stop (ported from
+    //                        v2.0.15, which main never received).
     var voiceJob by remember { mutableStateOf<Job?>(null) }
-    val playbackStop = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    var voiceCancellation by remember { mutableStateOf<dk.ternedal.modelrig.voice.VoiceTurnCancellation?>(null) }
     var speaking by remember { mutableStateOf(false) }
     var showVoice by remember { mutableStateOf(false) }
     // Skaerm 13: rig-liveness. null = ukendt endnu; loekken auto-retry'er
@@ -1160,8 +1173,13 @@ private fun ChatScreen(
         val conversationAtVoiceStart = convId
         val navigationRevisionAtVoiceStart = voiceNavigationRevision
         val modelAtVoiceStart = currentModel
+        // Per turn: a Stop of this turn can never be undone by the next turn
+        // resetting a shared flag, and every callback below checks it.
+        val cancellation = dk.ternedal.modelrig.voice.VoiceTurnCancellation()
+        voiceCancellation = cancellation
+        val playbackStop = cancellation.stopFlag
         voiceBusy = true; voiceError = null; wasInterrupted = false
-        speaking = false; playbackStop.set(false)
+        speaking = false
         voiceJob = scope.launch {
             // Audio chunks flow from the network reader (producer) to the player
             // (consumer) through this channel. Unlimited: sentences are small and
@@ -1173,6 +1191,13 @@ private fun ChatScreen(
             var transcriptText = ""
             var transcriptShown = false
             var replyIdx = -1
+            // The assistant bubble this turn owns. Every write checks that the
+            // slot still holds it (by identity), so a list that was cleared and
+            // refilled meanwhile -- another conversation -- is never touched.
+            var replyBubble: Msg? = null
+            fun updateOwnReply(update: (Msg) -> Msg?) {
+                replyBubble = dk.ternedal.modelrig.voice.updateOwnedSlot(messages, replyIdx, replyBubble, update)
+            }
             val replyBuilder = StringBuilder()
             var usedModel: String? = null
             var usedCloud = false
@@ -1186,13 +1211,14 @@ private fun ChatScreen(
             val player = launch(Dispatchers.IO) {
                 for ((bytes, utteranceId) in audioChan) {
                     if (playbackStop.get()) break
-                    speaking = true
+                    if (voiceCancellation === cancellation) speaking = true
                     bodyReporter.report(utteranceId, "started")
                     val cut = dk.ternedal.modelrig.voice.VoiceCapture.playWav(bytes, detector, playbackStop)
                     bodyReporter.report(utteranceId, "ended")
-                    if (cut) { wasInterrupted = true; playbackStop.set(true); break }
+                    // Barge-in ends the turn: stop the audio and close the stream.
+                    if (cut) { wasInterrupted = true; cancellation.stop(); break }
                 }
-                speaking = false
+                if (voiceCancellation === cancellation) speaking = false
             }
             // Poll the barge-in detector at 5 Hz to drive the on-screen RMS meter
             // (liveRms / peakRms). The streaming rewrite has to carry this over
@@ -1212,8 +1238,9 @@ private fun ChatScreen(
                     val b64 = android.util.Base64.encodeToString(wav, android.util.Base64.NO_WRAP)
                     val key = if (voiceUsesCloud) store.cloudKey else null
                     // Snapshot before ASR appends the current turn; do not echo it twice.
+                    // Error bubbles are shown, never sent as history (Msg.error), as on the text path.
                     val voiceHistory = messages.filter { it.role == "user" || it.role == "assistant" }
-                        .filter { !it.streaming && it.text.isNotBlank() }
+                        .filter { !it.streaming && !it.error && it.text.isNotBlank() }
                         .takeLast(12).map { it.role to it.text.take(4000) }
                     ModelRigClient(store.baseUrl ?: "", store.token).voiceConverseStream(
                         b64,
@@ -1222,8 +1249,15 @@ private fun ChatScreen(
                         cloudBaseUrl = if (key != null) "https://ollama.com" else null,
                         cloudKey = key,
                         history = voiceHistory,
-                        registerCall = { c -> activeCall = c },
+                        // The turn's own handle, not the shared text-stream
+                        // activeCall: Stop must close THIS stream, and the
+                        // turn's cleanup must not clear a text call's handle.
+                        registerCall = { c -> cancellation.register(c) },
+                        // After Stop or barge-in nothing from this turn may
+                        // touch the message list: by then it may belong to a
+                        // new conversation ("Ny samtale" clears it in place).
                         onTranscript = { t ->
+                            if (playbackStop.get()) return@voiceConverseStream
                             val tt = t.trim()
                             if (tt.isNotEmpty() && !transcriptShown) {
                                 transcriptShown = true
@@ -1237,31 +1271,36 @@ private fun ChatScreen(
                                 messages.add(Msg("user", tt))
                                 replyIdx = messages.size
                                 // Stemme-turen har ingen turnPlan i scope; defaulten er den rigtige.
-                                messages.add(Msg("assistant", "", streaming = true))
+                                val bubble = Msg("assistant", "", streaming = true)
+                                messages.add(bubble)
+                                replyBubble = bubble
                             }
                         },
                         onChunk = { _, text, chunkB64, utteranceId ->
+                            if (playbackStop.get()) return@voiceConverseStream
                             if (replyBuilder.isNotEmpty()) replyBuilder.append(" ")
                             replyBuilder.append(text.trim())
-                            if (replyIdx in messages.indices) {
-                                messages[replyIdx] = messages[replyIdx].copy(text = stripEmojis(replyBuilder.toString()))
-                            }
+                            updateOwnReply { it.copy(text = stripEmojis(replyBuilder.toString())) }
                             if (chunkB64.isNotEmpty() && !playbackStop.get()) {
                                 val bytes = android.util.Base64.decode(chunkB64, android.util.Base64.DEFAULT)
                                 audioChan.trySend(bytes to utteranceId)
                             }
                         },
                         onDone = { reply, m, cloud ->
+                            if (playbackStop.get()) return@voiceConverseStream
                             usedModel = m; usedCloud = cloud
                             val finalText = stripEmojis(reply.trim().ifEmpty { replyBuilder.toString() })
-                            if (replyIdx in messages.indices) {
-                                messages[replyIdx] = messages[replyIdx].copy(
+                            updateOwnReply {
+                                it.copy(
                                     text = finalText,
                                     streaming = false, voiceModel = m, voiceViaCloud = cloud,
                                 )
                             }
                         },
-                        onError = { status, detail -> streamError = status to detail },
+                        onError = { status, detail ->
+                            // A stopped turn has no error to show.
+                            if (!playbackStop.get()) streamError = status to detail
+                        },
                     )
                 }
                 // The network stream is done; close the channel so the player
@@ -1283,10 +1322,7 @@ private fun ChatScreen(
                 // the user turn but skip an empty assistant row, and drop the
                 // empty bubble from the UI.
                 val finalReply = replyBuilder.toString().trim()
-                if (finalReply.isEmpty() && replyIdx in messages.indices &&
-                    messages.getOrNull(replyIdx)?.text.isNullOrBlank()) {
-                    messages.removeAt(replyIdx)
-                }
+                if (finalReply.isEmpty()) updateOwnReply { if (it.text.isBlank()) null else it }
                 // Preserve the original conversation target and do not save a
                 // stopped turn (including when the user navigated away).
                 if (!mayPersistCompletedVoiceTurn(
@@ -1311,33 +1347,51 @@ private fun ChatScreen(
                 }
             } catch (e: CancellationException) {
                 wasInterrupted = true
-                playbackStop.set(true)
+                cancellation.stop()
                 audioChan.close()
                 throw e
             } catch (e: Exception) {
-                voiceError = e.message ?: "stemme-fejl"
+                // Stop and barge-in close OkHttp on purpose; the IOException
+                // that follows is not an error to show in the voice overlay.
+                if (!playbackStop.get()) voiceError = e.message ?: "stemme-fejl"
                 audioChan.close()
             } finally {
-                activeCall = null
+                cancellation.clear()
+                // A stopped stream may have added an assistant bubble before its
+                // final onDone. Never leave it marked as streaming: it would spin
+                // forever and be left out of later history.
+                updateOwnReply { partial ->
+                    when {
+                        !partial.streaming -> partial
+                        partial.text.isBlank() -> null
+                        else -> partial.copy(streaming = false)
+                    }
+                }
                 player.cancel()
                 meter?.cancel()
                 // peakRms survives the turn: it's the measurement of the loudest
                 // barge-in attempt. liveRms resets to 0 (nothing playing now).
                 detector?.let { liveRms = 0.0; peakRms = it.peakRms }
-                speaking = false
-                voiceBusy = false
-                voiceJob = null
+                // Only the current turn resets the shared UI state; a late
+                // finish of a stopped turn must not clear a newer one.
+                if (voiceCancellation === cancellation) {
+                    voiceCancellation = null
+                    speaking = false
+                    voiceBusy = false
+                    voiceJob = null
+                }
             }
         }
     }
 
     /**
-     * Cut the current voice turn short. Order matters: raise the flag first so
-     * a blocking playWav write returns, then cancel the coroutine. Cancelling
+     * Cut the current voice turn short. Order matters: raise the turn's flag
+     * first so a blocking playWav write returns and no callback writes any
+     * more, then close its HTTP stream, then cancel the coroutine. Cancelling
      * first would leave the audio playing until the WAV ran out.
      */
     fun stopVoiceTurn() {
-        playbackStop.set(true)
+        voiceCancellation?.stop()
         voiceJob?.cancel()
     }
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -1459,6 +1513,8 @@ private fun ChatScreen(
         // reloads; the id this screen just minted is already on screen.
         if (openConvId != null && openConvId == convId) return@LaunchedEffect
         voiceNavigationRevision++
+        // A voice turn belongs to the conversation it started in.
+        stopVoiceTurn()
         messages.clear()
         // A pending confirmation belongs to the conversation that proposed it.
         // Leaving it on screen across a switch means approving an action in the
@@ -1469,14 +1525,20 @@ private fun ChatScreen(
         convId = openConvId
         if (openConvId != null) {
             val loaded = withContext(Dispatchers.IO) {
-                db.conversationMeta(openConvId) to db.loadMessages(openConvId)
+                db.conversationMeta(openConvId) to db.loadMessagesWithMedia(openConvId)
             }
             val (meta, msgs) = loaded
             // Strip emojis from OLD assistant replies on load too. The finalize-time
             // strip only cleans new replies; without this, opening a conversation
             // made before the persona/strip landed still shows the old 🌟✨ filler.
-            msgs.forEach { (role, content) ->
-                messages.add(Msg(role, if (role == "assistant") stripEmojis(content) else content, at = null))
+            // #2419: stored image-job ids come back as bubbles, which re-poll the rig.
+            msgs.forEach { m ->
+                messages.add(
+                    Msg(
+                        m.role, if (m.role == "assistant") stripEmojis(m.content) else m.content,
+                        at = null, mediaJobs = m.mediaJobs,
+                    ),
+                )
             }
             if (meta != null) {
                 // NB: for cloud we deliberately do NOT restore the model from
@@ -1512,6 +1574,8 @@ private fun ChatScreen(
         val sys = (if (useCloud) store.cloudSystem else store.rigSystem).trim()
         val convo = messages.filter { !it.error }.map { it.role to it.text }
         val history = trimHistory(sys, convo)
+        // The pictures this conversation holds, for the rig's "det billede" (#2459).
+        val pictureJobs = dk.ternedal.modelrig.ui.chat.MediaTurnJobs.pictures(messages.map { it.mediaJobs })
         val idx = messages.size
         messages.add(Msg("assistant", "", streaming = true, status = TurnStatus.forPlan(turnPlan)))
         val rigModel = currentModel
@@ -1562,6 +1626,12 @@ private fun ChatScreen(
                     messages[idx] = cur.copy(personLabel = label)
                 }
             }
+            val onMediaJobs: (List<dk.ternedal.modelrig.net.MediaJobRef>) -> Unit = { ids ->
+                scope.launch {
+                    val cur = messages.getOrNull(idx) ?: return@launch
+                    messages[idx] = cur.copy(mediaJobs = ids)
+                }
+            }
             // Riggens egen fase erstatter startgaettet fra TurnStatus.forPlan.
             // Ukendt fase -> null -> statussen staar; en nyere worker maa ikke
             // kunne blanke indikatoren.
@@ -1575,11 +1645,8 @@ private fun ChatScreen(
             }
             val hook: (okhttp3.Call) -> Unit = { activeCall = it }
 
-            // Track whether the rig stream emitted anything, so we only fall
-            // back to cloud on a clean pre-emit failure (never mid-stream --
-            // that would double the visible output). Mirrors desktop's
-            // ChatRouter.chatStream contract.
-            var rigEmitted = 0
+            // Set when the opt-in cloud fallback answered (CloudFallbackPolicy:
+            // only on a clean pre-emit failure that the user did not stop).
             var didFallback = false
             // Tools work in cloud mode too -- but only by routing the cloud
             // model THROUGH the rig, because that is where the gate lives. The
@@ -1638,9 +1705,14 @@ private fun ChatScreen(
                                     system = sys,
                                     registerCall = hook,
                                     onPhase = onPhase,
+                                    conversationImageJobs = pictureJobs,
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.context.isNotEmpty()) onContext(turn.context)
+                            if (turn.mediaJobs.isNotEmpty()) onMediaJobs(turn.mediaJobs)
+                            dk.ternedal.modelrig.ui.chat.MediaRefusalNotice.text(turn.mediaRefusals, turn.mediaJobs.size)?.let { notice ->
+                                scope.launch { val cur = messages.getOrNull(idx) ?: return@launch; messages[idx] = cur.copy(mediaNotice = notice) }
+                            }
                             turn.personName?.let { name ->
                                 onPerson(if (turn.personRevision != null) "$name \u00b7 ${turn.personRevision}" else name)
                             }
@@ -1667,27 +1739,32 @@ private fun ChatScreen(
                             // cloud key is set, transparently answer via cloud instead
                             // (rig down / model not pulled / HTTP error). A mid-stream
                             // rig failure is surfaced, not retried.
+                            // local-first: a rig failure does NOT auto-send to cloud
+                            // unless the user opted in, never after the user pressed
+                            // Stop, and an attached image is never sent via fallback --
+                            // it stays on the device.
                             val cloudKey = store.cloudKey
-                            try {
-                                ModelRigClient(store.baseUrl ?: "", store.token)
-                                    .chatStream(rigModel, history, registerCall = hook, imageB64 = imageB64,
-                                        onDelta = { d -> rigEmitted++; onDelta(d) })
-                            } catch (e: Exception) {
-                                // local-first: a rig failure does NOT auto-send to cloud
-                                // unless the user opted in, and an attached image is
-                                // never sent via fallback -- it stays on the device.
-                                if (rigEmitted == 0 && cloudKey != null && store.autoCloudFallback) {
-                                    didFallback = true
-                                    CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
-                                } else throw e
-                            }
+                            didFallback = CloudFallbackPolicy.runLocalFirst(
+                                hasCloudKey = cloudKey != null,
+                                optedIn = { store.autoCloudFallback },
+                                register = hook,
+                                rig = { register, onEmit ->
+                                    ModelRigClient(store.baseUrl ?: "", store.token)
+                                        .chatStream(rigModel, history, registerCall = register, imageB64 = imageB64,
+                                            onDelta = { d -> onEmit(); onDelta(d) })
+                                },
+                                cloud = { register ->
+                                    CloudClient(cloudKey!!).chatStream(cModel, history, registerCall = register, onDelta = onDelta)
+                                },
+                            )
                         }
                     }
                 }.exceptionOrNull()
             }
             activeCall = null
-            // A parked write proposal: surface the card. Nothing has executed.
-            proposal?.let { pendingTool = it }
+            // A parked write proposal: surface the card. Nothing has executed. The card carries no
+            // media references: what the turn queued before it is saved with this turn, below.
+            proposal?.let { pendingTool = it.copy(mediaJobs = emptyList()) }
             // The list can have been replaced mid-stream (a real conversation
             // switch). Then there is nothing on screen to finish; bail rather
             // than index past the end. The reply is not persisted in that
@@ -1704,10 +1781,22 @@ private fun ChatScreen(
             // A pending tool proposal produces no answer yet: the card is on
             // screen and nothing has run. Persisting an empty assistant turn
             // would leave a blank bubble in the history forever.
-            if ((err == null || cancelled) && finalText.isNotBlank()) {
-                withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText) }
+            // ...but a turn that queued a picture or a clip is kept even without words: its
+            // bubble is on screen, and the row is what makes the job this conversation's.
+            // A parked turn's references come from the proposal itself: they must not depend on
+            // the bubble update having run, because a card that expires or an app that is closed
+            // would otherwise take a rendering job out of the conversation.
+            val jobs = proposal?.mediaJobs ?: messages[idx].mediaJobs
+            val saved = (err == null || cancelled) &&
+                dk.ternedal.modelrig.ui.chat.MediaTurnJobs.worthSaving(finalText, jobs)
+            if (saved) {
+                withContext(Dispatchers.IO) { db.addMessage(cid, "assistant", finalText, jobs) }
             }
-            if (proposal != null) messages.removeAt(idx)
+            if (proposal != null) {
+                // Nothing to show yet -- unless the turn queued media: then its bubble stays.
+                if (saved && jobs.isNotEmpty()) messages[idx] = messages[idx].copy(mediaJobs = jobs)
+                else messages.removeAt(idx)
+            }
             busy = false
         }
     }
@@ -1735,6 +1824,9 @@ private fun ChatScreen(
         val sys = (if (useCloud) store.cloudSystem else store.rigSystem).trim()
         val convo = messages.filterIndexed { idx2, mm -> idx2 != i && !mm.error }.map { it.role to it.text }
         val history = trimHistory(sys, convo)
+        val pictureJobs = dk.ternedal.modelrig.ui.chat.MediaTurnJobs.pictures(
+            messages.filterIndexed { idx2, _ -> idx2 != i }.map { it.mediaJobs },
+        )
         val rigModel = currentModel
         val cModel = cloudModel
         val srcFilter = ragSourceFilter
@@ -1757,6 +1849,9 @@ private fun ChatScreen(
             }
             val onPersonRetry: (String) -> Unit = { label ->
                 scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(personLabel = label) }
+            }
+            val onMediaJobsRetry: (List<dk.ternedal.modelrig.net.MediaJobRef>) -> Unit = { ids ->
+                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(mediaJobs = ids) }
             }
             val onPhase: (String) -> Unit = { name ->
                 TurnStatus.forPhase(name)?.let { label ->
@@ -1790,9 +1885,14 @@ private fun ChatScreen(
                                     system = sys,
                                     registerCall = hook,
                                     onPhase = onPhase,
+                                    conversationImageJobs = pictureJobs,
                                 )
                             if (turn.sources.isNotEmpty()) onSources(turn.sources)
                             if (turn.context.isNotEmpty()) onContext(turn.context)
+                            if (turn.mediaJobs.isNotEmpty()) onMediaJobsRetry(turn.mediaJobs)
+                            dk.ternedal.modelrig.ui.chat.MediaRefusalNotice.text(turn.mediaRefusals, turn.mediaJobs.size)?.let { notice ->
+                                scope.launch { val cur = messages.getOrNull(i) ?: return@launch; messages[i] = cur.copy(mediaNotice = notice) }
+                            }
                             turn.personName?.let { name ->
                                 onPersonRetry(if (turn.personRevision != null) "$name \u00b7 ${turn.personRevision}" else name)
                             }
@@ -1815,24 +1915,28 @@ private fun ChatScreen(
                             // should still fall back to cloud (before any
                             // output), not just fail. A mid-stream failure is
                             // surfaced, not retried.
+                            // Never after Stop: CloudFallbackPolicy.
                             val cloudKey = store.cloudKey
-                            var rigEmitted = 0
-                            try {
-                                ModelRigClient(store.baseUrl ?: "", store.token)
-                                    .chatStream(rigModel, history, registerCall = hook,
-                                        onDelta = { d -> rigEmitted++; onDelta(d) })
-                            } catch (e: Exception) {
-                                if (rigEmitted == 0 && cloudKey != null && store.autoCloudFallback) {
-                                    CloudClient(cloudKey).chatStream(cModel, history, registerCall = hook, onDelta = onDelta)
-                                } else throw e
-                            }
+                            CloudFallbackPolicy.runLocalFirst(
+                                hasCloudKey = cloudKey != null,
+                                optedIn = { store.autoCloudFallback },
+                                register = hook,
+                                rig = { register, onEmit ->
+                                    ModelRigClient(store.baseUrl ?: "", store.token)
+                                        .chatStream(rigModel, history, registerCall = register,
+                                            onDelta = { d -> onEmit(); onDelta(d) })
+                                },
+                                cloud = { register ->
+                                    CloudClient(cloudKey!!).chatStream(cModel, history, registerCall = register, onDelta = onDelta)
+                                },
+                            )
                         }
                     }
                 }.exceptionOrNull()
             }
             activeCall = null
-            // Same as the main path: a parked write proposal surfaces the card.
-            proposal?.let { pendingTool = it }
+            // Same as the main path: a parked write proposal surfaces the card, without references.
+            proposal?.let { pendingTool = it.copy(mediaJobs = emptyList()) }
             val cur = messages.getOrNull(i) ?: run { busy = false; return@launch }
             val cancelled = err != null && cur.text.isNotEmpty()
             messages[i] = when {
@@ -1843,8 +1947,11 @@ private fun ChatScreen(
             val finalText = messages[i].text
             // Mirror the main path: a parked proposal has no answer yet --
             // never persist a blank assistant turn.
-            if (cidNow != null && (err == null || cancelled) && finalText.isNotBlank()) {
-                withContext(Dispatchers.IO) { db.addMessage(cidNow, "assistant", finalText) }
+            val jobs = proposal?.mediaJobs ?: messages[i].mediaJobs
+            if (cidNow != null && (err == null || cancelled) &&
+                dk.ternedal.modelrig.ui.chat.MediaTurnJobs.worthSaving(finalText, jobs)) {
+                if (proposal != null) messages[i] = messages[i].copy(mediaJobs = jobs)
+                withContext(Dispatchers.IO) { db.addMessage(cidNow, "assistant", finalText, jobs) }
             }
             busy = false
         }
@@ -1860,7 +1967,11 @@ private fun ChatScreen(
             val chatOverflowMenu: @Composable () -> Unit = {
                 DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
                         DropdownMenuItem(text = { Text("Ny samtale") }, onClick = {
-                            overflow = false; messages.clear(); convId = null; onConvChanged(null)
+                            // A running voice turn stays with the old conversation:
+                            // stop it, and bump the revision even when convId is
+                            // already null (the switch effect does not run then).
+                            overflow = false; voiceNavigationRevision++; stopVoiceTurn()
+                            messages.clear(); convId = null; onConvChanged(null)
                         })
                         DropdownMenuItem(text = { Text("Samtaler") }, onClick = { overflow = false; onOpenConversations() })
                         DropdownMenuItem(text = { Text("Modeller") }, onClick = { overflow = false; onOpenModels() })
@@ -1887,6 +1998,12 @@ private fun ChatScreen(
                                 val i = Intent(context, dk.ternedal.modelrig.MainActivity::class.java)
                                 i.putExtra(dk.ternedal.modelrig.MainActivity.EXTRA_PERSONS, true)
                                 context.startActivity(i)
+                            })
+                            // Billeder og video (#2275 C6 G1): generer-skærmen, derfra galleriet.
+                            // Den siger selv "ikke tilgængelig", hvis riggen ikke har det slået til.
+                            DropdownMenuItem(text = { Text(MediaEntry.LABEL) }, onClick = {
+                                overflow = false
+                                context.startActivity(MediaEntry.intent(context))
                             })
                             // Kroppen (slice D): Kaliv Body er en separat Unity-app.
                             // Kaliv giver den riggen og sit token som intent-extras,
@@ -2553,6 +2670,48 @@ private fun ChatScreen(
                             body = { MarkdownText(m.text, color = KalivTheme.colors.textBody) },
                             onRetry = if (m.error) ({ retry(i) }) else null,
                         )
+                        m.mediaNotice?.let { notice ->
+                            dk.ternedal.modelrig.ui.chat.ImageJobBubbleContent(
+                                dk.ternedal.modelrig.ui.chat.ImageJobPhase.Ended(notice),
+                                modifier = Modifier.padding(start = 15.dp),
+                            )
+                        }
+                        if (m.mediaJobs.isNotEmpty()) {
+                            // #2419: én boble pr. billedjob. Klienterne bygges mod den parrede
+                            // oprindelse; kan de ikke (ikke parret, afvist oprindelse), siger
+                            // boblen det i stedet for at gaette.
+                            val mediaClients = remember(store.baseUrl, store.token) {
+                                runCatching {
+                                    dk.ternedal.modelrig.net.MediaJobClient(store.baseUrl, store.token) to
+                                        dk.ternedal.modelrig.net.MediaGalleryClient(store.baseUrl, store.token)
+                                }
+                            }
+                            m.mediaJobs.forEach { ref ->
+                                mediaClients.fold(
+                                    onSuccess = { (jobs, gallery) ->
+                                        if (ref.kind == dk.ternedal.modelrig.net.MediaJobRef.Kind.VIDEO) {
+                                            dk.ternedal.modelrig.ui.chat.VideoJobBubble(
+                                                jobId = ref.jobId, jobs = jobs, gallery = gallery,
+                                                modifier = Modifier.padding(start = 15.dp),
+                                            )
+                                        } else {
+                                            dk.ternedal.modelrig.ui.chat.ImageJobBubble(
+                                                jobId = ref.jobId, jobs = jobs, gallery = gallery,
+                                                modifier = Modifier.padding(start = 15.dp),
+                                            )
+                                        }
+                                    },
+                                    onFailure = {
+                                        dk.ternedal.modelrig.ui.chat.ImageJobBubbleContent(
+                                            dk.ternedal.modelrig.ui.chat.ImageJobPhase.Ended(
+                                                "Billedet ligger i galleriet, n\u00e5r det er klar",
+                                            ),
+                                            modifier = Modifier.padding(start = 15.dp),
+                                        )
+                                    },
+                                )
+                            }
+                        }
                         if (m.context.isNotEmpty() && !m.streaming) {
                             var showCitations by remember(m.at) { mutableStateOf(false) }
                             Text(
@@ -2743,8 +2902,14 @@ private fun ChatScreen(
                                 // expiry; this just stops offering a dead button.
                                 if (pendingTool?.confirmationId == prop.confirmationId) {
                                     pendingTool = null
-                                    messages.add(Msg("assistant",
-                                        "Bekræftelsen udløb. Handlingen blev ikke udført."))
+                                    // Saved like any other answer: after a restart the conversation
+                                    // should still say that nothing was done. (A card carries no media
+                                    // references any more; they were saved when they arrived.)
+                                    val expired = "Bekræftelsen udløb. Handlingen blev ikke udført."
+                                    messages.add(Msg("assistant", expired, mediaJobs = prop.mediaJobs))
+                                    convId?.let { id ->
+                                        withContext(Dispatchers.IO) { db.addMessage(id, "assistant", expired, prop.mediaJobs) }
+                                    }
                                 }
                             }
                             if (remaining > 0) {
@@ -2768,12 +2933,26 @@ private fun ChatScreen(
                                         }
                                         toolBusy = false
                                         val next = r.getOrNull()
+                                        // #2465: media the turn queued BEFORE the card rides on the card's
+                                        // turn; what it queued after the approval rides on the answer. The
+                                        // rig starts a new list per call, so the app keeps the union -- else
+                                        // a picture that is already rendering never gets its bubble.
+                                        val carried = dk.ternedal.modelrig.ui.chat.MediaTurnJobs
+                                            .across(prop.mediaJobs, next?.mediaJobs.orEmpty())
                                         if (next?.status == "confirmation_required") {
                                             // Agent v2: an approved write may continue the
                                             // chain, and the NEXT write comes back as its own
                                             // confirmation card. Show it instead of ending the
                                             // turn -- one approval never authorises the next write.
-                                            pendingTool = next
+                                            // What was queued between the two cards is saved and
+                                            // shown now: the next card may expire, or never be seen.
+                                            if (carried.isNotEmpty()) {
+                                                messages.add(Msg("assistant", "", mediaJobs = carried))
+                                                convId?.let { id ->
+                                                    withContext(Dispatchers.IO) { db.addMessage(id, "assistant", "", carried) }
+                                                }
+                                            }
+                                            pendingTool = next?.copy(mediaJobs = emptyList())
                                         } else {
                                             pendingTool = null
                                             val text = next?.answer
@@ -2784,15 +2963,15 @@ private fun ChatScreen(
                                                         "Bekræftelsen udløb. Handlingen blev ikke udført."
                                                     else friendlyError(e)
                                                 } ?: ""
-                                            if (text.isNotBlank()) {
-                                                messages.add(Msg("assistant", text))
+                                            if (dk.ternedal.modelrig.ui.chat.MediaTurnJobs.worthSaving(text, carried)) {
+                                                messages.add(Msg("assistant", text, mediaJobs = carried))
                                                 // Persist it. What you approved, and what
                                                 // Kaliv did about it, belongs in the
                                                 // conversation -- not only in RAM until the
                                                 // next app restart.
                                                 convId?.let { id ->
                                                     withContext(Dispatchers.IO) {
-                                                        db.addMessage(id, "assistant", text)
+                                                        db.addMessage(id, "assistant", text, carried)
                                                     }
                                                 }
                                             }

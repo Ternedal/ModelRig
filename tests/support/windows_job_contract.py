@@ -28,6 +28,7 @@ from app.windows_job import (  # noqa: E402
     WindowsIsolationError,
     WindowsJob,
     _extended_limits,
+    attached_job_process_ids,
     close_attached_job,
     spawn_in_job,
     terminate_attached_job,
@@ -137,6 +138,12 @@ class FakeApi:
     def close_handle(self, handle):
         self._call("close", handle)
 
+    def process_ids(self, handle):
+        self._call("process_ids", handle)
+        return self.ids
+
+    ids = [5372, 1904]
+
 
 class FakeProc:
     def __init__(self):
@@ -171,6 +178,27 @@ check(
     [call[0] for call in api.calls].count("close") == 1,
     "Job Object close is idempotent",
 )
+
+# The job names every process in it (rig 21/11: a venv's python.exe is a starter whose child does
+# the work, so the pid Popen returned is not the pid that holds the resident lock).
+api = FakeApi()
+job = WindowsJob(limits, api=api)
+check(job.process_ids() == frozenset({5372, 1904}), "the job lists the spawned process and its child")
+holder = FakeProc()
+holder._kaliv_windows_job = job
+check(attached_job_process_ids(holder) == frozenset({5372, 1904}), "the attached job's process ids are readable from the process")
+check(attached_job_process_ids(FakeProc()) == frozenset(), "a process without a job has no list")
+api.ids = [0]
+rejects(job.process_ids, "invalid process id list", "a zero pid from the job is refused")
+api.ids = [True]
+rejects(job.process_ids, "invalid process id list", "a bool is not a pid")
+check(attached_job_process_ids(holder) == frozenset(), "an unreadable list is empty, never a guess")
+api.ids = [5372]
+api.fail_at = "process_ids"
+check(attached_job_process_ids(holder) == frozenset(), "a failed query is empty, never a guess")
+api.fail_at = None
+job.close()
+rejects(job.process_ids, "closed Job Object", "a closed job cannot be queried")
 
 created = []
 

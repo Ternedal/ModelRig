@@ -23,6 +23,13 @@ busy, so an orphaned ComfyUI blocks every cooperating generator until it has
 exited, on POSIX and Windows alike. Only a process started by the holder of
 the main lease takes the resident lock.
 
+A third lock, <lease dir>/<GPU UUID>.executor.lock, marks the one media
+executor process for that GPU (G2, #2296 6511335742). The executor takes it
+before it recovers interrupted jobs and keeps it for its whole life, so a
+second executor for the same GPU is refused before it can touch a live
+executor's job. It is independent of the main lease (which is held only while
+a model is resident).
+
 Scope (decision 6491161681): the lease coordinates only processes that take
 it. Ollama, a WSL2 instance or any other worker that does not use this module
 is NOT covered; whole-rig GPU exclusivity is unproven and not claimed.
@@ -47,6 +54,7 @@ DEVICE_ORDER_ENV = "CUDA_DEVICE_ORDER"
 MAX_GPU_INDEX = 15
 MAX_TIMEOUT_SECONDS = 3600.0
 RESIDENT_SUFFIX = ".resident.lock"
+EXECUTOR_SUFFIX = ".executor.lock"
 
 _UUID = re.compile(r"GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
@@ -134,17 +142,38 @@ def lease_dir_from_env(env: Mapping[str, str] | None = None) -> str:
     return value
 
 
+_IS_WINDOWS = os.name == "nt"
+
+
+def _windows_lease_dir_private(directory: Path) -> tuple[bool, str]:
+    from .lease_dir_acl_windows import lease_dir_private  # Windows only; imports no third-party code
+    return lease_dir_private(directory)
+
+
 def _check_lease_dir(lease_dir: object) -> Path:
     directory = Path(lease_dir) if isinstance(lease_dir, str) and lease_dir else None
     if directory is None or not directory.is_absolute() or directory.is_symlink() or not directory.is_dir():
         raise GpuLeaseError("lease directory must be an existing absolute non-symlink directory")
-    if os.name != "nt":
+    if _IS_WINDOWS:
+        # The mode bits say nothing on Windows: read the owner and DACL instead (gap G5, #2296).
+        # Same rule as POSIX: owned by this user (or SYSTEM/Administrators), nobody else can
+        # add, replace, delete or re-permission a lock file.
+        private, reason = _windows_lease_dir_private(directory)
+        if not private:
+            raise GpuLeaseError(f"lease directory refused: {reason}")
+    else:
         info = directory.stat()
         if info.st_uid != os.getuid():
             raise GpuLeaseError("lease directory must be owned by the current user")
         if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
             raise GpuLeaseError("lease directory must not be group- or world-writable")
     return directory
+
+
+def check_lease_dir(lease_dir: str) -> None:
+    """Raise GpuLeaseError unless lease_dir passes the check every lock acquisition makes.
+    Lets a caller refuse a bad configuration up front instead of at its first lock."""
+    _check_lease_dir(lease_dir)
 
 
 class GpuLease:
@@ -222,6 +251,45 @@ def _resident_held(path: Path) -> bool:
         return False
     finally:
         os.close(fd)
+
+
+class ExecutorAlreadyRunning(RuntimeError):
+    """Another live process holds this GPU's executor lock."""
+
+
+class ExecutorLock:
+    """Held while the executor runs; released explicitly by release() or by the OS at process exit."""
+
+    def __init__(self, gpu_uuid: str, fd: int | None, path: Path):
+        self.gpu_uuid, self._fd, self.path = gpu_uuid, fd, path
+
+    @property
+    def held(self) -> bool:
+        return self._fd is not None
+
+    def release(self) -> None:
+        fd, self._fd = self._fd, None
+        if fd is not None:
+            try:
+                _unlock(fd)
+            finally:
+                os.close(fd)
+
+    def __del__(self) -> None:  # not released by garbage collection: only release() or process exit
+        pass
+
+
+def acquire_executor_lock(gpu_uuid: str, *, lease_dir: str) -> ExecutorLock:
+    """Take <lease dir>/<GPU UUID>.executor.lock without waiting, or raise ExecutorAlreadyRunning."""
+    normalized = normalize_gpu_uuid(gpu_uuid)
+    path = _check_lease_dir(lease_dir) / f"{normalized}{EXECUTOR_SUFFIX}"
+    fd = _open_lock_file(path)
+    try:
+        _try_lock(fd)
+    except OSError:
+        os.close(fd)
+        raise ExecutorAlreadyRunning(f"an executor for {normalized} is already running") from None
+    return ExecutorLock(normalized, fd, path)
 
 
 def resident_is_held(gpu_uuid: str, *, lease_dir: str) -> bool:

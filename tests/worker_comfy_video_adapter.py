@@ -18,6 +18,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -64,6 +65,213 @@ def request(**overrides) -> GenerationRequest:
 
 
 class TemplateTests(unittest.TestCase):
+    def test_a_number_several_nodes_need_may_sit_on_a_primitive(self):
+        # LTX-2.3 renders sound with the picture: the frame count goes to the video latent and to
+        # the audio latent, the frame rate to three nodes. A marker appears once, so it sits on
+        # ComfyUI's own fan-out node, whose input is called "value".
+        graph = json.loads(raw())
+        graph["7"]["inputs"]["length"] = ["20", 0]
+        graph["9"]["inputs"]["fps"] = ["21", 0]
+        graph["20"] = {"class_type": "PrimitiveInt", "inputs": {"value": "__KALIV_VIDEO_FRAMES__"}}
+        graph["21"] = {"class_type": "PrimitiveInt", "inputs": {"value": "__KALIV_VIDEO_FPS__"}}
+        graph["22"] = {"class_type": "LTXVEmptyLatentAudio", "inputs": {"frames_number": ["20", 0], "frame_rate": ["21", 0]}}
+        template = load_template(raw(graph), sha(raw(graph)))
+        bound = template.bind(request(frames=49), fps=25)
+        self.assertEqual((bound["20"]["inputs"]["value"], bound["21"]["inputs"]["value"]), (49, 25))
+        self.assertEqual(bound["22"]["inputs"]["frames_number"], ["20", 0], "links are untouched")
+        # only on that class, and never for the prompt or the picture
+        for class_type in ("PrimitiveString", "PrimitiveFloat", "KSampler", "Reroute"):
+            other = json.loads(raw(graph))
+            other["20"]["class_type"] = class_type
+            with self.subTest(class_type), self.assertRaisesRegex(GenerationError, "may not fill input 'value'"):
+                load_template(raw(other), sha(raw(other)))
+        for marker in ("__KALIV_VIDEO_PROMPT__", "__KALIV_VIDEO_IMAGE__"):
+            other = json.loads(raw())
+            other["30"] = {"class_type": "PrimitiveInt", "inputs": {"value": marker}}
+            if marker == "__KALIV_VIDEO_PROMPT__":
+                other["6"]["inputs"]["text"] = ["30", 0]
+            with self.subTest(marker), self.assertRaisesRegex(GenerationError, "may not fill input 'value'"):
+                load_template(raw(other), sha(raw(other)))
+        twice = json.loads(raw(graph))
+        twice["23"] = {"class_type": "PrimitiveInt", "inputs": {"value": "__KALIV_VIDEO_FRAMES__"}}
+        with self.assertRaisesRegex(GenerationError, "more than once"):
+            load_template(raw(twice), sha(raw(twice)))
+
+    def test_the_ltx23_rig_helper_builds_a_template_the_adapter_accepts(self):
+        # scripts/media_comfy_ltx23_setup.py: video WITH sound, to be tried on the rig. Not run
+        # anywhere yet -- this only proves that what it would write passes the repository's checks.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("ltx23", ROOT / "scripts" / "media_comfy_ltx23_setup.py")
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        pins = [target for _repo, _name, target in helper.FILES]
+        data = helper.template_bytes()
+        template = load_template(data, sha(data), pinned_files=pins)
+        self.assertEqual(template.task, "text_to_video")
+        self.assertEqual(sorted(template.slots), sorted(m for m in (
+            "__KALIV_VIDEO_PROMPT__", "__KALIV_VIDEO_WIDTH__", "__KALIV_VIDEO_HEIGHT__", "__KALIV_VIDEO_FPS__",
+            "__KALIV_VIDEO_FRAMES__", "__KALIV_VIDEO_SEED__")), "its schedule is in the graph: no steps slot")
+        graph = template.bind(request(profile_id=helper.PROFILE_ID, width=768, height=512, frames=49, steps=8), fps=25)
+        self.assertEqual((graph["20"]["inputs"]["value"], graph["21"]["inputs"]["value"]), (49, 25))
+        self.assertEqual(graph["19"]["inputs"]["audio"], ["18", 0], "the muxer gets the decoded sound")
+        self.assertEqual(helper.bound({"FRAMES": 49, "FPS": 25, "WIDTH": 768, "HEIGHT": 512, "SEED": 1, "PROMPT": "x"})["7"]["inputs"]["width"], 768)
+        self.assertFalse([v for n in helper.bound({"FRAMES": 49, "FPS": 25, "WIDTH": 768, "HEIGHT": 512, "SEED": 1, "PROMPT": "x"}).values()
+                          for v in n["inputs"].values() if isinstance(v, str) and "KALIV" in v], "the direct test leaves no marker")
+        from app.media_generation_profiles import parse_profile
+        made = helper.profile([{"path": p, "sha256": "a" * 64, "bytes": 1} for p in pins], "b" * 40, sha(data),
+                              width=768, height=512, frames=49, fps=25)
+        parsed = parse_profile(made)
+        self.assertEqual((parsed.qualification, parsed.license, sorted(parsed.tasks)), ("candidate", "ltx-2-community-license", ["text_to_video"]))
+        self.assertTrue(parsed.backend_options.sound, "the sound profile promises sound, so a silent clip fails the job")
+        # image-to-video with sound: the same files, the picture written into the video latent
+        data = helper.template_bytes("image_to_video")
+        animated = load_template(data, sha(data), pinned_files=pins)
+        self.assertEqual(animated.task, "image_to_video")
+        self.assertEqual(animated.slots["__KALIV_VIDEO_IMAGE__"], ("26", "image"))
+        graph = animated.bind(request(profile_id="ltx23-i2v-av-gpu1", task="image_to_video", width=640, height=640,
+                                      frames=49, steps=8, input_asset_id="a" * 32),
+                              fps=25, source_file="kaliv-src-0123456789abcdef.png")
+        self.assertEqual((graph["24"]["inputs"]["value"], graph["25"]["inputs"]["value"]), (640, 640))
+        self.assertEqual(graph["26"]["inputs"]["image"], "kaliv-src-0123456789abcdef.png")
+        self.assertEqual(graph["10"]["inputs"]["video_latent"], ["29", 0], "the clip starts from the picture")
+        made = helper.profile([{"path": p, "sha256": "a" * 64, "bytes": 1} for p in pins], "b" * 40, sha(data),
+                              width=640, height=640, frames=49, fps=25, task="image_to_video")
+        parsed = parse_profile(made)
+        self.assertEqual((parsed.profile_id, sorted(parsed.tasks), parsed.backend_options.port),
+                         ("ltx23-i2v-av-gpu1", ["image_to_video"], 8192))
+        # the helper reports what the adapter decides: a handler box inside moov > trak > mdia
+        def box(kind, payload):
+            return (8 + len(payload)).to_bytes(4, "big") + kind + payload
+
+        def track(kind):
+            return box(b"trak", box(b"mdia", box(b"hdlr", b"\x00" * 8 + kind + b"\x00" * 13)))
+        ftyp = box(b"ftyp", b"isom\x00\x00\x02\x00")
+        self.assertTrue(helper.has_sound_track(ftyp + box(b"moov", track(b"vide") + track(b"soun"))))
+        self.assertFalse(helper.has_sound_track(ftyp + box(b"moov", track(b"vide"))))
+        self.assertFalse(helper.has_sound_track(ftyp + box(b"mdat", track(b"soun")) + box(b"moov", track(b"vide"))))
+        self.assertFalse(helper.has_sound_track(b"soun but no handler box"))
+
+    def test_a_template_with_its_own_schedule_may_leave_the_steps_slot_out(self):
+        # A distilled model's schedule is part of the graph (LTX-2.3: a list of sigmas).
+        graph = json.loads(raw())
+        del graph["3"]["inputs"]["steps"]
+        template = load_template(raw(graph), sha(raw(graph)))
+        self.assertNotIn("__KALIV_VIDEO_STEPS__", template.slots)
+        bound = template.bind(request(steps=20), fps=16)
+        self.assertNotIn("steps", bound["3"]["inputs"], "nothing in the graph takes the request's step count")
+        # every other slot is still required
+        for marker_input, node in (("seed", "3"), ("text", "6"), ("width", "7"), ("height", "7"), ("length", "7"), ("fps", "9")):
+            missing = json.loads(raw())
+            del missing[node]["inputs"][marker_input]
+            with self.subTest(marker_input), self.assertRaisesRegex(GenerationError, "missing slots"):
+                load_template(raw(missing), sha(raw(missing)))
+
+    def test_the_templates_that_ran_on_the_rig_are_the_ones_in_the_repository(self):
+        # docs/MEDIA_VIDEO_RIG_QUALIFICATION.md §7: byte for byte what ran on 21 November 2026.
+        folder = ROOT / "deploy" / "media" / "comfy-templates"
+        cases = {
+            "wan21-t2v-1p3b.json": ("4cd0d604b4728159eb351f84992819eaf2730bad7b4187889697e2020b798369", "text_to_video",
+                                    ["diffusion_models/wan2.1_t2v_1.3B_fp16.safetensors",
+                                     "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "vae/wan_2.1_vae.safetensors"]),
+            "wan22-ti2v-5b.json": ("62402da4ec636592c416cc05e7a8bd81be5baa9b205a403ebaae752ebe58e4d5", "image_to_video",
+                                   ["diffusion_models/wan2.2_ti2v_5B_fp16.safetensors",
+                                    "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "vae/wan2.2_vae.safetensors"]),
+        }
+        self.assertEqual(sorted(p.name for p in folder.glob("*.json")), sorted(cases))
+        for name, (sha, task, pins) in cases.items():
+            with self.subTest(name):
+                template = load_template((folder / name).read_bytes(), sha, pinned_files=pins)
+                self.assertEqual(template.task, task)
+                save = [n["inputs"] for n in template.graph.values() if n["class_type"] == "SaveVideo"]
+                self.assertEqual(len(save), 1)
+                self.assertEqual((save[0]["format"], save[0]["format.codec"]), ("mp4", "h264"))
+                self.assertNotIn("/", save[0]["filename_prefix"], "one plain .mp4 in the output root")
+
+    def test_a_pinned_template_may_only_load_pinned_model_files(self):
+        load_template(raw(), sha(raw()), pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors"])
+        with self.assertRaisesRegex(GenerationError, "not pinned"):
+            load_template(raw(), sha(raw()), pinned_files=["diffusion_models/other.safetensors"])
+        graph = copy.deepcopy(GRAPH)
+        graph["5"] = {"class_type": "LoraLoader", "inputs": {"lora_name": "sub/extra.safetensors"}}
+        with self.assertRaisesRegex(GenerationError, "not pinned"):
+            load_template(raw(graph), sha(raw(graph)), pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors"])
+        # The value is the path inside the loader's folder: the basename alone is a different file.
+        with self.assertRaisesRegex(GenerationError, "not pinned"):
+            load_template(raw(graph), sha(raw(graph)),
+                          pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors", "loras/extra.safetensors"])
+        load_template(raw(graph), sha(raw(graph)),
+                      pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors", "loras/sub/extra.safetensors"])
+        load_template(raw(), sha(raw()))  # no pins: no binding (candidate profiles)
+
+    def test_a_distinct_whitespace_named_file_cannot_satisfy_the_pin(self):
+        # Codex's reproduction (4472405235), as ChatGPT asked: two REAL files with different bytes,
+        # only the first pinned. The weights check passes (both files exist, the pinned one matches);
+        # the template that names the second is refused before anything starts.
+        from app.comfy_weights import verify_weights
+        from app.media_generation_profiles import WeightPin
+        with tempfile.TemporaryDirectory() as tmp:
+            models = Path(tmp, "models", "diffusion_models")
+            models.mkdir(parents=True)
+            Path(models, "wan2.2_t2v_example.safetensors").write_bytes(b"pinned bytes")
+            Path(models, " wan2.2_t2v_example.safetensors").write_bytes(b"never hashed")
+            pin = WeightPin("diffusion_models/wan2.2_t2v_example.safetensors",
+                            hashlib.sha256(b"pinned bytes").hexdigest(), len(b"pinned bytes"))
+            verify_weights(Path(tmp, "models"), [pin], comfy_root=tmp)
+            graph = copy.deepcopy(GRAPH)
+            graph["4"]["inputs"]["unet_name"] = " wan2.2_t2v_example.safetensors"
+            with self.assertRaisesRegex(GenerationError, "not pinned"):
+                load_template(raw(graph), sha(raw(graph)), pinned_files=[pin.path])
+            load_template(raw(), sha(raw()), pinned_files=[pin.path])  # the exact name is accepted
+
+    def test_a_backslash_is_refused_because_it_means_different_files_per_platform(self):
+        # #2328 review 4472675602: on POSIX "evil\\wan.safetensors" is one file name, not evil/ + wan.
+        # (A value that does not END in a model extension is not a file ComfyUI lists, so it never loads.)
+        for value in ("evil\\wan2.2_t2v_example.safetensors", "\\wan2.2_t2v_example.safetensors"):
+            graph = copy.deepcopy(GRAPH)
+            graph["4"]["inputs"]["unet_name"] = value
+            with self.subTest(value=value), self.assertRaisesRegex(GenerationError, "not pinned"):
+                load_template(raw(graph), sha(raw(graph)),
+                              pinned_files=["diffusion_models/wan2.2_t2v_example.safetensors",
+                                            "diffusion_models/evil/wan2.2_t2v_example.safetensors"])
+
+    def test_embeddings_cannot_be_loaded_under_pins(self):
+        # #2328 review 4472675615: "embedding:<name>" in any encoded text loads models/embeddings/<name>.
+        pins = ["diffusion_models/wan2.2_t2v_example.safetensors"]
+        graph = copy.deepcopy(GRAPH)
+        graph["5"] = {"class_type": "CLIPTextEncode", "inputs": {"text": "blurry, Embedding:badhands", "clip": ["8", 0]}}
+        with self.assertRaisesRegex(GenerationError, "references an embedding"):
+            load_template(raw(graph), sha(raw(graph)), pinned_files=pins)
+        load_template(raw(graph), sha(raw(graph)))  # candidates are not pinned
+        pinned = load_template(raw(), sha(raw()), pinned_files=pins)
+        for prompt in ("a kite embedding:unpinned", "(EMBEDDING:x:1.2) a kite", "embedding:x"):
+            with self.subTest(prompt=prompt), self.assertRaisesRegex(GenerationError, "embedding"):
+                pinned.bind(request(prompt=prompt), fps=16)
+        self.assertEqual(pinned.bind(request(prompt="an embedding of meaning"), fps=16)["6"]["inputs"]["text"],
+                         "an embedding of meaning", "the word alone is fine")
+        unpinned = load_template(raw(), sha(raw()))
+        self.assertEqual(unpinned.bind(request(prompt="embedding:x"), fps=16)["6"]["inputs"]["text"], "embedding:x")
+
+    def test_the_binding_is_keyed_on_the_value_not_the_input_name(self):
+        # #2328 review 4472123690: DualCLIPLoader's clip_name1/clip_name2 do not end in "_name".
+        base = ["diffusion_models/wan2.2_t2v_example.safetensors"]
+        for inputs in ({"clip_name1": "clip_l.safetensors", "clip_name2": "t5xxl.safetensors", "type": "flux"},
+                       # #2328 review 4472405235: a distinct POSIX file must not satisfy the pin by stripping
+                       {"unet_name": " wan2.2_t2v_example.safetensors"},
+                       {"unet_name": "wan2.2_t2v_example.safetensors "},
+                       {"unet_name": "WAN2.2_T2V_EXAMPLE.safetensors"},
+                       {"clip_name1": "CLIP_L.SAFETENSORS "},           # case and trailing space
+                       {"model": "x\\nested\\upscaler.pt2"},           # any input name, Windows separators
+                       {"files": ["a.txt", "lora.pkl"]}):               # inside a list
+            graph = copy.deepcopy(GRAPH)
+            graph["5"] = {"class_type": "DualCLIPLoader", "inputs": inputs}
+            with self.subTest(inputs=inputs), self.assertRaisesRegex(GenerationError, "not pinned"):
+                load_template(raw(graph), sha(raw(graph)), pinned_files=base)
+        graph = copy.deepcopy(GRAPH)
+        graph["5"] = {"class_type": "DualCLIPLoader",
+                      "inputs": {"clip_name1": "clip_l.safetensors", "clip_name2": "t5xxl.safetensors", "type": "flux"}}
+        load_template(raw(graph), sha(raw(graph)),
+                      pinned_files=base + ["text_encoders/clip_l.safetensors", "text_encoders/t5xxl.safetensors"])
+
     def test_binds_values_into_a_fresh_graph(self):
         template = load_template(raw(), sha(raw()))
         bound = template.bind(request(), fps=16)
@@ -162,12 +370,13 @@ class AdapterTests(unittest.TestCase):
                                            limits={"max_prompt_chars": 200, "sizes": [[832, 480]],
                                                    "max_steps": 30, "max_frames": 81}))
 
-    def adapter(self, fake=None, profile=None, volume=None, **kwargs) -> ComfyVideoAdapter:
-        launch = ComfyLaunch(python_executable=sys.executable, main_py=str(FAKE_MAIN), port=self.port,
+    def adapter(self, fake=None, profile=None, work_area=None, comfy_root=None, **kwargs) -> ComfyVideoAdapter:
+        main_py = str(Path(comfy_root, "main.py")) if comfy_root else str(FAKE_MAIN)
+        launch = ComfyLaunch(python_executable=sys.executable, main_py=main_py, port=self.port,
                              input_directory=self.dirs["input"], output_directory=self.dirs["output"],
                              temp_directory=self.dirs["temp"], user_directory=self.dirs["user"])
         env = {"FAKE_COMFY_STATE_DIR": self.state, **(fake or {})}
-        sup = FakeSupervisor(fake_env=env, media_volume=volume, gpu_uuid=GPU, lease_dir=self.lease_dir, launch=launch,
+        sup = FakeSupervisor(fake_env=env, work_area=work_area, gpu_uuid=GPU, lease_dir=self.lease_dir, launch=launch,
                              reserve_gib=2, min_usable_gib=8, ready_timeout_s=15, stop_timeout_s=5, poll_s=0.05,
                              base_env={"PATH": os.environ.get("PATH", "")})
         values = dict(supervisor=sup, template_dir=self.templates, output_directory=self.dirs["output"], poll_s=0.05,
@@ -183,6 +392,95 @@ class AdapterTests(unittest.TestCase):
             return True
         except GpuBusy:
             return False
+
+    def test_a_profile_that_promises_sound_refuses_a_silent_clip(self):
+        # Anders, 21 Nov 2026: "der skal lyd på". A sound profile's clip without a sound track is a
+        # failed job, not a finished one the user has to play to find out.
+        silent = self.adapter(profile=self.profile(sound=True))
+        silent.load()
+        sink = io.BytesIO()
+        with self.assertRaisesRegex(GenerationError, "^output_has_no_sound:"):
+            silent.render_to(request(), sink)
+        silent.close()
+        with_sound = self.adapter(fake={"FAKE_COMFY_SOUND": "1"}, profile=self.profile(sound=True))
+        with_sound.load()
+        sink = io.BytesIO()
+        self.assertEqual(with_sound.render_to(request(), sink), "video/mp4")
+        self.assertIn(b"soun", sink.getvalue())
+        with_sound.close()
+        # a profile that promises nothing publishes either kind
+        plain = self.adapter(fake={"FAKE_COMFY_SOUND": "1"})
+        plain.load()
+        self.assertEqual(plain.render_to(request(), io.BytesIO()), "video/mp4")
+
+    def test_bytes_that_look_like_a_sound_handler_are_not_a_sound_track(self):
+        # #2477 review (P2): the scan searched for "hdlr....soun" anywhere, so the same bytes in
+        # mdat or in metadata passed a silent clip. Only moov > trak > mdia > hdlr counts.
+        decoy = self.adapter(fake={"FAKE_COMFY_SOUND": "decoy"}, profile=self.profile(sound=True))
+        decoy.load()
+        sink = io.BytesIO()
+        with self.assertRaisesRegex(GenerationError, "^output_has_no_sound:"):
+            decoy.render_to(request(), sink)
+        decoy.close()
+
+    def test_the_sound_track_scan_walks_the_boxes(self):
+        from app.comfy_video_adapter import _SoundTrackScan
+
+        def box(kind, payload, wide=False):
+            if wide:
+                return b"\x00\x00\x00\x01" + kind + (16 + len(payload)).to_bytes(8, "big") + payload
+            return (8 + len(payload)).to_bytes(4, "big") + kind + payload
+
+        def hdlr(handler):
+            return box(b"hdlr", b"\x00" * 8 + handler + b"\x00" * 13)
+
+        def track(handler, **kw):
+            return box(b"trak", box(b"tkhd", b"\x00" * 12) + box(b"mdia", box(b"mdhd", b"\x00" * 12) + hdlr(handler)), **kw)
+
+        def scan(data, size=None):
+            found = _SoundTrackScan()
+            for at in range(0, len(data), size or max(len(data), 1)):
+                found.feed(data[at:at + (size or len(data))])
+            return found.found
+
+        ftyp = box(b"ftyp", b"isom\x00\x00\x02\x00isomiso2")
+        bait = hdlr(b"soun")
+        with_sound = ftyp + box(b"mdat", b"\x07" * 50) + box(b"moov", track(b"vide") + track(b"soun"))
+        cases = {
+            "moov after mdat": (with_sound, True),
+            "moov before mdat": (ftyp + box(b"moov", track(b"soun") + track(b"vide")) + box(b"mdat", b"\x07" * 50), True),
+            "64-bit box sizes": (ftyp + box(b"mdat", b"\x07" * 9, wide=True) + box(b"moov", track(b"soun", wide=True), wide=True), True),
+            "video only": (ftyp + box(b"mdat", b"\x07" * 50) + box(b"moov", track(b"vide")), False),
+            "the bytes inside mdat": (ftyp + box(b"mdat", bait) + box(b"moov", track(b"vide")), False),
+            "the bytes in udta": (ftyp + box(b"moov", track(b"vide") + box(b"udta", bait)), False),
+            "an hdlr directly under moov": (ftyp + box(b"moov", track(b"vide") + bait), False),
+            "an hdlr under trak, outside mdia": (ftyp + box(b"moov", box(b"trak", bait)), False),
+            "a trak outside moov": (ftyp + track(b"soun") + box(b"moov", track(b"vide")), False),
+            "meta's handler": (ftyp + box(b"moov", track(b"vide") + box(b"meta", b"\x00" * 4 + bait)), False),
+            "mdat to the end of the file": (ftyp + box(b"moov", track(b"vide")) + b"\x00\x00\x00\x00mdat" + bait, False),
+            "a box smaller than its header": (ftyp + b"\x00\x00\x00\x04moov" + box(b"moov", track(b"soun")), False),
+            "a child past its parent": (ftyp + box(b"moov", b"\x00\x00\xff\xfftrak") + box(b"moov", track(b"soun")), False),
+            "a handler box cut short": (ftyp + box(b"moov", box(b"trak", box(b"mdia", box(b"hdlr", b"\x00" * 4)))), False),
+            "zero padding after ftyp": (ftyp + b"\x00" * 64, False),
+            "empty": (b"", False),
+        }
+        for name, (data, expected) in cases.items():
+            for size in (None, 1, 3, 7, 16):
+                with self.subTest(case=name, chunk=size):
+                    self.assertEqual(scan(data, size), expected)
+        for cut in range(1, len(with_sound)):  # every split point of a real clip
+            found = _SoundTrackScan()
+            found.feed(with_sound[:cut]); found.feed(with_sound[cut:])
+            self.assertTrue(found.found, f"split at {cut}")
+        skipping = _SoundTrackScan()  # mdat is passed, not kept: memory does not follow the clip's size
+        skipping.feed(ftyp + (8 + 5_000_000).to_bytes(4, "big") + b"mdat")
+        for _ in range(5):
+            skipping.feed(b"\x07" * 1_000_000)
+            self.assertLessEqual(len(skipping._buffer), 16)
+        skipping.feed(box(b"moov", track(b"soun")))
+        self.assertTrue(skipping.found)
+        with self.assertRaisesRegex(Exception, "backend_options.sound must be true or false"):
+            self.profile(sound="yes")
 
     def test_end_to_end_text_to_video(self):
         adapter = self.adapter()
@@ -200,6 +498,40 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(adapter.render_to(request(seed=8), io.BytesIO()), "video/mp4")
         adapter.close()
         self.assertTrue(self.lease_is_free())
+
+    def test_a_warm_comfyui_takes_the_next_job_without_a_restart(self):
+        # Rig 21/11: a ComfyUI that keeps its models reports 5 of 12 GiB free; the next job read
+        # that as a shortage and ComfyUI was closed and started again for every clip.
+        from app.comfy_supervisor import ComfyVramShortage
+        adapter = self.adapter()
+        adapter.load()
+        pid = adapter.supervisor.pid
+        self.assertIsNone(adapter.supervisor._idle_free_bytes)
+        Path(self.state, "vram_free_gib").write_text("5")  # what the fake reports from now on
+        with self.assertRaises(ComfyVramShortage):
+            adapter.render_to(request(), io.BytesIO())  # no job has succeeded in it yet: strict
+        Path(self.state, "vram_free_gib").unlink()
+        self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
+        self.assertEqual(adapter.supervisor._idle_job_cost, 832 * 480 * 33, "the proof is taken when the job has succeeded, with its size")
+        kind = adapter.supervisor._idle_job_kind
+        self.assertEqual(kind, f"wan-t2v|{adapter._template.sha256}|text_to_video", "and with what it was: profile, workflow, task")
+        Path(self.state, "vram_free_gib").write_text("5")
+        adapter.supervisor.note_idle(832 * 480 * 33, kind)  # as after a job whose models stayed loaded
+        self.assertEqual(adapter.render_to(request(seed=8), io.BytesIO()), "video/mp4")
+        self.assertEqual(adapter.supervisor.pid, pid, "the same ComfyUI rendered both")
+        # #2462 review: a job larger than the one that proved it does not lean on that proof
+        adapter.supervisor.note_idle(832 * 480 * 17, kind)
+        with self.assertRaises(ComfyVramShortage):
+            adapter.render_to(request(seed=9), io.BytesIO())  # 33 frames after a 17-frame job
+        # ...nor does a job of another kind: proof from image-to-video says nothing about text-to-video
+        adapter.supervisor.note_idle(832 * 480 * 33, kind.replace("text_to_video", "image_to_video"))
+        with self.assertRaises(ComfyVramShortage):
+            adapter.render_to(request(seed=9), io.BytesIO())
+        adapter.supervisor.note_idle(832 * 480 * 33, kind)
+        Path(self.state, "vram_free_gib").write_text("3")  # somebody else took 2 GiB since
+        with self.assertRaises(ComfyVramShortage):
+            adapter.render_to(request(seed=9), io.BytesIO())
+        adapter.close()
 
     def test_end_to_end_into_a_staged_sink(self):
         """The #2296 seam: with sink.staged(".mp4") as out: mime = render_to(req, out); sink.adopt(out, mime)."""
@@ -272,36 +604,36 @@ class AdapterTests(unittest.TestCase):
         with adapter.supervisor.job_slot():
             pass  # acquirable: the failed job did not leak it
 
-    def test_comfyui_media_directories_must_be_on_the_verified_volume_before_start(self):
+    def test_comfyui_directories_must_be_in_the_private_work_area_before_start(self):
         for lost in ("input", "output", "temp", "user"):
             with self.subTest(lost=lost):
-                volume = AnyExistingDirectory()
-                volume.lost.add(self.dirs[lost])
+                work_area = AnyExistingDirectory()
+                work_area.lost.add(self.dirs[lost])
                 self.port = free_port()
                 with self.assertRaises(ArtifactSinkUnavailable):
-                    self.adapter(volume=volume).load()
-                self.assertFalse(Path(self.state, "pid").exists(), "no ComfyUI on an unverified disk")
+                    self.adapter(work_area=work_area).load()
+                self.assertFalse(Path(self.state, "pid").exists(), "no ComfyUI outside the verified work area")
                 self.assertTrue(self.lease_is_free())
 
-    def test_losing_the_volume_before_submit_is_fatal_and_submits_nothing(self):
-        volume = AnyExistingDirectory()
-        adapter = self.adapter(volume=volume)
+    def test_losing_the_work_area_before_submit_is_fatal_and_submits_nothing(self):
+        work_area = AnyExistingDirectory()
+        adapter = self.adapter(work_area=work_area)
         adapter.load()
-        volume.lost.add("*")  # unplugged, or replaced by another disk
+        work_area.lost.add("*")  # replaced, or no longer private
         with self.assertRaises(ArtifactSinkUnavailable):
             adapter.render_to(request(), io.BytesIO())
         self.assertEqual(self.submissions(), 0)
 
-    def test_losing_the_volume_during_the_render_hands_nothing_to_the_sink(self):
-        volume = AnyExistingDirectory()
-        adapter = self.adapter(volume=volume, fake={"FAKE_COMFY_RENDER_SECONDS": "0.5"})
+    def test_losing_the_work_area_during_the_render_hands_nothing_to_the_sink(self):
+        work_area = AnyExistingDirectory()
+        adapter = self.adapter(work_area=work_area, fake={"FAKE_COMFY_RENDER_SECONDS": "0.5"})
         adapter.load()
         real_history = adapter.supervisor.history
 
         def history_then_unplug(prompt_id):
             record = real_history(prompt_id)
             if record is not None:
-                volume.lost.add("*")  # the render finished, then the disk went away
+                work_area.lost.add("*")  # the render finished, then the work area failed its check
             return record
 
         adapter.supervisor.history = history_then_unplug
@@ -310,7 +642,7 @@ class AdapterTests(unittest.TestCase):
             adapter.render_to(request(), sink)
         self.assertEqual(sink.getvalue(), b"")
 
-    # --- #2316 review 4415046066: failed jobs must not fill the volume ---------------------------
+    # --- #2316 review 4415046066: failed jobs must not fill the work area-----------------------
     def test_rejected_outputs_do_not_accumulate(self):
         """Codex's scenario: three renders rejected by the size cap must leave nothing behind."""
         adapter = self.adapter(fake={"FAKE_COMFY_MP4_PAD": "4096"}, profile=self.profile(max_output_bytes=1024))
@@ -331,6 +663,379 @@ class AdapterTests(unittest.TestCase):
             adapter.render_to(request(), BrokenSink())
         self.assertEqual(os.listdir(self.dirs["output"]), [])
 
+    # --- Anders, 6 Nov (#2275 6686905826): the work-area copy goes only once the staged copy is durable ---
+    def test_the_staged_copy_is_synced_before_the_work_area_copy_is_removed(self):
+        from unittest.mock import patch
+        adapter = self.adapter()
+        adapter.load()
+        events = []
+        real_remove = adapter._remove_job_outputs
+
+        def remove(*args):
+            events.append(("remove", sorted(os.listdir(self.dirs["output"]))))
+            return real_remove(*args)
+
+        adapter._remove_job_outputs = remove
+        real_fsync = os.fsync
+        staged = Path(self.tmp, "staged.mp4")
+        with open(staged, "wb") as sink, \
+                patch("app.comfy_video_adapter.os.fsync",
+                      side_effect=lambda fd: (events.append(("fsync", fd)), real_fsync(fd))[1]):
+            self.assertEqual(adapter.render_to(request(), sink), "video/mp4")
+            fileno = sink.fileno()
+        self.assertEqual([e[0] for e in events], ["fsync", "remove"], "durable on the volume, then removed here")
+        self.assertEqual(events[0][1], fileno, "the sink's own descriptor is synced")
+        self.assertEqual(len(events[1][1]), 1, "the render's output was still there when the copy was synced")
+        self.assertEqual(os.listdir(self.dirs["output"]), [])
+        self.assertEqual(staged.read_bytes()[4:8], b"ftyp")
+
+    def test_a_staged_handle_is_synced_through_its_own_sync_before_the_removal(self):
+        """The staged sink's handle (#2347) has sync() and no fileno: that is what is called."""
+        adapter = self.adapter()
+        adapter.load()
+        events = []
+        real_remove = adapter._remove_job_outputs
+        adapter._remove_job_outputs = lambda *a: (events.append("remove"), real_remove(*a))[1]
+
+        class StagedHandle:
+            def __init__(self):
+                self.data = bytearray()
+
+            def write(self, chunk):
+                self.data += chunk
+                return len(chunk)
+
+            def flush(self):
+                pass
+
+            def sync(self):
+                events.append(("sync", len(self.data)))
+
+        handle = StagedHandle()
+        self.assertEqual(adapter.render_to(request(), handle), "video/mp4")
+        self.assertEqual(events, [("sync", len(handle.data)), "remove"], "the whole copy is synced, then removed")
+        self.assertEqual(bytes(handle.data[4:8]), b"ftyp")
+
+    def test_a_staged_handle_whose_sync_fails_fails_the_job(self):
+        from app.media_generation_contract import ArtifactSinkUnavailable
+        adapter = self.adapter()
+        adapter.load()
+
+        class FullDisk(io.BytesIO):
+            def sync(self):
+                raise ArtifactSinkUnavailable("staged_video_unavailable")
+
+        with self.assertRaises(ArtifactSinkUnavailable):
+            adapter.render_to(request(), FullDisk())
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "a failed job's output is cleaned up, as for any failure")
+
+    def test_holding_keeps_the_copy_until_the_block_ends_then_removes_it(self):
+        adapter = self.adapter()
+        adapter.load()
+        with adapter.holding_outputs():
+            self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
+            self.assertEqual(len(os.listdir(self.dirs["output"])), 1, "still on C: until published")
+        self.assertEqual(os.listdir(self.dirs["output"]), [])
+        self.assertIsNone(adapter._holding)
+
+    def test_a_failure_after_the_hand_over_keeps_the_copy_for_recovery(self):
+        from app.media_generation_contract import ArtifactSinkUnavailable
+        adapter = self.adapter()
+        adapter.load()
+        with self.assertLogs("kaliv.media.comfy", level="WARNING"), self.assertRaises(ArtifactSinkUnavailable):
+            with adapter.holding_outputs():
+                adapter.render_to(request(), io.BytesIO())
+                raise ArtifactSinkUnavailable("publication failed")
+        kept = os.listdir(self.dirs["output"])
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(adapter.last_cleanup["kept_for_recovery"], kept)
+
+    def test_a_cancel_after_the_hand_over_removes_the_copy(self):
+        from app.media_generation_contract import GenerationCancelled
+        adapter = self.adapter()
+        adapter.load()
+        with self.assertRaises(GenerationCancelled):
+            with adapter.holding_outputs():
+                adapter.render_to(request(), io.BytesIO())
+                raise GenerationCancelled("the owner cancelled before publication")
+        self.assertEqual(os.listdir(self.dirs["output"]), [])
+
+    def test_a_render_that_fails_inside_the_hold_is_cleaned_at_once(self):
+        adapter = self.adapter(fake={"FAKE_COMFY_OUTPUT_MODE": "notmp4"})
+        adapter.load()
+        with self.assertRaises(GenerationError), adapter.holding_outputs():
+            try:
+                adapter.render_to(request(), io.BytesIO())
+            finally:
+                self.assertEqual(os.listdir(self.dirs["output"]), [], "removed before the hold even ends")
+        self.assertNotIn("kept_for_recovery", adapter.last_cleanup)
+
+    def test_the_holder_gets_a_receipt_before_the_copy_and_one_after_the_sync(self):
+        adapter = self.adapter()
+        adapter.load()
+        sink = io.BytesIO()
+        receipts = []
+
+        def record(receipt):
+            receipts.append((receipt, len(sink.getvalue())))
+        with adapter.holding_outputs(on_handoff=record):
+            adapter.render_to(request(), sink)
+            name = os.listdir(self.dirs["output"])[0]
+            info = os.stat(Path(self.dirs["output"], name))
+        output = {"name": name, "dev": info.st_dev, "ino": info.st_ino, "size": info.st_size}
+        self.assertEqual(receipts[0], ({"stage": "copying", "output": output}, 0), "before a byte reached the sink")
+        copied, written = receipts[1]
+        self.assertEqual(copied, {"stage": "copied", "output": output, "sha256": hashlib.sha256(sink.getvalue()).hexdigest(),
+                                  "size": len(sink.getvalue())})
+        self.assertEqual(written, len(sink.getvalue()))
+        self.assertEqual(len(receipts), 2)
+
+    def test_an_unrecorded_hand_off_fails_before_anything_is_copied(self):
+        adapter = self.adapter()
+        adapter.load()
+        sink = io.BytesIO()
+
+        def refuse(receipt):
+            raise GenerationError("the hand-off could not be recorded for this job")
+        with self.assertRaises(GenerationError), adapter.holding_outputs(on_handoff=refuse):
+            adapter.render_to(request(), sink)
+        self.assertEqual(sink.getvalue(), b"", "nothing reached the volume")
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "a job that never handed over is cleaned at once")
+
+    def test_a_volume_lost_while_the_receipt_is_recorded_keeps_the_finished_file(self):
+        """Codex #2357 4503161825: the receipt callback can hit the lost volume (the store's guard,
+        or the volume's stat). That is not the render's fault: the finished copy must be kept for
+        recovery, as when the volume cannot take the copy, never deleted."""
+        from app.media_generation_contract import ArtifactSinkUnavailable
+        for stage in ("copying", "copied"):
+            with self.subTest(stage=stage):
+                adapter = self.adapter()
+                adapter.load()
+
+                def lost(receipt, stage=stage):
+                    if receipt["stage"] == stage:
+                        raise ArtifactSinkUnavailable("media_volume_lost")
+                with self.assertRaisesRegex(ArtifactSinkUnavailable, "media_volume_lost"), \
+                        adapter.holding_outputs(on_handoff=lost):
+                    adapter.render_to(request(), io.BytesIO())
+                self.assertEqual(len(os.listdir(self.dirs["output"])), 1, "the finished render is kept")
+                for name in os.listdir(self.dirs["output"]):
+                    os.unlink(Path(self.dirs["output"], name))
+                adapter.close()  # release ComfyUI and the GPU lease before the next stage's adapter
+
+    def test_a_receipt_store_that_fails_keeps_the_finished_file(self):
+        """Codex #2357 4503721455: the receipt database can be full, locked or unreadable
+        (sqlite3.OperationalError / DatabaseError), or the disk can fail (OSError). None of these
+        is the render's fault: at either receipt the finished copy is kept for recovery."""
+        import errno
+        import sqlite3
+        failures = (sqlite3.OperationalError("database or disk is full"),
+                    sqlite3.OperationalError("database is locked"),
+                    sqlite3.DatabaseError("database disk image is malformed"),
+                    OSError(errno.EIO, "I/O error"))
+        for stage in ("copying", "copied"):
+            for failure in failures:
+                with self.subTest(stage=stage, failure=str(failure)):
+                    adapter = self.adapter()
+                    adapter.load()
+
+                    def broken(receipt, stage=stage, failure=failure):
+                        if receipt["stage"] == stage:
+                            raise failure
+                    with self.assertLogs("kaliv.media.comfy", level="WARNING"), \
+                            self.assertRaises(type(failure)), adapter.holding_outputs(on_handoff=broken):
+                        adapter.render_to(request(), io.BytesIO())
+                    kept = os.listdir(self.dirs["output"])
+                    self.assertEqual(len(kept), 1, "the finished render is kept")
+                    self.assertEqual(adapter.last_cleanup["kept_for_recovery"], kept)
+                    os.unlink(Path(self.dirs["output"], kept[0]))
+                    adapter.close()
+
+    def test_a_refused_receipt_still_cleans_the_render_at_once(self):
+        """The other side of 4503721455: an explicit refusal (a receipt that does not validate,
+        ImageJobError; a job that is not this executor's, GenerationError) is not an
+        infrastructure failure. At either receipt the job fails and nothing is kept."""
+        from app.image_job_store import ImageJobError
+        refusals = (ImageJobError("hand-off record is invalid"),
+                    GenerationError("the hand-off could not be recorded for this job"))
+        for stage in ("copying", "copied"):
+            for refusal in refusals:
+                with self.subTest(stage=stage, refusal=type(refusal).__name__):
+                    adapter = self.adapter()
+                    adapter.load()
+
+                    def refuse(receipt, stage=stage, refusal=refusal):
+                        if receipt["stage"] == stage:
+                            raise refusal
+                    with self.assertRaises(type(refusal)), adapter.holding_outputs(on_handoff=refuse):
+                        adapter.render_to(request(), io.BytesIO())
+                    self.assertEqual(os.listdir(self.dirs["output"]), [], "a refused hand-off is cleaned at once")
+                    self.assertNotIn("kept_for_recovery", adapter.last_cleanup)
+                    adapter.close()
+
+    def test_every_output_name_the_adapter_accepts_a_receipt_accepts_too(self):
+        """Codex #2357 4504060850: a name the adapter accepted but the receipt refused failed the
+        hand-off as an explicit refusal and deleted a valid render. The two use one rule now."""
+        from app.image_job_store import ImageJobError, check_handoff_record
+        adapter = self.adapter()  # never loaded: _single_output only reads the output directory
+        names = ["kaliv_00001_.mp4", "rød drage.mp4", "  spaces  .mp4", "_x.mp4", ".x.mp4", "日本語.mp4",
+                 "emoji 🐉.mp4", "a" * 251 + ".mp4", "a" * 252 + ".mp4", "a\nb.mp4", "a\x00b.mp4", "a\x85b.mp4",
+                 "a\udcffb.mp4", "a\\b.mp4", "c:b.mp4", "a/b.mp4", "../b.mp4", ".mp4", "x.MP4",
+                 # Windows (ChatGPT #2357 6716735710): device names, characters Win32 refuses, and
+                 # names that are not devices. Each dragon is two UTF-16 code units.
+                 "CON.mp4", "nul.mp4", "Com1.mp4", "lpt¹.mp4", "aux .mp4", "CONOUT$.mp4", "con.tar.mp4",
+                 'a"b.mp4', "a<b.mp4", "a|b.mp4", "a?b.mp4", "a*b.mp4", "🐉" * 62 + ".mp4",
+                 "console.mp4", "com10.mp4", "lpt.mp4", "nul_x.mp4"]
+        for name in names:  # every name is a real file there, as it is after a render
+            if "/" in name:
+                continue
+            try:
+                Path(self.dirs["output"], name).write_bytes(b"x")
+            except (OSError, ValueError):
+                pass  # not creatable on this system: refused by the rule before the directory matters
+        accepted = []
+        for name in names:
+            with self.subTest(name=name):
+                outputs = {"9": {"videos": [{"filename": name, "subfolder": "", "type": "output"}]}}
+                try:
+                    adapter._single_output(outputs, set())
+                except GenerationError:
+                    continue
+                accepted.append(name)
+                try:
+                    check_handoff_record({"stage": "copying", "output": {"name": name, "dev": 1, "ino": 2, "size": 3}})
+                except ImageJobError:
+                    self.fail(f"the adapter accepts {name!r} but its receipt is refused")
+        self.assertEqual(accepted, ["kaliv_00001_.mp4", "rød drage.mp4", "  spaces  .mp4", "_x.mp4", ".x.mp4",
+                                    "日本語.mp4", "emoji 🐉.mp4", "a" * 251 + ".mp4", ".mp4", "🐉" * 62 + ".mp4",
+                                    "console.mp4", "com10.mp4", "lpt.mp4", "nul_x.mp4"])
+
+    def test_an_output_name_the_directory_does_not_list_is_refused(self):
+        """ChatGPT #2357 6716735710: on Windows a name can reach a file it does not spell, such as
+        another case of an older file's name or its 8.3 alias. The adapter takes only a name the
+        output directory itself lists, so it never adopts an older file."""
+        adapter = self.adapter()
+        Path(self.dirs["output"], "kaliv_old.mp4").write_bytes(b"older")
+        for name in ("KALIV_OLD.mp4", "Kaliv_old.mp4", "never_written.mp4"):
+            with self.subTest(name=name), self.assertRaises(GenerationError):
+                adapter._single_output({"9": {"videos": [{"filename": name, "subfolder": "", "type": "output"}]}},
+                                       {"kaliv_old.mp4"})
+
+    def test_cleanup_never_deletes_through_a_name_the_directory_does_not_list(self):
+        """ChatGPT #2357 6716735710: a history naming an 8.3 alias of an older file
+        ("KALIV_~1.MP4") must not make cleanup delete that older file. Windows' alias lookup is
+        simulated here: stat resolves the alias to the older file, as NTFS would."""
+        from unittest.mock import patch
+        import app.comfy_video_adapter as module
+        adapter = self.adapter()
+        older = Path(self.dirs["output"], "kaliv_older_job.mp4")
+        older.write_bytes(b"another job's finished render")
+        real_stat = os.stat
+
+        def windows_stat(path, *args, **kwargs):
+            if Path(path).name in ("KALIV_~1.MP4", "Kaliv_Older_Job.mp4"):
+                path = older
+            return real_stat(path, *args, **kwargs)
+
+        outputs = {"9": {"videos": [{"filename": "KALIV_~1.MP4", "subfolder": "", "type": "output"},
+                                    {"filename": "Kaliv_Older_Job.mp4", "subfolder": "", "type": "output"}]}}
+        with patch.object(module.os, "stat", windows_stat):
+            self.assertEqual(adapter._attested_outputs(outputs, {"kaliv_older_job.mp4"}), [])
+        self.assertEqual(older.read_bytes(), b"another job's finished render")
+
+    def test_cleanup_skips_a_device_name_even_when_such_a_file_exists(self):
+        """On Linux "CON.mp4" is a file; on Windows the same name opens the console. Cleanup never
+        stats or deletes by such a name, so the file is kept."""
+        adapter = self.adapter()
+        Path(self.dirs["output"], "CON.mp4").write_bytes(b"x")
+        outputs = {"9": {"videos": [{"filename": "CON.mp4", "subfolder": "", "type": "output"}]}}
+        self.assertEqual(adapter._attested_outputs(outputs, set()), [])
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "needs a FIFO (POSIX)")
+    def test_cleanup_keeps_a_node_that_is_neither_a_file_nor_a_link(self):
+        """ChatGPT #2357 6718447424: ComfyUI writes its output as a file. A FIFO (or socket or
+        device node) that a history names is not provably the render, so cleanup keeps it and
+        reports it as untracked. A file and a link the job made are still removed; removing a link
+        never touches what it points to."""
+        adapter = self.adapter()
+        out = Path(self.dirs["output"])
+        os.mkfifo(out / "pipe.mp4")
+        (out / "render.mp4").write_bytes(b"x")
+        target = Path(self.state, "elsewhere.mp4")
+        target.write_bytes(b"not the job's")
+        os.symlink(target, out / "link.mp4")
+        outputs = {"9": {"videos": [{"filename": n, "subfolder": "", "type": "output"}
+                                    for n in ("pipe.mp4", "render.mp4", "link.mp4")]}}
+        owned = adapter._attested_outputs(outputs, set())
+        self.assertEqual([name for name, _, _ in owned], ["render.mp4", "link.mp4"])
+        adapter._remove_job_outputs(set(), owned)
+        self.assertEqual(sorted(os.listdir(out)), ["pipe.mp4"])
+        self.assertEqual(adapter.last_cleanup["removed"], ["render.mp4", "link.mp4"])
+        self.assertEqual(adapter.last_cleanup["untracked"], ["pipe.mp4"])
+        self.assertEqual(target.read_bytes(), b"not the job's")
+
+    def test_receipts_go_only_to_the_current_holder(self):
+        adapter = self.adapter()
+        adapter.load()
+        receipts = []
+        with adapter.holding_outputs(on_handoff=receipts.append):
+            adapter.render_to(request(), io.BytesIO())
+        adapter.render_to(request(), io.BytesIO())  # no holder: no receipts, as before
+        self.assertEqual([r["stage"] for r in receipts], ["copying", "copied"])
+
+    def test_a_copy_the_volume_could_not_take_keeps_the_finished_file(self):
+        import errno
+        from app.media_generation_contract import ArtifactSinkUnavailable
+        adapter = self.adapter()
+        adapter.load()
+
+        class FullVolume(io.BytesIO):
+            def write(self, data):
+                if self.tell() > 0:
+                    raise ArtifactSinkUnavailable("staged_video_unavailable")
+                return super().write(data)
+
+        class SyncFails(io.BytesIO):
+            def sync(self):
+                raise OSError(errno.EIO, "I/O error")
+
+        for sink in (FullVolume(), SyncFails()):
+            with self.subTest(sink=type(sink).__name__):
+                with self.assertLogs("kaliv.media.comfy", level="WARNING"), self.assertRaises((ArtifactSinkUnavailable, OSError)):
+                    with adapter.holding_outputs():
+                        adapter.render_to(request(), sink)
+                kept = os.listdir(self.dirs["output"])
+                self.assertEqual(len(kept), 1, "the finished render was never deleted before it was published")
+                self.assertEqual(adapter.last_cleanup["kept_for_recovery"], kept)
+                os.unlink(os.path.join(self.dirs["output"], kept[0]))
+
+    def test_a_bad_render_found_while_copying_is_still_cleaned_at_once(self):
+        adapter = self.adapter(fake={"FAKE_COMFY_MP4_PAD": "4096"}, profile=self.profile(max_output_bytes=1024))
+        adapter.load()
+        with self.assertRaisesRegex(GenerationError, "size cap"), adapter.holding_outputs():
+            adapter.render_to(request(), io.BytesIO())
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "not a finished file: nothing to keep")
+
+    def test_holding_does_not_nest(self):
+        adapter = self.adapter()
+        with adapter.holding_outputs():
+            with self.assertRaises(RuntimeError):
+                with adapter.holding_outputs():
+                    pass
+
+    def test_a_sync_failure_is_a_failed_job_never_a_silent_success(self):
+        import errno
+        from unittest.mock import patch
+        adapter = self.adapter()
+        adapter.load()
+        with open(Path(self.tmp, "staged.mp4"), "wb") as sink, \
+                patch("app.comfy_video_adapter.os.fsync", side_effect=OSError(errno.ENOSPC, "No space left on device")):
+            with self.assertRaises(OSError) as caught:
+                adapter.render_to(request(), sink)
+        self.assertEqual(caught.exception.errno, errno.ENOSPC)
+        self.assertEqual(os.listdir(self.dirs["output"]), [], "the failed job's output is cleaned up, as for any failure")
+        self.assertEqual(adapter.last_cleanup["failed"], [])
+
     def test_cleanup_never_touches_what_existed_before_the_job(self):
         Path(self.dirs["output"], "operator-note.txt").write_text("keep me")
         os.mkdir(os.path.join(self.dirs["output"], "keep-dir"))
@@ -339,16 +1044,16 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
         self.assertEqual(sorted(os.listdir(self.dirs["output"])), ["keep-dir", "operator-note.txt"])
 
-    def test_cleanup_touches_nothing_when_the_volume_is_no_longer_verified(self):
-        volume = AnyExistingDirectory()
-        adapter = self.adapter(volume=volume, fake={"FAKE_COMFY_RENDER_SECONDS": "0.3"})
+    def test_cleanup_touches_nothing_when_the_work_area_is_no_longer_verified(self):
+        work_area = AnyExistingDirectory()
+        adapter = self.adapter(work_area=work_area, fake={"FAKE_COMFY_RENDER_SECONDS": "0.3"})
         adapter.load()
         real_history = adapter.supervisor.history
 
         def history_then_unplug(prompt_id):
             record = real_history(prompt_id)
             if record is not None:
-                volume.lost.add("*")
+                work_area.lost.add("*")
             return record
 
         adapter.supervisor.history = history_then_unplug
@@ -540,6 +1245,170 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout[-2000:] + result.stderr[-2000:])
         self.assertIn("(0 failures)", result.stdout)
 
+    # --- G2 cooperative cancellation (#2296 6510332634) ------------------------------------------
+    def test_should_cancel_interrupts_comfyui_and_runs_the_normal_cleanup(self):
+        from app.media_generation_contract import GenerationCancelled
+        adapter = self.adapter(fake={"FAKE_COMFY_RENDER_SECONDS": "5"})
+        adapter.load()
+        deadline = time.monotonic() + 0.5
+        started = time.monotonic()
+        with self.assertRaises(GenerationCancelled):
+            adapter.render_to(request(), io.BytesIO(), should_cancel=lambda: time.monotonic() >= deadline)
+        self.assertLess(time.monotonic() - started, 3, "interrupted, not waited out")
+        self.assertEqual(adapter.last_cleanup.get("failed"), [], "cleanup ran and touched nothing it cannot prove")
+        self.assertTrue(adapter.supervisor.running, "ComfyUI stays resident for the next job")
+        self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4", "and it still renders")
+
+    def test_an_unconfirmed_drain_marks_the_adapter_for_restart(self):
+        """#2318 review 4469472651: a ComfyUI whose queue does not drain must take no further job."""
+        from unittest.mock import patch
+        from app.comfy_supervisor import ComfySupervisorError
+        from app.media_generation_contract import GenerationCancelled
+        import app.comfy_video_adapter as adapter_module
+
+        def stuck_queue(sup):
+            return False
+
+        def failing_check(sup):
+            raise ComfySupervisorError("queue check failed")
+
+        for label in ("queue never drains", "queue check fails", "interrupt fails"):
+            with self.subTest(label):
+                self.port = free_port()
+                adapter = self.adapter(fake={"FAKE_COMFY_RENDER_SECONDS": "5"})
+                adapter.load()
+                sup = adapter.supervisor
+                real_submit, real_queue, real_interrupt = sup.submit, sup.queue_is_empty, sup.interrupt
+                submitted = []
+
+                def submit(graph):
+                    submitted.append(1)
+                    return real_submit(graph)
+
+                def queue_is_empty():
+                    if not submitted:
+                        return real_queue()  # the pre-submit single-tenant check is real
+                    return stuck_queue(sup) if label == "queue never drains" else failing_check(sup)
+
+                def interrupt():
+                    if label == "interrupt fails":
+                        raise ComfySupervisorError("interrupt failed")
+                    return real_interrupt()
+
+                sup.submit, sup.queue_is_empty, sup.interrupt = submit, queue_is_empty, interrupt
+                start = time.monotonic()
+                try:
+                    with patch.object(adapter_module, "DRAIN_SECONDS", 0.3):
+                        with self.assertRaises(GenerationCancelled):
+                            adapter.render_to(request(), io.BytesIO(),
+                                              should_cancel=lambda: time.monotonic() - start > 0.3)
+                finally:
+                    sup.submit, sup.queue_is_empty, sup.interrupt = real_submit, real_queue, real_interrupt
+                self.assertTrue(adapter.needs_restart)
+                self.assertTrue(adapter.close(), "it can still be stopped and its lease released")
+                with self.assertRaisesRegex(GenerationError, "needs a restart"):
+                    adapter.load()
+
+    # --- G3 pins (#2296 6634996133) --------------------------------------------------------------
+    def _models(self, data=b"wan weights" * 100):
+        """A ComfyUI root of our own (the fake main.py plus models/), as on the rig."""
+        root = Path(self.tmp, "comfy-root")
+        (root / "models" / "diffusion_models").mkdir(parents=True, exist_ok=True)
+        shutil.copy(FAKE_MAIN, root / "main.py")
+        Path(root, "models", "diffusion_models", "wan2.2_t2v_example.safetensors").write_bytes(data)
+        return str(root), {"path": "diffusion_models/wan2.2_t2v_example.safetensors",
+                           "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
+
+    def test_a_pinned_comfyui_version_must_match_at_start(self):
+        ok = self.adapter(fake={"FAKE_COMFY_VERSION": "0.3.68"}, profile=self.profile(comfyui_version="0.3.68"))
+        ok.load()
+        self.assertEqual(ok.render_to(request(), io.BytesIO()), "video/mp4")
+        ok.close()
+        self.port = free_port()
+        wrong = self.adapter(fake={"FAKE_COMFY_VERSION": "0.3.70"}, profile=self.profile(comfyui_version="0.3.68"))
+        with self.assertRaisesRegex(GenerationError, "version does not match"):
+            wrong.load()
+        self.assertFalse(wrong.supervisor.running, "stopped, not left running")
+        self.assertTrue(self.lease_is_free(), "and the lease went with it")
+
+    def test_a_version_change_under_a_resident_comfyui_refuses_the_next_job(self):
+        adapter = self.adapter(fake={"FAKE_COMFY_VERSION": "0.3.68"}, profile=self.profile(comfyui_version="0.3.68"))
+        adapter.load()
+        Path(self.state, "comfyui_version").write_text("0.4.0")
+        with self.assertRaisesRegex(GenerationError, "version does not match"):
+            adapter.render_to(request(), io.BytesIO())
+        self.assertFalse(Path(self.state, "last_prompt.json").exists(), "nothing was submitted")
+
+    def test_pinned_weights_are_verified_before_comfyui_starts(self):
+        root, pin = self._models()
+        good = self.adapter(profile=self.profile(weights=[pin]), comfy_root=root)
+        good.load()
+        self.assertEqual(good.render_to(request(), io.BytesIO()), "video/mp4")
+        good.close()
+        os.unlink(Path(self.state, "env.json"))
+        Path(root, "models", "diffusion_models", "wan2.2_t2v_example.safetensors").write_bytes(b"swapped weights" * 73)
+        self.port = free_port()
+        swapped = self.adapter(profile=self.profile(weights=[pin]), comfy_root=root)
+        with self.assertRaisesRegex(GenerationError, "pinned model file"):
+            swapped.load()
+        self.assertFalse(Path(self.state, "env.json").exists(), "ComfyUI never started")
+        self.assertTrue(self.lease_is_free())
+
+    def test_a_weight_swapped_after_load_refuses_the_next_job_and_forces_a_restart(self):
+        # ComfyUI reads weights when a job runs: the start-time hash must still describe the file.
+        root, pin = self._models()
+        adapter = self.adapter(profile=self.profile(weights=[pin]), comfy_root=root)
+        adapter.load()
+        target = Path(root, "models", "diffusion_models", "wan2.2_t2v_example.safetensors")
+        incoming = target.with_name("incoming")
+        incoming.write_bytes(b"swapped weights" * 73)
+        os.replace(incoming, target)
+        with self.assertRaisesRegex(GenerationError, "changed since it was verified"):
+            adapter.render_to(request(), io.BytesIO())
+        self.assertFalse(Path(self.state, "last_prompt.json").exists(), "nothing was submitted")
+        self.assertTrue(adapter.needs_restart, "the executor restarts it, which re-verifies")
+        adapter.close()
+
+    def test_an_embedding_added_after_load_refuses_the_next_job(self):
+        root, pin = self._models()
+        adapter = self.adapter(profile=self.profile(weights=[pin]), comfy_root=root)
+        adapter.load()
+        self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
+        os.unlink(Path(self.state, "last_prompt.json"))
+        Path(root, "models", "embeddings").mkdir()
+        Path(root, "models", "embeddings", "late.pt").write_bytes(b"tensor")
+        with self.assertRaisesRegex(GenerationError, "unpinned embedding"):
+            adapter.render_to(request(), io.BytesIO())
+        self.assertFalse(Path(self.state, "last_prompt.json").exists(), "nothing was submitted")
+        self.assertTrue(adapter.needs_restart)
+        adapter.close()
+
+    def test_a_prompt_embedding_under_pins_is_refused_before_anything_is_submitted(self):
+        root, pin = self._models()
+        adapter = self.adapter(profile=self.profile(weights=[pin]), comfy_root=root)
+        adapter.load()
+        with self.assertRaisesRegex(GenerationError, "may not reference an embedding"):
+            adapter.render_to(request(prompt="a kite embedding:unpinned"), io.BytesIO())
+        self.assertFalse(Path(self.state, "last_prompt.json").exists(), "nothing was submitted")
+        self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4", "the next job still runs")
+        adapter.close()
+
+    def test_an_ambiguous_comfyui_lookup_is_refused_before_start(self):
+        root, pin = self._models()
+        Path(root, "extra_model_paths.yaml").write_text("comfyui:\n  base_path: /elsewhere\n")
+        adapter = self.adapter(profile=self.profile(weights=[pin]), comfy_root=root)
+        with self.assertRaisesRegex(GenerationError, "extra model paths"):
+            adapter.load()
+        self.assertFalse(Path(self.state, "env.json").exists(), "ComfyUI never started")
+
+    def test_a_template_that_loads_an_unpinned_file_is_refused_before_start(self):
+        root, pin = self._models()
+        other = dict(pin, path="diffusion_models/some_other.safetensors")
+        adapter = self.adapter(profile=self.profile(weights=[other]), comfy_root=root)
+        with self.assertRaisesRegex(GenerationError, "not pinned"):
+            adapter.load()
+        self.assertFalse(Path(self.state, "env.json").exists(), "ComfyUI never started")
+
     def test_cleanup_never_masks_the_render_result_or_error(self):
         adapter = self.adapter(fake={"FAKE_COMFY_OUTPUT_MODE": "notmp4"})
         adapter.load()
@@ -559,17 +1428,17 @@ class AdapterTests(unittest.TestCase):
         with self.assertLogs("kaliv.media.comfy", level="WARNING"):
             self.assertEqual(good.render_to(request(), io.BytesIO()), "video/mp4", "a successful hand-off stays a success")
 
-    def test_production_supervisor_has_no_internal_disk_default(self):
+    def test_production_supervisor_has_no_default_work_area(self):
         from app.comfy_supervisor import ComfyLaunch, ComfySupervisor, ComfySupervisorError
         launch = ComfyLaunch(python_executable=sys.executable, main_py=str(FAKE_MAIN), port=self.port,
                              input_directory=self.dirs["input"], output_directory=self.dirs["output"],
                              temp_directory=self.dirs["temp"], user_directory=self.dirs["user"])
         common = dict(gpu_uuid=GPU, lease_dir=self.lease_dir, launch=launch, reserve_gib=2, min_usable_gib=8)
         with self.assertRaises(TypeError):
-            ComfySupervisor(**common)  # media_volume is required
+            ComfySupervisor(**common)  # work_area is required
         for bogus in (None, "/mnt/media", object()):
-            with self.subTest(volume=bogus), self.assertRaises(ComfySupervisorError):
-                ComfySupervisor(media_volume=bogus, **common)
+            with self.subTest(work_area=bogus), self.assertRaises(ComfySupervisorError):
+                ComfySupervisor(work_area=bogus, **common)
 
     def test_template_problems_stop_load_before_comfyui_starts(self):
         link_dir = tempfile.mkdtemp(dir=self.tmp)
@@ -655,7 +1524,10 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(adapter.render_to(request(), io.BytesIO()), "video/mp4")
         Path(self.state, "vram_free_gib").write_text("9")  # e.g. Ollama loaded a model meanwhile
         os.unlink(Path(self.state, "last_prompt.json"))
-        with self.assertRaisesRegex(GenerationError, "ComfyUI unavailable"):
+        # G4 (Anders 5 Nov 2026): a VRAM shortage is transient, not a job failure -- it reaches the
+        # executor as ComfyVramShortage, which re-queues the job.
+        from app.comfy_supervisor import ComfyVramShortage
+        with self.assertRaisesRegex(ComfyVramShortage, "insufficient free VRAM"):
             adapter.render_to(request(), io.BytesIO())
         self.assertFalse(Path(self.state, "last_prompt.json").exists(), "nothing submitted on a failed budget")
 

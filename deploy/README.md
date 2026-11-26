@@ -114,7 +114,7 @@ updates the rig to the latest release safely:
 - Check only: `modelrig-updater-windows-x64.exe -check` — prints whether a newer
   release exists and changes nothing.
 - Update: `modelrig-updater-windows-x64.exe` — downloads the new server/worker/
-  supervisor exes, backs up the current ones to `backups\exe-<version>\`, stops
+  supervisor exes, backs up the current ones to an immutable per-attempt `backups\<UTC-ts>-<from>-to-<to>\`, stops
   the supervisor, swaps, restarts, and verifies `/healthz` reports the new
   version. If the new version does NOT become healthy, it rolls back to the
   backup automatically.

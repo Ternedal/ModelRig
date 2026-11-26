@@ -83,7 +83,7 @@ checks are unchanged**.
 
 ## Safety and release authority
 
-This standalone diagnostic is proposed against the current **ModelRig v2.0.18 `main`**. The temporary merge freeze was lifted on 2026-10-20. The change is limited to an offline-tested read-only diagnostic script, its tests, CI contract, generated test inventory and this documentation. It does not modify the worker's Ollama client or any release/physical gate. The JSON output is an **observation**, not proof that system latency meets a target. Any merge still requires current-head CI and review; a subsequent software release or production activation requires separate authorization and qualification.
+This standalone diagnostic was proposed against **ModelRig v2.0.18 `main`** (October 2026) and is now on `main` (`scripts/ollama_local_perf_probe.py`). The temporary merge freeze was lifted on 2026-10-20. The change is limited to an offline-tested read-only diagnostic script, its tests, CI contract, generated test inventory and this documentation. It does not modify the worker's Ollama client or any release/physical gate. The JSON output is an **observation**, not proof that system latency meets a target. Any merge still requires current-head CI and review; a subsequent software release or production activation requires separate authorization and qualification.
 
 ## Repeatable baseline protocol (no automatic tuning)
 

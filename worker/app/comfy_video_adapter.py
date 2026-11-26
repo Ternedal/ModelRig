@@ -9,10 +9,14 @@ load():   verify the pinned template (SHA-256 over the exact bytes that are
 render_to(request, sink_file):
           VRAM re-check -> empty queue (single tenant) -> bind slot values
           -> submit -> poll history with the profile deadline (interrupt on
-          timeout) -> exactly one MP4 in the ComfyUI output dir, validated
+          timeout) -> exactly one MP4 in the ComfyUI output dir (in the
+          private work area on the internal disk; Anders, 6 Nov), validated
           (no symlinks, unchanged over a settle window before the copy and
-          during it, ftyp header, size cap) -> copied into sink_file ->
-          ComfyUI's output removed.
+          during it, ftyp header, size cap) -> copied into sink_file (a
+          staged file on the external media volume, published by the sink
+          only after the copy is complete and checked) -> ComfyUI's output
+          removed: at once, or, inside holding_outputs(), only after the
+          caller has published it (kept for recovery if publication fails).
           Cleanup (#2316 reviews 4415046066, 5702562074): after the job --
           success or failure -- remove exactly the files that are provably
           the job's: named by ComfyUI in THIS prompt's history (type
@@ -29,7 +33,7 @@ render_to(request, sink_file):
           a file without a file id (st_ino 0) is never treated as the job's.
           Foreign files created mid-job and anything that existed before are
           kept. Cleanup never raises: it cannot mask the render's own error. A symlink is
-          removed as a link, its target never. If the volume cannot be
+          removed as a link, its target never. If the work area cannot be
           verified at cleanup time, nothing is touched. Every cleanup is
           reported in last_cleanup and failures are logged (file names only;
           they are generated, never a prompt).
@@ -37,33 +41,167 @@ render_to(request, sink_file):
           in the history and is left in place (reported as untracked).
 close():  stop the supervisor.
 
-image_to_video needs input-asset retrieval (ChatGPT's asset service) and is
-not supported here.
+image_to_video (#2296 6635978072): render_to(..., source_png=bytes). The caller
+(the executor) reads the source through ChatGPT's owner-gated reader; the adapter
+only receives bytes. It bounds the decode (IHDR: at most 4096 px per side), creates kaliv-src-<16 hex>.png exclusively (O_EXCL, O_NOFOLLOW, 0600,
+fsync) in ComfyUI's input directory right after verifying that directory is in
+the private work area, binds the template's image slot to that name, and removes the
+file after the job -- success, failure or cancel -- with the same rename-capture
+identity check as the outputs: a replaced file is never deleted.
 """
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import logging
 import os
 import secrets
 import stat
 import time
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Callable
 
-from .comfy_supervisor import ComfyBusy, ComfySupervisor, ComfySupervisorError
+from .comfy_supervisor import ComfyBusy, ComfySupervisor, ComfySupervisorError, ComfyVramShortage
+from .comfy_weights import check_lookup_is_unambiguous, check_weights_unchanged, verify_weights
 from .comfy_workflow_template import MAX_TEMPLATE_BYTES, WorkflowTemplate, load_template
-from .media_generation_contract import GenerationError, GenerationRequest, RenderedArtifact
+from .media_generation_contract import (GenerationCancelled, GenerationError, GenerationRequest, RenderedArtifact,
+                                         is_plain_file_name)
 from .media_generation_profiles import ModelProfile, validate_request
 
 MIME = "video/mp4"
+
+
+def _job_cost(request: GenerationRequest) -> int:
+    """How large a job is for the warm VRAM check: pixels x frames. Requests are validated before
+    they get here; anything else is 0, which the supervisor treats as 'do not use the warm path'."""
+    values = (request.width, request.height, request.frames)
+    if any(type(value) is not int or value <= 0 for value in values):
+        return 0
+    return request.width * request.height * request.frames
 COPY_CHUNK = 1024 * 1024
+DRAIN_SECONDS = 30  # how long an interrupted job may take to leave ComfyUI's queue
 _log = logging.getLogger("kaliv.media.comfy")
+
+
+# Decoder-side bound for an image_to_video source (#2296 6636684138: agreed with ChatGPT, whose
+# reader validates the PNG container). ComfyUI decodes with PIL; bytes alone do not bound memory.
+MAX_SOURCE_AXIS = 4096  # so at most 16.8 MP
+MAX_SOURCE_BYTES = 64 * 1024 * 1024
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+# APNG: ComfyUI's LoadImage decodes and concatenates EVERY frame, so IHDR's size alone does not
+# bound memory (#2346 review 4489553700: 100 frames at 4096x4096 fit in 5 MB of APNG).
+_ANIMATION_CHUNKS = frozenset({b"acTL", b"fcTL", b"fdAT"})
+
+
+def check_source_png(data: object) -> None:
+    """Refuse a source that is not a single-frame PNG whose first chunk is a well-formed IHDR
+    within the caps. Not a full validation (CRCs are the reader's); a bound on what ComfyUI may
+    decode: one frame of at most MAX_SOURCE_AXIS per side."""
+    if type(data) is not bytes or not 8 + 25 <= len(data) <= MAX_SOURCE_BYTES:
+        raise GenerationError("the source image must be PNG bytes within the size limit")
+    if data[:8] != _PNG_SIGNATURE or data[8:16] != b"\x00\x00\x00\x0dIHDR":
+        raise GenerationError("the source image is not a PNG")
+    width, height = int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+    if not (1 <= width <= MAX_SOURCE_AXIS and 1 <= height <= MAX_SOURCE_AXIS):
+        raise GenerationError(f"the source image must be 1..{MAX_SOURCE_AXIS} px per side")
+    offset = 8
+    while offset + 12 <= len(data):
+        length, kind = int.from_bytes(data[offset:offset + 4], "big"), data[offset + 4:offset + 8]
+        if kind in _ANIMATION_CHUNKS:
+            raise GenerationError("the source image must be a single-frame PNG (animated PNG refused)")
+        if kind == b"IEND":
+            return
+        offset += 12 + length
+    raise GenerationError("the source image is not a complete PNG")
+
+
+class _SoundTrackScan:
+    """Does an MP4 stream declare a sound track? Fed chunk by chunk while the file is copied.
+
+    The boxes are walked, not searched (#2477 review: a search for the bytes ``hdlr....soun``
+    also matches them inside ``mdat`` or metadata, and a silent clip would pass). Only
+    ``moov > trak > mdia > hdlr`` counts, with handler type ``soun`` (ISO 14496-12 8.4.3: the
+    handler box is version/flags(4) pre_defined(4) handler_type(4) ...). Every other box is
+    skipped by its declared size without being read into memory, so ``mdat`` costs nothing and
+    ``moov`` may come before or after it.
+
+    A stream whose boxes do not add up (a size smaller than its header, a child that runs past
+    its parent) ends the walk: nothing after that point can be trusted, and a track found
+    before it stands. It is a check on what the container declares, not a decode.
+    """
+    _PATH = (b"moov", b"trak", b"mdia")
+
+    def __init__(self) -> None:
+        self.found = False
+        self._done = False          # found, or the structure broke: stop looking
+        self._buffer = b""          # only ever a partial box header (and a handler box's first 12 bytes)
+        self._position = 0          # stream offset of the first byte in _buffer
+        self._skip = 0              # bytes of an uninteresting box still to pass
+        self._open: list[int] = []  # end offsets of the open moov / trak / mdia
+
+    def feed(self, chunk: bytes) -> None:
+        if self._done or not chunk:
+            return
+        data = self._buffer + chunk
+        at = 0
+        while not self._done:
+            if self._skip:
+                step = min(self._skip, len(data) - at)
+                at += step
+                self._skip -= step
+                if self._skip:
+                    break
+            here = self._position + at
+            while self._open and here >= self._open[-1]:
+                self._open.pop()
+            if len(data) - at < 8:
+                break
+            size = int.from_bytes(data[at:at + 4], "big")
+            kind = data[at + 4:at + 8]
+            header = 8
+            if size == 1:  # 64-bit size follows the type
+                if len(data) - at < 16:
+                    break
+                size = int.from_bytes(data[at + 8:at + 16], "big")
+                header = 16
+            if size == 0:  # "to the end of the file": legal for the last top-level box only
+                if self._open:
+                    self._done = True
+                    break
+                size = None
+            elif size < header or (self._open and here + size > self._open[-1]):
+                self._done = True
+                break
+            depth = len(self._open)
+            if size is not None and depth < len(self._PATH) and kind == self._PATH[depth]:
+                self._open.append(here + size)
+                at += header
+                continue
+            if size is not None and depth == len(self._PATH) and kind == b"hdlr":
+                if size < header + 12:
+                    self._done = True
+                    break
+                if len(data) - at < header + 12:
+                    break
+                if data[at + header + 8:at + header + 12] == b"soun":
+                    self.found = self._done = True
+                    break
+                at += header + 12
+                self._skip = size - header - 12
+                continue
+            if size is None:  # the rest of the stream is this one box: nothing more to find
+                self._done = True
+                break
+            at += header
+            self._skip = size - header
+        self._position += at
+        self._buffer = b"" if self._done else data[at:]
 
 
 class ComfyVideoAdapter:
     def __init__(self, profile: ModelProfile, *, supervisor: ComfySupervisor, template_dir: str,
                  output_directory: str, poll_s: float = 1.0, settle_s: float = 0.5,
-                 settle_rounds: int = 10):
+                 settle_rounds: int = 10, weights_cache: str | None = None):
         if profile.backend != "comfyui" or profile.backend_options is None:
             raise GenerationError("ComfyVideoAdapter needs a comfyui profile")
         if supervisor.port != profile.backend_options.port:
@@ -85,8 +223,16 @@ class ComfyVideoAdapter:
         self.template_dir = template_dir
         self.output_directory = Path(output_directory)
         self.poll_s = float(poll_s)
+        self.weights_cache = weights_cache
         self._template: WorkflowTemplate | None = None
         self.last_cleanup: dict[str, list[str]] = {}
+        self._holding: list[tuple[set[str], list]] | None = None  # see holding_outputs()
+        self._on_handoff: Callable[[dict], None] | None = None
+        self._sink_failed = False
+        # True once an interrupt could not be confirmed drained: this ComfyUI must not take another
+        # job. The executor unloads (and so restarts) the adapter (#2318 review 4469472651).
+        self.needs_restart = False
+        self._verified_weights: tuple = ()
 
     # --- lifecycle --------------------------------------------------------
     def _read_template(self) -> bytes:
@@ -108,9 +254,52 @@ class ComfyVideoAdapter:
     def load(self) -> None:
         if self._template is not None:
             raise GenerationError("adapter already loaded")
-        template = load_template(self._read_template(), self.options.template_sha256)
-        self.supervisor.start()
+        if self.needs_restart:
+            raise GenerationError("this adapter needs a restart: create a new one")
+        pins = self.options.weights
+        template = load_template(self._read_template(), self.options.template_sha256,
+                                 pinned_files=[pin.path for pin in pins] if pins else None)
+        if template.task not in self.profile.tasks:
+            raise GenerationError(f"the template renders {template.task}, which this profile does not list")
+        verified = ()
+        if pins:  # before ComfyUI starts: nothing unpinned is ever loaded (G3)
+            launch = self.supervisor.launch
+            verified = verify_weights(launch.resolved_models_directory, pins, cache_path=self.weights_cache,
+                                      comfy_root=Path(launch.main_py).parent)
+        budget = self.supervisor.start()
+        if not self._version_ok(budget):
+            self.supervisor.stop()  # proven stop: the lease goes with ComfyUI
+            raise GenerationError("comfyui_version_mismatch: ComfyUI version does not match the profile pin")
+        self._verified_weights = verified
         self._template = template
+
+    def _job_kind(self, request: GenerationRequest) -> str:
+        """What a job is, for the warm VRAM check: the profile (its models and settings), the exact
+        workflow (the template's SHA-256) and the task. Proof from one kind says nothing about
+        another, even at the same size."""
+        template = self._template.sha256 if self._template is not None else ""
+        return f"{self.profile.profile_id}|{template}|{request.task}"
+
+    def _weights_still_verified(self) -> None:
+        """Before every job: the files hashed at load are still those files, and the lookup is
+        still unambiguous (no embedding or same-named file added since). ComfyUI reads weights
+        when a job runs, so a start-time check alone would leave the resident lifetime open.
+        A failure refuses the job before submit and marks this ComfyUI for a restart, which
+        re-verifies from scratch."""
+        pins = self.options.weights
+        if not pins:
+            return
+        launch = self.supervisor.launch
+        try:
+            check_weights_unchanged(launch.resolved_models_directory, self._verified_weights)
+            check_lookup_is_unambiguous(Path(launch.main_py).parent, launch.resolved_models_directory, pins)
+        except GenerationError:
+            self.needs_restart = True
+            raise
+
+    def _version_ok(self, budget) -> bool:
+        pin = self.options.comfyui_version
+        return pin is None or getattr(budget, "comfyui_version", None) == pin
 
     def close(self) -> bool:
         """Stop ComfyUI. True once it has exited and the lease is released."""
@@ -122,45 +311,132 @@ class ComfyVideoAdapter:
         raise GenerationError("video is written to a staged sink file; use render_to()")
 
     # --- one job ------------------------------------------------------------
-    def render_to(self, request: GenerationRequest, sink_file: BinaryIO) -> str:
+    def render_to(self, request: GenerationRequest, sink_file: BinaryIO, *,
+                  should_cancel: Callable[[], bool] | None = None, source_png: bytes | None = None) -> str:
+        """Render into sink_file. should_cancel is polled with the history; True interrupts
+        ComfyUI and raises GenerationCancelled (the normal cleanup still runs).
+        source_png: the source image, required exactly for image_to_video."""
         if self._template is None:
             raise GenerationError("adapter not loaded")
         request = validate_request(self.profile, request)
-        if request.task != "text_to_video":
-            raise GenerationError("only text_to_video is supported")
+        if request.task != self._template.task:
+            raise GenerationError(f"this adapter's template renders {self._template.task} only")
+        if request.task == "image_to_video":
+            check_source_png(source_png)  # before the job slot, the volume or anything on disk
+        elif source_png is not None:
+            raise GenerationError("a source image is only valid for image_to_video")
         try:
             # One job per ComfyUI, from admission to cleanup (#2316 review 5700997784):
             # a concurrent second call is refused here and never submitted.
             with self.supervisor.job_slot():
-                return self._render_one(request, sink_file)
+                return self._render_one(request, sink_file, should_cancel, source_png)
         except ComfyBusy:
             raise GenerationError("ComfyUI is busy with another job: refused, not queued") from None
 
-    def _render_one(self, request: GenerationRequest, sink_file: BinaryIO) -> str:
-        self.supervisor.require_media_volume()  # ArtifactSinkUnavailable propagates: fatal
+    def _render_one(self, request: GenerationRequest, sink_file: BinaryIO,
+                    should_cancel: Callable[[], bool] | None = None, source_png: bytes | None = None) -> str:
+        self.supervisor.require_work_area()  # ArtifactSinkUnavailable propagates: fatal
         before = self._entry_names()  # snapshot before anything is submitted
         owned: list[tuple[str, int, int]] = []  # (name, st_dev, st_ino) attested by THIS prompt's history
+        staged: list[tuple[str, int, int]] = []  # the source file this job created, once it exists
+        handed_over = False
+        self._sink_failed = False
         try:
-            return self._render_and_hand_over(request, sink_file, before, owned)
+            mime = self._render_and_hand_over(request, sink_file, before, owned, should_cancel, source_png, staged)
+            handed_over = True
+            # This job succeeded at this size: the proof the next job's VRAM check may lean on.
+            self.supervisor.note_idle(_job_cost(request), self._job_kind(request))  # never raises
+            return mime
         finally:
-            try:
-                self._remove_job_outputs(before, owned)
-            except Exception as exc:  # never mask the render's own result or error
-                _log.warning("comfy cleanup raised %s; outputs left in place", type(exc).__name__)
+            if (handed_over or self._sink_failed) and self._holding is not None:
+                # Anders, 6 Nov: the finished file stays in the work area until the caller has
+                # published it; holding_outputs() removes it then (or keeps it if publication fails).
+                # A copy the volume could not take (write or sync failed) is a finished file too.
+                self._holding.append((before, owned))
+            else:
+                self._cleanup_quietly(before, owned)
+            if staged:  # the staged source is only an input: it never waits for publication
+                try:
+                    self._remove_staged_source(*staged[0])
+                except Exception as exc:
+                    self.last_cleanup["source"] = f"failed: {type(exc).__name__}"
+                    _log.warning("comfy source cleanup raised %s; source left in place", type(exc).__name__)
+
+    def _cleanup_quietly(self, before: set[str], owned: list, *, keep_source: bool = False) -> None:
+        # A deferred cleanup runs after the job's source cleanup already reported: keep that report.
+        source = self.last_cleanup.get("source") if keep_source else None
+        try:
+            self._remove_job_outputs(before, owned)
+        except Exception as exc:  # never mask the render's own result or error
+            _log.warning("comfy cleanup raised %s; outputs left in place", type(exc).__name__)
+        if source is not None:
+            self.last_cleanup.setdefault("source", source)
+
+    @contextlib.contextmanager
+    def holding_outputs(self, on_handoff: Callable[[dict], None] | None = None):
+        """Keep a finished render's copy in the work area until the caller has published it.
+
+            with adapter.holding_outputs(on_handoff=record):
+                with sink.staged(".mp4") as out:
+                    mime = adapter.render_to(request, out)
+                    asset_id = sink.adopt_for_job(out, mime, job_id)
+
+        Anders, 6 Nov 2026: publish on the volume, THEN remove the copy on the internal disk. A
+        normal exit (published) removes it, and so does GenerationCancelled (the owner's choice).
+        Any other exception after the hand-over keeps it, reported in last_cleanup
+        ["kept_for_recovery"] and listed by C6, so a finished file is never deleted before it is
+        published. A render that fails before the hand-over is cleaned up at once, as always.
+
+        on_handoff, if given, receives the hand-off receipt twice: {"stage": "copying", "output":
+        {name, dev, ino, size}} before the first byte is copied, and {"stage": "copied", ..., "sha256",
+        "size"} after the copy is synced. The executor stores it (C6 correlates leftovers with jobs).
+        """
+        if self._holding is not None:
+            raise RuntimeError("holding_outputs() does not nest")
+        self._holding = []
+        self._on_handoff = on_handoff
+        keep = False
+        try:
+            yield
+        except GenerationCancelled:
+            raise
+        except BaseException:
+            keep = True
+            raise
+        finally:
+            pending, self._holding, self._on_handoff = self._holding, None, None
+            for before, owned in pending:
+                if keep:
+                    kept = [name for name, _, _ in owned]
+                    source = self.last_cleanup.get("source")
+                    self.last_cleanup = {"removed": [], "kept_replaced": [], "untracked": [], "failed": [],
+                                         "kept_for_recovery": kept, **({"source": source} if source else {})}
+                    _log.warning("publication did not complete: kept %s in the work area for recovery", kept)
+                else:
+                    self._cleanup_quietly(before, owned, keep_source=True)
 
     def _render_and_hand_over(self, request: GenerationRequest, sink_file: BinaryIO, before: set[str],
-                              owned: list) -> str:
+                              owned: list, should_cancel: Callable[[], bool] | None = None,
+                              source_png: bytes | None = None, staged: list | None = None) -> str:
         try:
-            self.supervisor.check_budget()
+            if not self._version_ok(self.supervisor.check_budget(_job_cost(request), self._job_kind(request))):
+                raise GenerationError("comfyui_version_mismatch: ComfyUI version does not match the profile pin")
+            self._weights_still_verified()
             if not self.supervisor.queue_is_empty():
                 raise GenerationError("ComfyUI queue is not empty: refusing to share it")
-            prompt_id = self.supervisor.submit(self._template.bind(request, fps=self.options.fps))
-            outputs = self._wait(prompt_id)
+            source_file = None
+            if source_png is not None:
+                source_file = self._stage_source(source_png, staged)  # records itself before any write
+            prompt_id = self.supervisor.submit(self._template.bind(request, fps=self.options.fps,
+                                                                   source_file=source_file))
+            outputs = self._wait(prompt_id, should_cancel)
+        except ComfyVramShortage:
+            raise  # before submit: transient, the executor re-queues the job (G4)
         except ComfySupervisorError as exc:
             raise GenerationError("ComfyUI unavailable") from exc
         owned.extend(self._attested_outputs(outputs, before))  # recorded before any validation can fail
         source = self._single_output(outputs, before)
-        self.supervisor.require_media_volume()  # still the same verified volume after the render
+        self.supervisor.require_work_area()  # still the same private work area after the render
         self._wait_quiescent(source)
         self._copy_validated(source, sink_file)
         return MIME
@@ -179,17 +455,28 @@ class ComfyVideoAdapter:
     def _attested_outputs(self, outputs: object, before: set[str]) -> list[tuple[str, int, int]]:
         """Files ComfyUI says THIS prompt wrote to the output root, with their identity right now."""
         found = []
+        try:
+            listed = set(self._entry_names())
+        except OSError:
+            return found  # the directory cannot be listed: nothing is provably this job's
         for item in self._history_entries(outputs):
             name, subfolder = item.get("filename"), item.get("subfolder", "")
             if item.get("type") != "output" or subfolder != "" or not isinstance(name, str):
                 continue
-            if Path(name).name != name or name in ("", ".", "..") or "\\" in name or ":" in name or name in before:
+            # Only a name the directory itself lists, so an 8.3 alias or another case of an older
+            # file's name never makes cleanup delete that file (ChatGPT #2357 6716735710).
+            if not is_plain_file_name(name) or Path(name).name != name or name in before or name not in listed:
                 continue
             try:
                 info = os.stat(self.output_directory / name, follow_symlinks=False)
             except OSError:
                 continue  # named but not there: nothing to clean
-            if not stat.S_ISDIR(info.st_mode) and info.st_ino != 0:  # no file id: identity unprovable, kept
+            # Only a file (the render) or a link the job made: removing a link never touches its
+            # target. A directory, FIFO, socket or device node is not provably the render, so it
+            # is kept and reported as untracked (ChatGPT #2357 6718447424).
+            if not (stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)):
+                continue
+            if info.st_ino != 0:  # no file id: identity unprovable, kept
                 found.append((name, info.st_dev, info.st_ino))
         return found
 
@@ -198,11 +485,11 @@ class ComfyVideoAdapter:
         report: dict[str, list[str]] = {"removed": [], "kept_replaced": [], "untracked": [], "failed": []}
         self.last_cleanup = report
         try:
-            self.supervisor.require_media_volume()
+            self.supervisor.require_work_area()
         except Exception:
             report["failed"] = [name for name, _, _ in owned]
-            _log.warning("comfy cleanup skipped: media volume not verified; left %s", report["failed"])
-            return  # unmounted or replaced: touch nothing on whatever is mounted now
+            _log.warning("comfy cleanup skipped: work area not verified; left %s", report["failed"])
+            return  # replaced or no longer private: touch nothing in whatever is there now
         # POSIX: stat and unlink through one directory fd (no path re-resolution between
         # the identity check and the unlink). Windows has no dir_fd: same check by path.
         use_fd = all(f in os.supports_dir_fd for f in (os.stat, os.unlink, os.rename, os.link))
@@ -239,7 +526,7 @@ class ComfyVideoAdapter:
             _log.warning("comfy cleanup kept files it cannot prove are this job's: replaced=%s untracked=%s",
                          report["kept_replaced"], report["untracked"])
 
-    def _wait(self, prompt_id: str) -> dict:
+    def _wait(self, prompt_id: str, should_cancel: Callable[[], bool] | None = None) -> dict:
         deadline = time.monotonic() + self.options.max_render_seconds
         while True:
             record = self.supervisor.history(prompt_id)
@@ -254,22 +541,45 @@ class ComfyVideoAdapter:
                     if not isinstance(outputs, dict):
                         raise GenerationError("ComfyUI history has no outputs")
                     return outputs
+            if should_cancel is not None and should_cancel():
+                self._interrupt_and_drain()
+                raise GenerationCancelled("cancelled while rendering")
             if time.monotonic() >= deadline:
-                try:
-                    self.supervisor.interrupt()
-                except ComfySupervisorError:
-                    pass  # stop() interrupts again and terminates if needed
+                self._interrupt_and_drain()
                 raise GenerationError("render exceeded the profile deadline")
             time.sleep(self.poll_s)
 
-    def _delete_if_same(self, name: str, dev: int, ino: int, dir_fd: int | None) -> str:
+    def _interrupt_and_drain(self) -> None:
+        """Interrupt, then wait (bounded) until ComfyUI's queue is empty, so the next job on this
+        resident ComfyUI is not refused as "queue not empty" while the interrupt is still landing.
+        If the drain cannot be confirmed (interrupt or queue check failed, or the deadline passed),
+        mark the adapter for a restart instead of letting it take more jobs."""
+        try:
+            self.supervisor.interrupt()
+        except ComfySupervisorError:
+            self.needs_restart = True
+            return
+        until = time.monotonic() + DRAIN_SECONDS
+        while time.monotonic() < until:
+            try:
+                if self.supervisor.queue_is_empty():
+                    return
+            except ComfySupervisorError:
+                break
+            time.sleep(self.poll_s)
+        self.needs_restart = True
+        _log.warning("comfy queue not confirmed drained after an interrupt; the adapter needs a restart")
+
+    def _delete_if_same(self, name: str, dev: int, ino: int, dir_fd: int | None,
+                        directory: Path | None = None) -> str:
         """Delete `name` only if it is still the file with (dev, ino); never delete anything else.
 
         Returns "removed", "gone", "kept", "kept:<quarantine name>", or the error type name
         ("<error>:<quarantine name>" once the file has been captured and is left there).
         """
         quarantine = f".kaliv-cleanup-{secrets.token_hex(8)}"
-        here = (lambda n: n) if dir_fd is not None else (lambda n: self.output_directory / n)
+        base = self.output_directory if directory is None else directory
+        here = (lambda n: n) if dir_fd is not None else (lambda n: base / n)
         fd_args = {"src_dir_fd": dir_fd, "dst_dir_fd": dir_fd} if dir_fd is not None else {}
         try:
             os.rename(here(name), here(quarantine), **fd_args)  # atomic within one directory
@@ -295,6 +605,54 @@ class ComfyVideoAdapter:
         except OSError:
             return f"kept:{quarantine}"  # its name was taken meanwhile: left, unharmed, and reported
 
+    def _stage_source(self, data: bytes, staged: list) -> str:
+        """Create the job's source image in ComfyUI's input directory: exclusively, in the
+        verified work area, flushed. Appends (name, st_dev, st_ino) to `staged` right after the
+        exclusive create and BEFORE any fallible write, so the caller's cleanup always sees it
+        (#2346 review 4484574398). The identity is the created file's own (fstat), checked
+        against the name with os.stat -- the call the cleanup repeats -- before it is recorded
+        and again after the write: a file swapped in meanwhile is refused and never submitted,
+        and the cleanup keeps it instead of deleting it as job-owned (#2346 review 4484574409)."""
+        directory = Path(self.supervisor.launch.input_directory)
+        self.supervisor.work_area.require(str(directory))  # right before the write
+        name = f"kaliv-src-{secrets.token_hex(8)}.png"
+        path = directory / name
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+        fd = os.open(path, flags, 0o600)
+        try:
+            created = os.fstat(fd)
+            named = os.stat(path, follow_symlinks=False)
+            if not stat.S_ISREG(named.st_mode) or (named.st_dev, named.st_ino) != (created.st_dev, created.st_ino):
+                raise GenerationError("the staged source image was replaced while it was created")
+            staged.append((name, created.st_dev, created.st_ino))  # recorded before anything can fail
+            view = memoryview(data)
+            while view:
+                view = view[os.write(fd, view):]
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        info = os.stat(path, follow_symlinks=False)
+        if (not stat.S_ISREG(info.st_mode) or (info.st_dev, info.st_ino) != (created.st_dev, created.st_ino)
+                or info.st_size != len(data)):
+            raise GenerationError("the staged source image changed while it was written")
+        return name
+
+    def _remove_staged_source(self, name: str, dev: int, ino: int) -> None:
+        """Remove the staged source only if it is still the file this job created."""
+        directory = Path(self.supervisor.launch.input_directory)
+        try:
+            self.supervisor.work_area.require(str(directory))
+        except Exception:
+            self.last_cleanup["source"] = f"failed: {name} (work area not verified)"
+            return  # replaced or no longer private: touch nothing in whatever is there now
+        if ino == 0:  # no file id: identity unprovable, kept (as for outputs)
+            self.last_cleanup["source"] = f"kept: {name}"
+            return
+        outcome = self._delete_if_same(name, dev, ino, None, directory=directory)
+        self.last_cleanup["source"] = outcome if outcome in ("removed", "gone") else f"{outcome}: {name}"
+        if outcome not in ("removed", "gone"):
+            _log.warning("comfy source cleanup kept or failed on %s (%s)", name, outcome)
+
     def _entry_names(self) -> set[str]:
         return {entry.name for entry in os.scandir(self.output_directory)}
 
@@ -313,11 +671,17 @@ class ComfyVideoAdapter:
         name, subfolder = entries[0].get("filename"), entries[0].get("subfolder", "")
         if not isinstance(name, str) or not isinstance(subfolder, str) or subfolder:
             raise GenerationError("ComfyUI output must be a file name in the output directory root")
-        if Path(name).name != name or name in ("", ".", "..") or "\\" in name or ":" in name \
-                or not name.endswith(".mp4"):
+        # The same rule as the hand-off receipt's (is_plain_file_name), so a name accepted here is
+        # never refused when the receipt records it.
+        if not is_plain_file_name(name) or Path(name).name != name or not name.endswith(".mp4"):
             raise GenerationError("ComfyUI output name is not a plain .mp4 file name")
         if name in before:
             raise GenerationError("ComfyUI output already existed before this job")
+        # The name must be one the directory itself lists, before anything opens it by name. On
+        # Windows a name can reach another file than the one it spells: an 8.3 alias
+        # ("KALIV_~1.MP4") or a different case of an existing name (ChatGPT #2357 6716735710).
+        if name not in self._entry_names():
+            raise GenerationError("ComfyUI output is not listed in the output directory")
         return self.output_directory / name
 
     def _wait_quiescent(self, source: Path) -> None:
@@ -349,6 +713,7 @@ class ComfyVideoAdapter:
             fd = os.open(source, flags)
         except OSError:
             raise GenerationError("ComfyUI output is missing or a symlink") from None
+        digest = hashlib.sha256()
         with os.fdopen(fd, "rb") as handle:
             first = os.fstat(handle.fileno())
             if not stat.S_ISREG(first.st_mode) or not 12 <= first.st_size <= limit:
@@ -356,8 +721,13 @@ class ComfyVideoAdapter:
             header = handle.read(12)
             if header[4:8] != b"ftyp" or int.from_bytes(header[:4], "big") < 8:
                 raise GenerationError("ComfyUI output is not an MP4 container")
-            sink_file.write(header)
+            output = {"name": source.name, "dev": first.st_dev, "ino": first.st_ino, "size": first.st_size}
+            self._notify_handoff({"stage": "copying", "output": output})  # before a byte reaches the volume
+            self._to_sink(sink_file.write, header)
+            digest.update(header)
             copied = len(header)
+            sound = _SoundTrackScan()
+            sound.feed(header)
             while True:
                 chunk = handle.read(COPY_CHUNK)
                 if not chunk:
@@ -365,9 +735,60 @@ class ComfyVideoAdapter:
                 copied += len(chunk)
                 if copied > limit:
                     raise GenerationError("ComfyUI output grew past the size cap")
-                sink_file.write(chunk)
+                self._to_sink(sink_file.write, chunk)
+                digest.update(chunk)
+                sound.feed(chunk)
             last = os.fstat(handle.fileno())
         if (copied != first.st_size or last.st_size != first.st_size
                 or last.st_mtime_ns != first.st_mtime_ns or last.st_ino != first.st_ino):
             raise GenerationError("ComfyUI output changed while it was copied")
-        sink_file.flush()
+        # A profile that promises sound must not publish a silent clip as finished: the user asked
+        # for sound and would only find out by playing it. Raised before the bytes are adopted.
+        if self.options.sound and not sound.found:
+            raise GenerationError("output_has_no_sound: the profile promises a sound track and the clip has none")
+        self._to_sink(sink_file.flush)
+        # The bytes must be durable on the publication volume before anything relies on them
+        # (Anders, 6 Nov: work on C:, publish to Z:). A delayed write error (disk full, I/O error)
+        # surfaces here and fails the job, never a silent success. The staged sink's handle has
+        # sync() and deliberately no fileno (#2347).
+        sync = getattr(sink_file, "sync", None)
+        if callable(sync):
+            self._to_sink(sync)
+        else:
+            try:
+                fileno = sink_file.fileno()
+            except (AttributeError, OSError):  # an in-memory sink (tests) has nothing to sync
+                fileno = None
+            if fileno is not None:
+                self._to_sink(os.fsync, fileno)
+        self._notify_handoff({"stage": "copied", "output": output, "sha256": digest.hexdigest(), "size": copied})
+
+    def _to_sink(self, call, *args):
+        """A write, flush or sync on the volume's side. If it fails, the finished file is not at fault:
+        inside holding_outputs() it is kept for recovery instead of being removed."""
+        try:
+            return call(*args)
+        except BaseException:
+            self._sink_failed = True
+            raise
+
+    def _notify_handoff(self, record: dict) -> None:
+        """Tell the holder (holding_outputs(on_handoff=...)) what is being handed over. A failure
+        here fails the job: no hand-off goes unrecorded.
+
+        The holder refuses a receipt with a ValueError (GenerationError, ImageJobError): a receipt
+        that does not validate, or a job that is not this executor's. The job fails and the render
+        is cleaned at once, as before. Anything else is the holder's own infrastructure failing,
+        not the render: the volume or work area gone (ArtifactSinkUnavailable), the receipt
+        database full, locked or unreadable (sqlite3.OperationalError / DatabaseError), an I/O
+        error. The render is finished and was checked before the first receipt, so, like a copy
+        the volume could not take, it is kept for recovery instead of removed (Codex #2357
+        4503161825, 4503721455)."""
+        if self._on_handoff is not None:
+            try:
+                self._on_handoff(dict(record))
+            except ValueError:
+                raise  # an explicit refusal: cleaned at once
+            except BaseException:
+                self._sink_failed = True
+                raise

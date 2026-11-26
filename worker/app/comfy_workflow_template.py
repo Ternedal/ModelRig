@@ -8,7 +8,16 @@ graph structure, and the graph itself never comes from a request.
 
 Slot markers are whole input values. Each must appear exactly once, under an
 input name from its allowlist, and no other string in the graph may contain
-the marker prefix.
+the marker prefix. Two additions for graphs that render sound with the picture
+(LTX-2.3, rig 21/11): an integer slot may sit on a PrimitiveInt's "value", so
+one number can reach several nodes, and the steps slot may be left out by a
+template whose schedule is part of the graph.
+
+Image-to-video (#2296 6635978072): a template that contains __KALIV_VIDEO_IMAGE__
+(on an input named "image", i.e. LoadImage) renders image_to_video and nothing
+else; one without it renders text_to_video and nothing else. The slot is bound
+to the name of the source file the adapter has just created in ComfyUI's input
+directory -- never to anything from the request.
 """
 from __future__ import annotations
 
@@ -37,8 +46,29 @@ SLOTS: Mapping[str, tuple[str, frozenset[str]]] = {
     "__KALIV_VIDEO_STEPS__": ("steps", frozenset({"steps"})),
     "__KALIV_VIDEO_SEED__": ("seed", frozenset({"seed", "noise_seed"})),
 }
+IMAGE_MARKER = "__KALIV_VIDEO_IMAGE__"
+# The one request field a template may leave out. A distilled model runs a schedule that is part
+# of the graph (LTX-2.3: a fixed list of sigmas), so there is no step count to fill in. Such a
+# template renders its own schedule whatever the request says; a slot wired to nothing would
+# only pretend otherwise.
+OPTIONAL_SLOTS = frozenset({"__KALIV_VIDEO_STEPS__"})
+# A number that several nodes need (LTX-2.3: the frame count goes to the video latent and to the
+# audio latent, the frame rate to three nodes) cannot sit on one of them, and a marker appears
+# exactly once. ComfyUI's own answer is a primitive node that fans the value out; its input is
+# called "value" whatever it carries, so that name is allowed on these classes only, and only
+# for the integer slots.
+FANOUT_CLASSES = frozenset({"PrimitiveInt"})
+FANOUT_INPUT = "value"
+FANOUT_FIELDS = frozenset({"width", "height", "fps", "frames", "steps", "seed"})
+# The image slot is the one optional slot: its presence makes the template image_to_video.
+_ALL_SLOTS: Mapping[str, tuple[str, frozenset[str]]] = {**SLOTS, IMAGE_MARKER: ("image", frozenset({"image"}))}
+# What the adapter names the source file it stages; bind() accepts nothing else.
+SOURCE_FILE_NAME = re.compile(r"kaliv-src-[0-9a-f]{16}\.png")
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+# Every extension ComfyUI lists in a model folder (folder_paths.supported_pt_extensions), plus
+# .gguf. A string input ending in one of these is a model file, whatever the input is called.
+MODEL_FILE_SUFFIXES = (".safetensors", ".ckpt", ".pt", ".pt2", ".pth", ".bin", ".pkl", ".gguf", ".sft")
 
 
 def _fail(reason: str) -> GenerationError:
@@ -57,29 +87,74 @@ def _strings(value: object):
             yield from _strings(item)
 
 
+# ComfyUI's tokenizer loads models/embeddings/<name> for "embedding:<name>" in any text it
+# encodes, with or without an extension (comfy/sd1_clip.py). Under pins no such load is allowed.
+EMBEDDING_REFERENCE = "embedding:"
+
+
 @dataclass(frozen=True)
 class WorkflowTemplate:
     graph: Mapping[str, object]
     slots: Mapping[str, tuple[str, str]]  # marker -> (node id, input name)
     sha256: str
+    pinned: bool = False
 
-    def bind(self, request: GenerationRequest, *, fps: int) -> dict:
-        """A fresh graph with request values in the slots. The request must already be validated."""
-        if request.task != "text_to_video":
-            raise GenerationError("this template binds text_to_video only")
+    @property
+    def task(self) -> str:
+        return "image_to_video" if IMAGE_MARKER in self.slots else "text_to_video"
+
+    def bind(self, request: GenerationRequest, *, fps: int, source_file: str | None = None) -> dict:
+        """A fresh graph with request values in the slots. The request must already be validated.
+        source_file: for image_to_video, the name of the staged source in ComfyUI's input dir."""
+        if self.pinned and EMBEDDING_REFERENCE in request.prompt.casefold():
+            # The prompt enters the graph here, after load_template's checks (#2328 review 4472675615).
+            raise GenerationError("a prompt may not reference an embedding under a pinned profile")
+        if request.task != self.task:
+            raise GenerationError(f"this template binds {self.task} only")
+        if self.task == "image_to_video":
+            if not isinstance(source_file, str) or not SOURCE_FILE_NAME.fullmatch(source_file):
+                raise GenerationError("image_to_video needs the staged source file name")
+        elif source_file is not None:
+            raise GenerationError("a source image is only valid for image_to_video")
         seed = request.seed if request.seed is not None else secrets.randbelow(2**32)
         values = {"prompt": request.prompt, "width": request.width, "height": request.height,
-                  "fps": fps, "frames": request.frames, "steps": request.steps, "seed": seed}
+                  "fps": fps, "frames": request.frames, "steps": request.steps, "seed": seed,
+                  "image": source_file}
         for field in ("width", "height", "frames", "steps"):
             if type(values[field]) is not int:
                 raise GenerationError(f"{field} must be filled in by validate_request first")
         graph = copy.deepcopy(dict(self.graph))
         for marker, (node_id, input_name) in self.slots.items():
-            graph[node_id]["inputs"][input_name] = values[SLOTS[marker][0]]
+            graph[node_id]["inputs"][input_name] = values[_ALL_SLOTS[marker][0]]
         return graph
 
 
-def load_template(raw: bytes, expected_sha256: str) -> WorkflowTemplate:
+def _model_files(graph: Mapping[str, object]):
+    """(node id, input name, value) for every input value that names a model file.
+
+    Keyed on the VALUE, not the input name: loaders name their inputs freely
+    (ckpt_name, unet_name, but also clip_name1/clip_name2 on DualCLIPLoader), so a
+    name heuristic lets an unpinned file through (#2328 review 4472123690).
+
+    Detection is generous (case and surrounding whitespace ignored); the value is then
+    compared with the pins EXACTLY as ComfyUI will receive it. " wan.safetensors" is a different
+    file from "wan.safetensors" and must not satisfy its pin (#2328 review 4472405235).
+    """
+    for node_id, node in graph.items():
+        for input_name, value in node["inputs"].items():
+            for text in _strings(value):
+                if text.strip().lower().endswith(MODEL_FILE_SUFFIXES):
+                    yield node_id, input_name, text
+
+
+def load_template(raw: bytes, expected_sha256: str, *, pinned_files=None) -> WorkflowTemplate:
+    """pinned_files: the profile's weights paths. When given, every model file the graph loads
+    must be one of them (G3, #2296 6634996133): a pinned graph can only load pinned bytes.
+
+    A loader names its file relative to its model folder, so a value must equal a pin's path
+    without the folder: pin "loras/sub/x.safetensors" is loaded as "sub/x.safetensors". Exactly,
+    and with "/" only -- a backslash is a separator on Windows but a file-name character on
+    POSIX, so "evil\\x.safetensors" is ambiguous and refused (#2328 review 4472675602)."""
     if not isinstance(expected_sha256, str) or not _SHA256.fullmatch(expected_sha256):
         raise _fail("pinned SHA-256 is malformed")
     if type(raw) is not bytes or not raw or len(raw) > MAX_TEMPLATE_BYTES:
@@ -107,10 +182,14 @@ def load_template(raw: bytes, expected_sha256: str) -> WorkflowTemplate:
         if not isinstance(inputs, dict):
             raise _fail(f"node {node_id} has no inputs object")
         for input_name, value in inputs.items():
-            if isinstance(value, str) and value in SLOTS:
-                field, allowed = SLOTS[value]
-                if input_name not in allowed:
+            if isinstance(value, str) and value in _ALL_SLOTS:
+                field, allowed = _ALL_SLOTS[value]
+                fans_out = (input_name == FANOUT_INPUT and field in FANOUT_FIELDS
+                            and node["class_type"] in FANOUT_CLASSES)
+                if input_name not in allowed and not fans_out:
                     raise _fail(f"{value} may not fill input {input_name!r}")
+                if value == IMAGE_MARKER and node["class_type"] != "LoadImage":
+                    raise _fail(f"{IMAGE_MARKER} may only fill LoadImage's image input")
                 if value in found:
                     raise _fail(f"{value} appears more than once")
                 found[value] = (node_id, input_name)
@@ -120,7 +199,15 @@ def load_template(raw: bytes, expected_sha256: str) -> WorkflowTemplate:
                 raise _fail("a slot marker cannot be an input name")
         if "_meta" in node and any(MARKER_PREFIX in text for text in _strings(node["_meta"])):
             raise _fail("a slot marker cannot sit in _meta")
-    missing = sorted(set(SLOTS) - set(found))
+    missing = sorted(set(SLOTS) - OPTIONAL_SLOTS - set(found))
     if missing:
         raise _fail(f"missing slots {missing}")
-    return WorkflowTemplate(graph=graph, slots=found, sha256=actual)
+    if pinned_files is not None:
+        loadable = {str(path).split("/", 1)[1] for path in pinned_files if "/" in str(path)}
+        for node_id, input_name, value in _model_files(graph):
+            if value not in loadable:  # pins cannot contain "\\", so a backslash never matches
+                raise _fail(f"node {node_id} loads a model file that is not pinned ({input_name})")
+        for node_id, node in graph.items():
+            if any(EMBEDDING_REFERENCE in text.casefold() for text in _strings(node["inputs"])):
+                raise _fail(f"node {node_id} references an embedding, which is not pinned")
+    return WorkflowTemplate(graph=graph, slots=found, sha256=actual, pinned=pinned_files is not None)

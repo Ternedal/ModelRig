@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
+import os
 import sqlite3
 import sys
 import tempfile
@@ -379,6 +382,60 @@ with tempfile.TemporaryDirectory(prefix="scheduler-pilot-evidence-") as temp_dir
           "atomic writer preserves report")
     check(not list(report_path.parent.glob(report_path.name + ".*.tmp")),
           "atomic writer leaves no partial file")
+
+# The collector must never write over the physical campaign's scheduler report:
+# the campaign reads that path and requires kaliv-scheduler-pilot/v4 (#2371).
+campaign_spec = importlib.util.spec_from_file_location(
+    "physical_validation_campaign_core_for_pilot_evidence",
+    ROOT / "scripts" / "physical_validation_campaign_core.py",
+)
+assert campaign_spec and campaign_spec.loader
+campaign = importlib.util.module_from_spec(campaign_spec)
+sys.modules[campaign_spec.name] = campaign
+campaign_spec.loader.exec_module(campaign)
+
+check(campaign.DEFAULT_PATHS["scheduler_pilot"] == pilot.CAMPAIGN_REPORT,
+      "collector names the path the campaign actually reads")
+check(pilot.SCHEMA != campaign.SCHEDULER_PILOT_SCHEMA,
+      "collector and campaign schemas differ, so sharing a path is destructive")
+check(pilot._parser().parse_args([]).report == pilot.DEFAULT_REPORT,
+      "default report is the collector's own path")
+check(not pilot._is_campaign_report(pilot.DEFAULT_REPORT, ROOT),
+      "default report is not the campaign report")
+for spelling in (
+    ROOT / pilot.CAMPAIGN_REPORT,
+    ROOT / "validation" / "." / "scheduler-pilot-latest.json",
+    ROOT / "scripts" / ".." / "validation" / "scheduler-pilot-latest.json",
+):
+    check(pilot._is_campaign_report(spelling, ROOT),
+          f"campaign report is recognised when spelled {spelling.relative_to(ROOT).as_posix()}")
+previous_cwd = Path.cwd()
+os.chdir(ROOT)
+try:
+    check(pilot._is_campaign_report(pilot.CAMPAIGN_REPORT, ROOT),
+          "campaign report is recognised as a path relative to the checkout")
+finally:
+    os.chdir(previous_cwd)
+
+collected: list[str] = []
+real_runtime, real_token = pilot.collect_runtime, os.environ.get("MODELRIG_TOKEN")
+pilot.collect_runtime = lambda *a, **k: collected.append("runtime") or (_ for _ in ()).throw(
+    pilot.PilotError("runtime must not be reached"))
+os.environ["MODELRIG_TOKEN"] = "x" * 64
+try:
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr):
+        code = pilot.main(["--report", str(ROOT / pilot.CAMPAIGN_REPORT)])
+    check(code == 2 and not collected,
+          "main refuses the campaign report before collecting anything")
+    check(pilot.CAMPAIGN_REPORT.as_posix() in stderr.getvalue(),
+          "the refusal names the campaign report")
+finally:
+    pilot.collect_runtime = real_runtime
+    if real_token is None:
+        os.environ.pop("MODELRIG_TOKEN", None)
+    else:
+        os.environ["MODELRIG_TOKEN"] = real_token
 
 source = code_of(ROOT / "scripts" / "scheduler_pilot_evidence.py")
 check("mode=ro" in source and "PRAGMA query_only=ON" in source,

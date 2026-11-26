@@ -9,7 +9,7 @@ echo   KALIV STAGE B - STRICT UPDATER-EVIDENS
 echo ================================================================
 echo.
 echo Wizard'en verificerer updater-bootstrapens checksum + provenance,
-echo haandhaever source 1.58.150, gennemfoerer en kontrolleret mid-swap
+echo haandhaever den pinnede source-release, gennemfoerer en kontrolleret mid-swap
 echo interruption/recovery og samler derefter de normale lifecycle-beviser.
 echo.
 echo Den kan ikke merge, pushe, tagge, release eller aktivere produktion.

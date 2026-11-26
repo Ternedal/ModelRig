@@ -603,6 +603,13 @@ class ToolChatReq(BaseModel):
     model: str | None = None
     conversation_id: str | None = None
     system: str | None = None
+    # The image jobs shown in this conversation, oldest first (ids only). With it,
+    # "lav en video af det billede" means the newest picture of THIS conversation;
+    # without it the rig can only take the owner's newest picture anywhere, which
+    # may be another conversation's (#2459, review 6004386187). Optional and
+    # additive: an older client sends nothing and gets the fallback. Sanitised on
+    # use -- malformed entries are dropped, never a 422 for a whole turn.
+    conversation_image_jobs: list | None = None
     # Cloud may propose tools (Anders 2026-07-10). Writes still need the card;
     # reads run either way. The key is never persisted -- per request only.
     cloud_base_url: str | None = None
@@ -675,6 +682,12 @@ async def _final_answer(messages: list[dict], model: str | None,
     return msg.get("content", "")
 
 
+def _cloud_upstream(req: "ToolChatReq") -> bool:
+    """Is the answering model off the rig? A cloud URL without a key is still a cloud
+    upstream (the same rule as the history cut in _tools_chat_turn and as voice)."""
+    return bool(req.cloud_key or req.cloud_base_url)
+
+
 def _rag_cloud_allowed(req: "ToolChatReq") -> bool:
     """D4: may RAG document content be sent to a cloud model?
 
@@ -712,8 +725,44 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
     what ran.
     """
     from . import tools as t
+    from .image_generate_tool import (TOOL_NAME as _IMAGE_TOOL, parse_job_reference as _image_job_ref,
+                                      parse_refusal as _media_refusal)
+    from .video_generate_tool import TOOL_NAME as _VIDEO_TOOL
+    _MEDIA_TOOLS = {_IMAGE_TOOL, _VIDEO_TOOL}
     _schema = t.ollama_tool_schema(t.GATE)
     last_result = None
+    # #2419: image jobs the turn queued, lifted out of the tool result so the app
+    # can draw a bubble that polls GET /api/v1/media/jobs/{id}. Additive wire
+    # field, always present on an answered turn; empty when no image was asked for.
+    media_jobs: list[dict] = []
+    # Rig 20/11: a refused picture reached the user only as the model's paraphrase ("der er
+    # tekniske problemer"), and the reason could be read nowhere. A media tool call that
+    # queued nothing is listed here with its code -- the tool's name and a code, never an
+    # argument. Additive, like media_jobs; empty when nothing was refused.
+    media_refusals: list[dict] = []
+
+    def _keep_queued(reason: str) -> "dict | None":
+        """An answered turn built from what is already queued, or None if nothing is.
+
+        #2462 review (Codex, P2): a job that image_generate or video_generate queued earlier in
+        this turn is already rendering. If the model's follow-up then fails, a 502 threw the
+        reference away: no bubble, and a retry of the turn queued a second render. The turn now
+        ends answered with the references and a fixed sentence; ``answer_fallback`` names why the
+        model's own words are missing (a code, never an exception text)."""
+        if not media_jobs:
+            return None
+        kinds = {job.get("kind") for job in media_jobs}
+        if len(media_jobs) == 1 and kinds == {"image"}:
+            text = "Billedet er på vej — det vises her, når det er færdigt."
+        elif len(media_jobs) == 1 and kinds == {"video"}:
+            text = "Klippet er på vej — det vises her, når det er færdigt. Det tager et par minutter."
+        else:
+            text = "Det er på vej — det vises her, når det er færdigt."
+        _logger.warning("level=warn tool_loop media_kept reason=%s jobs=%d", reason, len(media_jobs))
+        return {"status": "answered", "answer": text, "answer_fallback": reason,
+                "tool": tools_used[-1] if tools_used else None, "tools_used": tools_used,
+                "sources": sources, "media_jobs": media_jobs, "media_refusals": media_refusals,
+                "context": context or [], "origin": origin}
 
     _BODY_STATES = {"generating": "thinking", "tool_run": "waiting_for_tool"}
 
@@ -738,6 +787,9 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
             msg = await oc.chat_tools(messages, tools=_schema, model=model,
                                       base_url=cloud_base_url, api_key=cloud_key)
         except oc.OllamaError as e:
+            kept = _keep_queued("model_unavailable")
+            if kept is not None:
+                return kept
             raise HTTPException(status_code=502, detail=str(e))
         calls = msg.get("tool_calls") or []
         _logger.info("level=info tool_loop step=%d has_calls=%s", step, bool(calls))
@@ -745,6 +797,7 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
             return {"status": "answered", "answer": msg.get("content", ""),
                     "tool": tools_used[-1] if tools_used else None,
                     "tools_used": tools_used, "sources": sources,
+                    "media_jobs": media_jobs, "media_refusals": media_refusals,
                     # De udsnit der FAKTISK laa i konteksten. "sources" er
                     # navnene; dette er hvad der blev laest. Vi paastaar IKKE
                     # hvilken saetning i svaret der brugte hvilket udsnit --
@@ -759,6 +812,9 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
             try:
                 args = _json.loads(args)
             except Exception:
+                kept = _keep_queued("tool_arguments_invalid")
+                if kept is not None:
+                    return kept
                 raise HTTPException(status_code=400, detail="tool arguments are not valid JSON")
         messages.append({"role": "assistant", "content": msg.get("content", ""),
                          "tool_calls": calls[:1]})
@@ -771,6 +827,9 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
                 messages=messages, model=model, origin=origin,
             )
         except t.ToolDenied as e:
+            kept = _keep_queued("tool_denied")  # a later call in the turn; the queued job stands
+            if kept is not None:
+                return kept
             m = str(e)
             if m.startswith("unknown tool"):
                 raise HTTPException(status_code=404, detail=m)
@@ -778,21 +837,38 @@ async def _run_tool_loop(messages: list[dict], model: "str | None",
                 raise HTTPException(status_code=403, detail=m)
             raise HTTPException(status_code=400, detail=m)
         except t.ToolError as e:
+            kept = _keep_queued("tool_error")
+            if kept is not None:
+                return kept
             raise HTTPException(status_code=503, detail=str(e))
         if result["status"] == "confirmation_required":
+            # media_jobs too: a picture queued earlier in this turn is already rendering,
+            # and without its reference here the client could never show its bubble.
             return {**result, "extra_tool_calls_ignored": len(calls) - 1,
                     "tools_used": tools_used, "sources": sources,
-                    "context": context or []}
+                    "context": context or [], "media_jobs": media_jobs, "media_refusals": media_refusals}
         tools_used.append(name)
         last_result = result["result"]
+        if name in _MEDIA_TOOLS:
+            ref = _image_job_ref(result["result"])
+            if ref is not None:
+                media_jobs.append(ref)
+            else:
+                code = _media_refusal(result["result"])
+                if code is not None and len(media_refusals) < TOOL_MAX_STEPS:
+                    media_refusals.append({"tool": name, "code": code})
         messages.append({"role": "tool", "content": result["result"]})
     try:
         answer = await _final_answer(messages, model, cloud_base_url, cloud_key)
     except oc.OllamaError as e:
+        kept = _keep_queued("model_unavailable")
+        if kept is not None:
+            return kept
         raise HTTPException(status_code=502, detail=str(e))
     return {"status": "answered", "tool": tools_used[-1] if tools_used else None,
             "tools_used": tools_used, "answer": answer, "origin": origin,
-            "tool_result": last_result, "steps_exhausted": True}
+            "tool_result": last_result, "steps_exhausted": True,
+            "media_jobs": media_jobs, "media_refusals": media_refusals}
 
 
 async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
@@ -829,6 +905,12 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
         "action. If no tool fits, answer normally."
     )
     messages.append({"role": "system", "content": _tool_nudge})
+    # #2419 slice C: one more line per media tool, only while it is registered.
+    from .image_generate_tool import system_rule_if_registered as _image_rule
+    from .video_generate_tool import system_rule_if_registered as _video_rule
+    for _rule in (_image_rule(), _video_rule()):
+        if _rule:
+            messages.append({"role": "system", "content": _rule})
     # Person Profile binding (#752): a selected person's active personality
     # takes precedence over the client's persona text; with no person
     # selected the client's prompt is used exactly as before.
@@ -888,7 +970,9 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
         # refuse to send it onward without consent (per request allow_rag_cloud,
         # or operator opt-in KALIV_ALLOW_RAG_CLOUD). Only fires when documents
         # actually matched AND the target model is cloud.
-        if matches and req.cloud_key and not _rag_cloud_allowed(req):
+        # Either field makes the upstream a cloud one (#2275 item 25): chat_tools posts to
+        # cloud_base_url with or without a key, so a URL alone must not skip the consent.
+        if matches and _cloud_upstream(req) and not _rag_cloud_allowed(req):
             raise HTTPException(
                 status_code=403,
                 detail=("RAG matched your documents and the selected model is in "
@@ -917,12 +1001,20 @@ async def _tools_chat_turn(req: ToolChatReq, on_phase=None) -> dict:
         user_msg["images"] = [req.image_base64]
     messages.append(user_msg)
 
-    origin = "cloud" if req.cloud_key else "local"
-    result = await _run_tool_loop(
-        messages, req.model, req.cloud_base_url, req.cloud_key,
-        req.conversation_id, origin, sources, [], on_phase=on_phase,
-        context=context_used,
-    )
+    origin = "cloud" if _cloud_upstream(req) else "local"
+    # Which pictures this conversation holds, for video_generate's "latest" (#2459). Set for
+    # exactly this turn's tool calls and taken away again: a parked confirmation continues in
+    # another request, without it, and falls back like an older client.
+    from .video_generate_tool import CONVERSATION_IMAGE_JOBS, conversation_image_jobs
+    shown = CONVERSATION_IMAGE_JOBS.set(conversation_image_jobs(req.conversation_image_jobs))
+    try:
+        result = await _run_tool_loop(
+            messages, req.model, req.cloud_base_url, req.cloud_key,
+            req.conversation_id, origin, sources, [], on_phase=on_phase,
+            context=context_used,
+        )
+    finally:
+        CONVERSATION_IMAGE_JOBS.reset(shown)
     if person is not None and isinstance(result, dict):
         # Which person answered -- additive, so older clients ignore it and a
         # newer one can show it. Absent means "no person selected".

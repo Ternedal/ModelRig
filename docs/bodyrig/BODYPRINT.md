@@ -1,5 +1,7 @@
 # `.bodyprint` Package Specification v0.1
 
+> **Historical (ModelRig-local bootstrap design).** See [`README.md`](README.md) in this directory; standalone `Ternedal/BodyRig` is authoritative. The live package format is `.mrbody` ([`../MRBODY_SPEC.md`](../MRBODY_SPEC.md)).
+
 A bodyprint is a portable, renderer-independent embodiment profile. It is a ZIP-compatible container with a `.bodyprint` extension.
 
 ## Package layout

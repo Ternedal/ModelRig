@@ -65,6 +65,13 @@ def fixture() -> tuple[Path, str, str]:
         "def code_fingerprint():\n    return 'b' * 64\n", encoding="utf-8"
     )
     (root / "base.txt").write_text("main\n", encoding="utf-8")
+    # ADR-SYS-002 D2: the documentation class, as in the real repository.
+    (root / "release_fingerprint_exclusions.txt").write_text(
+        (ROOT / "release_fingerprint_exclusions.txt").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    (root / "docs").mkdir()
+    (root / "docs" / "GUIDE.md").write_text("# guide\n", encoding="utf-8")
+    (root / "HANDOFF.md").write_text("# handoff\n", encoding="utf-8")
     git(root, "add", "-A")
     git(root, "commit", "-q", "-m", "main")
     main_sha = git(root, "rev-parse", "HEAD")
@@ -205,6 +212,25 @@ check(
 freeze.load_receipt(repo, now=now)
 check(True, "strict receipt reader accepts unchanged checkout and current main")
 
+import json as _json
+_unchanged_path = repo / freeze.DEFAULT_REPORT
+_unchanged = _json.loads(_unchanged_path.read_text(encoding="utf-8"))
+for mutate, fragment, label in (
+    (lambda a: dict(a, release_fingerprint="1" * 64), "anchor release fingerprint no longer matches", "forged anchor fingerprint on the unchanged-main path"),
+    (lambda a: {k: v for k, v in a.items() if k != "release_fingerprint"}, "anchor release fingerprint is missing", "missing anchor fingerprint on the unchanged-main path"),
+    (lambda a: dict(a, release_fingerprint="not-hex"), "anchor release fingerprint is missing", "non-canonical anchor fingerprint on the unchanged-main path"),
+):
+    bad = dict(_unchanged); bad["main_anchor"] = mutate(_unchanged["main_anchor"])
+    _unchanged_path.write_text(_json.dumps(bad), encoding="utf-8")
+    try:
+        freeze.load_receipt(repo, now=now)
+        check(False, f"{label} must be rejected")
+    except freeze.CandidateFreezeError as exc:
+        check(fragment in str(exc), f"{label} is rejected")
+_unchanged_path.write_text(_json.dumps(_unchanged), encoding="utf-8")
+freeze.load_receipt(repo, now=now)
+check(True, "the restored receipt is accepted again")
+
 try:
     freeze.create_receipt(
         "a" * 40,
@@ -283,6 +309,168 @@ except freeze.CandidateFreezeError as exc:
         "origin/main moved" in str(exc) and "rerun candidate freeze" in str(exc),
         "receipt consumption refetches main and names the required re-freeze",
     )
+
+# ADR-SYS-002 D7: the receipt carries the release fingerprint of candidate and anchor.
+check(
+    len(receipt["candidate"].get("release_fingerprint", "")) == 64
+    and len(receipt["main_anchor"].get("release_fingerprint", "")) == 64,
+    "receipt records release fingerprints for candidate and main anchor (D7)",
+)
+
+# ADR-SYS-002 D3 / contract test 2: a documentation-only advance of origin/main
+# keeps the freeze; a code advance or a rewritten main does not.
+docs_repo, docs_main_sha, docs_candidate_sha = fixture()
+freeze.create_receipt(docs_candidate_sha, root=docs_repo, token="test-token", api=free_tag_api(), now=now)
+git(docs_repo, "switch", "-q", "-c", "main-docs", docs_main_sha)
+(docs_repo / "docs" / "GUIDE.md").write_text("# guide\nmore words\n", encoding="utf-8")
+(docs_repo / "HANDOFF.md").write_text("# handoff\nstatus line\n", encoding="utf-8")
+(docs_repo / "docs" / "NEW.md").write_text("new doc\n", encoding="utf-8")
+git(docs_repo, "add", "-A")
+git(docs_repo, "commit", "-q", "-m", "docs only on main")
+git(docs_repo, "push", "-q", "origin", "main-docs:main")
+git(docs_repo, "switch", "-q", "candidate")
+try:
+    freeze.load_receipt(docs_repo, now=now)
+    check(True, "receipt survives a documentation-only advance of origin/main (D3)")
+except freeze.CandidateFreezeError as exc:
+    check(False, f"docs-only main advance must keep the freeze: {exc}")
+
+# a receipt whose recorded fingerprint is not the candidate's is rejected
+docs_receipt_path = docs_repo / freeze.DEFAULT_REPORT
+docs_receipt = _json.loads(docs_receipt_path.read_text(encoding="utf-8"))
+tampered = dict(docs_receipt)
+tampered["candidate"] = dict(docs_receipt["candidate"], release_fingerprint="0" * 64)
+docs_receipt_path.write_text(_json.dumps(tampered), encoding="utf-8")
+try:
+    freeze.load_receipt(docs_repo, now=now)
+    check(False, "a receipt with a foreign release fingerprint must be rejected")
+except freeze.CandidateFreezeError as exc:
+    check("no longer matches the candidate" in str(exc), "a tampered release fingerprint is rejected")
+
+# the anchor's fingerprint is bound too (ChatGPT review on #2412): missing or forged -> rejected,
+# on the unchanged-main path as well as after a docs-only advance
+for label, repo_, sha_ in (("after docs-only advance", docs_repo, None),):
+    receipt_path_ = repo_ / freeze.DEFAULT_REPORT
+    good = _json.loads(receipt_path_.read_text(encoding="utf-8"))
+    forged = dict(good); forged["main_anchor"] = dict(good["main_anchor"], release_fingerprint="1" * 64)
+    receipt_path_.write_text(_json.dumps(forged), encoding="utf-8")
+    try:
+        freeze.load_receipt(repo_, now=now)
+        check(False, f"a forged anchor fingerprint must be rejected ({label})")
+    except freeze.CandidateFreezeError as exc:
+        check("anchor release fingerprint no longer matches" in str(exc), f"a forged anchor fingerprint is rejected ({label})")
+    missing = dict(good); missing["main_anchor"] = {k: v for k, v in good["main_anchor"].items() if k != "release_fingerprint"}
+    receipt_path_.write_text(_json.dumps(missing), encoding="utf-8")
+    try:
+        freeze.load_receipt(repo_, now=now)
+        check(False, f"a missing anchor fingerprint must be rejected ({label})")
+    except freeze.CandidateFreezeError as exc:
+        check("anchor release fingerprint is missing" in str(exc), f"a missing anchor fingerprint is rejected ({label})")
+    receipt_path_.write_text(_json.dumps(good), encoding="utf-8")
+
+# a receipt whose anchor the candidate does not contain is rejected even when main sits on that anchor
+advanced_main = git(docs_repo, "rev-parse", "origin/main")
+tampered = dict(docs_receipt)
+tampered["main_anchor"] = dict(docs_receipt["main_anchor"], git_sha=advanced_main)
+docs_receipt_path.write_text(_json.dumps(tampered), encoding="utf-8")
+try:
+    freeze.load_receipt(docs_repo, now=now)
+    check(False, "an anchor outside the candidate's history must be rejected")
+except freeze.CandidateFreezeError as exc:
+    check("does not contain" in str(exc), "the candidate must still contain the frozen anchor")
+docs_receipt_path.write_text(_json.dumps(docs_receipt), encoding="utf-8")
+
+# the same repository, main advanced again with one byte of code: rejected, naming the path
+git(docs_repo, "switch", "-q", "main-docs")
+(docs_repo / "worker" / "app" / "build_identity.py").write_text(
+    "def code_fingerprint():\n    return 'c' * 64\n", encoding="utf-8"
+)
+git(docs_repo, "add", "-A")
+git(docs_repo, "commit", "-q", "-m", "code on main")
+git(docs_repo, "push", "-q", "origin", "main-docs:main")
+git(docs_repo, "switch", "-q", "candidate")
+try:
+    freeze.load_receipt(docs_repo, now=now)
+    check(False, "a code advance of origin/main must break the freeze")
+except freeze.CandidateFreezeError as exc:
+    check(
+        "non-documentation changes" in str(exc) and "worker/app/build_identity.py" in str(exc)
+        and "rerun candidate freeze" in str(exc),
+        "a code advance of origin/main is rejected and names the offending path",
+    )
+
+# a protected document (campaign runbook) is code for this purpose
+runbook_repo, runbook_main_sha, runbook_candidate_sha = fixture()
+freeze.create_receipt(runbook_candidate_sha, root=runbook_repo, token="test-token", api=free_tag_api(), now=now)
+git(runbook_repo, "switch", "-q", "-c", "main-runbook", runbook_main_sha)
+(runbook_repo / "RIGDAG_SIMPEL.md").write_text("# rigdag\nnew step\n", encoding="utf-8")
+git(runbook_repo, "add", "-A")
+git(runbook_repo, "commit", "-q", "-m", "runbook on main")
+git(runbook_repo, "push", "-q", "origin", "main-runbook:main")
+git(runbook_repo, "switch", "-q", "candidate")
+try:
+    freeze.load_receipt(runbook_repo, now=now)
+    check(False, "a campaign runbook change on main must break the freeze (protected document)")
+except freeze.CandidateFreezeError as exc:
+    check("RIGDAG_SIMPEL.md" in str(exc), "a protected document on main is treated as a code change")
+
+# a rewritten main whose history no longer holds the anchor is a new main
+rewrite_repo, rewrite_main_sha, rewrite_candidate_sha = fixture()
+freeze.create_receipt(rewrite_candidate_sha, root=rewrite_repo, token="test-token", api=free_tag_api(), now=now)
+git(rewrite_repo, "switch", "-q", "--orphan", "rewritten")
+(rewrite_repo / "ORPHAN.md").write_text("orphan\n", encoding="utf-8")
+git(rewrite_repo, "add", "ORPHAN.md")
+git(rewrite_repo, "commit", "-q", "-m", "rewritten main")
+git(rewrite_repo, "push", "-q", "--force", "origin", "rewritten:main")
+git(rewrite_repo, "switch", "-q", "candidate")
+try:
+    freeze.load_receipt(rewrite_repo, now=now)
+    check(False, "a rewritten origin/main must break the freeze")
+except freeze.CandidateFreezeError as exc:
+    check("not in its history" in str(exc), "a rewritten origin/main is rejected as a new main")
+
+# ADR-SYS-002 D3 at freeze time (Codex P2 on #2412): a candidate may be frozen while
+# origin/main is already ahead by docs-only commits; the anchor is then the merge-base.
+ahead_repo, ahead_main_sha, ahead_candidate_sha = fixture()
+git(ahead_repo, "switch", "-q", "-c", "main-ahead", ahead_main_sha)
+(ahead_repo / "HANDOFF.md").write_text("# handoff\nahead\n", encoding="utf-8")
+git(ahead_repo, "add", "-A")
+git(ahead_repo, "commit", "-q", "-m", "docs ahead of candidate")
+git(ahead_repo, "push", "-q", "origin", "main-ahead:main")
+git(ahead_repo, "switch", "-q", "candidate")
+try:
+    ahead_receipt = freeze.create_receipt(ahead_candidate_sha, root=ahead_repo, token="test-token", api=free_tag_api(), now=now)
+    check(ahead_receipt["main_anchor"]["git_sha"] == ahead_main_sha, "freeze while main is ahead docs-only anchors at the merge-base, not at current main")
+    freeze.load_receipt(ahead_repo, now=now)
+    check(True, "…and the reader accepts that receipt")
+except freeze.CandidateFreezeError as exc:
+    check(False, f"a docs-only-ahead main must still allow freezing: {exc}")
+
+code_ahead_repo, code_main_sha, code_candidate_sha = fixture()
+git(code_ahead_repo, "switch", "-q", "-c", "main-code", code_main_sha)
+(code_ahead_repo / "worker" / "app" / "build_identity.py").write_text("def code_fingerprint():\n    return 'd' * 64\n", encoding="utf-8")
+git(code_ahead_repo, "add", "-A")
+git(code_ahead_repo, "commit", "-q", "-m", "code ahead of candidate")
+git(code_ahead_repo, "push", "-q", "origin", "main-code:main")
+git(code_ahead_repo, "switch", "-q", "candidate")
+try:
+    freeze.create_receipt(code_candidate_sha, root=code_ahead_repo, token="test-token", api=free_tag_api(), now=now)
+    check(False, "a code-ahead main must refuse the freeze")
+except freeze.CandidateFreezeError as exc:
+    check("does not contain current origin/main" in str(exc) and "worker/app/build_identity.py" in str(exc), "a code-ahead main refuses the freeze and names the path")
+
+# a receipt without the fingerprint (pre-ADR) is not accepted silently
+legacy_repo, legacy_main_sha, legacy_candidate_sha = fixture()
+freeze.create_receipt(legacy_candidate_sha, root=legacy_repo, token="test-token", api=free_tag_api(), now=now)
+legacy_path = legacy_repo / freeze.DEFAULT_REPORT
+legacy = _json.loads(legacy_path.read_text(encoding="utf-8"))
+del legacy["candidate"]["release_fingerprint"]
+legacy_path.write_text(_json.dumps(legacy), encoding="utf-8")
+try:
+    freeze.load_receipt(legacy_repo, now=now)
+    check(False, "a receipt without a release fingerprint must be rejected")
+except freeze.CandidateFreezeError as exc:
+    check("release fingerprint is missing" in str(exc), "a pre-ADR receipt is rejected and asks for a re-freeze")
 
 print(f"candidate freeze contracts: {passed} passed, {failed} failed")
 if failed:

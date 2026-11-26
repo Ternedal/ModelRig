@@ -98,6 +98,14 @@ def fake_modules(calls, free_gib=11.0, allocator=None, hook_cache=None, workspac
             calls.append(("call", kwargs))
             if not workspaces:
                 workspaces.append(FakeTensor(allocator, 32 * 1024 * 1024))
+            callback = kwargs.get("callback_on_step_end")
+            if callback is not None:  # diffusers' loop: an interrupted pipeline skips the remaining steps
+                self._interrupt = False
+                for step in range(kwargs["num_inference_steps"]):
+                    if self._interrupt:
+                        continue
+                    calls.append(("step", step))
+                    callback(self, step, 1000 - step, {})
             return types.SimpleNamespace(images=[_Image()])
 
     class Generator:
@@ -236,6 +244,29 @@ class AdapterTests(unittest.TestCase):
             self.adapter().load()
         budget.assert_not_called()
         self.assertEqual(self.calls, [])
+
+    def test_the_probe_and_nvml_are_read_together_for_the_diagnostics(self):
+        # Rig 20/11: a load was admitted on a card another process held 8 GB of, and nothing kept the numbers.
+        from app.image_gpu_admission import GpuBudget, GpuMemoryShortage
+        gib = 1024**3
+        admitted = GpuBudget(1, 12 * gib, 11 * gib, 2 * gib, 9 * gib)
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget", return_value=admitted), \
+                patch("app.diffusers_image_adapter.nvml_used_mib", return_value=8149) as smi, \
+                patch.dict(sys.modules, fake_modules(self.calls)):
+            adapter = self.adapter()
+            adapter.load()
+        smi.assert_called_once_with(1)
+        self.assertEqual((adapter.admitted_budget, adapter.admitted_nvml_used_mib), (admitted, 8149))
+        adapter.close()
+
+        short = GpuMemoryShortage("insufficient free VRAM after reservation", GpuBudget(1, 12 * gib, 4 * gib, 2 * gib, 2 * gib))
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget", side_effect=short), \
+                patch("app.diffusers_image_adapter.nvml_used_mib", return_value=8149), \
+                patch.dict(sys.modules, fake_modules(self.calls)), self.assertRaises(GpuMemoryShortage) as caught:
+            self.adapter().load()
+        self.assertEqual(caught.exception.nvml_used_mib, 8149, "the refusal carries the second opinion too")
+        with acquire_gpu_lease(GPU1, lease_dir=self.lease_dir):
+            pass  # and the lease was released
 
     def test_budget_is_checked_while_the_lease_is_held(self):
         seen = []
@@ -617,6 +648,63 @@ with patch("app.diffusers_image_adapter.inspect_cuda_budget"), patch.dict(sys.mo
                          ("a lighthouse", 12, 832, 1216))
         self.assertIn(("seed", "cpu", 42), self.calls)
         self.assertIn(("empty_cache",), self.calls)
+        self.assertNotIn("guidance_scale", kwargs, "no profile default: the pipeline's own default stands")
+        self.assertNotIn("negative_prompt", kwargs)
+
+    def test_profile_render_defaults_reach_the_pipeline_only_when_set(self):
+        cases = [
+            ({"guidance_scale": 6.5, "negative_prompt": "blurry, text, watermark"},
+             {"guidance_scale": 6.5, "negative_prompt": "blurry, text, watermark"}),
+            ({"guidance_scale": 4}, {"guidance_scale": 4.0}),
+            ({"negative_prompt": "lowres"}, {"negative_prompt": "lowres"}),
+        ]
+        for options, expected in cases:
+            calls = []
+            with self.subTest(options=options), patch("app.diffusers_image_adapter.inspect_cuda_budget"), \
+                    patch.dict(sys.modules, fake_modules(calls)):
+                adapter = self.adapter(profile=parse_profile(image_profile(backend_options=options)))
+                adapter.load()
+                adapter.render(self.req(steps=12))
+                adapter.close()
+                kwargs = [c for c in calls if c[0] == "call"][0][1]
+                for key in ("guidance_scale", "negative_prompt"):
+                    if key in expected:
+                        self.assertEqual(kwargs[key], expected[key])
+                    else:
+                        self.assertNotIn(key, kwargs)
+                self.assertEqual((kwargs["prompt"], kwargs["num_inference_steps"]), ("a lighthouse", 12),
+                                 "the request itself is untouched by the defaults")
+
+    # --- G2 cooperative cancellation (#2296 6510332634) ------------------------------------------
+    def test_cancel_mid_render_interrupts_the_pipeline_and_discards_the_image(self):
+        from app.media_generation_contract import GenerationCancelled
+        polls = []
+
+        def should_cancel():
+            polls.append(1)
+            return len(polls) >= 4  # 1 pre-check + 3 completed steps, then the owner cancels
+
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget"), \
+                patch.dict(sys.modules, fake_modules(self.calls)):
+            adapter = self.adapter()
+            adapter.load()
+            with self.assertRaises(GenerationCancelled):
+                adapter.render(self.req(steps=12), should_cancel=should_cancel)
+            self.assertTrue(adapter.loaded, "the model stays resident for the next job")
+            adapter.close()
+        steps = [c[1] for c in self.calls if c[0] == "step"]
+        self.assertEqual(steps, [0, 1, 2], "the remaining nine steps were skipped")
+
+    def test_cancel_before_render_never_calls_the_pipeline(self):
+        from app.media_generation_contract import GenerationCancelled
+        with patch("app.diffusers_image_adapter.inspect_cuda_budget"), \
+                patch.dict(sys.modules, fake_modules(self.calls)):
+            adapter = self.adapter()
+            adapter.load()
+            with self.assertRaises(GenerationCancelled):
+                adapter.render(self.req(), should_cancel=lambda: True)
+            adapter.close()
+        self.assertFalse([c for c in self.calls if c[0] == "call"])
 
     def test_image_to_image_is_not_rendered_by_this_slice(self):
         both = parse_profile(image_profile(tasks=["text_to_image", "image_to_image"]))

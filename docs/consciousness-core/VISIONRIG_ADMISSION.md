@@ -36,6 +36,20 @@ The route is absent unless the exact opt-in is set:
 KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED=1
 ```
 
+For V1 gate 3 (`visionrig_physical_perception`) on the candidate, start the
+worker with the validation stack's `-EnableVisionRigAdmission`. It writes this
+flag into the generated worker cmd, plus the live Consciousness session of
+`LIVE_CYCLE_QUALIFICATION.md` and the profile unless
+`-EnableConsciousnessLifecycle` already provides them:
+
+```powershell
+.\scripts\start-stage-a-validation-stack.ps1 -PlannerModel qwen3:14b `
+  -ValidationReport <absolute path> -WorkerOnly -EnableVisionRigAdmission [-ConsciousnessProfileFile <file>]
+```
+
+The release evidence ref itself is produced in VisionRig
+(`run-v1-release-gate.ps1`, `visionrig-physical-perception:<VisionRig SHA>:<sha256>`).
+
 When enabled, the private loopback-only endpoint is:
 
 ```text

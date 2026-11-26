@@ -1,5 +1,7 @@
 # BodyRig Roadmap
 
+> **Historical (ModelRig-local bootstrap design).** See [`README.md`](README.md) in this directory; standalone `Ternedal/BodyRig` is authoritative. The live package format is `.mrbody` ([`../MRBODY_SPEC.md`](../MRBODY_SPEC.md)).
+
 ## M0 — Embodiment runtime proof
 
 Goal: prove that ModelRig + VoiceRig can drive a believable, interruptible humanoid avatar before attempting body cloning.

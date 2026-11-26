@@ -11,13 +11,17 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-SCHEMA = "kaliv-system-release-manifest/v1"
-VERDICT_SCHEMA = "kaliv-system-release-verdict/v1"
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import release_fingerprint  # noqa: E402  (ADR-SYS-002 D4: the one lineage rule)
+
+SCHEMA = "kaliv-system-release-manifest/v2"
+VERDICT_SCHEMA = "kaliv-system-release-verdict/v2"
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _RELEASE_ID = re.compile(r"^kaliv-rc-[A-Za-z0-9._-]{1,64}$")
 _ANDROID_LIVE_BODY_REF = re.compile(
@@ -75,6 +79,22 @@ REQUIRED_GATES = (
     "repository_authority",
 )
 
+# ADR-SYS-001: two named releases over the same ten gates. Kaliv Embodied
+# requires all ten. Kaliv V1 requires the seven that do not depend on a human
+# accepting a photoreal body. The three body gates keep their evidence rules in
+# both scopes; in a V1 manifest they are reported as deferred, never as passed
+# by omission. BodyRig stays in the pin set for both scopes.
+BODY_GATES = (
+    "bodyrig_photoreal_likeness",
+    "bodyrig_digital_twin_m6",
+    "bodyrig_android_live_body",
+)
+V1_GATES = tuple(gate for gate in REQUIRED_GATES if gate not in BODY_GATES)
+RELEASE_SCOPE_GATES: Mapping[str, tuple[str, ...]] = {
+    "v1": V1_GATES,
+    "embodied": REQUIRED_GATES,
+}
+
 _ALLOWED_STATUS = {"PASS", "PENDING", "FAIL"}
 _MAX_EVIDENCE_REFS = 32
 _MAX_REF_LEN = 512
@@ -84,49 +104,42 @@ class SystemReleaseManifestError(RuntimeError):
     """The supplied release manifest is malformed or overclaims authority."""
 
 
-def _git(*args: str) -> str:
-    try:
-        result = subprocess.run(
-            ["git", *args],
-            cwd=Path(__file__).resolve().parents[1],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise SystemReleaseManifestError(
-            "cannot verify ModelRig evidence ancestry/tree equivalence"
-        ) from exc
-    return result.stdout.strip()
+def _release_equivalent(evidence_sha: str, pinned_sha: str) -> tuple[bool, str]:
+    """Seam for the contract tests; production path is ADR-SYS-002 D4."""
+    exclusions = release_fingerprint.load_exclusions(_REPO_ROOT)
+    return release_fingerprint.equivalent(_REPO_ROOT, evidence_sha, pinned_sha, exclusions)
 
 
 def _modelrig_evidence_matches_pin(evidence_sha: str, pinned_sha: str) -> bool:
+    """ADR-SYS-002 D4: the evidence commit is the pin, or an ancestor of the pin
+    with the same release fingerprint.
+
+    Before ADR-SYS-002 the rule was "ancestor with the identical Git tree",
+    which a documentation-only commit on main broke. The fingerprint leaves
+    the documentation class out and keeps everything the rig runs in
+    (``scripts/release_fingerprint.py``). Unknown or unavailable commits are
+    non-equivalent evidence: fail closed without turning that into an
+    infrastructure authority error. An unusable exclusion list, or no git at
+    all, IS an authority error.
+    """
     if evidence_sha == pinned_sha:
         return True
-
     try:
-        subprocess.run(
-            ["git", "merge-base", "--is-ancestor", evidence_sha, pinned_sha],
-            cwd=Path(__file__).resolve().parents[1],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-    except subprocess.CalledProcessError:
-        # Non-ancestor and unknown/unavailable commit objects are both
-        # non-equivalent evidence. Fail closed without converting this into an
-        # infrastructure authority error.
+        exclusions = release_fingerprint.load_exclusions(_REPO_ROOT)
+    except release_fingerprint.FingerprintError as exc:
+        raise SystemReleaseManifestError(
+            "release fingerprint exclusion list is unusable: " + str(exc)
+        ) from exc
+    del exclusions  # loaded only to fail loudly before any lineage answer
+    try:
+        ok, _reason = _release_equivalent(evidence_sha, pinned_sha)
+    except release_fingerprint.FingerprintError:
         return False
     except OSError as exc:
         raise SystemReleaseManifestError(
-            "cannot verify ModelRig evidence ancestry"
+            "cannot verify ModelRig evidence ancestry/fingerprint equivalence"
         ) from exc
-
-    evidence_tree = _git("rev-parse", f"{evidence_sha}^{{tree}}")
-    pinned_tree = _git("rev-parse", f"{pinned_sha}^{{tree}}")
-    return evidence_tree == pinned_tree
+    return bool(ok)
 
 
 @dataclass(frozen=True)
@@ -134,22 +147,28 @@ class SystemReleaseVerdict:
     schema: str
     release_id: str
     state: str
+    release_scope: str
     release_ready: bool
     production_activation: bool
     pinned_repositories: dict[str, str]
+    pinned_release_fingerprints: dict[str, str | None]
     pending_gates: tuple[str, ...]
     failed_gates: tuple[str, ...]
+    deferred_gates: tuple[str, ...]
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "schema": self.schema,
             "release_id": self.release_id,
             "state": self.state,
+            "release_scope": self.release_scope,
             "release_ready": self.release_ready,
             "production_activation": self.production_activation,
             "pinned_repositories": dict(self.pinned_repositories),
+            "pinned_release_fingerprints": dict(self.pinned_release_fingerprints),
             "pending_gates": list(self.pending_gates),
             "failed_gates": list(self.failed_gates),
+            "deferred_gates": list(self.deferred_gates),
         }
 
 
@@ -235,13 +254,15 @@ def _validate_gates(
     bodyrig_sha: str,
     visionrig_sha: str,
     voicerig_sha: str,
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    scope_gates: tuple[str, ...],
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     gates = _require_mapping(value, "gates")
     expected = set(REQUIRED_GATES)
     _exact_keys(gates, expected, "gates")
 
     pending: list[str] = []
     failed: list[str] = []
+    deferred: list[str] = []
     for gate in REQUIRED_GATES:
         entry = _require_mapping(gates[gate], gate)
         _exact_keys(entry, {"status", "evidence_refs"}, gate)
@@ -315,8 +336,8 @@ def _validate_gates(
                 )
             if not _modelrig_evidence_matches_pin(match.group(1), modelrig_sha):
                 raise SystemReleaseManifestError(
-                    "recovery_soak evidence is not exact-tree-equivalent "
-                    "to the pinned ModelRig revision"
+                    "recovery_soak evidence is not release-fingerprint-equivalent "
+                    "to the pinned ModelRig revision (ADR-SYS-002 D4)"
                 )
         if gate == "consciousness_live_lifecycle" and status == "PASS":
             if len(refs) != 1:
@@ -332,8 +353,8 @@ def _validate_gates(
                 )
             if not _modelrig_evidence_matches_pin(match.group(1), modelrig_sha):
                 raise SystemReleaseManifestError(
-                    "consciousness_live_lifecycle evidence is not exact-tree-equivalent "
-                    "to the pinned ModelRig revision"
+                    "consciousness_live_lifecycle evidence is not release-fingerprint-equivalent "
+                    "to the pinned ModelRig revision (ADR-SYS-002 D4)"
                 )
         if gate == "visionrig_physical_perception" and status == "PASS":
             if len(refs) != 1:
@@ -417,8 +438,8 @@ def _validate_gates(
                 )
             if not _modelrig_evidence_matches_pin(match.group(1), modelrig_sha):
                 raise SystemReleaseManifestError(
-                    "bodyrig_android_live_body evidence is not exact-tree-equivalent "
-                    "to the pinned ModelRig revision"
+                    "bodyrig_android_live_body evidence is not release-fingerprint-equivalent "
+                    "to the pinned ModelRig revision (ADR-SYS-002 D4)"
                 )
         if gate == "end_to_end_latency" and status == "PASS":
             if len(refs) != 1:
@@ -434,14 +455,20 @@ def _validate_gates(
                 )
             if not _modelrig_evidence_matches_pin(match.group(1), modelrig_sha):
                 raise SystemReleaseManifestError(
-                    "end_to_end_latency evidence is not exact-tree-equivalent "
-                    "to the pinned ModelRig revision"
+                    "end_to_end_latency evidence is not release-fingerprint-equivalent "
+                    "to the pinned ModelRig revision (ADR-SYS-002 D4)"
                 )
-        if status == "PENDING":
+        if gate not in scope_gates:
+            # Outside the release scope a gate cannot block and cannot be
+            # claimed: anything but PASS is deferred, and a PASS was held to
+            # the same evidence rules above.
+            if status != "PASS":
+                deferred.append(gate)
+        elif status == "PENDING":
             pending.append(gate)
         elif status == "FAIL":
             failed.append(gate)
-    return tuple(pending), tuple(failed)
+    return tuple(pending), tuple(failed), tuple(deferred)
 
 
 def evaluate_manifest(manifest: Mapping[str, Any]) -> SystemReleaseVerdict:
@@ -451,6 +478,7 @@ def evaluate_manifest(manifest: Mapping[str, Any]) -> SystemReleaseVerdict:
         {
             "schema",
             "release_id",
+            "release_scope",
             "repositories",
             "gates",
             "production_activation",
@@ -464,6 +492,12 @@ def evaluate_manifest(manifest: Mapping[str, Any]) -> SystemReleaseVerdict:
     if not isinstance(release_id, str) or _RELEASE_ID.fullmatch(release_id) is None:
         raise SystemReleaseManifestError("release_id must be kaliv-rc-<bounded-id>")
 
+    release_scope = root["release_scope"]
+    if not isinstance(release_scope, str) or release_scope not in RELEASE_SCOPE_GATES:
+        raise SystemReleaseManifestError(
+            "release_scope must be one of: " + ", ".join(sorted(RELEASE_SCOPE_GATES))
+        )
+
     # This qualification surface deliberately cannot activate production.
     if root["production_activation"] is not False:
         raise SystemReleaseManifestError(
@@ -471,24 +505,43 @@ def evaluate_manifest(manifest: Mapping[str, Any]) -> SystemReleaseVerdict:
         )
 
     pinned = _validate_repositories(root["repositories"])
-    pending, failed = _validate_gates(
+    pending, failed, deferred = _validate_gates(
         root["gates"],
         modelrig_sha=pinned["Ternedal/ModelRig"],
         bodyrig_sha=pinned["Ternedal/BodyRig"],
         visionrig_sha=pinned["Ternedal/VisionRig"],
         voicerig_sha=pinned["Ternedal/VoiceRig"],
+        scope_gates=RELEASE_SCOPE_GATES[release_scope],
     )
     ready = not pending and not failed
     return SystemReleaseVerdict(
         schema=VERDICT_SCHEMA,
         release_id=release_id,
         state="QUALIFIED" if ready else "BLOCKED",
+        release_scope=release_scope,
         release_ready=ready,
         production_activation=False,
         pinned_repositories=pinned,
+        pinned_release_fingerprints={
+            "Ternedal/ModelRig": _release_fingerprint_or_none(pinned["Ternedal/ModelRig"])
+        },
         pending_gates=pending,
         failed_gates=failed,
+        deferred_gates=deferred,
     )
+
+
+def _release_fingerprint_or_none(sha: str) -> str | None:
+    """ADR-SYS-002 D7: the pinned ModelRig fingerprint, when this checkout holds the commit.
+
+    None when the commit is not in this checkout (the gate also runs on
+    manifests built elsewhere); never an error, because the verdict's authority
+    comes from the gate rules, not from this annotation.
+    """
+    try:
+        return release_fingerprint.fingerprint(_REPO_ROOT, sha)
+    except (release_fingerprint.FingerprintError, OSError):
+        return None
 
 
 def load_manifest(path: Path) -> Mapping[str, Any]:

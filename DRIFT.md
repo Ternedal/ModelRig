@@ -38,33 +38,15 @@ krypteret i sig selv), men ikke på åbent internet.
 
 ## 2. Backup og restore
 
-To datakilder at have styr på:
-
-| Fil | Indhold | Sti (default) |
-|---|---|---|
-| `modelrig-data.json` | Parrede enheder, hashede tokens | `./modelrig-data.json` (backend working dir) |
-| `modelrig-rag.db` | RAG-index (ingesterede dokumenter, embeddings) | `./modelrig-rag.db` (worker working dir), override via `MODELRIG_DB` |
-
-**Backup (kør med rig'en stoppet, eller accepter en lille race hvis den kører):**
-```bash
-# Windows (PowerShell)
-Copy-Item modelrig-data.json  "$env:USERPROFILE\ModelRigBackup\modelrig-data.json"
-Copy-Item modelrig-rag.db     "$env:USERPROFILE\ModelRigBackup\modelrig-rag.db"
-
-# Linux
-cp modelrig-data.json /opt/modelrig/backup/modelrig-data.json
-cp modelrig-rag.db    /opt/modelrig/backup/modelrig-rag.db
-```
-Begge er almindelige filer (JSON / SQLite) — ingen særlig eksport nødvendig.
-Anbefaling: en simpel dagligt kørende scheduled task/cron der kopierer begge til
-en anden disk eller cloud-mappe (OneDrive/Nextcloud-synkroniseret mappe er fint,
-så længe filen ikke redigeres af to processer samtidig).
-
-**Restore:**
-1. Stop backend + worker.
-2. Læg de to filer tilbage på deres pladser (`modelrig-data.json` i backend's
-   working dir, `modelrig-rag.db` i worker's working dir).
-3. Start op igen. Ingen migrering nødvendig — de læses direkte ved opstart.
+**Brug [`scripts/BACKUP.md`](scripts/BACKUP.md).** Den beskriver den rigtige vej
+(`scripts\kaliv-backup.bat`, som kalder `python -m worker.app.backup
+create|verify|restore`; daglig task via `scripts\kaliv-backup-scheduled.ps1`;
+maskinflytning via `scripts\migrate-new-rig-state.ps1`) og dækker alle stores —
+RAG-index, backend-parring, tool-audit, jobs/scheduler, Agent 3-databaser,
+home-rig-stores og notes — på deres faktiske stier. Workerens relative stier
+ankres under `KALIV_DATA_DIR` (default `%LOCALAPPDATA%\Kaliv`), og backend-storen
+`modelrig-data.json` ligger ved siden af server-exe'en. Kopiér ikke enkeltfiler
+fra working dir: det rammer forkerte eller tomme filer.
 
 **Konsekvens hvis `modelrig-data.json` mistes** (ikke gendannet): alle parrede
 enheder mister deres token og skal parres igen (ny XXXX-XXXX-kode, `-pair` på
@@ -112,8 +94,8 @@ du en dag rebuilder fra en meget gammel zip.
 curl http://<rig-ip>:8080/healthz          # backend oppe + version
 curl http://<rig-ip>:8080/api/v1/health/deep  # rundtur til Ollama + worker (kræver token)
 ```
-Se `CLIENT_BUILD_AND_TEST.md` for fuld røgtest af både server og Android-app efter
-en opgradering.
+Fuld røgtest efter en opgradering: `python tools/modelrig-cli.py doctor --deep` og
+[`DEVICE_TEST.md`](DEVICE_TEST.md).
 
 ## 5. API-oversigt
 

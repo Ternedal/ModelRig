@@ -1,5 +1,11 @@
 # Kaliv Milestone 3 — current-main fysisk kandidat
 
+> **⚠️ HISTORISK DOKUMENT (1.58.147-æraen).** Kandidatgrenen
+> `agent/milestone3-current-main-v2` findes ikke længere på origin (GitHub API:
+> 404), og PR #250 blev lukket uden merge 30/7-2026. Launcheren stopper derfor
+> ved `git fetch`. Den gældende fysiske procedure står i
+> `STAGED_PHYSICAL_PROMOTION.md`.
+
 Denne kandidat samler de tre resterende fysiske Agent 3-domæner på én ren Git-head:
 
 1. T-020 read-only developer-pilot.

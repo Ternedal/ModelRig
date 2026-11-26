@@ -44,6 +44,63 @@ class ImageGpuAdmissionTests(unittest.TestCase):
             with self.assertRaises(ImageGpuAdmissionError):
                 inspect_cuda_budget(0)
 
+    def test_a_busy_gpu_is_a_transient_shortage_other_refusals_are_not(self):
+        # G4: only "not enough free VRAM right now" is GpuMemoryShortage, which the executor waits out.
+        from app.image_gpu_admission import GpuMemoryShortage
+        with patch.dict(sys.modules, {"torch": self._torch(free_gib=2)}), self.assertRaises(GpuMemoryShortage):
+            inspect_cuda_budget(0, reserve_gib=1, min_usable_gib=8)
+        with patch.dict(sys.modules, {"torch": self._torch(free_gib=11, count=0)}):
+            with self.assertRaises(ImageGpuAdmissionError) as caught:
+                inspect_cuda_budget(0, reserve_gib=1, min_usable_gib=8)
+            self.assertNotIsInstance(caught.exception, GpuMemoryShortage, "a missing GPU is not a wait")
+
+    def test_a_shortage_carries_what_the_probe_measured_and_a_budget_reads_as_mib(self):
+        # Rig 20/11: a job started on a card another process held 8 GB of, and nothing said what
+        # the probe had seen. The numbers ride on the result and on the refusal.
+        from app.image_gpu_admission import GpuBudget, GpuMemoryShortage, budget_detail
+        with patch.dict(sys.modules, {"torch": self._torch(free_gib=4)}), self.assertRaises(GpuMemoryShortage) as caught:
+            inspect_cuda_budget(1, reserve_gib=1, min_usable_gib=8)
+        self.assertEqual(budget_detail(caught.exception.budget),
+                         "cuda1,free_mib=4096,reserved_mib=1024,usable_mib=3072,total_mib=12288")
+        with patch.dict(sys.modules, {"torch": self._torch(free_gib=11)}):
+            admitted = inspect_cuda_budget(1, reserve_gib=1, min_usable_gib=8)
+        self.assertEqual(budget_detail(admitted), "cuda1,free_mib=11264,reserved_mib=1024,usable_mib=10240,total_mib=12288")
+        self.assertIsNone(GpuMemoryShortage("insufficient free VRAM after reservation").budget, "a bare shortage still works")
+        for not_a_budget in (None, object(), "cuda1", {"free_bytes": 1}, unittest.mock.MagicMock()):
+            self.assertIsNone(budget_detail(not_a_budget))
+        self.assertIsInstance(admitted, GpuBudget)
+
+    def test_nvml_is_a_second_opinion_that_can_only_be_missing_never_fail(self):
+        # Under WDDM cudaMemGetInfo answers from Windows' GPU memory manager; NVML counts every process.
+        from app.image_gpu_admission import GpuBudget, budget_detail, nvml_used_mib
+        mib = 1024 * 1024
+        asked = []
+
+        def torch_with(read):
+            return types.SimpleNamespace(cuda=types.SimpleNamespace(device_memory_used=read))
+        with patch.dict(sys.modules, {"torch": torch_with(lambda index: asked.append(index) or 8149 * mib + 5)}):
+            self.assertEqual(nvml_used_mib(1), 8149)
+        self.assertEqual(asked, [1], "asked for the leased GPU's index")
+        with patch.dict(sys.modules, {"torch": types.SimpleNamespace(cuda=types.SimpleNamespace())}):
+            self.assertIsNone(nvml_used_mib(1), "an older torch without the call")
+
+        def no_bindings(index):
+            raise ModuleNotFoundError("pynvml")
+        with patch.dict(sys.modules, {"torch": torch_with(no_bindings)}):
+            self.assertIsNone(nvml_used_mib(1), "no NVML bindings is not an error")
+        for odd in (-1, 8149.0, None, "8149", True):
+            with patch.dict(sys.modules, {"torch": torch_with(lambda index, odd=odd: odd)}):
+                self.assertIsNone(nvml_used_mib(1), f"a reading of {odd!r} is no reading")
+        for not_an_index in (None, -1, True, "1", 1.0):
+            self.assertIsNone(nvml_used_mib(not_an_index))
+        gib = 1024**3
+        budget = GpuBudget(1, 12 * gib, 11 * gib, gib, 10 * gib)
+        self.assertEqual(budget_detail(budget, 8149),
+                         "cuda1,free_mib=11264,reserved_mib=1024,usable_mib=10240,total_mib=12288,nvml_used_mib=8149")
+        for not_a_reading in (None, True, "8149", -1, 8149.0, 10**7):
+            self.assertEqual(budget_detail(budget, not_a_reading),
+                             "cuda1,free_mib=11264,reserved_mib=1024,usable_mib=10240,total_mib=12288")
+
     def test_rejects_missing_gpu(self):
         with patch.dict(sys.modules, {"torch": self._torch(11, count=1)}):
             with self.assertRaises(ImageGpuAdmissionError):

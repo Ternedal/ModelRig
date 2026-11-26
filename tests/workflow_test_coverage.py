@@ -8,6 +8,7 @@ import fnmatch
 import importlib
 import importlib.util
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -104,18 +105,69 @@ check(
     "the shared test workflow keeps Stage-B default-on and explicitly gated",
 )
 check(
-    "run_stage_b: ${{ github.event_name != 'pull_request' }}" in ci_workflow,
-    "PR CI skips only the duplicate Stage-B invocation; push/dispatch keep it",
+    "run_stage_b: ${{ github.event_name == 'workflow_dispatch' }}" in ci_workflow,
+    "CI skips the duplicate Stage-B invocation on PRs and main; only dispatch keeps it",
 )
 agent3_stage_b = agent3_full_workflow.split("  stage-b-slices:", 1)[1]
 check(
-    "if: github.event_name != 'pull_request'" in agent3_stage_b,
-    "PR Agent 3 full diagnostics delegates Stage-B ownership to exact-head qualification",
+    "if: github.event_name == 'workflow_dispatch'" in agent3_stage_b,
+    "Agent 3 full diagnostics delegates PR and main Stage-B ownership to exact-head qualification",
+)
+exact_head_stage_b = exact_head_workflow.split("  stage-b-slices:", 1)[1]
+# CI-tiering (#2413): the condition is folded and draft-aware. Main pushes and
+# dispatch still run Stage-B unconditionally; PRs run it when open and not a
+# draft. The literal pieces are pinned so the policy cannot drift by rewording.
+check(
+    "(github.event_name != 'pull_request' && github.event_name != 'merge_group') ||" in exact_head_stage_b
+    and "github.event.action != 'closed'" in exact_head_stage_b
+    and "github.event.pull_request.draft != true" in exact_head_stage_b
+    and "uses: ./.github/workflows/_stage_b_slices.yml" in exact_head_stage_b,
+    "exact-head qualification is the sole Stage-B authority for non-draft PRs and pushes to main",
 )
 check(
-    "if: github.event_name != 'pull_request' || github.event.action != 'closed'"
-    in exact_head_workflow,
-    "exact-head qualification remains the sole PR Stage-B authority",
+    "needs.release-class.outputs.docs_only != 'true'" in exact_head_stage_b
+    and 'git show "$BASE_SHA:scripts/release_class.sh"' in exact_head_workflow
+    and "release_fingerprint.py" in (root / "scripts" / "release_class.sh").read_text(encoding="utf-8"),
+    "exact-head qualification skips Stage-B for documentation-only PRs as classified by the ADR-SYS-002 fingerprint tool",
+)
+# Merge queue (ADR-SYS-003, contract test 3): every workflow that produces a
+# name in REQUIRED_STATUS_CHECKS must fire on merge_group, or the queue waits
+# forever for a check that never reports. The map is maintained by hand on
+# purpose: a new required check must be placed here, and a workflow that stops
+# producing one must be removed.
+required_check_workflows = {
+    "ci.yml": ("test / test", "test / test-windows-appliance", "test / test-windows-tool-isolation",
+               "browser-use-runtime-contract", "android-compile", "desktop-compile",
+               "desktop-dpapi-windows", "agent3-memory-dpapi-windows"),
+    "codeql.yml": ("analyze (go)", "analyze (python)"),
+    "agent3-diagnostics.yml": ("agent3-python",),
+    "agent3-full-diagnostics.yml": ("full-test-log",),
+    "exact-head-qualification.yml": ("exact-head-core", "legacy-merge-tree-equivalence"),
+}
+import sys as _sys
+_sys.path.insert(0, str(root / "scripts"))
+import repository_authority as _ra  # noqa: E402
+mapped = {name for names in required_check_workflows.values() for name in names}
+check(mapped == set(_ra.REQUIRED_STATUS_CHECKS), "the required-check → workflow map covers exactly REQUIRED_STATUS_CHECKS")
+queue_extra = set(_ra.QUEUE_REQUIRED_STATUS_CHECKS) - set(_ra.REQUIRED_STATUS_CHECKS)
+freeze_guard_workflow = (root / ".github" / "workflows" / "freeze-guard.yml").read_text(encoding="utf-8")
+check(queue_extra == {"stage-b-verdict", "freeze-guard"}
+      and re.search(r"(?m)^  stage-b-verdict:$", exact_head_workflow) is not None
+      and re.search(r"(?m)^  freeze-guard:$", freeze_guard_workflow) is not None
+      and re.search(r"(?m)^  merge_group:\n(?:    .*\n)*?    types: \[checks_requested\]", freeze_guard_workflow.split("jobs:", 1)[0]) is not None,
+      "the two extra queue-mode required checks (stage-b-verdict, freeze-guard) are produced by workflows that fire on merge_group")
+for wf_name in required_check_workflows:
+    wf_on = (root / ".github" / "workflows" / wf_name).read_text(encoding="utf-8").split("jobs:", 1)[0]
+    check(re.search(r"(?m)^  merge_group:\n(?:    .*\n)*?    types: \[checks_requested\]", wf_on) is not None,
+          f"{wf_name} produces required checks and therefore fires on merge_group checks_requested (ADR-SYS-003)")
+
+check(
+    "ready_for_review" in exact_head_workflow.split("jobs:", 1)[0],
+    "a draft that becomes ready triggers exact-head qualification with Stage-B",
+)
+check(
+    "on:\n  push:\n    branches: [main]" in exact_head_workflow,
+    "exact-head qualification runs on every push to main, so main is still Stage-B qualified once",
 )
 release_server_tests = release_workflow.split("  server-tests:", 1)[1].split(
     "\n  android-build:", 1
@@ -129,10 +181,12 @@ check(
 expected_stage_b_names = (
     "midchain-1",
     "midchain-2",
+    "midchain-2b",
     "midchain-3",
     "downstream-1",
     "downstream-2",
     "downstream-3",
+    "downstream-4",
 )
 check(
     "stage-b-admission:" in stage_b_workflow
@@ -148,11 +202,71 @@ for name in expected_stage_b_names:
         f"- name: {name}" in stage_b_workflow,
         f"Stage-B reusable workflow retains {name} qualification",
     )
-for shard in ("1/3", "2/3", "3/3"):
+# Midchain keeps its strided thirds (2/3 split into the serial 2a/2b cohorts);
+# downstream's four cost-weighted shards are checked further down.
+for shard in ("1/3", "2a/3", "2b/3", "3/3"):
     check(
         f'shard: "{shard}"' in stage_b_workflow,
-        f"Stage-B reusable workflow retains shard {shard}",
+        f"Stage-B reusable workflow retains midchain shard {shard}",
     )
+# The 355-minute hosted job limit cannot accommodate 12 slow contracts
+# serially in midchain-2. Keep the original required status context, but
+# split its workload into two independently REQUIRED matrix participants.
+check(
+    '- name: midchain-2\n            slice: midchain\n            shard: "2a/3"'
+    in stage_b_workflow
+    and '- name: midchain-2b\n            slice: midchain\n            shard: "2b/3"'
+    in stage_b_workflow,
+    "midchain-2 keeps its original status name and requires the second half",
+)
+_midchain_spec = importlib.util.spec_from_file_location(
+    "stage_b_midchain_partition_under_test",
+    root / "tests/support/rsi_pilot_exact_task_stage_b_midchain_driver.py",
+)
+assert _midchain_spec is not None and _midchain_spec.loader is not None
+_midchain_module = importlib.util.module_from_spec(_midchain_spec)
+_midchain_spec.loader.exec_module(_midchain_module)
+_old_shard = os.environ.get("MODELRIG_STAGE_B_CONTRACT_SHARD")
+_partitions = {}
+try:
+    for _shard in ("1/3", "2/3", "2a/3", "2b/3", "3/3"):
+        os.environ["MODELRIG_STAGE_B_CONTRACT_SHARD"] = _shard
+        _partitions[_shard] = _midchain_module._selected_contract_files()
+finally:
+    if _old_shard is None:
+        os.environ.pop("MODELRIG_STAGE_B_CONTRACT_SHARD", None)
+    else:
+        os.environ["MODELRIG_STAGE_B_CONTRACT_SHARD"] = _old_shard
+_hosted_parts = (
+    list(_partitions["1/3"]) + list(_partitions["2a/3"])
+    + list(_partitions["2b/3"]) + list(_partitions["3/3"])
+)
+check(
+    len(_hosted_parts) == len(set(_hosted_parts))
+    == len(_midchain_module._CONTRACT_FILES)
+    and set(_hosted_parts) == set(_midchain_module._CONTRACT_FILES)
+    and set(_partitions["2a/3"]).isdisjoint(_partitions["2b/3"])
+    and set(_partitions["2a/3"]) | set(_partitions["2b/3"])
+    == set(_partitions["2/3"]),
+    "the hosted shards execute every original midchain contract exactly once",
+)
+_deep_worker_counts = {}
+try:
+    for _shard in ("2a/3", "2b/3"):
+        os.environ["MODELRIG_STAGE_B_CONTRACT_SHARD"] = _shard
+        _deep_worker_counts[_shard] = _midchain_module._worker_count(
+            len(_partitions[_shard])
+        )
+finally:
+    if _old_shard is None:
+        os.environ.pop("MODELRIG_STAGE_B_CONTRACT_SHARD", None)
+    else:
+        os.environ["MODELRIG_STAGE_B_CONTRACT_SHARD"] = _old_shard
+check(
+    all(_deep_worker_counts[_shard] == 1 for _shard in ("2a/3", "2b/3")),
+    "each deep half-shard remains serial to avoid nested runner oversubscription",
+)
+
 check(
     stage_b_workflow.count("timeout-minutes: 355") == 2,
     "admission and shard jobs stay below the GitHub-hosted six-hour job ceiling",
@@ -180,7 +294,7 @@ check(
 )
 check(
     'name: stage-b-cache-${{ inputs.head_sha }}' in stage_b_workflow
-    and "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+    and "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9"
     in stage_b_workflow
     and "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333"
     in stage_b_workflow,
@@ -199,15 +313,109 @@ check(
     and 'stage_b_slice in ("midchain", "downstream")' in stage_b_driver,
     "midchain/downstream consume only a validated preloaded proof+ledger root",
 )
-for label, source in (
-    ("midchain", midchain_driver),
-    ("downstream", downstream_driver),
-):
-    check(
-        "_REQUIRED_SHARD_COUNT = 3" in source
-        and "_CONTRACT_FILES[index - 1 :: total]" in source,
-        f"{label} uses the locked three-way strided shard partition",
-    )
+# #1682 slice 3: midchain cohorts are cost-weighted within their parallelism
+# class. The deep cohort (2/3 = 2a ∪ 2b) must stay exactly the strided second
+# third, so serial execution and deep timeouts keep covering the same contracts.
+check(
+    "_REQUIRED_SHARD_COUNT = 3" in midchain_driver
+    and "_CONTRACT_COST_SECONDS = {" in midchain_driver
+    and "_DEEP_CONTRACT_FILES = _CONTRACT_FILES[1::_REQUIRED_SHARD_COUNT]" in midchain_driver
+    and "_CONTRACT_FILES[index - 1 :: total]" not in midchain_driver,
+    "midchain uses cost-weighted cohorts with the deep set pinned to the strided second third",
+)
+check(
+    set(_partitions["2/3"]) == set(_midchain_module._CONTRACT_FILES[1::3])
+    and set(_midchain_module._CONTRACT_COST_SECONDS) == set(_midchain_module._CONTRACT_FILES)
+    and all(isinstance(v, int) and v > 0 for v in _midchain_module._CONTRACT_COST_SECONDS.values()),
+    "midchain deep cohort is exactly the historical second third; cost table names exactly the contracts",
+)
+_mc_cost = _midchain_module._CONTRACT_COST_SECONDS
+_mc_deep_loads = [sum(_mc_cost[f] for f in _partitions[s]) for s in ("2a/3", "2b/3")]
+_mc_shallow_loads = [sum(_mc_cost[f] for f in _partitions[s]) for s in ("1/3", "3/3")]
+check(
+    max(_mc_deep_loads) <= min(_mc_deep_loads) * 1.15
+    and max(_mc_shallow_loads) <= min(_mc_shallow_loads) * 1.15,
+    f"midchain cohorts are balanced within 15 % (deep CPU-min {[round(l / 60) for l in _mc_deep_loads]}, "
+    f"shallow {[round(l / 60) for l in _mc_shallow_loads]})",
+)
+check(
+    all(
+        list(_partitions[s]) == [f for f in _midchain_module._CONTRACT_FILES if f in _partitions[s]]
+        for s in ("1/3", "2a/3", "2b/3", "3/3")
+    ),
+    "each midchain cohort keeps the original contract order",
+)
+# #1682: downstream shards are cost-weighted. The table must name exactly the
+# contracts, every contract must land in exactly one shard, each shard must be
+# non-empty and keep _CONTRACT_FILES order, and the CPU load must be balanced
+# to within 15 % -- otherwise the table has drifted and needs refreshing.
+check(
+    "_REQUIRED_SHARD_COUNT = 4" in downstream_driver
+    and "_CONTRACT_COST_SECONDS = {" in downstream_driver
+    and "_shard_assignment(total)[index]" in downstream_driver
+    and "_CONTRACT_FILES[index - 1 :: total]" not in downstream_driver,
+    "downstream uses the cost-weighted four-way shard partition, not the strided one",
+)
+_downstream_spec = importlib.util.spec_from_file_location(
+    "stage_b_downstream_partition_under_test",
+    root / "tests/support/rsi_pilot_exact_task_release_transaction_contract.py",
+)
+assert _downstream_spec is not None and _downstream_spec.loader is not None
+_downstream_module = importlib.util.module_from_spec(_downstream_spec)
+_downstream_spec.loader.exec_module(_downstream_module)
+_ds_assignment = _downstream_module._shard_assignment()
+_ds_all = [f for index in sorted(_ds_assignment) for f in _ds_assignment[index]]
+_DS_SHARDS = (1, 2, 3, 4)
+check(
+    sorted(_ds_assignment) == list(_DS_SHARDS)
+    and len(_ds_all) == len(set(_ds_all)) == len(_downstream_module._CONTRACT_FILES)
+    and set(_ds_all) == set(_downstream_module._CONTRACT_FILES)
+    and all(_ds_assignment[i] for i in _DS_SHARDS),
+    "downstream shards execute every contract exactly once, none empty",
+)
+check(
+    set(_downstream_module._CONTRACT_COST_SECONDS) == set(_downstream_module._CONTRACT_FILES)
+    and all(isinstance(v, int) and v > 0 for v in _downstream_module._CONTRACT_COST_SECONDS.values()),
+    "downstream cost table names exactly the contracts, with positive integer seconds",
+)
+_ds_loads = [
+    sum(_downstream_module._CONTRACT_COST_SECONDS[f] for f in _ds_assignment[i]) for i in _DS_SHARDS
+]
+check(
+    max(_ds_loads) <= min(_ds_loads) * 1.15,
+    f"downstream shard loads are balanced within 15 % (CPU-minutes {[round(l / 60) for l in _ds_loads]})",
+)
+check(
+    all(
+        list(_ds_assignment[i])
+        == [f for f in _downstream_module._CONTRACT_FILES if f in _ds_assignment[i]]
+        for i in _DS_SHARDS
+    ),
+    "each downstream shard keeps the original contract order",
+)
+_old_ds_shard = os.environ.get("MODELRIG_STAGE_B_CONTRACT_SHARD")
+try:
+    _ds_selected = {}
+    for _shard in ("1/4", "2/4", "3/4", "4/4"):
+        os.environ["MODELRIG_STAGE_B_CONTRACT_SHARD"] = _shard
+        _ds_selected[_shard] = _downstream_module._selected_contract_files()
+    os.environ.pop("MODELRIG_STAGE_B_CONTRACT_SHARD", None)
+    _ds_unsharded = _downstream_module._selected_contract_files()
+finally:
+    if _old_ds_shard is None:
+        os.environ.pop("MODELRIG_STAGE_B_CONTRACT_SHARD", None)
+    else:
+        os.environ["MODELRIG_STAGE_B_CONTRACT_SHARD"] = _old_ds_shard
+check(
+    _ds_selected == {f"{i}/4": _ds_assignment[i] for i in _DS_SHARDS}
+    and _ds_unsharded == _downstream_module._CONTRACT_FILES,
+    "the shard env selects the weighted partition; no shard runs everything",
+)
+check(
+    all(f'shard: "{i}/4"' in stage_b_workflow for i in _DS_SHARDS)
+    and 'shard: "1/3"\n' not in stage_b_workflow.split("downstream-1")[1],
+    "the hosted matrix runs the four downstream shards and no strided downstream shard",
+)
 
 command = (
     "PYTHONPATH=devcontrol/src python3 -m unittest discover "
@@ -289,11 +497,17 @@ check(
     # and hazmat/primitives/asymmetric/ed25519.py are byte-identical between the
     # sdists; the only source change is a clippy allow in serialization.rs, and
     # the changelog's only entry is wheels rebuilt with OpenSSL 4.0.2.
-    worker_requirements.count("cryptography==50.0.1") == 1,
+    # Reviewed 5/11/2026 for the 50.0.1 -> 50.0.2 move (#2332): the same two files are
+    # byte-identical between the PyPI sdists (sha256 verified against the PyPI JSON);
+    # the source changes are PyO3 0.29.0 -> 0.29.2 (Cargo.lock), a no-op
+    # `use openssl_sys as _;` in cryptography-cffi, version metadata and a 3.15
+    # classifier; the changelog: wheels on OpenSSL 4.0.3, abi3t wheels for 3.15+,
+    # PyO3 0.29.2 (Cygwin/MSYS2 builds).
+    worker_requirements.count("cryptography==50.0.2") == 1,
     "the CI/runtime environment pins the reviewed Ed25519 implementation exactly once",
 )
 check(
-    pyproject.count('"cryptography==50.0.1"') == 1,
+    pyproject.count('"cryptography==50.0.2"') == 1,
     "the DevControl package metadata pins the same Ed25519 implementation",
 )
 
@@ -684,6 +898,13 @@ native_windows_contracts = (
     "tests/worker_toolhost.py",
     "tests/support/windows_catalog_tier_a_contract.py",
     "tests/support/windows_tier_a_receipt_contract.py",
+    "tests/support/windows_media_volume_contract.py",
+    "tests/support/windows_media_work_area_contract.py",
+    "tests/support/windows_media_preflight_contract.py",
+    "tests/support/windows_lease_dir_acl_contract.py",
+    "tests/support/windows_media_env_set_contract.py",
+    "tests/worker_media_staged_video_sink.py",
+    "tests/workflow_media_gallery_index_writer.py",
 )
 check(
     all(path in workflow for path in native_windows_contracts),

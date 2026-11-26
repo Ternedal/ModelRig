@@ -1,8 +1,8 @@
 # KRAVSPEC — V5 "Kaliv handler" (agent-laget)
 
-**Status:** ✅ GODKENDT 10/7 · ✅ **LEVERET & ON-DEVICE-BEVIST 11/7-2026** (læse + skrive bag bekræftelseskort, audit-log, gate i worker). Specen står som kravdokument/optegnelse; aktuel status i ROADMAP §10.
+**Status:** ✅ GODKENDT 10/7 · ✅ **LEVERET & ON-DEVICE-BEVIST 11/7-2026** (læse + skrive bag bekræftelseskort, audit-log, gate i worker). Specen står som kravdokument/optegnelse; aktuel status i `CURRENT_STATE.md`; det historiske V5-afsnit står i `HISTORY.md` §10.
 **Skrevet:** 2026-07-10 · **Forudsætter:** v1.17.0
-**Roadmap:** `ROADMAP.md` §10 (V5), invarianter i §14
+**Roadmap:** `HISTORY.md` §10 (V5, arkiveret roadmap); invarianter i `ROADMAP.md` "Produktprincipper / invarianter"
 
 > **Læs dette først.** Det her er det farligste vi har bygget. Alt andet i
 > ModelRig kan i værste fald give et forkert svar. Et agent-lag kan slette

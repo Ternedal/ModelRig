@@ -21,7 +21,8 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "worker"))
 
-from app.gpu_lease import GpuBusy, acquire_gpu_lease, resident_is_held, resident_lock_path  # noqa: E402
+from app.gpu_lease import (ExecutorAlreadyRunning, GpuBusy, acquire_executor_lock, acquire_gpu_lease,  # noqa: E402
+                          resident_is_held, resident_lock_path)
 
 LAUNCHER = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "worker", "app",
                                         "comfy_resident_launcher.py"))
@@ -49,6 +50,15 @@ def wait_until(predicate, seconds):
             return True
         time.sleep(0.05)
     return predicate()
+
+
+def _executor_lock_free(lease_dir):
+    try:
+        lock = acquire_executor_lock(GPU, lease_dir=lease_dir)
+    except ExecutorAlreadyRunning:
+        return False
+    os.close(lock._fd)
+    return True
 
 
 def lease_is_busy(lease_dir):
@@ -135,6 +145,63 @@ if WINDOWS:
     check(not lease_is_busy(lease_dir), "the GPU lease is available after the orphan was reaped")
 else:
     print("  SKIP: Job Object kill-on-close case is Windows-only (POSIX keeps the orphan; tested in worker_comfy_supervisor)")
+
+# 4b. Windows only: launched through a venv (as ComfyUI is on the rig), python.exe is a starter and
+#     the interpreter that takes the lock is its child. The proof then names a pid that is not the
+#     spawned one -- but it is in the spawned process's Job Object, and that is what the supervisor
+#     accepts (rig 21/11: proof pid 1904, spawned pid 5372, every start refused).
+if WINDOWS:
+    import venv
+    from app.windows_job import attached_job_process_ids, close_attached_job, JobLimits, spawn_in_job
+    venv_dir = os.path.join(work, "venv")
+    venv.EnvBuilder(with_pip=False, symlinks=False).create(venv_dir)
+    venv_python = os.path.join(venv_dir, "Scripts", "python.exe")
+    marker = os.path.join(work, "started-venv")
+    argv = [venv_python, LAUNCHER, "--resident-lock", lock, "--", main_py, marker, "60"]
+    proc = spawn_in_job(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                        env=env, limits=JobLimits(active_process_limit=4))
+    check(wait_until(lambda: os.path.exists(marker), 60), "stand-in ComfyUI started through a venv's python.exe")
+    try:
+        proof = json.load(open(lock + ".proof", encoding="ascii"))
+    except (OSError, ValueError):
+        proof = {}
+    members = attached_job_process_ids(proc)
+    print(f"  INFO: spawned pid {proc.pid}, proof pid {proof.get('pid')}, job members {sorted(members)}")
+    check(proc.pid in members, "the spawned process is in its job")
+    check(proof.get("token") == TOKEN and proof.get("pid") in members,
+          "the process that holds the lock is in the spawned process's job")
+    check(os.getpid() not in members, "the supervisor itself is not in the job")
+    close_attached_job(proc)
+    proc.wait(timeout=30)
+    check(wait_until(lambda: not resident_is_held(GPU, lease_dir=lease_dir), 10),
+          "closing the job released the lock the venv child held")
+else:
+    print("  SKIP: the venv starter case is Windows-only")
+
+# 5. The executor lock (G2, #2296): held by a live process, a second process is refused; once the
+#    holder is killed, the OS releases it and the next executor gets it. Same primitive as the lease.
+holder = subprocess.Popen(
+    [sys.executable, "-c",
+     "import sys, time\n"
+     f"sys.path.insert(0, {os.path.join(os.path.dirname(__file__), '..', '..', 'worker')!r})\n"
+     "from app.gpu_lease import acquire_executor_lock\n"
+     f"lock = acquire_executor_lock({GPU!r}, lease_dir={lease_dir!r})\n"
+     "print('HELD', flush=True)\n"
+     "time.sleep(60)\n"],
+    stdout=subprocess.PIPE, text=True)
+try:
+    check(holder.stdout.readline().strip() == "HELD", "a live executor process holds the executor lock")
+    try:
+        acquire_executor_lock(GPU, lease_dir=lease_dir)
+        check(False, "a second executor must be refused while the first is alive")
+    except ExecutorAlreadyRunning:
+        check(True, "a second executor is refused while the first is alive")
+    check(not lease_is_busy(lease_dir), "the executor lock is independent of the GPU lease")
+finally:
+    holder.kill()
+    holder.wait()
+    holder.stdout.close()
+check(wait_until(lambda: _executor_lock_free(lease_dir), 15), "the OS released the executor lock when its holder was killed")
 
 print(f"\n===== RESIDENT LOCK CONTRACT ({'windows' if WINDOWS else 'posix'}): {passed} passed, {failed} failed =====")
 raise SystemExit(1 if failed else 0)

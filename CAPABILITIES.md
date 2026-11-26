@@ -44,20 +44,22 @@ liste over navne: `tests/worker_unit.py` **finder** loaderne ved at gå
 optræder i svaret. En ny loader falder derfor på testen i stedet for stille at
 blive urapporterbar.
 
-## Core vs. full worker — **status: core (Kendt begrænsning)**
+## Core vs. full worker — **status: voice bundlet, dokument-deps ikke (Kendt begrænsning)**
 
 Den **publicerede** worker-exe (`modelrig-worker-windows-x64.exe`) bygges fra
-`worker/requirements.txt`, som pr. 17/8 indeholder FastAPI, Uvicorn, HTTPX,
-Pydantic, cryptography og tzdata — altså stadig ingen af de fire nedenfor.
-De fire ovenstående er kommenterede/valgfri og er **ikke** i den udgivne exe. Så
-på en frisk installation rapporterer `/capabilities` typisk `asr/tts/pdf/docx =
-false`, indtil de installeres på riggen (kræver en Python-worker, ikke exe'en).
+`worker/requirements.txt` + `worker/requirements-release-voice.txt`
+(faster-whisper, piper-tts, soundfile og CUDA 12/cuDNN 9-runtime), og
+release-workflowet verificerer stemmepakken i den frosne exe
+(`scripts/verify_frozen_voice_package.py`). `asr`/`tts`/`cuda` er altså med;
+PDF/DOCX/PPTX-loaderne er stadig **ikke** bundlet. Så på en frisk installation
+rapporterer `/capabilities` typisk `pdf/docx/pptx = false`, indtil de
+installeres på riggen (kræver en Python-worker, ikke exe'en).
 
 Dette er en **bevidst accepteret begrænsning** for nu, ikke en fejl — men den er
 nu *ærlig*: workeren lover ikke evner den ikke har, og klienten kan spørge.
 
 **Vej til full (planlagt, ikke gjort):** enten en separat `modelrig-worker-full`
-med dependencies bundlet + feature-smoke-tests i CI, eller én full appliance-worker.
+med dokument-dependencies bundlet + feature-smoke-tests i CI, eller én full appliance-worker.
 Indtil da: kør worker fra Python på riggen med de deps du vil bruge.
 
 ## Hvad klienten bør gøre (planlagt)
@@ -75,7 +77,7 @@ BEGGE klienttræer og opdager selv nye kaldesteder, så en fremtidig
 desktop-ingest ikke kan komme ind ugatet.)**
 
 > **Tre forskellige ting hedder "capabilities". Forveksl dem ikke:**
-> `GET /capabilities` er workerens fem dependency-booleans (dette dokument).
+> `GET /capabilities` er workerens syv dependency-booleans (dette dokument).
 > `GET /api/v1/tools` er T-030's `kaliv-capability/v2`-deskriptorer, som
 > Kontrolcentret læser. `GET /api/v1/experimental/agent3/capabilities` er
 > Agent 3's egen flade. Et grep efter "capabilities" rammer alle tre, og det
@@ -85,5 +87,5 @@ desktop-ingest ikke kan komme ind ugatet.)**
 
 - **Implementeret:** `/capabilities` + `capabilities` i `/health/full`; ærlig
   import- + CUDA-detektion; unit-testet (`tests/worker_unit.py`).
-- **Kendt begrænsning:** udgivet worker-exe er core-only (ingen ASR/TTS/PDF/DOCX-deps).
-- **Planlagt:** klient-gating på capabilities; full-worker-pakke + smoke-tests.
+- **Kendt begrænsning:** udgivet worker-exe har voice (ASR/TTS/CUDA), men ingen PDF/DOCX/PPTX-deps.
+- **Landet:** Android-klient-gating (17/8). **Planlagt:** full-worker-pakke med dokument-deps + smoke-tests.

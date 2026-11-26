@@ -51,11 +51,11 @@ import io
 import os
 import traceback
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Callable, Mapping
 
 from .gpu_lease import GpuLease, acquire_gpu_lease, device_uuid_map, parse_cuda_device
-from .image_gpu_admission import inspect_cuda_budget
-from .media_generation_contract import GenerationError, GenerationRequest, RenderedArtifact
+from .image_gpu_admission import GpuMemoryShortage, inspect_cuda_budget, nvml_used_mib
+from .media_generation_contract import GenerationCancelled, GenerationError, GenerationRequest, RenderedArtifact
 from .media_generation_profiles import DIFFUSERS_PIPELINES, ModelProfile, validate_request
 
 
@@ -137,6 +137,8 @@ class DiffusersImageAdapter:
         self._env = os.environ if env is None else env
         self._lease = None
         self._pipeline = None
+        self.admitted_budget = None
+        self.admitted_nvml_used_mib = None
         self._quarantine: _Quarantined | None = None
         self._baseline: int | None = None
         self._torch = None
@@ -172,9 +174,17 @@ class DiffusersImageAdapter:
         try:
             # Advisory: weights may still exceed what was free, but no process
             # that takes this lease can load onto this GPU while we hold it.
-            inspect_cuda_budget(self.index, reserve_gib=self.profile.resources.reserve_gib,
-                                min_usable_gib=self.profile.resources.min_usable_gib,
-                                expected_uuid=gpu_uuid)
+            # Kept for the executor's diagnostics: what the card looked like when the load was
+            # admitted or refused -- the probe's own numbers and NVML's, taken together.
+            nvml_used = nvml_used_mib(self.index)
+            try:
+                self.admitted_budget = inspect_cuda_budget(
+                    self.index, reserve_gib=self.profile.resources.reserve_gib,
+                    min_usable_gib=self.profile.resources.min_usable_gib, expected_uuid=gpu_uuid)
+            except GpuMemoryShortage as shortage:
+                shortage.nvml_used_mib = nvml_used
+                raise
+            self.admitted_nvml_used_mib = nvml_used
             import torch
             import diffusers
             pipeline_class = getattr(diffusers, self.profile.pipeline)
@@ -217,22 +227,45 @@ class DiffusersImageAdapter:
             f"model load failed ({failure}) and GPU memory could not be proven free; "
             "the GPU lease is kept until this process exits")
 
-    def render(self, request: GenerationRequest) -> RenderedArtifact:
+    def render(self, request: GenerationRequest, *,
+               should_cancel: Callable[[], bool] | None = None) -> RenderedArtifact:
+        """Render one PNG. should_cancel is polled after each denoising step; True sets the
+        pipeline's interrupt flag, the partial image is discarded and GenerationCancelled is raised."""
         if self._pipeline is None:
             raise RuntimeError("adapter is not loaded")
         request = validate_request(self.profile, request)
         if request.task != "text_to_image":
             raise GenerationError("this adapter renders text_to_image only")
+        if should_cancel is not None and should_cancel():
+            raise GenerationCancelled("cancelled before rendering")
         kwargs = {
             "prompt": request.prompt,
             "num_inference_steps": request.steps,
             "width": request.width,
             "height": request.height,
         }
+        # Profile render defaults (DiffusersOptions). Only keys the operator set are passed, so a
+        # profile without them renders exactly as before this slice.
+        options = self.profile.backend_options
+        if options is not None:
+            if options.guidance_scale is not None:
+                kwargs["guidance_scale"] = options.guidance_scale
+            if options.negative_prompt is not None:
+                kwargs["negative_prompt"] = options.negative_prompt
         if request.seed is not None:
             import torch
             kwargs["generator"] = torch.Generator(device="cpu").manual_seed(request.seed)
+        cancelled = []
+        if should_cancel is not None:
+            def on_step_end(pipeline, step, timestep, callback_kwargs):
+                if not cancelled and should_cancel():
+                    cancelled.append(step)
+                    pipeline._interrupt = True  # diffusers skips the remaining steps
+                return callback_kwargs
+            kwargs["callback_on_step_end"] = on_step_end
         image = self._pipeline(**kwargs).images[0]
+        if cancelled:
+            raise GenerationCancelled("cancelled while rendering")
         output = io.BytesIO()
         image.save(output, format="PNG")
         return RenderedArtifact(output.getvalue(), "image/png")

@@ -35,9 +35,11 @@ error if the deadline expires.
 
 The installed v2.0.16/v2.0.17 updater still has the old readiness window. Merely
 publishing a new supervisor cannot change the updater already running the
-transaction. After v2.0.18 is published, update the updater first with its
-existing signed self-update command, wait for replacement, verify its version,
-then run the appliance update:
+transaction. Update the updater first with its existing signed self-update
+command, wait for replacement, verify that it is at least v2.0.18, then run the
+appliance update. Both self-update and the appliance update install the latest
+published release (`releases/latest`), not a pinned version, so the guard below
+checks for v2.0.18 or newer rather than an exact version:
 
 ```powershell
 $rig = 'C:\Rig\ModelRig'
@@ -49,11 +51,16 @@ $updaterVersion = ''
 do {
     if (-not (Test-Path (Join-Path $rig 'updater.lock'))) {
         $updaterVersion = (& $updater -version | Out-String).Trim()
-        if ($LASTEXITCODE -eq 0 -and $updaterVersion -eq '2.0.18') { break }
+        $parsed = $null
+        if ($LASTEXITCODE -eq 0 -and [version]::TryParse($updaterVersion, [ref]$parsed) -and
+            $parsed -ge [version]'2.0.18') { break }
     }
     Start-Sleep -Milliseconds 500
 } while ([DateTime]::UtcNow -lt $deadline)
-if ($updaterVersion -ne '2.0.18') { throw 'The v2.0.18 updater is not installed yet.' }
+$parsed = $null
+if (-not ([version]::TryParse($updaterVersion, [ref]$parsed) -and $parsed -ge [version]'2.0.18')) {
+    throw "An updater of v2.0.18 or newer is not installed yet (found '$updaterVersion')."
+}
 & $updater -dir $rig
 ```
 

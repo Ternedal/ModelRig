@@ -8,6 +8,11 @@ on:
     branches: [main]
   pull_request:
     types: [opened, synchronize, reopened, closed]
+  # Merge queue (ADR-SYS-003 D3/D4): the queue's merge commit is github.sha; the
+  # existing `pull_request.head.sha || github.sha` derivations already pick it.
+  # Inert until a ruleset with a merge_queue rule exists on main.
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 concurrency:
@@ -37,7 +42,7 @@ jobs:
           }
           echo "exact checkout authority: $actual"
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.23"
 
@@ -55,7 +60,7 @@ jobs:
         run: python3 scripts/current_state.py
 
       - name: Upload generated current state
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: agent3-generated-current-state
           path: CURRENT_STATE.md
@@ -102,18 +107,19 @@ jobs:
 
       - name: Upload full failed test log
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: agent3-full-test-log
           path: /tmp/modelrig-full-test.log
           if-no-files-found: error
           retention-days: 7
 
-  # Pull requests are Stage-B qualified exactly once by
-  # exact-head-qualification. Push/main and workflow_dispatch keep this
-  # independent full-diagnostics Stage-B authority.
+  # Pull requests and pushes to main are Stage-B qualified exactly once by
+  # exact-head-qualification. Only workflow_dispatch keeps this independent
+  # full-diagnostics Stage-B lane (06/11-2026: three Stage-B chains per push
+  # to main were the single largest CI cost and added no verdict).
   stage-b-slices:
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/_stage_b_slices.yml
     with:
       head_sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}

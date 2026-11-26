@@ -40,6 +40,58 @@ It does not satisfy lifecycle, physical perception, Photoreal likeness, M6
 digital-twin, Android live-body, latency, soak, repository-authority, or final
 production activation.
 
+## Assemble it from GitHub Actions
+
+Do not type the input by hand. `scripts/kaliv_software_exact_green_assembler.py`
+reads it from GitHub for the four pins (read-only `gh api`, with the operator's
+`gh` login):
+
+```powershell
+python scripts/kaliv_software_exact_green_assembler.py `
+  --pin-modelrig <sha> --pin-bodyrig <sha> --pin-visionrig <sha> --pin-voicerig <sha> `
+  --out .\validation\software-exact-green\<date>
+```
+
+Per repository it requires:
+- the newest `exact-head-qualification` run on exactly that `head_sha`,
+  completed with success;
+- the newest run of each required workflow, completed with success;
+- every check run on the commit completed with success, skipped or neutral.
+
+The required workflows per repository:
+
+| Repository | Required workflows |
+|---|---|
+| ModelRig | `ci`, `codeql`, `agent3-full-diagnostics`, `exact-head-qualification` |
+| BodyRig | `ci`, `codeql`, `exact-head-qualification` |
+| VisionRig | `tests`, `exact-head-qualification` |
+| VoiceRig | `tests`, `CodeQL`, `windows-lifecycle`, `exact-head-qualification` |
+
+**VisionRig runs `exact-head-qualification` only on `workflow_dispatch`.**
+Dispatch it for the pin before assembling; without it the assembler refuses.
+Measured 16/11 on VisionRig `main` `efe0c15c`: only `tests` ran.
+
+**Dispatch while the pin is still the head of the branch you dispatch on.** A
+dispatched run, and its check runs, carry the branch head as `head_sha`, not
+the `head_sha` input. If VisionRig `main` has moved past the pin, the run is
+not visible on the pin, and the assembler refuses. In that case pin the new
+head, or dispatch from a branch whose head is the pin:
+
+    gh workflow run exact-head-qualification.yml -R Ternedal/VisionRig --ref main -f head_sha=<pin>
+
+It writes a new directory holding:
+- one capture file per repository, with the runs and check runs it judged;
+- the evidence file;
+- an assembly record with the qualifier's verdict.
+
+Each `evidence_ref` names the exact-head run and binds the SHA-256 of its
+capture file. The qualifier runs before anything is written; a refusal writes
+nothing.
+
+**Limits:**
+- It sees GitHub's answer at assembly time.
+- The workflow list is the assembler's own, not read from branch protection.
+
 ## Input shape
 
 ```json

@@ -4,7 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened, closed]
+    types: [opened, synchronize, reopened, ready_for_review, closed]
+  # Merge queue (ADR-SYS-003 D3/D4): the queue's merge commit is github.sha; the
+  # existing `pull_request.head.sha || github.sha` derivations already pick it.
+  # Inert until a ruleset with a merge_queue rule exists on main.
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 # Only PR runs share a group (per PR number) so newer immutable PR heads
@@ -39,7 +44,7 @@ jobs:
           }
           echo "exact checkout authority: $actual"
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.23"
 
@@ -122,7 +127,7 @@ jobs:
 
       - name: Upload exact-head failed Python log
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: exact-head-python-failure
           path: /tmp/exact-head-python.log
@@ -135,17 +140,102 @@ jobs:
         shell: bash
         run: PYTHONPATH=devcontrol/src python3 -m unittest discover -s devcontrol/tests -p 'test_*.py' -v
 
+  # Release class of a PR (ADR-SYS-002): does merge-base..head touch only the
+  # documentation class? Computed by scripts/release_fingerprint.py, the same
+  # classifier the freeze reader uses, so "docs-only" means the same thing in
+  # CI as in a freeze receipt: protected documents (RIGDAG_SIMPEL.md, ...) and
+  # every protected prefix count as code. Fail-closed by construction: if this
+  # job fails or is skipped, docs_only is empty and Stage B runs. Pushes to main
+  # and dispatch never consult it. Script and classifier are the BASE commit's.
+  # In a merge group (ADR-SYS-003 D3) the head is the queue's merge commit
+  # (github.sha) and the base is merge_group.base_sha; merge-base of the two is
+  # the base itself, so the classification covers exactly what the PR adds.
+  release-class:
+    if: >-
+      (github.event_name == 'pull_request' && github.event.action != 'closed') ||
+      github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Classify merge-base..head with the release fingerprint
+        id: classify
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          # The script and the classifier come from the BASE commit, never from
+          # the PR head (review P2 on #2422). A base without the script cannot
+          # classify: say so and run the full chain.
+          if git cat-file -e "$BASE_SHA:scripts/release_class.sh" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/release_class.sh" > "$RUNNER_TEMP/release_class.sh"
+            bash "$RUNNER_TEMP/release_class.sh" "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT"
+          else
+            echo "::notice::base $BASE_SHA has no scripts/release_class.sh; treating the PR as code"
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # CI-tiering (#2413): the Stage B chain is ~650 job-minutes and 2-3 h of
+  # wall-clock, 92% of a PR run. It runs on main pushes, on workflow_dispatch,
+  # and on pull requests that are NOT drafts; a draft becoming ready fires
+  # ready_for_review, which re-qualifies the same head with Stage B included.
+  # The merge rule is unchanged: full CI incl. Stage B green on the qualified
+  # commit. On a draft this job is skipped, never reported green. A PR whose
+  # merge-base..head is documentation-only (release-class above) is skipped
+  # too: Stage B qualifies code, and the documentation class is by definition
+  # outside the release fingerprint (ADR-SYS-002 D1). The same two rules apply
+  # to a merge-group run (ADR-SYS-003 D3); pushes to main and dispatch always run.
   stage-b-slices:
-    if: github.event_name != 'pull_request' || github.event.action != 'closed'
+    needs: [release-class]
+    if: >-
+      !cancelled() && (
+        (github.event_name != 'pull_request' && github.event_name != 'merge_group') ||
+        (github.event_name == 'merge_group' && needs.release-class.outputs.docs_only != 'true') ||
+        (github.event_name == 'pull_request' && github.event.action != 'closed' &&
+         github.event.pull_request.draft != true && needs.release-class.outputs.docs_only != 'true')
+      )
     uses: ./.github/workflows/_stage_b_slices.yml
     with:
       head_sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
-  # _tests.yml is shared with the release workflow and historically checks out
-  # GitHub's pull-request merge ref. Until that large reusable workflow is
-  # migrated independently, require its *entire repository tree* to be byte-
-  # identical to the immutable PR head. Base drift therefore fails closed
-  # instead of silently injecting files into qualification.
+
+  # ADR-SYS-003 D3 (Codex P1 on #2427): the merge queue must WAIT for Stage B.
+  # The slice jobs are not required checks (their names vary per shard), so
+  # this single job is: it passes only when Stage B succeeded, or was skipped
+  # for a reason the policy allows (documentation-only candidate; a draft PR,
+  # where Stage B is deferred to ready_for_review). Any other skip, a failure
+  # or a cancellation fails it. Required in queue mode (QUEUE_REQUIRED_STATUS_
+  # CHECKS in scripts/repository_authority.py); classic protection today does
+  # not list it, so gate 10's current verdict is unchanged.
+  # The logic lives in scripts/stage_b_verdict.sh so the gate can test every
+  # branch (tests/workflow_stage_b_verdict.py). The campaign freeze (D7) is NOT
+  # judged here -- this job runs the candidate's own files -- but in
+  # .github/workflows/freeze-guard.yml, required via the ruleset from main.
+  stage-b-verdict:
+    needs: [release-class, stage-b-slices]
+    if: >-
+      !cancelled() &&
+      (github.event_name != 'pull_request' || github.event.action != 'closed')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Stage B completed, or skipped for an allowed reason
+        shell: bash
+        env:
+          RESULT: ${{ needs.stage-b-slices.result }}
+          DOCS_ONLY: ${{ needs.release-class.outputs.docs_only }}
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: bash scripts/stage_b_verdict.sh
+
   legacy-merge-tree-equivalence:
     if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest

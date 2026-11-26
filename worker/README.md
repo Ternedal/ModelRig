@@ -5,10 +5,15 @@ in SQLite, and answers queries by brute-force cosine retrieval + optional
 synthesis. The backend proxies `/api/v1/rag/*` here; clients never call it
 directly.
 
-Status: **built and tested** (9/9) in the generator environment (logic verified
-with Ollama stubbed out; live embedding/generation needs a running Ollama).
+Status (V1 checkpoint, historical): **built and tested** (9/9) in the generator
+environment (logic verified with Ollama stubbed out; live embedding/generation
+needs a running Ollama). CI now runs every `tests/worker_*.py`.
 
 ## Endpoints
+The table below is the original RAG core. Full route list (RAG, voice, tools,
+jobs, schedules, Agent 3 …): [`ROUTE_INVENTORY.md`](../ROUTE_INVENTORY.md)
+(generated).
+
 | Method | Path          | Purpose                                        |
 |--------|---------------|------------------------------------------------|
 | GET    | `/healthz`    | liveness + version + document count            |
@@ -28,6 +33,7 @@ cd worker
 python3 -m venv .venv && source .venv/bin/activate   # optional
 pip install -r requirements.txt
 # Loopback only: the worker has no auth; the backend reaches it on localhost.
+# It also refuses non-loopback clients (403) unless KALIV_WORKER_ALLOW_LAN=1.
 uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099
 ```
 
@@ -37,8 +43,8 @@ uvicorn app.entrypoint:app --host 127.0.0.1 --port 8099
 | `MODELRIG_OLLAMA_URL`     | `http://127.0.0.1:11434`   |
 | `MODELRIG_EMBED_MODEL`    | `nomic-embed-text`         |
 | `MODELRIG_GEN_MODEL`      | `qwen2.5-coder:7b`         |
-| `MODELRIG_OLLAMA_TIMEOUT` | `60` (seconds)             |
-| `MODELRIG_DB`             | `./modelrig-rag.db`        |
+| `MODELRIG_OLLAMA_TIMEOUT` | `600` (seconds)            |
+| `MODELRIG_DB`             | `modelrig-rag.db` under `KALIV_DATA_DIR` (default `%LOCALAPPDATA%\Kaliv` / `~/.local/share/kaliv`) |
 
 ## Example
 ```bash
@@ -51,12 +57,12 @@ curl -X POST http://localhost:8099/rag/query -H 'Content-Type: application/json'
 
 ## Design notes
 - **Chunking**: documents are split into overlapping chunks (`chunk_size` chars,
-  `overlap` chars, prefer whitespace break points) before embedding, so a fact
+  `overlap` chars, prefer sentence-ending punctuation, then whitespace) before embedding, so a fact
   split across a boundary stays retrievable. Each chunk keeps its `source` and a
   `chunk_index`. Defaults 800/150; tune per corpus.
 - Embeddings stored as JSON text in SQLite; retrieval is a linear cosine scan.
   Fine to a few thousand chunks. Swap in `sqlite-vec` or Qdrant when the corpus
-  outgrows a linear scan (see STATUS.md).
+  outgrows a linear scan (see `RAG_DESIGN.md`).
 - Pure-Python cosine (`app/rag.py`) — no numpy dependency.
 
 ## Verified here

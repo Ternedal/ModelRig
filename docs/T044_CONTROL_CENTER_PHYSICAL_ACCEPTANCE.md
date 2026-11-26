@@ -110,7 +110,7 @@ If the exact SHA cannot be identified, the working tree is dirty, any exercised 
 
 ## Test A — open/close and focus order
 
-1. Launch ModelRig.
+1. Launch the Kaliv app.
 2. Open **Settings**.
 3. Activate **Control Center** using TalkBack rather than sight-only tapping.
 4. Verify TalkBack announces the Control Center heading and reaches **Luk**.

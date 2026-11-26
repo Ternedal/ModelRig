@@ -49,8 +49,8 @@ async def fake_chat(messages, model=None):
     return "KVITTERING\nBrugsen 12/7-2026\nMælk 12,50 kr\nÆg 24,00 kr"
 async def fake_embed(text, model=None):
     return [0.1, 0.2, 0.3]
-orig_chat, orig_embed = oc.chat, oc.embed
-oc.chat, oc.embed = fake_chat, fake_embed
+orig_chat, orig_embed, orig_many = oc.chat, oc.embed, oc.embed_many
+oc.chat, oc.embed, oc.embed_many = fake_chat, fake_embed, oc.embed_each
 try:
     os.environ["KALIV_VISION_MODEL"] = "llama3.2-vision:11b "  # trailing space on purpose
     st = M.rag_image_status()
@@ -87,7 +87,7 @@ try:
     check(err is not None and err.status_code == 502,
           "502 when Ollama errors during extraction")
 finally:
-    oc.chat, oc.embed = orig_chat, orig_embed
+    oc.chat, oc.embed, oc.embed_many = orig_chat, orig_embed, orig_many
     os.environ.pop("KALIV_VISION_MODEL", None)
 
 print(f"\n===== VISION: {passed} passed, {failed} failed =====")

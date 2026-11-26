@@ -1,0 +1,541 @@
+{
+  "schema": "kaliv-rig-simulator-manifest/v1",
+  "operators": [
+    {
+      "id": "ps51-parse-all-scripts",
+      "script": "scripts/rig_simulator/ps51_parse_check.ps1",
+      "kind": "powershell",
+      "platform": "windows",
+      "needs_stack": false,
+      "args": [
+        "-RepositoryRoot",
+        "${REPO}",
+        "-Report",
+        "${WORK_DIR}\\ps51-parse.json"
+      ],
+      "expect": {
+        "exit": [
+          0
+        ]
+      },
+      "why": "Every root, scripts/, scripts/rig_simulator/ and deploy/ .ps1 parses under Windows PowerShell 5.1, the rig's shell (workflow_ps1_encoding covers pwsh 7); pwsh-only syntax fails here instead of on the rig day."
+    },
+    {
+      "id": "cmd-launcher-targets-exist",
+      "script": "scripts/rig_simulator/cmd_targets.py",
+      "kind": "python",
+      "needs_stack": false,
+      "args": [
+        "--repository-root",
+        "${REPO}",
+        "--report",
+        "${WORK_DIR}/cmd-targets.json"
+      ],
+      "expect": {
+        "exit": [
+          0
+        ],
+        "stdout_json": {
+          "schema": "kaliv-rig-simulator-cmd-targets/v1",
+          "ok": true
+        }
+      },
+      "why": "Every scripts\\, deploy\\ and tools\\ source file a root .cmd launcher or operator .ps1 points at exists with that exact spelling, so a renamed script cannot strand a launcher."
+    },
+    {
+      "id": "system-release-gate-all-pending",
+      "script": "scripts/kaliv_system_release_gate.py",
+      "kind": "python",
+      "needs_stack": false,
+      "args": [
+        "${REPO}/scripts/rig_simulator/fixtures/v1-manifest-all-pending.json"
+      ],
+      "expect": {
+        "exit": [
+          1
+        ],
+        "stdout_json": {
+          "schema": "kaliv-system-release-verdict/v2",
+          "state": "BLOCKED",
+          "release_scope": "v1",
+          "production_activation": false
+        }
+      },
+      "why": "The final V1 gate runs on this Python and this OS and answers BLOCKED for a manifest with every gate pending; it emits its verdict as JSON, never a traceback."
+    },
+    {
+      "id": "v1-rig-smoke",
+      "script": "scripts/kaliv_v1_rig_smoke.py",
+      "kind": "python",
+      "args": [
+        "--expected-modelrig-sha",
+        "${HEAD_SHA}",
+        "--backend-url",
+        "${BACKEND_URL}",
+        "--worker-url",
+        "${WORKER_URL}"
+      ],
+      "timeout_seconds": 180,
+      "expect": {
+        "exit": [
+          0,
+          1
+        ],
+        "stdout_json": {
+          "schema": "kaliv-v1-readonly-rig-smoke/v1",
+          "probes.backend.status": "PASS",
+          "probes.worker.status": "PASS",
+          "source.matches_expected": true,
+          "production_activation": false
+        }
+      },
+      "why": "The read-only V1 readiness smoke reaches a verdict against a live backend and worker: checkout comparison, both health probes and the voice status probe run end to end. Exit 1 is allowed because the simulator has no ASR/TTS runtime; a traceback or missing JSON is not."
+    },
+    {
+      "id": "recovery-soak-sample-once",
+      "script": "scripts/kaliv_recovery_soak_collector.py",
+      "kind": "python",
+      "args": [
+        "sample",
+        "--once",
+        "--repository-root",
+        "${REPO}",
+        "--journal",
+        "validation/rig-simulator/recovery-soak-journal.jsonl",
+        "--backend-url",
+        "${BACKEND_URL}",
+        "--worker-url",
+        "${WORKER_URL}",
+        "--heartbeat",
+        "${HEARTBEAT}",
+        "--heartbeat-settle-seconds",
+        "4",
+        "--timeout",
+        "5"
+      ],
+      "timeout_seconds": 120,
+      "expect": {
+        "exit": [
+          0
+        ],
+        "jsonl_last": {
+          "path": "validation/rig-simulator/recovery-soak-journal.jsonl",
+          "fields": {
+            "backend_healthy": true,
+            "worker_healthy": true,
+            "supervisor_looping": true,
+            "state_error_absent": true
+          }
+        }
+      },
+      "why": "The recovery_soak collector (gate 9) takes one probe against a live stack and an advancing heartbeat file, and journals a line in which all four health flags hold (backend, worker incl. /health/full, advancing heartbeat, no tool-gate state error); the gate's collector has otherwise never run outside the rig."
+    },
+    {
+      "id": "e2e-latency-voice-driver",
+      "script": "scripts/kaliv_e2e_latency_voice_driver.py",
+      "kind": "python",
+      "args": [
+        "--worker-url",
+        "${WORKER_URL}",
+        "--wav",
+        "${FRESH_WAV}",
+        "--timeout",
+        "30"
+      ],
+      "timeout_seconds": 120,
+      "expect": {
+        "exit": [
+          0,
+          2
+        ],
+        "stdout_json": {
+          "ok": false
+        }
+      },
+      "why": "The gate 8 rig driver accepts a just-written WAV, reaches the worker and reports its outcome as JSON. The simulated worker has no voice runtime and the latency route is dormant, so the driver must fail closed: exit 2 and a JSON object with ok=false, never a traceback. The expectation flips to ok=true the day the simulator carries a voice runtime."
+    },
+    {
+      "id": "v1-gate2-operator-preflight-fail-closed",
+      "script": "scripts/consciousness_live_lifecycle_operator.py",
+      "kind": "python",
+      "needs_stack": true,
+      "args": [
+        "--profile-file",
+        "scripts/rig_simulator/fixtures/gate2-profile.json",
+        "--swap-profile",
+        "scripts/rig_simulator/fixtures/gate2-profile-swap.json",
+        "--worker-url",
+        "${WORKER_URL}",
+        "--out",
+        "${SCRATCH}/gate2-operator"
+      ],
+      "timeout_seconds": 120,
+      "expect": {
+        "exit": [
+          2
+        ],
+        "stdout_contains": [
+          "STOPPED: the worker is not ready for the lifecycle gate",
+          "flags not set to 1"
+        ],
+        "files_absent": [
+          "${SCRATCH}/gate2-operator"
+        ]
+      },
+      "why": "The gate 2 operator (#2407) runs end to end up to its preflight against the production worker entrypoint: it reaches /experimental/consciousness/status, reads the runtime-status schema and refuses because the simulated worker runs without the consciousness flags. That proves the operator's Python, its HTTP path and its fail-closed message on the rig's interpreter, not that gate 2 passes. A refusal in preflight creates no evidence directory (files_absent pins that; the operator's first mkdir is in live_cycle()). Exit 2 is the operator's own 'stopped before the qualifier' code; a traceback, a hang or a different reason is a defect. A simulated PASS needs a worker started with the consciousness flags, a SelfState, an approved Person Revision and a restart choreography the simulator cannot drive yet (pending)."
+    },
+    {
+      "id": "release-assembler-no-evidence-fail-closed",
+      "script": "scripts/kaliv_release_manifest_assembler.py",
+      "kind": "python",
+      "needs_stack": false,
+      "args": [
+        "--release-id",
+        "kaliv-rc-simulator-no-evidence",
+        "--release-scope",
+        "v1",
+        "--modelrig-sha",
+        "${HEAD_SHA}",
+        "--bodyrig-sha",
+        "0000000000000000000000000000000000000000",
+        "--visionrig-sha",
+        "0000000000000000000000000000000000000000",
+        "--voicerig-sha",
+        "0000000000000000000000000000000000000000",
+        "--manifest",
+        "${WORK_DIR}/assembler-must-not-write/no-evidence.json"
+      ],
+      "timeout_seconds": 60,
+      "expect": {
+        "exit": [
+          2
+        ],
+        "stdout_json": {
+          "schema": "kaliv-system-release-manifest-assembly/v1",
+          "state": "INVALID",
+          "production_activation": false
+        },
+        "stdout_contains": [
+          "evidence refs do not match required gates: missing "
+        ],
+        "files_absent": [
+          "validation/rig-simulator/assembler-must-not-write/no-evidence.json"
+        ]
+      },
+      "why": "The gate 1→10 assembler (#2408) is asked for a V1 manifest with no evidence at all: it must answer INVALID as JSON naming the missing gates, exit 2, and write no manifest file. The same convenience layer on the rig would otherwise be the easiest place to fabricate a release; the simulator pins that it refuses before it writes."
+    },
+    {
+      "id": "release-assembler-fake-evidence-fail-closed",
+      "script": "scripts/kaliv_release_manifest_assembler.py",
+      "kind": "python",
+      "needs_stack": false,
+      "args": [
+        "--release-id",
+        "kaliv-rc-simulator-fake-evidence",
+        "--release-scope",
+        "v1",
+        "--modelrig-sha",
+        "${HEAD_SHA}",
+        "--bodyrig-sha",
+        "0000000000000000000000000000000000000000",
+        "--visionrig-sha",
+        "0000000000000000000000000000000000000000",
+        "--voicerig-sha",
+        "0000000000000000000000000000000000000000",
+        "--software-exact-green-ref",
+        "simulator:not-evidence",
+        "--consciousness-live-lifecycle-ref",
+        "simulator:not-evidence",
+        "--visionrig-physical-perception-ref",
+        "simulator:not-evidence",
+        "--voicerig-physical-acceptance-ref",
+        "simulator:not-evidence",
+        "--end-to-end-latency-ref",
+        "simulator:not-evidence",
+        "--recovery-soak-ref",
+        "simulator:not-evidence",
+        "--repository-authority-ref",
+        "simulator:not-evidence",
+        "--manifest",
+        "${WORK_DIR}/assembler-must-not-write/fake-evidence.json"
+      ],
+      "timeout_seconds": 60,
+      "expect": {
+        "exit": [
+          2
+        ],
+        "stdout_json": {
+          "schema": "kaliv-system-release-manifest-assembly/v1",
+          "state": "INVALID",
+          "production_activation": false
+        },
+        "stdout_contains": [
+          "rejected by the final release gate"
+        ],
+        "files_absent": [
+          "validation/rig-simulator/assembler-must-not-write/fake-evidence.json"
+        ]
+      },
+      "why": "Seven refs of the right count and shape but with no canonical evidence behind them: the assembler hands the manifest to kaliv_system_release_gate, which must reject it (canonical evidence required per gate), so the assembler answers INVALID, exit 2 and writes nothing. This is the path a hurried operator would hit on the rig; a QUALIFIED here would be a hole in the gate itself."
+    },
+    {
+      "id": "stack-worker-cmd-v1-gates-3-8",
+      "script": "scripts/start-stage-a-validation-stack.ps1",
+      "kind": "powershell",
+      "platform": "windows",
+      "needs_stack": false,
+      "args": [
+        "-PlannerModel",
+        "qwen3:14b",
+        "-ValidationReport",
+        "${SCRATCH}\\agent3-report.json",
+        "-WriteWorkerCmdOnly",
+        "-EnableE2eLatency",
+        "-EnableVisionRigAdmission"
+      ],
+      "expect": {
+        "exit": [
+          0
+        ],
+        "stdout_contains": [
+          "WORKER-CMD-BEGIN",
+          "WORKER-CMD-END",
+          "set \"KALIV_CONSCIOUSNESS_CORE_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_CHAT_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_PROFILE_FILE=",
+          "deploy\\consciousness-dev-profile.json\"",
+          "set \"KALIV_E2E_LATENCY_QUALIFICATION_ENABLED=1\"",
+          "set \"KALIV_E2E_LATENCY_CANDIDATE_GIT_SHA=",
+          "validation\\e2e-latency\"",
+          "set \"KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED=1\""
+        ]
+      },
+      "why": "The rig-day command line for V1 gates 8 and 3 (#2425) runs under Windows PowerShell 5.1 and writes the latency flag, the HEAD SHA, the evidence root, VisionRig's admission flag and the live-cycle session with the default profile into the generated worker cmd. -WriteWorkerCmdOnly stops before any port wait or start, so this proves the generated environment, not that the worker starts."
+    },
+    {
+      "id": "stack-worker-cmd-v1-gate2-with-3-8",
+      "script": "scripts/start-stage-a-validation-stack.ps1",
+      "kind": "powershell",
+      "platform": "windows",
+      "needs_stack": false,
+      "args": [
+        "-PlannerModel",
+        "qwen3:14b",
+        "-ValidationReport",
+        "${SCRATCH}\\agent3-report.json",
+        "-WriteWorkerCmdOnly",
+        "-EnableScheduler",
+        "-SchedulerDataDir",
+        "${SCRATCH}\\scheduler",
+        "-SchedulerApprovalSecret",
+        "simulator-approval-secret-0123456789abcdef",
+        "-EnableConsciousnessLifecycle",
+        "-EnableE2eLatency",
+        "-EnableVisionRigAdmission"
+      ],
+      "expect": {
+        "exit": [
+          0
+        ],
+        "stdout_contains": [
+          "WORKER-CMD-BEGIN",
+          "set \"KALIV_SCHEDULER=1\"",
+          "set \"KALIV_CONSCIOUSNESS_AUTONOMOUS_SCHEDULER_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_QUALIFICATION_EVIDENCE_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_CORE_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_SUPERVISOR_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_CHAT_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_EVENT_STEP_ENABLED=1\"",
+          "set \"KALIV_CONSCIOUSNESS_PROFILE_FILE=",
+          "deploy\\consciousness-dev-profile.json\"",
+          "set \"KALIV_E2E_LATENCY_QUALIFICATION_ENABLED=1\"",
+          "set \"KALIV_E2E_LATENCY_CANDIDATE_GIT_SHA=",
+          "validation\\e2e-latency\"",
+          "set \"KALIV_CONSCIOUSNESS_VISIONRIG_ENABLED=1\"",
+          "WORKER-CMD-END"
+        ]
+      },
+      "why": "Gate 2's command line (#2407) together with gates 8 and 3: the scheduler, the twelve lifecycle flags, the profile, the latency block and the VisionRig flag all land in one worker cmd under PowerShell 5.1."
+    },
+    {
+      "id": "stack-worker-cmd-gate2-refuses-without-scheduler",
+      "script": "scripts/start-stage-a-validation-stack.ps1",
+      "kind": "powershell",
+      "platform": "windows",
+      "needs_stack": false,
+      "args": [
+        "-PlannerModel",
+        "qwen3:14b",
+        "-ValidationReport",
+        "${SCRATCH}\\agent3-report.json",
+        "-WriteWorkerCmdOnly",
+        "-EnableConsciousnessLifecycle"
+      ],
+      "expect": {
+        "exit": [
+          1
+        ]
+      },
+      "why": "-EnableConsciousnessLifecycle without -EnableScheduler is refused before anything is written: the autonomous scheduler only mounts with KALIV_SCHEDULER=1 (#2407). Exit 1 is PowerShell's for a thrown error under -File."
+    },
+    {
+      "id": "worker-boots-with-v1-gates-3-8-env",
+      "script": "scripts/rig_simulator/worker_cmd_boot.py",
+      "kind": "python",
+      "platform": "windows",
+      "needs_stack": false,
+      "timeout_seconds": 240,
+      "args": [
+        "--repository-root",
+        "${REPO}",
+        "--scratch",
+        "${SCRATCH}\\boot-3-8",
+        "--expect-path",
+        "/experimental/e2e-latency/voice",
+        "--expect-path",
+        "/experimental/consciousness/visionrig-event",
+        "--status-true",
+        "enabled.visionrig_admission",
+        "--status-true",
+        "enabled.event_step",
+        "--status-true",
+        "mounted.supervisor",
+        "--status-true",
+        "prerequisites.cognitive_profile_available",
+        "--stray",
+        "KALIV_SIMULATOR_STRAY_FLAG=1",
+        "--",
+        "-EnableE2eLatency",
+        "-EnableVisionRigAdmission",
+        "-PlannerModel",
+        "qwen3:14b",
+        "-ValidationReport",
+        "${SCRATCH}\\agent3-report.json"
+      ],
+      "expect": {
+        "exit": [
+          0
+        ],
+        "stdout_json": {
+          "schema": "kaliv-rig-simulator-worker-cmd-boot/v1",
+          "ok": true,
+          "inherited_kaliv": [
+            "KALIV_SIMULATOR_STRAY_FLAG"
+          ]
+        }
+      },
+      "why": "The production worker (app.entrypoint:app) boots on the rig's interpreter with exactly the environment the gate 3+8 command line generates (-WriteWorkerCmdOnly, #2437): /healthz answers, the latency and VisionRig admission routes are in its OpenAPI surface, the supervisor mounts and the CognitiveProfile from the generated path loads. Not proven: that either gate passes (no GPU, speech backends, camera or model here). A KALIV_* variable left in the operator's shell is named by the stack (INHERITED-KALIV, warning on a real start): the worker cmd inherits it, since only the variables the cmd sets are overridden."
+    },
+    {
+      "id": "worker-boots-with-v1-gate2-3-8-env",
+      "script": "scripts/rig_simulator/worker_cmd_boot.py",
+      "kind": "python",
+      "platform": "windows",
+      "needs_stack": false,
+      "timeout_seconds": 240,
+      "args": [
+        "--repository-root",
+        "${REPO}",
+        "--scratch",
+        "${SCRATCH}\\boot-2-3-8",
+        "--expect-path",
+        "/experimental/e2e-latency/voice",
+        "--expect-path",
+        "/experimental/consciousness/visionrig-event",
+        "--status-true",
+        "enabled.autonomous_scheduler",
+        "--status-true",
+        "enabled.continuous_loop",
+        "--status-true",
+        "enabled.visionrig_admission",
+        "--status-true",
+        "mounted.supervisor",
+        "--status-true",
+        "prerequisites.cognitive_profile_available",
+        "--",
+        "-EnableScheduler",
+        "-SchedulerDataDir",
+        "${SCRATCH}\\boot-scheduler",
+        "-SchedulerApprovalSecret",
+        "simulator-approval-secret-0123456789abcdef",
+        "-EnableConsciousnessLifecycle",
+        "-EnableE2eLatency",
+        "-EnableVisionRigAdmission",
+        "-PlannerModel",
+        "qwen3:14b",
+        "-ValidationReport",
+        "${SCRATCH}\\agent3-report.json"
+      ],
+      "expect": {
+        "exit": [
+          0
+        ],
+        "stdout_json": {
+          "schema": "kaliv-rig-simulator-worker-cmd-boot/v1",
+          "ok": true,
+          "inherited_kaliv": []
+        }
+      },
+      "why": "Same for gate 2's command line together with 3 and 8: the worker boots with the scheduler and all lifecycle flags. mounted.autonomous_scheduler is not asserted: it also needs a SelfState and live session the simulator does not create (gate 2 operator preflight covers that refusal)."
+    }
+  ],
+  "pending": [
+    {
+      "script": "scripts/consciousness_live_lifecycle_qualifier.py",
+      "issue": 2390,
+      "why": "The gate 2 operator (#2407) is on main and the simulator runs it up to its preflight (v1-gate2-operator-preflight-fail-closed). The qualifier itself, and a simulated QUALIFIED verdict, need a worker started with KALIV_CONSCIOUSNESS_* flags, KALIV_SCHEDULER=1 and KALIV_CONSCIOUSNESS_QUALIFICATION_EVIDENCE_ENABLED=1, a SelfState, an approved Person Revision and a worker restart the operator asks a human for; the simulator does not drive that yet."
+    },
+    {
+      "script": "scripts/kaliv_software_exact_green_qualifier.py",
+      "issue": 2390,
+      "why": "Gate 1 needs GitHub Actions check-run reads for four repositories (#2408); the simulator has no token by design. Covered by the qualifier's contract test."
+    },
+    {
+      "script": "scripts/kaliv_end_to_end_latency_qualifier.py",
+      "issue": 2390,
+      "why": "Needs a driver run record from the rig speaker path; the simulator exercises the driver and leaves the qualifier to its contract test until a simulated run record exists."
+    },
+    {
+      "script": "scripts/kaliv_voicerig_physical_qualifier.py",
+      "issue": 2390,
+      "why": "Gate 4 evidence is produced in Ternedal/VoiceRig with CUDA synthesis and human listening; nothing to simulate here beyond the contract test."
+    },
+    {
+      "script": "scripts/kaliv_bodyrig_photoreal_qualifier.py",
+      "issue": 2390,
+      "why": "Body gate, deferred under release_scope v1 (ADR-SYS-001); evidence comes from Ternedal/BodyRig."
+    },
+    {
+      "script": "scripts/kaliv_bodyrig_digital_twin_m6_qualifier.py",
+      "issue": 2390,
+      "why": "Body gate, deferred under release_scope v1 (ADR-SYS-001); evidence comes from Ternedal/BodyRig."
+    },
+    {
+      "script": "scripts/kaliv_system_release_bind_consciousness.py",
+      "issue": 2390,
+      "why": "Binds gate 2 evidence into the manifest; runs after the gate 2 operator can be simulated."
+    },
+    {
+      "script": "scripts/freeze_check.py",
+      "issue": 2390,
+      "why": "Asks GitHub for tag ownership and exact-head CI while the token is in hand (#347); the simulator has no token by design and a tokenless run answers NOT FROZEN, which proves nothing."
+    },
+    {
+      "script": "scripts/kaliv_software_exact_green_assembler.py",
+      "issue": 2390,
+      "why": "Gate 1 reads GitHub Actions runs for the four pins (#2408); the simulator has no token by design. Covered by its contract test."
+    },
+    {
+      "script": "scripts/kaliv_repository_authority_assembler.py",
+      "issue": 2390,
+      "why": "Gate 10 assembles each repository's verify-repository-authority.ps1 -Json output, which reads live GitHub protection settings; nothing to simulate without a token. Covered by its contract test."
+    },
+    {
+      "script": "scripts/kaliv_recovery_soak_qualification.py",
+      "issue": 2390,
+      "why": "Gate 9 qualifies a multi-hour journal of real restarts and reruns freeze_check (tokenless here); the collector is run, the qualifier needs a recorded campaign."
+    }
+  ]
+}

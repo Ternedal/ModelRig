@@ -2,6 +2,11 @@
 
 **Status:** AFVENTER KØRSEL · resultatfelter tomme · gælder 1.58.49+ · **Ejer:** Anders (rig + telefon)
 
+> **⚠️ HISTORISK DOKUMENT (1.58.49-æraen).** Tjeklisten blev aldrig udfyldt her
+> og er afløst af Stage A/B-procedurerne i `STAGED_PHYSICAL_PROMOTION.md`. Punkt
+> B9 ("self-update findes ikke") gælder ikke længere: 2.0.12 er en signeret source
+> med updater self-update-support (`STAGE_B_UPDATER_EVIDENCE.md`).
+
 > **Formål:** on-device-bevis for alt det, CI kun kan kompilere/unit-teste.
 > Udfyld **Resultat** (✅/❌/⏭️) + **Note** under test. Dette er porten mellem
 > "CI-grøn" og "tør stole på det" — og den er nu ajour med hvad der faktisk er

@@ -35,8 +35,7 @@ text or raw prompt; only the prompt's SHA-256.
 
 ```powershell
 cd C:\Rig\src\ModelRig
-# Only run from the experimental branch or from an explicitly downloaded,
-# reviewed copy of this nonproduction script. Do not replace or overwrite a checked-out release tree.
+# The script is on main; run it from a clean checkout. Do not replace or overwrite a checked-out release tree.
 python .\scripts\ollama_inference_benchmark.py `
   --base-url http://127.0.0.1:11434 `
   --model gemma4:26b --num-ctx 8192 `

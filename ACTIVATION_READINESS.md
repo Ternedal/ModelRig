@@ -3,9 +3,9 @@
 > **Genereret af `scripts/activation_readiness.py`. Ret ikke i hånden.**
 > Den her side findes fordi de dokumenter der plejede at svare på spørgsmålet alle var driftet på én gang, og det er den side et menneske læser i præcis det øjeblik hvor de beslutter at give software lov til at handle selv. Den fejler lukket: ingen rapport = ikke klar.
 
-**Version på main:** `2.0.18`
+**Version på main:** `2.0.21`
 **Kørende appliance:** ingen fundet på 127.0.0.1:8080 — dommen bygger på dette miljøs rapportstier (CI-fallback)
-**Genereret:** 2026-10-20 06:02 UTC
+**Genereret:** 2026-11-20 09:03 UTC
 
 ---
 
@@ -71,7 +71,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 
 ## Switches (læst fra koden, ikke fra hukommelsen)
 
-**0 af 39 feature-switches er tændt som default.** (34 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
+**0 af 42 feature-switches er tændt som default.** (36 af posterne nedenfor er indstillinger — tal og stier, ikke beslutninger.)
 
 | Switch | Default | Tilstand |
 |---|---|---|
@@ -111,7 +111,10 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_FILE_WORKSPACE_ROOT` | `(tom)` | indstilling |
 | `KALIV_GITHUB_CONNECTOR_PILOT` | `0` | slukket |
 | `KALIV_HOME_RIG_PILOT` | `0` | slukket |
+| `KALIV_IMAGE_TOOL_ENABLED` | `(tom)` | slukket |
 | `KALIV_MAX_UPLOAD_MB` | `25` | indstilling |
+| `KALIV_MEDIA_INTERNAL_SECRET` | `(unset)` | indstilling |
+| `KALIV_MEDIA_JOBS_API` | `0` | slukket |
 | `KALIV_MEMORY4_CHAT_ENABLED` | `0` | slukket |
 | `KALIV_MEMORY4_CHAT_WRITE_ENABLED` | `0` | slukket |
 | `KALIV_MEMORY4_CONTEXT_ENABLED` | `(tom)` | slukket |
@@ -127,6 +130,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `KALIV_TOOLS_DIR` | `(unset)` | indstilling |
 | `KALIV_TOOLS_ENABLED` | `0` | slukket |
 | `KALIV_TOOL_ISOLATION` | `(tom)` | indstilling |
+| `KALIV_VIDEO_TOOL_ENABLED` | `0` | slukket |
 | `KALIV_VISIONRIG_SENSOR_CONTROL` | `0` | slukket |
 | `KALIV_VISIONRIG_URL` | `http://127.0.0.1:8110` | indstilling |
 | `KALIV_VISION_MODEL` | `(tom)` | indstilling |
@@ -136,6 +140,7 @@ Sæt `KALIV_AGENT3_VALIDATION_REPORT` hvis rapporten ligger et andet sted.
 | `MODELRIG_CLAIM_MAX` | `(unset)` | indstilling |
 | `MODELRIG_CONFIG` | `(unset)` | indstilling |
 | `MODELRIG_DATA` | `(unset)` | slukket |
+| `MODELRIG_EMBED_BATCH` | `32` | indstilling |
 | `MODELRIG_EMBED_MODEL` | `nomic-embed-text` | indstilling |
 | `MODELRIG_GEN_MODEL` | `qwen2.5-coder:7b` | indstilling |
 | `MODELRIG_HOST` | `(unset)` | indstilling |

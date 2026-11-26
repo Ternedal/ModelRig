@@ -1,0 +1,105 @@
+name: rig-simulator
+
+# The rig is the scarcest resource in the project. This workflow runs the rig
+# operators once, on Windows, under Windows PowerShell 5.1, against a simulated
+# appliance (real backend + real worker + mock Ollama on loopback), so that
+# path, argument, environment and parser defects show up here and not on a rig
+# day. It proves that operators run to a verdict. It produces no evidence and
+# activates nothing. See docs/RIG_SIMULATOR.md.
+
+on:
+  pull_request:
+    paths:
+      - "scripts/**"
+      - "deploy/**"
+      - "*.cmd"
+      - "worker/requirements.txt"
+      - "tests/workflow_rig_simulator.py"
+      - ".github/workflows/rig-simulator.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**"
+      - "deploy/**"
+      - "*.cmd"
+      - "worker/requirements.txt"
+      - "tests/workflow_rig_simulator.py"
+      - ".github/workflows/rig-simulator.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rig-simulator-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulate:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: "1.23"
+          cache-dependency-path: backend/go.sum
+
+      - name: Show Windows PowerShell authority
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Write-Host "Windows PowerShell: $($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion)"
+          if ($PSVersionTable.PSVersion.Major -ne 5) {
+            throw "Expected Windows PowerShell 5.1, got $($PSVersionTable.PSVersion)"
+          }
+
+      - name: Install the worker's pinned dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install -r worker/requirements.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build the backend
+        shell: powershell
+        working-directory: backend
+        run: |
+          $ErrorActionPreference = "Stop"
+          go build -o "$env:RUNNER_TEMP\modelrig-server.exe" ./cmd/modelrig-server
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Manifest and gate (the same check Linux CI runs)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:PYTHONDONTWRITEBYTECODE = "1"
+          python -B tests/workflow_rig_simulator.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run every operator against the simulated appliance
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:PYTHONDONTWRITEBYTECODE = "1"
+          python -B scripts/rig_simulator/run_operators.py --backend-bin "$env:RUNNER_TEMP\modelrig-server.exe" --require-all --report "$env:RUNNER_TEMP\rig-simulator-report.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload the report and the stack logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rig-simulator-${{ github.run_id }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/rig-simulator-report.json
+            validation/rig-simulator/*.log
+            validation/rig-simulator/*.json
+            validation/rig-simulator/*.jsonl

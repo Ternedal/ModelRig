@@ -127,7 +127,7 @@ Before activation:
 6. **T-034D2 — installed runtime contract**: delivered; real 0.13.4 package surface, dependency isolation, locked profile, action registry and side-channel controls.
 7. **T-034D3 — controlled Chromium request-boundary gate**: delivered in 1.58.123; real browser startup, current-tab-only tools, CDP domain/IP denial and cleanup without an LLM or public network.
 8. **T-034E1 — dormant egress authorization ledger**: delivered in 1.58.124; exact-plan consent, one-use receipts and hash-only audit without runtime wiring.
-9. **T-034E2 — dormant public peer binding**: this delivery; short-lived DNS/peer receipts, one-use claim, connected-peer proof and hash-only URL audit without runtime wiring.
+9. **T-034E2 — dormant public peer binding**: delivered; short-lived DNS/peer receipts, one-use claim, connected-peer proof and hash-only URL audit without runtime wiring.
 10. **T-034E3 — runtime integration**: BrowserHost consent/audit wiring, CDP peer binding, CapabilityDescriptor, controlled public-network validation and eval gates.
 
 Authenticated browsing is a separate future capability, not a flag added to this contract.

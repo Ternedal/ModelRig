@@ -71,6 +71,59 @@ async def embed(text: str, model: str | None = None) -> list[float]:
     return emb
 
 
+# Chunks per /api/embed request during ingest. Measured on the rig (RAG_BENCHMARK.md):
+# 10.000 chunks took >35 min because every chunk was its own HTTP round trip with a
+# fresh connection. /api/embed takes a list and embeds it in one model pass, so one
+# request per batch replaces one per chunk. Kept modest: a batch is one prompt
+# evaluation, and a too-large one only trades round trips for a long single call.
+EMBED_BATCH = max(1, int(os.getenv("MODELRIG_EMBED_BATCH", "32")))
+
+
+async def embed_each(texts: list[str], model: str | None = None) -> list[list[float]]:
+    """One embed() call per text, in order. The legacy-server path of embed_many.
+
+    Resolves ``embed`` at call time, so a stubbed single-text embedder is honoured."""
+    return [await embed(t, model) for t in texts]
+
+
+async def embed_many(texts: list[str], model: str | None = None,
+                     batch_size: int | None = None) -> list[list[float]]:
+    """Embed many texts through batched /api/embed calls; order is preserved.
+
+    Falls back to embed_each() when the server lacks the batch route (404/405),
+    so a downgraded Ollama still ingests, just one chunk at a time. A batch
+    whose response does not carry exactly one vector per input is an error:
+    the caller (ingest) commits nothing until every vector is in hand, so a
+    short answer must fail here rather than misalign chunks and vectors.
+    """
+    if not texts:
+        return []
+    model = model or EMBED_MODEL
+    size = batch_size or EMBED_BATCH
+    out: list[list[float]] = []
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as c:
+            for start in range(0, len(texts), size):
+                batch = texts[start:start + size]
+                r = await c.post(f"{OLLAMA_URL}/api/embed",
+                                 json={"model": model, "input": batch,
+                                       "keep_alive": KEEP_ALIVE})
+                if r.status_code in (404, 405):
+                    return out + await embed_each(texts[start:], model)
+                if r.status_code != 200:
+                    raise OllamaError(f"embeddings failed ({r.status_code}): {r.text[:200]}")
+                rows = r.json().get("embeddings")
+                if (not isinstance(rows, list) or len(rows) != len(batch)
+                        or not all(isinstance(v, list) and v for v in rows)):
+                    got = len(rows) if isinstance(rows, list) else "none"
+                    raise OllamaError(f"embeddings response carries {got} vectors for "
+                                      f"{len(batch)} inputs (is model '{model}' pulled?)")
+                out.extend(rows)
+    except httpx.HTTPError as e:
+        raise OllamaError(f"cannot reach Ollama at {OLLAMA_URL}: {e}") from e
+    return out
+
+
 async def chat(messages: list[dict], model: str | None = None) -> str:
     model = model or GEN_MODEL
     try:

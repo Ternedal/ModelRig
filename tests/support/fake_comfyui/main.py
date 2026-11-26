@@ -8,6 +8,7 @@ the supervisor actually passed. The real supervisor drops FAKE_COMFY_* (not
 in its passthrough list); tests add them in a ComfySupervisor subclass.
 """
 import argparse
+import hashlib
 import json
 import os
 import signal
@@ -64,6 +65,13 @@ if os.environ.get("FAKE_COMFY_PREQUEUED") == "1":
 
 def _render(prompt_id: str) -> None:
     deadline = time.monotonic() + render_seconds
+    if os.environ.get("FAKE_COMFY_SWAP_INPUT") == "1":  # someone replaces the source image mid-job
+        for name in os.listdir(args.input_directory):
+            if name.startswith("kaliv-src-"):
+                incoming = os.path.join(args.input_directory, ".incoming")
+                with open(incoming, "wb") as fh:
+                    fh.write(b"someone else's image")
+                os.replace(incoming, os.path.join(args.input_directory, name))
     foreign = os.environ.get("FAKE_COMFY_FOREIGN_FILE")  # someone else drops a file mid-job
     while time.monotonic() < deadline:
         if foreign and not os.path.exists(os.path.join(args.output_directory, foreign)):
@@ -79,9 +87,26 @@ def _render(prompt_id: str) -> None:
         with open(os.path.join(args.output_directory, foreign), "wb") as fh:
             fh.write(b"not ours")
     mode = os.environ.get("FAKE_COMFY_OUTPUT_MODE", "ok")
-    name = f"kaliv_{prompt_id[:8]}.mp4"
+    # A workflow names its output; FAKE_COMFY_OUTPUT_PREFIX stands in for its filename_prefix.
+    name = os.environ.get("FAKE_COMFY_OUTPUT_PREFIX", "kaliv_") + f"{prompt_id[:8]}.mp4"
     path = os.path.join(args.output_directory, name)
     mp4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2" + b"\x00" * int(os.environ.get("FAKE_COMFY_MP4_PAD", "64"))
+    sound = os.environ.get("FAKE_COMFY_SOUND")
+    if sound in ("1", "decoy"):
+        def box(kind, payload):
+            return (8 + len(payload)).to_bytes(4, "big") + kind + payload
+
+        def track(handler):
+            return box(b"trak", box(b"tkhd", b"\x00" * 12) + box(b"mdia", box(b"mdhd", b"\x00" * 12)
+                       + box(b"hdlr", b"\x00" * 8 + handler + b"\x00" * 13)))
+        pad = b"\x00" * int(os.environ.get("FAKE_COMFY_MP4_PAD", "64"))
+        handler_bytes = b"\x00\x00\x00\x21hdlr" + b"\x00" * 8 + b"soun" + b"\x00" * 13
+        # "1": a real sound track beside the video track, moov after mdat as SaveVideo writes it.
+        # "decoy": video only, but the same handler bytes lie inside mdat and in a udta box -
+        # what a byte search would take for a sound track (#2477 review).
+        tracks = track(b"vide") + (track(b"soun") if sound == "1" else box(b"udta", handler_bytes))
+        mp4 = (b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2"
+               + box(b"mdat", pad + (handler_bytes if sound == "decoy" else b"")) + box(b"moov", tracks))
     entries = [{"filename": name, "subfolder": "", "type": "output"}]
     status = {"status_str": "success", "completed": True}
 
@@ -148,7 +173,11 @@ class Handler(BaseHTTPRequestHandler):
                 free = int(float(open(override).read()) * GIB)  # another process took VRAM
             device = {"name": "cuda:0 Fake GPU", "type": device_type, "index": 0,
                       "vram_total": vram_total, "vram_free": free}
-            self._send({"system": {"comfyui_version": "fake"}, "devices": [device] * devices})
+            version = os.environ.get("FAKE_COMFY_VERSION", "fake")
+            version_file = os.path.join(STATE, "comfyui_version") if STATE else ""
+            if version_file and os.path.exists(version_file):
+                version = open(version_file).read().strip()  # e.g. someone upgraded ComfyUI under us
+            self._send({"system": {"comfyui_version": version}, "devices": [device] * devices})
         elif self.path == "/queue":
             with lock:
                 self._send({"queue_running": [[0, pid] for pid in queue[:1]],
@@ -167,7 +196,25 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(body.get("prompt"), dict):
                 self._send({"error": "no prompt"}, 400)
                 return
+            # Like ComfyUI: LoadImage's file must exist in the input directory when the prompt is
+            # validated; record exactly what it would read (i2v tests compare the bytes).
+            seen = []
+            for node in body["prompt"].values():
+                if isinstance(node, dict) and node.get("class_type") == "LoadImage":
+                    name = node.get("inputs", {}).get("image")
+                    # Resolve the name against a listing of the input directory, so the path that
+                    # is opened comes from the directory itself, never from the request.
+                    entries = {entry.name: entry.path for entry in os.scandir(args.input_directory)
+                               if entry.is_file(follow_symlinks=False)} if args.input_directory else {}
+                    if not isinstance(name, str) or name not in entries:
+                        self._send({"error": "prompt_outputs_failed_validation", "node_errors": {"image": "missing"}}, 400)
+                        return
+                    with open(entries[name], "rb") as fh:
+                        data = fh.read()
+                    seen.append({"name": name, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)})
             if STATE:
+                with open(os.path.join(STATE, "loadimage.json"), "w") as fh:
+                    json.dump(seen, fh)
                 with open(os.path.join(STATE, "last_prompt.json"), "w") as fh:
                     json.dump(body, fh)
                 with open(os.path.join(STATE, "prompts.log"), "a") as fh:

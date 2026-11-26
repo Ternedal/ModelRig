@@ -471,10 +471,19 @@ class PilotOperator:
 
     def _wait_json(self, path: Path, seconds: float, label: str) -> dict[str, Any]:
         deadline = self.monotonic() + seconds
+        last_error: OperatorError | None = None
         while self.monotonic() < deadline:
             if path.is_file():
-                return _read_object(path, label)
+                try:
+                    return _read_object(path, label)
+                except OperatorError as exc:
+                    # A producer may have created the file before its JSON
+                    # payload is complete. Retry only within the original
+                    # deadline; persistent corruption still fails closed.
+                    last_error = exc
             self.sleeper(0.1)
+        if last_error is not None:
+            raise last_error
         raise OperatorError(f"timeout mens der blev ventet på {label}")
 
 

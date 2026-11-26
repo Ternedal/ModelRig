@@ -111,6 +111,27 @@ class EndToEndLatencyObserver:
         }
         return receipt
 
+    def voice_outward_started(
+        self,
+        *,
+        utterance_id: str,
+        sample: ClockSample | None = None,
+    ) -> dict[str, Any]:
+        """The reply began to play, and no body is part of the measurement.
+
+        ADR-SYS-001 D5 and D6: a Kaliv V1 measurement ends at the first spoken
+        answer and must not claim a body, so the receipt names no body runtime.
+        The voice+body receipt is written by BodySession instead.
+        """
+        receipt, _ = self._base("outward_started", sample=sample)
+        receipt["details"] = {
+            "outward_kind": "voice",
+            "started": True,
+            "utterance_id": _token(utterance_id, "utterance_id"),
+            "body_runtime_id": None,
+        }
+        return receipt
+
     def outward_binding(self) -> dict[str, str]:
         """Return the exact worker-internal identity required by BodySession."""
         return {

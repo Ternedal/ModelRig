@@ -129,6 +129,7 @@ from app import rag
 from app.store import DocStore
 
 old_embed = oc.embed
+old_embed_many = oc.embed_many
 old_chat = oc.chat
 
 
@@ -162,6 +163,7 @@ async def forbidden_chat(*_args, **_kwargs):
 
 
 oc.embed = fake_embed
+oc.embed_many = oc.embed_each
 oc.chat = forbidden_chat
 try:
     with tempfile.TemporaryDirectory(prefix="rag-benchmark-test-") as td:
@@ -192,6 +194,7 @@ try:
             check(store.count() == 0, "no benchmark chunk survives successful cleanup")
 finally:
     oc.embed = old_embed
+    oc.embed_many = old_embed_many
     oc.chat = old_chat
 
 

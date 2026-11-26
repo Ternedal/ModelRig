@@ -57,11 +57,13 @@ from pathlib import Path
 from typing import Mapping
 
 from .gpu_lease import GpuLease, acquire_gpu_lease, normalize_gpu_uuid, resident_is_held, resident_lock_path
-from .media_generation_contract import VerifiedMediaVolume
+from .media_generation_contract import MediaWorkArea
 
 RESIDENT_LAUNCHER = Path(__file__).resolve().with_name("comfy_resident_launcher.py")
 
 _WINDOWS = os.name == "nt"
+MAX_LOG_BYTES = 8 * 1024 * 1024
+WARM_SLACK_BYTES = 256 * 1024 * 1024  # how much lower than its own idle reading a warm ComfyUI may read
 
 LOOPBACK = "127.0.0.1"
 MAX_RESPONSE_BYTES = 1024 * 1024
@@ -80,15 +82,20 @@ _DIRECTORY_FLAGS = ("--input-directory", "--output-directory", "--temp-directory
 # Variables the child gets from the caller's environment; everything else is
 # dropped so no CUDA_*/proxy/token variable leaks in by accident.
 # TEMP/TMP/TMPDIR are NOT passed through: they are pointed at ComfyUI's own temp
-# directory on the verified media volume (child_env), so no library inside
-# ComfyUI can stage frames or partial media in the caller's temp folder, which
-# on the rig is on the internal disk.
+# directory in the private work area (child_env), so no library inside ComfyUI
+# can stage frames or partial media in the caller's temp folder, which other
+# users of the machine may be able to read.
 _PASSTHROUGH_ENV = ("PATH", "SYSTEMROOT", "HOME", "USERPROFILE", "LANG", "LC_ALL")
 _TEMP_ENV = ("TEMP", "TMP", "TMPDIR")
 
 
 class ComfySupervisorError(RuntimeError):
     """ComfyUI could not be started, verified or stopped safely."""
+
+
+class ComfyVramShortage(ComfySupervisorError):
+    """Not enough free VRAM right now (another process holds it). Transient: the executor
+    re-queues the job instead of failing it (G4, Anders 5 Nov 2026)."""
 
 
 class ComfyBusy(ComfySupervisorError):
@@ -105,6 +112,13 @@ class ComfyLaunch:
     temp_directory: str
     user_directory: str
     flags: tuple[str, ...] = ("--disable-auto-launch", "--disable-metadata")
+
+    @property
+    def resolved_models_directory(self) -> Path:
+        """Where ComfyUI loads model files from: always <main.py dir>/models. No flag can move it
+        (--base-directory and --extra-model-paths-config are not allowlisted), so the directory the
+        pinned weights are verified in (G3) is the one ComfyUI reads (#2296 6636684138)."""
+        return Path(self.main_py).parent / "models"
 
     def argv(self, resident_lock: str) -> list[str]:
         python = Path(self.python_executable)
@@ -137,6 +151,7 @@ class VramBudget:
     total_bytes: int
     free_bytes: int
     usable_bytes: int
+    comfyui_version: str | None = None  # system.comfyui_version, compared with the profile pin (G3)
 
 
 def _get_json(port: int, path: str, timeout_s: float, *, method: str = "GET",
@@ -167,8 +182,26 @@ def port_answers(port: int, timeout_s: float = 0.5) -> bool:
         connection.close()
 
 
-def parse_vram_budget(stats: object, *, reserve_gib: float, min_usable_gib: float) -> VramBudget:
-    """Fail-closed reading of /system_stats: one CUDA device with enough free VRAM."""
+def parse_vram_budget(stats: object, *, reserve_gib: float, min_usable_gib: float,
+                      idle_free_bytes: int | None = None) -> VramBudget:
+    """Fail-closed reading of /system_stats: one CUDA device with enough free VRAM.
+
+    idle_free_bytes: what this same ComfyUI reported free when a job OF THE SAME KIND and at least
+    as large as the one about to run had just succeeded in it (the supervisor decides that; see check_budget).
+    A warm ComfyUI keeps its models, so its own reading is low without anybody else having taken
+    anything. Rig 21/11: idle after a clip it reported 5.2 GiB free of 12 (torch_vram_total
+    64 MiB: the models are not in torch's own figure), every second job read as a shortage, and
+    ComfyUI was closed and started again for every clip.
+
+    With that reading, min_usable_gib is not asked of the free figure a second time: it was
+    proven by the job that ran. What is still asked, both of them:
+    - the reading is no lower than it was then, within WARM_SLACK_BYTES -- nothing outside has
+      taken memory since;
+    - the profile's reserve is free in full. The warm path never dips into the reserve, however
+      low the earlier reading was (#2462 review, ChatGPT P2: a baseline of 0.5 GiB must not
+      admit a job at 0.5 GiB).
+    Otherwise it is a shortage as before.
+    """
     devices = stats.get("devices") if isinstance(stats, dict) else None
     if not isinstance(devices, list) or len(devices) != 1 or not isinstance(devices[0], dict):
         raise ComfySupervisorError("ComfyUI must report exactly one device")
@@ -178,11 +211,17 @@ def parse_vram_budget(stats: object, *, reserve_gib: float, min_usable_gib: floa
     total, free = device.get("vram_total"), device.get("vram_free")
     if type(total) is not int or type(free) is not int or not 0 <= free <= total or total == 0:
         raise ComfySupervisorError("ComfyUI reported unusable VRAM figures")
-    usable = max(0, free - int(reserve_gib * GIB))
+    reserve = int(reserve_gib * GIB)
+    usable = max(0, free - reserve)
     if usable < int(min_usable_gib * GIB):
-        raise ComfySupervisorError("insufficient free VRAM after reservation")
+        warm = type(idle_free_bytes) is int and 0 < idle_free_bytes <= total
+        if not warm or free + WARM_SLACK_BYTES < idle_free_bytes or free < reserve:
+            raise ComfyVramShortage("insufficient free VRAM after reservation")
     name = device.get("name")
-    return VramBudget(name if isinstance(name, str) else "", total, free, usable)
+    system = stats.get("system")
+    version = system.get("comfyui_version") if isinstance(system, dict) else None
+    return VramBudget(name if isinstance(name, str) else "", total, free, usable,
+                      version if isinstance(version, str) else None)
 
 
 def _bounded(value: object, low: float, high: float, name: str) -> float:
@@ -192,7 +231,7 @@ def _bounded(value: object, low: float, high: float, name: str) -> float:
 
 
 class ComfySupervisor:
-    def __init__(self, *, gpu_uuid: str, lease_dir: str, launch: ComfyLaunch, media_volume: VerifiedMediaVolume,
+    def __init__(self, *, gpu_uuid: str, lease_dir: str, launch: ComfyLaunch, work_area: MediaWorkArea,
                  reserve_gib: float, min_usable_gib: float, ready_timeout_s: float = 180.0,
                  stop_timeout_s: float = 30.0, poll_s: float = 0.5, log_path: str | None = None,
                  base_env: Mapping[str, str] | None = None, host_memory_gib: float = 48.0):
@@ -207,10 +246,13 @@ class ComfySupervisor:
         self.host_memory_gib = _bounded(host_memory_gib, 1, 64, "host_memory_gib")
         self.log_path = log_path
         self.base_env = dict(os.environ if base_env is None else base_env)
-        if not isinstance(media_volume, VerifiedMediaVolume):
-            raise ComfySupervisorError("a verified external media volume is required (no internal-disk default)")
-        self.media_volume = media_volume
+        if not isinstance(work_area, MediaWorkArea):
+            raise ComfySupervisorError("a verified private work area is required (no default folder)")
+        self.work_area = work_area
         self._lease: GpuLease | None = None
+        self._idle_free_bytes: int | None = None  # see note_idle(); cleared with every start and stop
+        self._idle_job_cost = 0
+        self._idle_job_kind: str | None = None
         self._proc: subprocess.Popen | None = None
         self._token = secrets.token_hex(16)
         self._job_lock = threading.Lock()
@@ -238,13 +280,27 @@ class ComfySupervisor:
             return False
         token, pid = proof["token"], proof["pid"]
         return (isinstance(token, str) and hmac.compare_digest(token, self._token)
-                and type(pid) is int and self._proc is not None and pid == self._proc.pid)
+                and type(pid) is int and self._proc is not None and pid in self._launched_pids())
 
-    def require_media_volume(self) -> None:
-        """Every ComfyUI media directory must be on the verified external volume, now."""
+    def _launched_pids(self) -> frozenset[int]:
+        """The pids that are provably the launched child: the one spawned, and on Windows every
+        process in the Job Object it was started in.
+
+        Rig 21/11: with ComfyUI's own venv, ``Scripts\\python.exe`` is a starter and the interpreter
+        that takes the resident lock is its child (proof pid 1904, spawned pid 5372), so every
+        start was refused. A process is in the job only by being created inside it; nothing
+        outside the launched tree can be on this list."""
+        pids = {self._proc.pid} if self._proc is not None else set()
+        if self._proc is not None and _WINDOWS:
+            from .windows_job import attached_job_process_ids
+            pids |= attached_job_process_ids(self._proc)
+        return frozenset(pids)
+
+    def require_work_area(self) -> None:
+        """Every ComfyUI directory must be in the verified private work area, now (Anders, 6 Nov)."""
         for directory in (self.launch.input_directory, self.launch.output_directory,
                           self.launch.temp_directory, self.launch.user_directory):
-            self.media_volume.require(directory)  # raises ArtifactSinkUnavailable
+            self.work_area.require(directory)  # raises ArtifactSinkUnavailable
 
     @contextlib.contextmanager
     def job_slot(self):
@@ -269,7 +325,7 @@ class ComfySupervisor:
             "PYTHONUNBUFFERED": "1",
             "KALIV_RESIDENT_TOKEN": self._token,
         })
-        env.update({key: str(self.launch.temp_directory) for key in _TEMP_ENV})  # on the verified volume
+        env.update({key: str(self.launch.temp_directory) for key in _TEMP_ENV})  # in the private work area
         return env
 
     def start(self) -> VramBudget:
@@ -277,18 +333,19 @@ class ComfySupervisor:
             raise ComfySupervisorError("supervisor already started")
         resident = resident_lock_path(self.gpu_uuid, lease_dir=self.lease_dir)
         argv = self.launch.argv(str(resident))
-        self.require_media_volume()  # before the lease: no ComfyUI on an internal or missing disk
+        self.require_work_area()  # before the lease: no ComfyUI outside the private work area
+        self._idle_free_bytes, self._idle_job_cost, self._idle_job_kind = None, 0, None
         self._token = secrets.token_hex(16)  # fresh per start
         self._proof = Path(str(resident) + ".proof")
         lease = acquire_gpu_lease(self.gpu_uuid, lease_dir=self.lease_dir)
         log = None
         try:
             if port_answers(self.port):
-                raise ComfySupervisorError("port already answers: refusing to share a ComfyUI")
+                raise ComfySupervisorError("comfy_port_in_use: the port already answers, refusing to share a ComfyUI")
             if self._proof.is_symlink():
                 raise ComfySupervisorError("resident proof must not be a symlink")
             self._proof.unlink(missing_ok=True)  # a stale proof from an earlier run proves nothing
-            log = open(self.log_path, "ab") if self.log_path else subprocess.DEVNULL
+            log = self._open_log() if self.log_path else subprocess.DEVNULL
             proc = self._spawn(argv, self.child_env(), log, lease)
         except BaseException:
             lease.release()
@@ -302,6 +359,19 @@ class ComfySupervisor:
         except BaseException:
             self.stop()
             raise
+
+    def _open_log(self):
+        """ComfyUI's stdout and stderr, appended across starts; one earlier file is kept once the
+        log passes MAX_LOG_BYTES, so it cannot grow without bound. Never a link."""
+        path = str(self.log_path)
+        if os.path.islink(path):
+            raise ComfySupervisorError("ComfyUI log must not be a symlink")
+        try:
+            if os.path.getsize(path) > MAX_LOG_BYTES:
+                os.replace(path, path + ".1")
+        except OSError:
+            pass  # no log yet
+        return open(path, "ab")
 
     def _spawn(self, argv: list[str], env: dict[str, str], log, lease: GpuLease) -> subprocess.Popen:
         if _WINDOWS:
@@ -318,7 +388,7 @@ class ComfySupervisor:
         deadline = time.monotonic() + self.ready_timeout_s
         while True:
             if self._proc is None or self._proc.poll() is not None:
-                raise ComfySupervisorError("ComfyUI exited during startup")
+                raise ComfySupervisorError("comfy_exited_at_start: ComfyUI exited during startup")
             try:
                 stats = _get_json(self.port, "/system_stats", timeout_s=2.0)
             except (OSError, ValueError):
@@ -327,24 +397,52 @@ class ComfySupervisor:
                 # ComfyUI answers from inside the launcher, which took the
                 # resident lock first: refuse if that cannot be observed.
                 if not resident_is_held(self.gpu_uuid, lease_dir=self.lease_dir):
-                    raise ComfySupervisorError("ComfyUI answers but does not hold the resident lock")
+                    raise ComfySupervisorError("resident_lock_not_held: ComfyUI answers but does not hold the resident lock")
                 if not self._proves_identity(self._proof):
-                    raise ComfySupervisorError("the resident lock is not proven to be held by the launched child")
+                    raise ComfySupervisorError("resident_proof_mismatch: the resident lock is not proven to be held by the launched child")
                 return parse_vram_budget(stats, reserve_gib=self.reserve_gib,
                                          min_usable_gib=self.min_usable_gib)
             if time.monotonic() >= deadline:
-                raise ComfySupervisorError("ComfyUI did not become ready before the deadline")
+                raise ComfySupervisorError("comfy_not_ready: ComfyUI did not become ready before the deadline")
             time.sleep(self.poll_s)
 
-    def check_budget(self) -> VramBudget:
-        """Re-read VRAM before each job: processes outside the lease may have taken VRAM."""
+    def check_budget(self, job_cost: int | None = None, job_kind: str | None = None) -> VramBudget:
+        """Re-read VRAM before each job: processes outside the lease may have taken VRAM.
+
+        job_cost: the size of the job about to run (pixels x frames). job_kind: what it is -- the
+        caller's name for workflow, task and model (the adapter gives profile, template SHA-256
+        and task). The warm reading is used only for a job of the SAME kind and no larger than
+        the one it was taken after: that job is the proof that this much free memory is enough.
+        Pixels x frames says nothing across workflows (#2462 review, ChatGPT P2: text-to-video
+        and image-to-video of one size need different memory), so a job of another kind, a
+        larger job, or a caller that does not say, gets the strict check."""
         if not self.running:
             raise ComfySupervisorError("ComfyUI is not running")
         try:
             stats = _get_json(self.port, "/system_stats", timeout_s=5.0)
         except (OSError, ValueError) as exc:
             raise ComfySupervisorError("ComfyUI /system_stats unavailable") from exc
-        return parse_vram_budget(stats, reserve_gib=self.reserve_gib, min_usable_gib=self.min_usable_gib)
+        proven = (type(job_cost) is int and job_cost > 0 and isinstance(job_kind, str) and bool(job_kind)
+                  and self._idle_free_bytes is not None
+                  and job_kind == self._idle_job_kind and job_cost <= self._idle_job_cost)
+        return parse_vram_budget(stats, reserve_gib=self.reserve_gib, min_usable_gib=self.min_usable_gib,
+                                 idle_free_bytes=self._idle_free_bytes if proven else None)
+
+    def note_idle(self, job_cost: int | None = None, job_kind: str | None = None) -> None:
+        """Called when a job has SUCCEEDED: remember what this ComfyUI reports free while it keeps
+        its models, how large that job was and of what kind, for the check before the next one.
+        Never raises; without a usable figure, a size and a kind the strict check stays in place."""
+        self._idle_free_bytes, self._idle_job_cost, self._idle_job_kind = None, 0, None
+        if (not self.running or type(job_cost) is not int or job_cost <= 0
+                or not isinstance(job_kind, str) or not job_kind):
+            return
+        try:
+            stats = _get_json(self.port, "/system_stats", timeout_s=5.0)
+            free = stats["devices"][0]["vram_free"]
+        except (OSError, ValueError, ComfySupervisorError, KeyError, IndexError, TypeError):
+            return
+        if type(free) is int and free > 0:
+            self._idle_free_bytes, self._idle_job_cost, self._idle_job_kind = free, job_cost, job_kind
 
     # --- the ComfyUI API the adapter needs; HTTP stays in this module -------
     def _api(self, path: str, *, method: str = "GET", payload: object | None = None,
@@ -386,8 +484,26 @@ class ComfySupervisor:
     def interrupt(self) -> None:
         self._api("/interrupt", method="POST")
 
+    def _wait_resident_released(self) -> None:
+        """ComfyUI has gone when its resident lock is free, not when the process we spawned is.
+
+        On Windows the spawned process is the venv's launcher and ComfyUI is its child (rig 21/11:
+        proof pid 1904, spawned pid 5372). The launcher exits at once; the child dies when the Job
+        Object closes, and a process holding tens of GiB takes a moment to be torn down. Returning
+        before that hands the next generator a GPU that is still "held by a resident process"
+        (rig 22/11: the first picture after an LTX-2.3 clip failed with gpu_busy after 0.3 s, the
+        next one went through). Waits at most stop_timeout_s; after that the lease is kept, as for
+        a ComfyUI that will not exit.
+        """
+        deadline = time.monotonic() + self.stop_timeout_s
+        while resident_is_held(self.gpu_uuid, lease_dir=self.lease_dir):
+            if time.monotonic() >= deadline:
+                raise ComfySupervisorError("ComfyUI did not exit; GPU lease kept")
+            time.sleep(min(self.poll_s, 0.1))
+
     def stop(self) -> None:
         """Interrupt, terminate, kill. The lease is released only after ComfyUI has exited."""
+        self._idle_free_bytes, self._idle_job_cost, self._idle_job_kind = None, 0, None
         proc = self._proc
         if proc is not None and proc.poll() is None:
             try:
@@ -407,6 +523,8 @@ class ComfySupervisor:
         if proc is not None and _WINDOWS:
             from .windows_job import close_attached_job
             close_attached_job(proc)
+        if proc is not None:
+            self._wait_resident_released()
         self._proc = None
         if self._lease is not None:
             self._lease.release()

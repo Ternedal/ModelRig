@@ -1,5 +1,7 @@
 # Memory 4.0 W04-B — stream-preserving normal-chat post-turn persistence
 
+Status: landed via #1237 (`a7d8fd00`); default-off (`KALIV_MEMORY4_CHAT_WRITE_ENABLED`). `production_activation=false`. See [MEMORY_4_CLOSURE.md](./MEMORY_4_CLOSURE.md).
+
 W04-B is the first reviewed integration slice that may connect a completed normal `/api/v1/chat` turn to the already-landed W04-A loopback write surface. It does **not** make memory writes unconditional and it does not move durable-memory authority into the backend or the model.
 
 ## Activation

@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "worker"))
 
 from app.comfy_supervisor import (  # noqa: E402
-    ComfyLaunch, ComfySupervisor, ComfySupervisorError, parse_vram_budget, port_answers,
+    ComfyLaunch, ComfySupervisor, ComfySupervisorError, ComfyVramShortage, parse_vram_budget, port_answers,
 )
 import app.comfy_supervisor as supervisor_module  # noqa: E402
 from app.gpu_lease import GpuBusy, acquire_gpu_lease, resident_is_held  # noqa: E402
@@ -42,8 +42,8 @@ def free_port() -> int:
 
 
 class AnyExistingDirectory:
-    """Test-only stand-in for ChatGPT's external-mount verifier: accepts any existing
-    directory unless told that the volume is gone. Production passes the real one."""
+    """Test-only stand-in for the private work area (production: media_work_area.PrivateWorkArea):
+    accepts any existing directory unless told that it is no longer verified."""
 
     def __init__(self):
         self.lost: set[str] = set()
@@ -53,14 +53,14 @@ class AnyExistingDirectory:
         from app.media_generation_contract import ArtifactSinkUnavailable
         self.checked.append(path)
         if path in self.lost or "*" in self.lost or not os.path.isdir(path):
-            raise ArtifactSinkUnavailable(f"{path} is not on the verified external media volume")
+            raise ArtifactSinkUnavailable(f"{path} is not in the verified private work area")
 
 
 class FakeSupervisor(ComfySupervisor):
     """Adds the test-only FAKE_COMFY_* channel on top of the real child env."""
 
-    def __init__(self, *, fake_env: dict[str, str], media_volume=None, **kwargs):
-        super().__init__(media_volume=media_volume or AnyExistingDirectory(), **kwargs)
+    def __init__(self, *, fake_env: dict[str, str], work_area=None, **kwargs):
+        super().__init__(work_area=work_area or AnyExistingDirectory(), **kwargs)
         self.fake_env = fake_env
 
     def child_env(self) -> dict[str, str]:
@@ -305,6 +305,16 @@ time.sleep(120)
         self._assert_start_fails_and_cleans_up(
             self.supervisor(fake={"FAKE_COMFY_VRAM_FREE_GIB": "9"}), "insufficient free VRAM")
 
+    def test_insufficient_vram_is_the_transient_shortage_type(self):
+        # G4: the executor re-queues on ComfyVramShortage; other start failures are not waits.
+        from app.comfy_supervisor import ComfyVramShortage
+        with self.assertRaises(ComfyVramShortage):
+            self.supervisor(fake={"FAKE_COMFY_VRAM_FREE_GIB": "9"}).start()
+        self.assertTrue(self.lease_is_free())
+        with self.assertRaises(ComfySupervisorError) as caught:
+            self.supervisor(fake={"FAKE_COMFY_DEVICES": "2"}).start()
+        self.assertNotIsInstance(caught.exception, ComfyVramShortage)
+
     def test_two_devices_refused(self):
         self._assert_start_fails_and_cleans_up(
             self.supervisor(fake={"FAKE_COMFY_DEVICES": "2"}), "exactly one device")
@@ -316,6 +326,100 @@ time.sleep(120)
     def test_child_exiting_during_startup(self):
         self._assert_start_fails_and_cleans_up(
             self.supervisor(fake={"FAKE_COMFY_EXIT_EARLY": "1"}), "exited during startup")
+
+    def test_comfyui_output_goes_to_the_log_and_the_log_is_bounded(self):
+        # Rig 21/11: ComfyUI's output went to DEVNULL; a start that was refused left nothing to read.
+        log = Path(self.tmp, "comfyui.log")
+        sup = self.supervisor(log_path=str(log))
+        sup.start()
+        sup.stop()
+        first = log.stat().st_size
+        self.assertTrue(log.is_file(), "the child's stdout and stderr have a file")
+        sup = self.supervisor(log_path=str(log))
+        sup.start()
+        sup.stop()
+        self.assertGreaterEqual(log.stat().st_size, first, "a second start appends")
+        log.write_bytes(b"x" * (supervisor_module.MAX_LOG_BYTES + 1))
+        sup = self.supervisor(log_path=str(log))
+        sup.start()
+        sup.stop()
+        self.assertEqual(Path(str(log) + ".1").stat().st_size, supervisor_module.MAX_LOG_BYTES + 1, "one earlier file is kept")
+        self.assertLessEqual(log.stat().st_size, supervisor_module.MAX_LOG_BYTES)
+        if hasattr(os, "symlink"):
+            log.unlink()
+            os.symlink(Path(self.tmp, "elsewhere"), log)
+            self._assert_start_fails_and_cleans_up(self.supervisor(log_path=str(log)), "symlink")
+
+    def test_a_refused_start_names_its_reason_as_a_code(self):
+        # The executor's event keeps the part before the colon (media_executor._event_code).
+        from app.media_executor import _event_code
+        sup = self.supervisor(fake={"FAKE_COMFY_STARTUP_DELAY": "30"}, ready_timeout_s=1)
+        with self.assertRaises(ComfySupervisorError) as caught:
+            sup.start()
+        self.assertEqual(_event_code(caught.exception), "comfy_not_ready")
+        self._forging_launcher('"pid": os.getpid()}', '"pid": os.getpid() + 1}')
+        with self.assertRaises(ComfySupervisorError) as caught:
+            self.supervisor().start()
+        self.assertEqual(_event_code(caught.exception), "resident_proof_mismatch")
+
+    def test_the_idle_reading_is_taken_after_a_job_and_dropped_with_the_process(self):
+        COST, T2V, I2V = 832 * 480 * 33, "wan-a|aa|text_to_video", "wan-a|aa|image_to_video"
+        sup = self.supervisor()  # reserve 2 GiB, min usable 8 GiB
+        sup.start()
+        self.assertIsNone(sup._idle_free_bytes)
+        for cost, kind in ((None, T2V), (COST, None), (COST, ""), (0, T2V), (COST, 7)):
+            sup.note_idle(cost, kind)  # no size or no kind: nothing was proven
+            self.assertIsNone(sup._idle_free_bytes)
+        sup.note_idle(COST, T2V)
+        self.assertEqual((sup._idle_free_bytes, sup._idle_job_cost, sup._idle_job_kind), (20 * GIB, COST, T2V))
+        Path(self.state, "vram_free_gib").write_text("5")
+        sup.note_idle(COST, T2V)
+        sup.check_budget(COST, T2V)  # 5 GiB free is a shortage at a start, not after a job this size succeeded at 5
+        sup.check_budget(COST - 1, T2V)  # a smaller job of the same kind leans on the same proof
+        # a larger job, or a caller that does not say how large, gets the strict check
+        for cost in (COST + 1, None, 0, -1, True, float(COST)):
+            with self.subTest(cost=cost), self.assertRaisesRegex(ComfySupervisorError, "insufficient"):
+                sup.check_budget(cost, T2V)
+        # #2462 review (ChatGPT, P2): the same size in another workflow proves nothing
+        for kind in (I2V, "wan-b|aa|text_to_video", "wan-a|bb|text_to_video", None, "", 7):
+            with self.subTest(kind=kind), self.assertRaisesRegex(ComfySupervisorError, "insufficient"):
+                sup.check_budget(COST, kind)
+        sup.note_idle(COST, I2V)  # an image-to-video job succeeded: now that is what is proven
+        sup.check_budget(COST, I2V)
+        with self.assertRaisesRegex(ComfySupervisorError, "insufficient"):
+            sup.check_budget(COST, T2V)
+        sup.note_idle(COST, T2V)
+        Path(self.state, "vram_free_gib").write_text("4")
+        with self.assertRaisesRegex(ComfySupervisorError, "insufficient"):
+            sup.check_budget(COST, T2V)  # 1 GiB lower than its own idle reading: somebody took it
+        sup.stop()
+        self.assertEqual((sup._idle_free_bytes, sup._idle_job_cost, sup._idle_job_kind), (None, 0, None),
+                         "a stopped ComfyUI has proven nothing")
+        sup.note_idle(COST, T2V)  # not running: no reading, no error
+        self.assertIsNone(sup._idle_free_bytes)
+
+    def test_a_warm_reading_never_admits_a_job_into_the_reserve(self):
+        # #2462 review (ChatGPT, P2): a baseline of 0.5 GiB must not admit the next job at 0.5 GiB.
+        COST, KIND = 832 * 480 * 33, "wan-a|aa|text_to_video"
+        sup = self.supervisor()  # reserve 2 GiB
+        sup.start()
+        for free in ("0.5", "1.9"):
+            Path(self.state, "vram_free_gib").write_text(free)
+            sup.note_idle(COST, KIND)
+            with self.subTest(free=free), self.assertRaisesRegex(ComfySupervisorError, "insufficient"):
+                sup.check_budget(COST, KIND)
+        Path(self.state, "vram_free_gib").write_text("2")
+        sup.note_idle(COST, KIND)
+        sup.check_budget(COST, KIND)  # the reserve is free in full: the earlier job is the proof for the rest
+        # competing load: the reading fell after the baseline was taken
+        Path(self.state, "vram_free_gib").write_text("6")
+        sup.note_idle(COST, KIND)
+        Path(self.state, "vram_free_gib").write_text("5.5")
+        with self.assertRaisesRegex(ComfySupervisorError, "insufficient"):
+            sup.check_budget(COST, KIND)  # 0.5 GiB went to somebody else: more than the 256 MiB slack
+        Path(self.state, "vram_free_gib").write_text("5.8")
+        sup.check_budget(COST, KIND)  # within the slack
+        sup.stop()
 
     def test_ready_deadline(self):
         self._assert_start_fails_and_cleans_up(
@@ -340,6 +444,42 @@ time.sleep(120)
         self.assertTrue(port_answers(self.port), "child still alive mid-stop")
         self.assertFalse(self.lease_is_free(), "lease must not be released while ComfyUI is alive")
         stopper.join(15)
+        self.assertTrue(self.lease_is_free())
+
+    def test_stop_waits_until_the_resident_lock_is_free(self):
+        # Rig 22/11: on Windows the spawned process is the venv launcher; ComfyUI is its child and
+        # outlives it for a moment (a 44 GiB process being torn down). stop() returned at once and
+        # the next generator met "held by a resident process" -> gpu_busy. Simulated here by a
+        # resident lock that stays held for a while after the spawned process has exited.
+        real = supervisor_module.resident_is_held
+        self.addCleanup(setattr, supervisor_module, "resident_is_held", real)
+        sup = self.supervisor(stop_timeout_s=3)
+        sup.start()
+        release_at = [None]
+
+        def lingering(*args, **kwargs):
+            if sup._proc is not None and sup._proc.poll() is not None:  # only once the spawned process is gone
+                release_at[0] = release_at[0] or time.monotonic() + 0.6
+                return time.monotonic() < release_at[0]
+            return real(*args, **kwargs)
+        supervisor_module.resident_is_held = lingering
+        started = time.monotonic()
+        sup.stop()
+        self.assertGreaterEqual(time.monotonic() - started, 0.55, "stop waited for the resident lock")
+        self.assertFalse(sup.running)
+        self.assertTrue(self.lease_is_free())
+
+    def test_stop_keeps_the_lease_when_the_resident_lock_never_frees(self):
+        real = supervisor_module.resident_is_held
+        self.addCleanup(setattr, supervisor_module, "resident_is_held", real)
+        sup = self.supervisor(stop_timeout_s=1)
+        sup.start()
+        supervisor_module.resident_is_held = lambda *a, **k: True
+        with self.assertRaisesRegex(ComfySupervisorError, "did not exit; GPU lease kept"):
+            sup.stop()
+        self.assertFalse(self.lease_is_free(), "the GPU may still be in use: the lease stays")
+        supervisor_module.resident_is_held = real
+        sup.stop()  # the lock is free now: a second stop completes
         self.assertTrue(self.lease_is_free())
 
     def test_windows_path_spawns_in_a_job_object_with_limits(self):
@@ -397,6 +537,46 @@ time.sleep(120)
     def test_a_proof_naming_another_pid_is_refused(self):
         self._forging_launcher('"pid": os.getpid()}', '"pid": os.getpid() + 1}')
         self._assert_start_fails_and_cleans_up(self.supervisor(), "not proven")
+
+    def test_on_windows_a_process_in_the_childs_job_proves_identity(self):
+        # Rig 21/11: ComfyUI's venv python.exe is a starter; the interpreter that takes the lock is
+        # its child (proof pid 1904, spawned pid 5372) and every start was refused.
+        from app import windows_job
+
+        class Api:
+            ids = [5372, 1904]
+            def create_job(self): return 7
+            def configure_job(self, handle, limits): pass
+            def close_handle(self, handle): pass
+            def process_ids(self, handle): return self.ids
+
+        class Proc:
+            pid = 5372
+
+        sup = self.supervisor()
+        proc, api = Proc(), Api()
+        proc._kaliv_windows_job = windows_job.WindowsJob(windows_job.JobLimits(), api=api)
+        sup._proc = proc
+        proof = Path(self.tmp, "proof.json")
+
+        def proves(pid, token=None):
+            proof.write_text(json.dumps({"token": token or sup._token, "pid": pid}))
+            return sup._proves_identity(proof)
+
+        was = supervisor_module._WINDOWS
+        try:
+            self.assertTrue(proves(5372), "the spawned pid still proves itself")
+            self.assertFalse(proves(1904), "off Windows the job is never consulted")
+            supervisor_module._WINDOWS = True
+            self.assertEqual(sup._launched_pids(), frozenset({5372, 1904}))
+            self.assertTrue(proves(1904), "a process in the launched child's job is the launched child")
+            self.assertFalse(proves(4242), "a pid outside the job is refused")
+            self.assertFalse(proves(1904, token="cd" * 16), "membership does not replace the token")
+            api.ids = [0]
+            self.assertFalse(proves(1904), "an unreadable job list falls back to the spawned pid only")
+            self.assertTrue(proves(5372))
+        finally:  # tearDown stops every supervisor: leave it as it was built
+            supervisor_module._WINDOWS, sup._proc = was, None
 
     def test_a_locked_child_without_a_proof_is_refused(self):
         self._forging_launcher("    os.replace(staging, proof)\n", "    os.unlink(staging)\n")
@@ -559,6 +739,32 @@ class VramParsingTests(unittest.TestCase):
             with self.subTest(label):
                 with self.assertRaisesRegex(ComfySupervisorError, "unusable VRAM"):
                     parse_vram_budget(cases[label], reserve_gib=2, min_usable_gib=8)
+
+    def test_a_warm_comfyui_is_measured_against_its_own_idle_reading(self):
+        # Rig 21/11: idle after a clip ComfyUI reported 5.2 GiB free of 12 (its models are not in
+        # torch_vram_total either), so the next job read as a shortage and ComfyUI was restarted.
+        MIB = 1024 * 1024
+        warm = self.stats(vram_free=5205 * MIB, vram_total=12288 * MIB, torch_vram_total=64 * MIB)
+        with self.assertRaisesRegex(ComfyVramShortage, "insufficient"):
+            parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8)  # a start: nothing may be held
+        budget = parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8, idle_free_bytes=5205 * MIB)
+        self.assertEqual(budget.free_bytes, 5205 * MIB, "accepted, and the figures are reported as read")
+        parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8, idle_free_bytes=5205 * MIB + supervisor_module.WARM_SLACK_BYTES)
+        # somebody else took memory since: lower than its own idle reading by more than the slack
+        with self.assertRaisesRegex(ComfyVramShortage, "insufficient"):
+            parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8, idle_free_bytes=5205 * MIB + supervisor_module.WARM_SLACK_BYTES + 1)
+        # a baseline that is no reading at all changes nothing
+        for bad in (None, 0, -1, True, 5205.0 * MIB, 12289 * MIB, "5205"):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ComfyVramShortage, "insufficient"):
+                parse_vram_budget(warm, reserve_gib=1, min_usable_gib=8, idle_free_bytes=bad)
+        # the reserve is never part of the warm path (#2462 review): equal to its baseline is not enough
+        for free_mib, reserve in ((512, 1), (1023, 1), (5205, 6)):
+            low = self.stats(vram_free=free_mib * MIB, vram_total=12288 * MIB)
+            with self.subTest(free_mib=free_mib, reserve=reserve), self.assertRaisesRegex(ComfyVramShortage, "insufficient"):
+                parse_vram_budget(low, reserve_gib=reserve, min_usable_gib=8, idle_free_bytes=free_mib * MIB)
+        exactly = self.stats(vram_free=1024 * MIB, vram_total=12288 * MIB)
+        parse_vram_budget(exactly, reserve_gib=1, min_usable_gib=8, idle_free_bytes=1024 * MIB)  # the reserve, in full
+        self.assertEqual(supervisor_module.WARM_SLACK_BYTES, 256 * MIB)
 
     def test_edge_exactly_enough(self):
         self.assertEqual(parse_vram_budget(self.stats(vram_free=10 * GIB), reserve_gib=2,

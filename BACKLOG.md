@@ -7,7 +7,7 @@
 > og kan ikke tage fejl om, hvad der er på `main`. Denne fil er en **plan** — hvad
 > der er tilbage, hvem der ejer det, og hvad der afhænger af hvad.
 
-Afledt af den strategiske analyse (1.58.107) og `09_TASK_REGISTER.md`.
+Afledt af den strategiske analyse (1.58.107) og task-registeret `09_TASK_REGISTER.md` (ikke i repoet).
 Rækkefølgen følger `ROADMAP.md`: **Prove → Scheduler → Agent 3-pilot →
 Capabilities → Product**.
 
@@ -292,7 +292,7 @@ Research-forarbejdet er merged, men forbliver dormant indtil de resterende gates
 | T-037 Google/Notion read-first connector-pakke | #84 | P2 | [KERNE] | T-030, T-032, T-036 | Separate scopes, read-first rollout og revocation. |
 | T-038 RigGate/Home Assistant read-only pilot | #85 | P2 | [KERNE] (afgrænset) | T-030, T-032 | Status og wake-preview uden side effect. |
 
-> ### T-030 — verificeret færdig 27/07, issue #77 er stadig åben
+> ### T-030 — verificeret færdig 27/07, issue #77 lukket 28/07
 >
 > Alle otte acceptkriterier er efterprøvet mod koden, ikke antaget:
 >

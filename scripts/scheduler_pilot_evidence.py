@@ -1049,10 +1049,25 @@ def inventory(paths: DataPaths) -> dict[str, Any]:
                 conn.close()
 
 
+# The physical campaign reads validation/scheduler-pilot-latest.json and requires
+# the kaliv-scheduler-pilot/v4 report written by the pilot wizards. This collector
+# writes a different schema (SCHEMA above), so writing it there turns a valid
+# campaign proof red. It therefore has its own default path and refuses the
+# campaign's path outright (#2371).
+DEFAULT_REPORT = Path("validation/scheduler-pilot-evidence-latest.json")
+CAMPAIGN_REPORT = Path("validation/scheduler-pilot-latest.json")
+
+
+def _is_campaign_report(report: Path, root: Path) -> bool:
+    campaign = (root / CAMPAIGN_REPORT).resolve()
+    target = report if report.is_absolute() else Path.cwd() / report
+    return os.path.normcase(str(target.resolve())) == os.path.normcase(str(campaign))
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=Path("eval/scheduler_pilot_manifest.json"))
-    parser.add_argument("--report", type=Path, default=Path("validation/scheduler-pilot-latest.json"))
+    parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     parser.add_argument("--backend-url", default=os.getenv("MODELRIG_BASE_URL", "http://127.0.0.1:8080"))
     parser.add_argument("--worker-url", default=os.getenv("MODELRIG_WORKER_URL", "http://127.0.0.1:8099"))
     parser.add_argument("--schedules-db", type=Path)
@@ -1085,6 +1100,14 @@ def main(argv: list[str] | None = None) -> int:
         print("ERROR: MODELRIG_TOKEN is required in the environment", file=sys.stderr)
         return 2
     root = Path(__file__).resolve().parents[1]
+    if _is_campaign_report(args.report, root):
+        print(
+            f"ERROR: --report must not be {CAMPAIGN_REPORT.as_posix()}: the physical campaign "
+            "reads that path and requires the kaliv-scheduler-pilot/v4 report; this collector "
+            f"writes {SCHEMA}",
+            file=sys.stderr,
+        )
+        return 2
     try:
         manifest = _read_json(args.manifest)
         candidate = source_candidate(root)

@@ -5,10 +5,9 @@ Desktop chat client for ModelRig with **local-first routing and Ollama Cloud fal
 > **Compile-verified** (2026-07-04): builds clean here (`./gradlew build` →
 > `BUILD SUCCESSFUL`, Kotlin 2.0.21 + Compose Multiplatform 1.7.0). **Not run**
 > — no display in the build sandbox, so actual on-screen behavior is still
-> unverified. Feature-wise this lags Android: no brand-real colors (`Brand.kt`
-> still has the old invented palette), no markdown rendering, no persistence,
-> no system prompts, no RAG — see `ROADMAP.md` §4 pt. 5 for the full audit and
-> the planned lift to parity in V2.
+> unverified at that checkpoint. The feature gaps listed then (palette, markdown,
+> persistence, system prompts, RAG) have since been closed — see "Next" below;
+> the original V2 desktop-parity audit is in `HISTORY.md` §4 pt. 5.
 
 ## What it does
 - Talks to any Ollama-compatible `/api/chat` endpoint.
@@ -23,11 +22,12 @@ Desktop chat client for ModelRig with **local-first routing and Ollama Cloud fal
   prepended as a `role:"system"` message before sending. Known simplification —
   the prompt follows the *preferred* source (the `preferLocal` toggle), not
   necessarily whichever one ends up answering after a fallback.
-- **Brand colors** (`Brand.kt`) match Android's verified palette: Sapphire
-  `#306CFC`, Champagne `#DEC08A`. UI strings are Danish, per project convention.
+- **Brand colors** come from the generated `KalivTokens.kt` (single source
+  `assets/design/kaliv-ui-guide/kaliv-ui-tokens.json`); `Brand.kt` reads them.
+  UI strings are Danish, per project convention.
 
 Routing lives in `net/ChatRouter.kt`; the HTTP client is `net/OllamaClient.kt`
-(JDK `java.net.http`, no ktor). Brand tokens in `Brand.kt`.
+(JDK `java.net.http`, no ktor). Theme mapping in `Brand.kt`.
 
 **Streaming**: replies stream token-by-token (`chatStream`, NDJSON). The
 cloud-fallback picks a source before the stream starts; a mid-stream failure is
@@ -38,13 +38,11 @@ surfaced rather than silently restarted on the other source (avoids double text)
 
 ## Prerequisites
 - JDK 21
-- Gradle 8.x (or generate the wrapper — see below)
+- The committed Gradle wrapper (`./gradlew`; no system Gradle needed)
 
 ## Build & run
 ```bash
 cd desktop
-# no wrapper jar is shipped; create one once (needs a local Gradle):
-gradle wrapper --gradle-version 8.9
 ./gradlew run
 ```
 Or with a system Gradle directly:
@@ -62,8 +60,8 @@ Or a single runnable jar (bundles Compose Desktop's native rendering layer for
 jar; a jar built on Linux/macOS won't run on Windows and vice versa):
 ```bash
 ./gradlew packageUberJarForCurrentOS
-#   -> composeApp/build/compose/jars/ModelRig-<os>-x64-<version>.jar
-#   run with: java -jar ModelRig-windows-x64-1.0.0.jar
+#   -> composeApp/build/compose/jars/Kaliv-<os>-x64-<version>.jar
+#   run with: java -jar Kaliv-windows-x64-<version>.jar
 ```
 Both were **confirmed working** in the Linux build sandbox (2026-07-04) — the
 Kotlin/Compose Multiplatform version pairing compiles and packages cleanly.
@@ -86,13 +84,14 @@ The compile claim above is the historical 2026-07-04 checkpoint; current
 compatibility is qualified by the repository's exact-head CI rather than by
 rewriting that older evidence.
 
-## Next (see `ROADMAP.md` §4 pt. 5 for the full V2 desktop-parity plan)
+## Next (see `HISTORY.md` §4 pt. 5 for the original V2 desktop-parity plan)
 > Markdown rendering: done (2026-07-04) — ported from Android, compiles clean.
 > SQLite persistence: done (2026-07-04) — `data/DesktopChatDb.kt`, plain JDBC
 > (`org.xerial:sqlite-jdbc`), DB at `~/.modelrig/modelrig.db`. Runtime-verified
 > with a temporary smoke test (insert/read/list/delete/cascade, all passed) —
-> removed after verification. Settings (URLs/keys/models) still in-memory;
-> only conversations persist. Latest conversation auto-resumes on startup; no
+> removed after verification. Settings persist too (SQLite `setting` table,
+> since v1.35.0); `deviceToken` and `cloudKey` are stored as Windows DPAPI
+> envelopes (see SECURITY.md). Latest conversation auto-resumes on startup; no
 > conversation browser (list/switch/delete) yet.
 > RAG mode: done (2026-07-04) — `net/RagClient.kt`, separate from
 > ChatRouter (RAG only makes sense against the backend+worker). Same

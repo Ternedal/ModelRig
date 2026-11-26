@@ -25,13 +25,14 @@ under test. **Start altid med `/health/full`** (launcheren kører det, eller
   relativ til opstartsmappen, så en server startet fra en anden mappe end der
   hvor du parrede, læste en tom/anden fil → 401. Fra v1.34.14 ankres filen på
   exe'ens mappe (se `device store: <sti>` i server-loggen ved opstart).
-- **Fix:** kør v1.34.14+ serveren, og genpar under ⋮ → Indstillinger. Parring er
-  åben i dev-mode (`MODELRIG_ADMIN_KEY` unset), så det er hurtigt.
+- **Fix:** kør v1.34.14+ serveren, og genpar under ⋮ → Indstillinger. Uden
+  `MODELRIG_ADMIN_KEY` kan en kode kun mintes fra riggen selv (`-pair` eller
+  loopback-kald), mens serveren kører.
 
 ## Appen svarer "via cloud (rig utilgængelig)" — når slet ikke riggen
 
 - **Årsag:** serveren lytter ikke på en adresse telefonen kan nå.
-- **Tjek på riggen:** `curl http://<rig-adresse>:8080/health`. Timeout = serveren
+- **Tjek på riggen:** `curl http://<rig-adresse>:8080/healthz`. Timeout = serveren
   binder ikke rigtigt.
 - **Almindelige fælder:**
   - `MODELRIG_HOST` ikke sat til `0.0.0.0` → serveren binder kun til loopback.
@@ -135,7 +136,7 @@ under test. **Start altid med `/health/full`** (launcheren kører det, eller
 
 ## CI: release med 0 assets / build-jobs fejler med tomme logs
 
-- **Årsag:** GitHub Actions storage/kvota for et PRIVAT repo er opbrugt. Jobs
+- **Årsag (historisk, da repoet var privat):** GitHub Actions storage/kvota var opbrugt. Jobs
   der uploader fejler; `server-tests` (uploader ikke) består. Logs giver
   `BlobNotFound`.
 - **Tjek:** `github.com/settings/billing` → Actions / Storage.

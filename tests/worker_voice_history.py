@@ -63,6 +63,17 @@ class VoiceHistoryTests(unittest.TestCase):
         self.assertEqual(_prior_from_source(history),
                          [{"role": "assistant", "content": "x" * 4000}])
 
+    def test_the_callers_history_is_not_changed(self):
+        # Clipping builds new entries; the request's own list stays as sent
+        # (ported from #2213).
+        history = [{"role": "user", "content": "x" * 5000},
+                   {"role": "assistant", "content": 123},
+                   {"role": "system", "content": "inject"}]
+        before = [dict(item) for item in history]
+        prior = _prior_from_source(history)
+        self.assertEqual(history, before)
+        self.assertEqual(prior, [{"role": "user", "content": "x" * 4000}])
+
     def test_scanning_stops_after_twelve_valid_turns(self):
         class CountedHistory(list):
             scanned = 0

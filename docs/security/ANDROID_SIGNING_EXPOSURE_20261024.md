@@ -1,6 +1,6 @@
 # Android signing exposure: containment and migration decision
 
-Status: **OPEN / potentially compromised** (2026-10-24). Tracking: #2267.
+Status: **OPEN / potentially compromised** (2026-10-24). Tracking: #2269.
 
 ## Verified repository facts
 
@@ -22,7 +22,7 @@ The public `main` tree contains `android/signing/modelrig.keystore` and `android
 
 No Android signing identity change is accepted without: approved migration decision, test on the real installed app, verified update path, and an operator-reviewed rollback/data preservation plan. A passing Gradle build is insufficient.
 
-## Scope of this PR
+## Scope of the original change (2026-10-24)
 
 Only preventive `.gitignore` rules and this incident playbook. **No private keys are read into output, removed, rotated, or replaced here.** No changes to build/release behavior or the running rig.
 
@@ -30,7 +30,7 @@ Only preventive `.gitignore` rules and this incident playbook. **No private keys
 
 The current `.github/workflows/build-and-release.yml` performs a normal checkout and then `:app:testDebugUnitTest` and `:app:assembleRelease`; it does **not** inject signing files from an external secret store. `android/app/build.gradle.kts` uses the repository-local signing properties for both debug and release. **Removing tracked signing files before provisioning a replacement secret-backed build path will break or change the release pipeline.** Keep remediation sequenced: introduce secure signing provision + test reproducibility, validate device update path, then remove tracked credentials and clean future workflows. Git history exposure remains even after removal.
 
-## CI audit implemented on this branch
+## CI audit (on main)
 
 `scripts/audit_android_signing.py` inspects tracked **paths only** using `git ls-files -z`; it never opens credential files. `.github/workflows/android-signing-audit.yml` runs path-classification and enforcement tests. The CI gate now runs `--block-new`: it **fails on newly tracked Android signing files**, while temporarily allowing only the two explicitly known legacy paths needed by the current release build. The audit prints counts, not credential contents.
 
