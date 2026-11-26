@@ -163,4 +163,13 @@ check("midchain slice without a cache passes", error is None, error)
 check("it runs the guard, then the midchain driver, and never the child",
       runner.started() == [GUARD, driver._MIDCHAIN_DRIVER_FILE], runner.started())
 
+# 8. The child's bound is a hang guard with room for a slow runner, and never the
+#    longest thing in admission.
+SLOWEST_CHILD_SECONDS_OBSERVED = 2464  # hosted runner, #2497, 25 Nov 2026
+child_bound, guard_bound = driver._timeout_for(CHILD), driver._timeout_for(GUARD)
+check("the child's bound is at least twice its slowest observed run",
+      child_bound >= 2 * SLOWEST_CHILD_SECONDS_OBSERVED, child_bound)
+check("the child's bound does not exceed the guard's, so it cannot lengthen admission's worst case",
+      child_bound <= guard_bound, (child_bound, guard_bound))
+
 print(f"{passed} passed, 0 failed")

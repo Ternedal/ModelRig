@@ -32,7 +32,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SUPPORT = ROOT / "tests" / "support"
 _DEFAULT_TIMEOUT_SECONDS = 1800
-_SHARED_DEEP_CHAIN_TIMEOUT_SECONDS = 3000
+# A hang guard, not a performance budget. 3000 s was set on 1 Oct 2026; the child has
+# since been measured at 1254-1273 s on a fast hosted runner and 2195 and 2464 s on
+# slow ones (#2497, 25 Nov 2026: 82 % of the bound, with nothing wrong). One runner a
+# fifth slower than the slowest seen would have failed a whole Stage-B run on time
+# alone. 5400 s is a little over twice the slowest observation, and since the child
+# runs beside the nonce guard (7200 s) it does not lengthen admission's worst case.
+_SHARED_DEEP_CHAIN_TIMEOUT_SECONDS = 5400
 _NONCE_REUSE_TIMEOUT_SECONDS = 7200
 _FULL_PHASE_TIMEOUT_SECONDS = 19800
 _SHARDED_PHASE_TIMEOUT_SECONDS = 18000
