@@ -151,6 +151,80 @@ class SourceImageTests(unittest.TestCase):
             read_source_png(self.sink, asset_id)
 
     @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_invalid_png_chunk_order_and_color_depth_refused(self, _mount):
+        sig = PNG[:8]
+        ihdr = _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+        invalid_depth = _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 4, 2, 0, 0, 0))
+        idat = _png_chunk(b"IDAT", zlib.compress(bytes.fromhex("00ff0000")))
+        end = _png_chunk(b"IEND", b"")
+        bad_images = (
+            sig + invalid_depth + idat + end,
+            sig + ihdr + idat + _png_chunk(b"tEXt", b"k\x00v") + idat + end,
+            sig + ihdr + idat + _png_chunk(b"PLTE", bytes(3)) + end,
+            sig + ihdr + _png_chunk(b"ABcD", b"") + idat + end,
+            sig + ihdr + _png_chunk(b"1bad", b"") + idat + end,
+        )
+        for bad in bad_images:
+            with self.subTest(length=len(bad)):
+                asset_id = self.sink.publish(bad, ".png")
+                with self.assertRaises(SourceImageUnavailable):
+                    read_source_png(self.sink, asset_id)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_valid_png_variants_are_still_read(self, _mount):
+        # The stricter structure rules must not refuse what the PNG specification allows:
+        # a palette image with its PLTE, 16-bit grey, image data split over contiguous IDAT
+        # chunks, and text chunks before and after the image data.
+        sig = PNG[:8]
+        end = _png_chunk(b"IEND", b"")
+        text = _png_chunk(b"tEXt", b"prompt\x00" + b"x" * 4096)
+        data = zlib.compress(bytes.fromhex("00ff0000"))
+        rgb = _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+        indexed = _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 1, 3, 0, 0, 0))
+        grey16 = _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 16, 0, 0, 0, 0))
+        idat = _png_chunk(b"IDAT", data)
+        good_images = (
+            sig + indexed + _png_chunk(b"PLTE", bytes(6)) + idat + end,
+            sig + grey16 + idat + end,
+            sig + rgb + _png_chunk(b"IDAT", data[:3]) + _png_chunk(b"IDAT", data[3:]) + end,
+            sig + rgb + text + idat + text + end,
+            sig + rgb + _png_chunk(b"PLTE", bytes(3)) + idat + end,  # a suggested palette is allowed for RGB
+        )
+        for good in good_images:
+            with self.subTest(length=len(good)):
+                asset_id = self.sink.publish(good, ".png")
+                self.assertEqual(read_source_png(self.sink, asset_id), good)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_empty_idat_sequence_refused(self, _mount):
+        # A CRC-valid PNG with no compressed image bytes must fail closed.
+        sig = PNG[:8]
+        ihdr = _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+        empty = _png_chunk(b"IDAT", b"")
+        bad = sig + ihdr + empty + empty + _png_chunk(b"IEND", b"")
+        asset_id = self.sink.publish(bad, ".png")
+        with self.assertRaises(SourceImageUnavailable):
+            read_source_png(self.sink, asset_id)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
+    def test_png_metadata_and_palette_limits_refused(self, _mount):
+        sig = PNG[:8]
+        ihdr = _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+        indexed = _png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 1, 3, 0, 0, 0))
+        idat = _png_chunk(b"IDAT", zlib.compress(bytes.fromhex("00ff0000")))
+        end = _png_chunk(b"IEND", b"")
+        bad_images = (
+            sig + ihdr + _png_chunk(b"tEXt", b"x" * (4 * 1024 * 1024 + 1)) + idat + end,
+            sig + ihdr + _png_chunk(b"tEXt", b"") * 4096 + idat + end,
+            sig + indexed + _png_chunk(b"PLTE", bytes(9)) + idat + end,
+        )
+        for bad in bad_images:
+            with self.subTest(length=len(bad)):
+                asset_id = self.sink.publish(bad, ".png")
+                with self.assertRaises(SourceImageUnavailable):
+                    read_source_png(self.sink, asset_id)
+
+    @patch("app.media_gallery_catalog.os.path.ismount", return_value=True)
     def test_wrong_bytes_and_bad_ids_refused(self, _mount):
         asset_id = self.sink.publish(b"not png", ".png")
         with self.assertRaises(SourceImageUnavailable):

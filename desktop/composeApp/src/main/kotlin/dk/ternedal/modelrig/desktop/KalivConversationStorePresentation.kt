@@ -10,7 +10,8 @@ import dk.ternedal.modelrig.desktop.data.DesktopChatDb
  * failures showed `Throwable.message` verbatim. Neither is operator copy. Every
  * failure is now one of four fixed sentences chosen by the *operation* that
  * failed, never by the exception's text -- a SQLite path, a lock name or a JDBC
- * detail belongs in the log, not in the panel.
+ * detail belongs in the log, not in the panel. The log is [DesktopDiagnosticsLog];
+ * [diagnosticName] is the operation name a failure is recorded under.
  */
 enum class ConversationStoreOperation { LOAD, RENAME, COPY, DELETE }
 
@@ -23,6 +24,9 @@ internal fun presentConversationStoreError(operation: ConversationStoreOperation
 
 /** Same rule for the system-instruction presets (follow-up noted on #2451). */
 enum class PresetStoreOperation { LOAD, SAVE, DELETE }
+
+internal val ConversationStoreOperation.diagnosticName: String get() = "conversation." + name.lowercase()
+internal val PresetStoreOperation.diagnosticName: String get() = "preset." + name.lowercase()
 
 internal fun presentPresetStoreError(operation: PresetStoreOperation): String = when (operation) {
     PresetStoreOperation.LOAD -> "Forudindstillingerne kunne ikke indlæses fra den lokale database"
@@ -52,9 +56,13 @@ internal fun mutatePresetsThenReload(
     operation: PresetStoreOperation,
     mutate: () -> Unit,
     reload: () -> List<DesktopChatDb.PresetMeta>,
+    onFailure: (PresetStoreOperation, Throwable) -> Unit = { _, _ -> },
 ): PresetMutationOutcome {
-    if (runCatching(mutate).isFailure) return PresetMutationOutcome(mutated = false, presets = null, error = operation)
-    val reloaded = runCatching(reload)
+    runCatching(mutate).onFailure {
+        onFailure(operation, it)
+        return PresetMutationOutcome(mutated = false, presets = null, error = operation)
+    }
+    val reloaded = runCatching(reload).onFailure { onFailure(PresetStoreOperation.LOAD, it) }
     return PresetMutationOutcome(
         mutated = true,
         presets = reloaded.getOrNull(),
@@ -111,5 +119,9 @@ sealed class ConversationListState {
 }
 
 /** Wraps a load so that a storage failure is a state, not an empty list. */
-internal fun loadConversationList(load: () -> List<DesktopChatDb.ConvMeta>): ConversationListState =
-    runCatching { ConversationListState.Loaded(load()) }.getOrElse { ConversationListState.Failed }
+internal fun loadConversationList(
+    onFailure: (Throwable) -> Unit = {},
+    load: () -> List<DesktopChatDb.ConvMeta>,
+): ConversationListState =
+    runCatching<ConversationListState> { ConversationListState.Loaded(load()) }
+        .getOrElse { onFailure(it); ConversationListState.Failed }
