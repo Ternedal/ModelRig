@@ -485,6 +485,25 @@ check("an entry that is another card's UUID is a WARN (the lease would guard the
       not found[preflight.FAIL] and [w["check"] for w in found[preflight.WARN]] == ["KALIV_GPU_DEVICE_UUIDS"], found[preflight.WARN])
 rig = Rig(); rig.env["KALIV_GPU_DEVICE_UUIDS"] = f"cuda:0={UUID0},cuda:1={UUID1.upper().replace('GPU-', '')}"
 check("the same UUID in another spelling is not a mismatch", not rig.statuses()[preflight.WARN] and not rig.statuses()[preflight.FAIL])
+# CUDA_VISIBLE_DEVICES remaps cuda:N, so nvidia-smi's index no longer says which card it is (Codex #2505).
+for where in ("file", "window"):
+    rig = Rig(); del rig.env["KALIV_GPU_DEVICE_UUIDS"]
+    if where == "file":
+        rig.env["CUDA_VISIBLE_DEVICES"] = "1"
+    else:
+        rig.process_env = {"CUDA_VISIBLE_DEVICES": "1"}
+    item = only_fail(rig, "KALIV_GPU_DEVICE_UUIDS")
+    code, out, _ = run_main(rig)
+    check(f"with CUDA_VISIBLE_DEVICES set in the {where}, no UUID line is offered: the fix says why",
+          "CUDA_VISIBLE_DEVICES" in item["fix"] and preflight.suggested_lines([item]) == [] and UUID1 not in out and UUID0 not in out
+          and "media_env_set" not in out, item)
+    rig = Rig(); rig.env["KALIV_GPU_DEVICE_UUIDS"] = f"cuda:1={UUID0}"
+    if where == "file":
+        rig.env["CUDA_VISIBLE_DEVICES"] = "0"
+    else:
+        rig.process_env = {"CUDA_VISIBLE_DEVICES": "0"}
+    check(f"...and an entry is not compared with nvidia-smi's index ({where})",
+          not any(f["check"] == "KALIV_GPU_DEVICE_UUIDS" for f in rig.evaluate()))
 rig = Rig(); rig.env["KALIV_GPU_LEASE_DIR"] = "lease"
 check("a relative folder is a FAIL", "absolut" in only_fail(rig, "KALIV_GPU_LEASE_DIR")["detail"])
 rig = Rig(); rig.env["KALIV_MEDIA_ROOT"] = str(rig.tmp / "volume" / "nowhere")

@@ -595,8 +595,19 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
         report.add(FAIL, "CUDA_DEVICE_ORDER", f"er {get('CUDA_DEVICE_ORDER')!r}: executoren kræver PCI_BUS_ID, så cuda:N er samme kort overalt",
                    ADD_LINE + "CUDA_DEVICE_ORDER=PCI_BUS_ID")
     indices = [int(card.split(":")[1]) for card in cards]
+    # With CUDA_VISIBLE_DEVICES set, cuda:N counts the VISIBLE cards, not nvidia-smi's: cuda:0 can
+    # be physical card 1. Then nvidia-smi's index says nothing about which UUID a cuda:N is, so
+    # no line is offered and nothing is compared (Codex on #2505). The window's own value counts
+    # too: the supervisor may have inherited it.
+    remapped = bool(get("CUDA_VISIBLE_DEVICES")) or bool(str(probes.process_env().get("CUDA_VISIBLE_DEVICES", "")).strip())
     wanted = ",".join(f"cuda:{i}={gpu_uuids[i]}" for i in indices) if indices and all(i in gpu_uuids for i in indices) else ""
-    uuid_fix = (ADD_LINE + "KALIV_GPU_DEVICE_UUIDS=" + wanted) if wanted else "én post pr. kort, cuda:N=GPU-<uuid>, fra: nvidia-smi --query-gpu=index,uuid --format=csv"
+    if remapped:
+        uuid_fix = ("CUDA_VISIBLE_DEVICES er sat, så cuda:N tæller de synlige kort og ikke nvidia-smi's indeks: "
+                    "skriv selv UUID'et for det kort, hver cuda:N ender på (nvidia-smi --query-gpu=index,uuid --format=csv)")
+    elif wanted:
+        uuid_fix = ADD_LINE + "KALIV_GPU_DEVICE_UUIDS=" + wanted
+    else:
+        uuid_fix = "én post pr. kort, cuda:N=GPU-<uuid>, fra: nvidia-smi --query-gpu=index,uuid --format=csv"
     try:
         mapping = probes.uuid_map(env)
     except Exception:
@@ -605,7 +616,8 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
         report.add(FAIL, "KALIV_GPU_DEVICE_UUIDS", "mangler eller er ikke en liste af cuda:N=GPU-<uuid>", uuid_fix)
     else:
         unmapped = [f"cuda:{i}" for i in indices if i not in mapping]
-        other = [f"cuda:{i}" for i in indices if i in mapping and i in gpu_uuids and mapping[i].lower() != gpu_uuids[i].lower()]
+        other = [] if remapped else [f"cuda:{i}" for i in indices
+                                     if i in mapping and i in gpu_uuids and mapping[i].lower() != gpu_uuids[i].lower()]
         if unmapped:
             report.add(FAIL, "KALIV_GPU_DEVICE_UUIDS", f"har ingen post for {', '.join(unmapped)}", uuid_fix)
         elif other:
