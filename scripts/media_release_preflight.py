@@ -281,6 +281,43 @@ def controlled(text: str, reasons: tuple, env: Mapping[str, str], default: str =
     return reason + (f"; nævner: {shown}" if names else "")
 
 
+# What the executor needs in its environment besides the supervisor's four keys. Its start check
+# stops at the FIRST thing that is wrong, so alone it costs one run at the rig per missing line;
+# section 5b asks for all of these in one run. The names are the executor's (pinned by the
+# contract); `check_start` remains the judge -- these lines can add a FAIL, never remove one.
+FOLDER_KEYS = (
+    ("KALIV_GPU_LEASE_DIR", "en mappe kun denne konto kan skrive i, fx C:\\ModelRig\\gpu-lease (docs/MEDIA_GENERATION_PROFILES.md)"),
+    ("KALIV_MEDIA_PROFILE_DIR", "mappen med profilfilerne (*.json)"),
+    ("KALIV_MEDIA_WORK_ROOT", "det private arbejdsområde på den interne disk (docs/MEDIA_WORK_AREA.md)"),
+    ("KALIV_MEDIA_VOLUME_ROOT", "medievolumens rod, fx D:\\ (docs/MEDIA_VOLUME.md)"),
+    ("KALIV_MEDIA_ROOT", "galleri-mappen på medievolumen"),
+)
+OFFLINE_FLAGS = ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")  # app.media_executor_main.OFFLINE_FLAGS
+ADD_LINE = "tilføj linjen "  # a fix that starts so is a complete KEY=VALUE line (see `suggested_lines`)
+GPU_UUID = re.compile(r"^GPU-[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$")
+
+
+def _uuid_map(env: Mapping[str, str]) -> "dict[int, str] | None":
+    """KALIV_GPU_DEVICE_UUIDS by the executor's own parser (app.gpu_lease), or None if it refuses
+    the value. The order rule is asked separately, so it is taken as met here."""
+    from app.gpu_lease import GpuLeaseError, device_uuid_map
+    try:
+        return device_uuid_map({**env, "CUDA_DEVICE_ORDER": "PCI_BUS_ID"})
+    except GpuLeaseError:
+        return None
+
+
+def suggested_lines(checks: list[dict]) -> list[str]:
+    """The KEY=VALUE lines a FAIL gives in full: the ones with one right answer on this machine."""
+    lines = []
+    for item in checks:
+        if item["status"] == FAIL and item["fix"].startswith(ADD_LINE):
+            line = item["fix"][len(ADD_LINE):].split(" ", 1)[0]
+            if re.fullmatch(r"[A-Z][A-Z0-9_]*=[\x21-\x7e]+", line) and line not in lines:
+                lines.append(line)
+    return lines
+
+
 @dataclass
 class Probes:
     """Everything that touches the machine, so the rules can be tested without one."""
@@ -298,6 +335,7 @@ class Probes:
     secret_ok: Callable[[str], bool] = _secret_ok
     executor_start: Callable[..., "tuple[str, str] | None"] = _executor_start
     process_env: Callable[[], Mapping[str, str]] = lambda: dict(os.environ)
+    uuid_map: Callable[[Mapping[str, str]], "dict[int, str] | None"] = _uuid_map
 
 
 @dataclass
@@ -340,6 +378,10 @@ CHECK_IDS = frozenset({
     "KALIV_COMFY_PYTHON", "KALIV_COMFY_MAIN", "KALIV_COMFY_DIR", "KALIV_COMFY_TEMPLATE_DIR", "KALIV_COMFY_HOST_MEMORY_GIB",
     "arbejdsområde", "arbejdsområde, jobdatabase og medievolumen", "nvidia-smi", "ollama", "ollama: model", "appliance",
     "miljø uden for env-filen",
+    # the executor's own environment, asked all at once (section 5b)
+    "executor-miljø", "CUDA_DEVICE_ORDER", "KALIV_GPU_DEVICE_UUIDS", "KALIV_GPU_LEASE_DIR", "KALIV_MEDIA_PROFILE_DIR",
+    "KALIV_MEDIA_WORK_ROOT", "KALIV_MEDIA_VOLUME_ROOT", "KALIV_MEDIA_ROOT", "KALIV_MEDIA_JOB_DB", "KALIV_MEDIA_VOLUME_ID",
+    "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE",
 })
 # The parts of app.media_preflight's check names that are its own words (before any ":").
 WORK_AREA_PARTS = ("work_area", "job_db_folder_in_work_area", "private", "publication_volume", "separate_disks",
@@ -535,6 +577,63 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
                 else:
                     report.add(OK, f"video: {task}", (chosen or serving)[0])
 
+    # --- 5b. the executor's environment, all of it in one run -----------------------------------
+    code, out = probes.run(["nvidia-smi", "--query-gpu=index,memory.total,memory.used,uuid", "--format=csv,noheader,nounits"], 30.0)
+    gpus: dict[int, tuple[int, int]] = {}
+    gpu_uuids: dict[int, str] = {}
+    if code == 0:
+        for line in out.splitlines():
+            parts = [part.strip() for part in line.split(",")]
+            if len(parts) in (3, 4) and all(part.isdigit() for part in parts[:3]):
+                gpus[int(parts[0])] = (int(parts[1]), int(parts[2]))
+                if len(parts) == 4 and GPU_UUID.match(parts[3]):
+                    gpu_uuids[int(parts[0])] = "GPU-" + parts[3][4:].lower()
+    # Before KALIV_MEDIA_EXECUTOR_DEVICES is set, the cards the enabled profiles run on stand in.
+    cards = devices or sorted({d for p in enabled.values() for d in p.resources.devices if DEVICE.match(d)})
+    before = len(report.checks)
+    if get("CUDA_DEVICE_ORDER") != "PCI_BUS_ID":
+        report.add(FAIL, "CUDA_DEVICE_ORDER", f"er {get('CUDA_DEVICE_ORDER')!r}: executoren kræver PCI_BUS_ID, så cuda:N er samme kort overalt",
+                   ADD_LINE + "CUDA_DEVICE_ORDER=PCI_BUS_ID")
+    indices = [int(card.split(":")[1]) for card in cards]
+    wanted = ",".join(f"cuda:{i}={gpu_uuids[i]}" for i in indices) if indices and all(i in gpu_uuids for i in indices) else ""
+    uuid_fix = (ADD_LINE + "KALIV_GPU_DEVICE_UUIDS=" + wanted) if wanted else "én post pr. kort, cuda:N=GPU-<uuid>, fra: nvidia-smi --query-gpu=index,uuid --format=csv"
+    try:
+        mapping = probes.uuid_map(env)
+    except Exception:
+        mapping = None
+    if mapping is None:
+        report.add(FAIL, "KALIV_GPU_DEVICE_UUIDS", "mangler eller er ikke en liste af cuda:N=GPU-<uuid>", uuid_fix)
+    else:
+        unmapped = [f"cuda:{i}" for i in indices if i not in mapping]
+        other = [f"cuda:{i}" for i in indices if i in mapping and i in gpu_uuids and mapping[i].lower() != gpu_uuids[i].lower()]
+        if unmapped:
+            report.add(FAIL, "KALIV_GPU_DEVICE_UUIDS", f"har ingen post for {', '.join(unmapped)}", uuid_fix)
+        elif other:
+            report.add(WARN, "KALIV_GPU_DEVICE_UUIDS", f"posten for {', '.join(other)} er et andet UUID end det, nvidia-smi viser for det kort", uuid_fix)
+    for key, what in FOLDER_KEYS:
+        path = get(key)
+        if not path:
+            report.add(FAIL, key, "mangler", f"sæt {key} til {what}")
+        elif not os.path.isabs(path):
+            report.add(FAIL, key, f"{path!r} er ikke en absolut sti", f"sæt {key} til {what}")
+        elif not probes.is_dir(path):
+            report.add(FAIL, key, f"mappen {path!r} findes ikke", f"opret den, eller ret {key}: {what}")
+    job_db = get("KALIV_MEDIA_JOB_DB")
+    if not job_db or not os.path.isabs(job_db):
+        report.add(FAIL, "KALIV_MEDIA_JOB_DB", f"{job_db!r} er ikke en absolut sti" if job_db else "mangler",
+                   "sæt KALIV_MEDIA_JOB_DB til en fil i en mappe i arbejdsområdet, fx <arbejdsområde>\\state\\jobs.sqlite3")
+    elif not probes.is_dir(os.path.dirname(job_db)):
+        report.add(FAIL, "KALIV_MEDIA_JOB_DB", f"mappen {os.path.dirname(job_db)!r} findes ikke", "opret mappen; den skal ligge i arbejdsområdet")
+    if not get("KALIV_MEDIA_VOLUME_ID"):
+        report.add(FAIL, "KALIV_MEDIA_VOLUME_ID", "mangler", "sæt KALIV_MEDIA_VOLUME_ID til id'et i volumens markørfil .kaliv-media-volume (docs/MEDIA_VOLUME.md)")
+    if any(p.backend == "diffusers" and (not cards or set(p.resources.devices) & set(cards)) for p in enabled.values()):
+        for flag in OFFLINE_FLAGS:
+            if get(flag) != "1":
+                report.add(FAIL, flag, f"er {get(flag)!r}: en diffusers-profil er slået til, og executoren henter aldrig noget ved kørsel",
+                           ADD_LINE + f"{flag}=1")
+    if len(report.checks) == before:
+        report.add(OK, "executor-miljø", "kort-rækkefølge, GPU-UUID, lease-mappe, stier, volumen-id og offline-flag er sat")
+
     # --- 6. ComfyUI, for the profiles that render through it -------------------------------------
     comfy = {pid: p for pid, p in enabled.items() if p.backend == "comfyui"}
     if comfy:
@@ -579,9 +678,31 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
             for item in failed:
                 # Of the check's name only its own word is used, and only if it is one this file
                 # knows; what follows a ":" there is a file name or a pid. Its detail is free text.
-                part = str(item.get("check")).split(":", 1)[0]
+                part, _, which = str(item.get("check")).partition(":")
+                # A folder that is not there already has its own FAIL line (5b), with the key to
+                # set; the two or three lines this check adds about the same folder say nothing more.
+                absent = {name for name, key in (("work_area", "KALIV_MEDIA_WORK_ROOT"), ("publication_volume", "KALIV_MEDIA_VOLUME_ROOT"))
+                          if not (os.path.isabs(get(key)) and probes.is_dir(get(key)))}
+                if part in absent or (part == "free_space" and which in absent):
+                    continue
+                # ...except the two labels app.media_preflight itself gives a free-space check,
+                # and the two numbers of its verdict: fixed words and numbers, never text.
+                place = {"work_area": "arbejdsområdet", "publication_volume": "medievolumen"}
+                detail = item.get("detail")
+                if part == "free_space" and which in place:
+                    said = f"for lidt fri plads på {place[which]}"
+                    if isinstance(detail, dict) and all(isinstance(detail.get(k), (int, float)) and not isinstance(detail.get(k), bool)
+                                                         for k in ("free_gib", "minimum_gib")):
+                        said += f": {detail['free_gib']:g} GiB fri, kræver {detail['minimum_gib']:g}"
+                    else:
+                        said = f"fri plads på {place[which]} kunne ikke måles"
+                elif part in place:
+                    said = controlled(str(detail), (), env, f"{place[part]} afvises, selv om mappen findes: rettigheder, filsystem"
+                                      + (" eller markør/id" if part == "publication_volume" else ""))
+                else:
+                    said = controlled(str(detail), (), env, "ikke opfyldt")
                 report.add(FAIL, "arbejdsområde: " + (part if part in WORK_AREA_PARTS else "andet"),
-                           controlled(str(item.get("detail")), (), env, "ikke opfyldt"), "se docs/MEDIA_WORK_AREA.md og docs/MEDIA_VOLUME.md")
+                           said, "se docs/MEDIA_WORK_AREA.md og docs/MEDIA_VOLUME.md")
         else:
             report.add(OK, "arbejdsområde, jobdatabase og medievolumen", f"{len(area.get('checks', []))} kontroller bestået")
     except Exception as exc:
@@ -619,13 +740,6 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
             report.add(FAIL, name, "kunne ikke køres (" + ("".join(re.findall(r"[A-Za-z0-9 ]", refusal[1])) or "?")[:40] + ")", "kør medie-python i executorens mappe: python -c \"import app.media_executor_main\"")
 
     # --- 8. the GPUs, as the driver reports them now ---------------------------------------------
-    code, out = probes.run(["nvidia-smi", "--query-gpu=index,memory.total,memory.used", "--format=csv,noheader,nounits"], 30.0)
-    gpus: dict[int, tuple[int, int]] = {}
-    if code == 0:
-        for line in out.splitlines():
-            parts = [part.strip() for part in line.split(",")]
-            if len(parts) == 3 and all(part.isdigit() for part in parts):
-                gpus[int(parts[0])] = (int(parts[1]), int(parts[2]))
     if not gpus:
         report.add(FAIL, "nvidia-smi", "gav ingen kort", "driveren skal være installeret og nvidia-smi på PATH")
     for device in devices:
@@ -668,7 +782,7 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
     return report.checks
 
 
-def render(checks: list[dict]) -> str:
+def render(checks: list[dict], env_file: str = "") -> str:
     lines = []
     for item in checks:
         lines.append(f"  {item['status']:<5} {item['check']}: {item['detail']}")
@@ -686,6 +800,13 @@ def render(checks: list[dict]) -> str:
                      + (f". IKKE klar: {', '.join(missing)}" if missing else ""))
     else:
         lines.append("  ikke klar: ret FAIL-linjerne og kør igen")
+    direct = suggested_lines(checks)
+    if direct:
+        # media_env_set.py changes only the named keys and takes a backup first (see its docstring).
+        lines.append("")
+        lines.append(f"  {len(direct)} af linjerne har kun ét rigtigt svar på denne maskine og kan sættes sådan:")
+        lines.append("    python scripts\\media_env_set.py --file " + (f'"{env_file}"' if env_file else "<env-fil>")
+                     + "".join(f' "{line}"' for line in direct))
     return "\n".join(lines)
 
 
@@ -718,10 +839,10 @@ def main(argv: list[str] | None = None, probes: Probes | None = None) -> int:
     checks = evaluate(env, probes, expect_version=args.expect_version, expect_sha=args.expect_sha,
                       planner_model=args.planner_model, require_video=args.require_video)
     if args.json:
-        print(json.dumps({"schema": SCHEMA, "env_file": args.env_file, "ready": readiness(checks), "checks": checks},
-                         ensure_ascii=False, indent=2))
+        print(json.dumps({"schema": SCHEMA, "env_file": args.env_file, "ready": readiness(checks),
+                          "suggested_lines": suggested_lines(checks), "checks": checks}, ensure_ascii=False, indent=2))
     else:
-        print(render(checks))
+        print(render(checks, args.env_file))
     return 1 if any(item["status"] == FAIL for item in checks) else 0
 
 

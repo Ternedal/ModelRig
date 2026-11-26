@@ -28,6 +28,8 @@ from worker_media_generation_profiles import image_profile, video_profile  # noq
 
 SHA = "c" * 40
 SECRET = "S3cret-" + "z" * 40
+UUID0 = "GPU-11111111-2222-3333-4444-555555555555"
+UUID1 = "GPU-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 passed = 0
 
 
@@ -78,14 +80,19 @@ class Rig:
             "KALIV_COMFY_TEMPLATE_DIR": str(self.templates), "KALIV_COMFY_HOST_MEMORY_GIB": "40",
             "KALIV_MEDIA_WORK_ROOT": str(self.tmp / "work"), "KALIV_MEDIA_JOB_DB": str(self.tmp / "work" / "jobs.sqlite3"),
             "KALIV_MEDIA_VOLUME_ROOT": str(self.tmp / "volume"), "KALIV_MEDIA_VOLUME_ID": "kaliv-media-a86762b9f60b",
+            "KALIV_MEDIA_ROOT": str(self.tmp / "volume" / "gallery"), "KALIV_GPU_LEASE_DIR": str(self.tmp / "lease"),
+            "CUDA_DEVICE_ORDER": "PCI_BUS_ID", "KALIV_GPU_DEVICE_UUIDS": f"cuda:0={UUID0},cuda:1={UUID1}",
+            "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
         }
+        for folder in ("work", "volume/gallery", "lease"):
+            (self.tmp / folder).mkdir(parents=True)
         self.env = dict(self.plain_env, KALIV_MEDIA_INTERNAL_SECRET=SECRET)
         self.head, self.dirty, self.untracked = SHA, "", ""
         self.own_head: str | None = None  # HEAD of the checkout the script itself lies in; None: same as `head`
         self.own_changed = ""  # `git status` of that checkout
         self.process_env: dict[str, str] = {}
         self.torch = {"torch": "2.8.0+cu126", "cuda": True, "count": 2}
-        self.smi = "0, 12288, 1400\n1, 12288, 120\n"
+        self.smi = f"0, 12288, 1400, {UUID0.upper().replace('GPU-', 'GPU-')}\n1, 12288, 120, {UUID1}\n"
         self.ollama = {"models": [{"name": "qwen3:14b"}, {"name": "gemma3:12b"}]}
         self.appliance = {"version": "2.0.21"}
         self.area = {"ok": True, "checks": [{"check": "work_area", "ok": True, "detail": "ok"}]}
@@ -287,7 +294,7 @@ rig = Rig(); rig.area = {"ok": False, "checks": [{"check": "work_area", "ok": Tr
                                                     {"check": "publication_volume", "ok": False, "detail": "media_volume_marker_missing"}]}
 item = only_fail(rig, "arbejdsområde: publication_volume")
 check("a failed work-area check is named by its id; its free text is not repeated",
-      item["detail"] == "ikke opfyldt" and "media_volume_marker_missing" not in json.dumps(item), item)
+      item["detail"].startswith("medievolumen afvises, selv om mappen findes") and "media_volume_marker_missing" not in json.dumps(item), item)
 rig = Rig(); rig.area = {"ok": False, "checks": [{"check": "private:Media Jobs.db\x1b[2J", "ok": False,
                                                     "detail": f"KALIV_MEDIA_JOB_DB is not private ({SECRET})"}]}
 item = only_fail(rig, "arbejdsområde: private")
@@ -432,6 +439,98 @@ check("...and a rule that ever builds an id from a value is reported under a fix
 check("the fixed device ids take cuda:N only", preflight.fixed_id("gpu cuda:1") and preflight.fixed_id("executor cuda:12: video")
       and not preflight.fixed_id("gpu cuda:1 " + SECRET) and not preflight.fixed_id("executor cuda:x: video"))
 
+# 9a. One run names everything the executor's environment lacks. Its own start check stops at the
+#     first thing that is wrong, which alone is one trip to the rig per missing line.
+ENVIRONMENT = ["CUDA_DEVICE_ORDER", "KALIV_GPU_DEVICE_UUIDS", "KALIV_GPU_LEASE_DIR", "KALIV_MEDIA_PROFILE_DIR",
+               "KALIV_MEDIA_WORK_ROOT", "KALIV_MEDIA_VOLUME_ROOT", "KALIV_MEDIA_ROOT", "KALIV_MEDIA_JOB_DB",
+               "KALIV_MEDIA_VOLUME_ID", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"]
+rig = Rig()
+found = rig.evaluate()
+check("a correctly configured rig gets one OK line for the executor's environment",
+      [f["status"] for f in found if f["check"] == "executor-miljø"] == [preflight.OK] and not any(f["check"] in ENVIRONMENT for f in found))
+rig = Rig()
+for key in ENVIRONMENT:
+    if key != "KALIV_MEDIA_PROFILE_DIR":  # without it there are no profiles, and the offline flags depend on them
+        del rig.env[key]
+failed = [f["check"] for f in rig.statuses()[preflight.FAIL]]
+check("with ten of them missing, ONE run has a FAIL line for each of the ten",
+      [k for k in ENVIRONMENT if k != "KALIV_MEDIA_PROFILE_DIR"] == [c for c in failed if c in ENVIRONMENT], failed)
+check("...and no OK line for the environment", not any(f["check"] == "executor-miljø" for f in rig.evaluate()))
+code, out, _ = run_main(rig)
+direct = ["CUDA_DEVICE_ORDER=PCI_BUS_ID", f"KALIV_GPU_DEVICE_UUIDS=cuda:1={UUID1}", "HF_HUB_OFFLINE=1", "TRANSFORMERS_OFFLINE=1"]
+command = 'python scripts\\media_env_set.py --file "' + str(rig.tmp / "modelrig.env") + '"' + "".join(f' "{line}"' for line in direct)
+check("the lines with one right answer on this machine are given as one command, the GPU's UUID read from nvidia-smi",
+      code == 1 and command in out, out[-500:])
+code, out, _ = run_main(rig, "--json")
+check("...and as a list in the JSON", json.loads(out)["suggested_lines"] == direct, json.loads(out)["suggested_lines"])
+rig = Rig()
+code, out, _ = run_main(rig)
+check("a ready rig is offered no command", code == 0 and "media_env_set" not in out and json.loads(run_main(rig, "--json")[1])["suggested_lines"] == [])
+rig = Rig()
+del rig.env["KALIV_GPU_DEVICE_UUIDS"]; rig.env["KALIV_MEDIA_EXECUTOR_DEVICES"] = ""
+fix = [f for f in rig.statuses()[preflight.FAIL] if f["check"] == "KALIV_GPU_DEVICE_UUIDS"][0]["fix"]
+check("before the executor's devices are set, the cards of the enabled profiles are used for the UUID line",
+      fix.startswith(preflight.ADD_LINE + "KALIV_GPU_DEVICE_UUIDS=cuda:") and UUID1 in fix, fix)
+rig = Rig(); del rig.env["KALIV_GPU_DEVICE_UUIDS"]; rig.smi = "0, 12288, 1400\n1, 12288, 120\n"
+item = only_fail(rig, "KALIV_GPU_DEVICE_UUIDS")
+check("an nvidia-smi that gives no UUID: the fix says how to get it, and no line is offered",
+      "nvidia-smi --query-gpu=index,uuid" in item["fix"] and preflight.suggested_lines([item]) == [], item)
+rig = Rig(); rig.env["KALIV_GPU_DEVICE_UUIDS"] = f"cuda:0={UUID0}"
+check("a card with no entry is a FAIL that names it", "cuda:1" in only_fail(rig, "KALIV_GPU_DEVICE_UUIDS")["detail"])
+rig = Rig(); rig.env["KALIV_GPU_DEVICE_UUIDS"] = "cuda:1=not-a-uuid"
+check("a value the executor's parser refuses is a FAIL", "cuda:N=GPU-<uuid>" in only_fail(rig, "KALIV_GPU_DEVICE_UUIDS")["detail"])
+rig = Rig(); rig.env["KALIV_GPU_DEVICE_UUIDS"] = f"cuda:1={UUID0}"
+found = rig.statuses()
+check("an entry that is another card's UUID is a WARN (the lease would guard the wrong card), not a FAIL",
+      not found[preflight.FAIL] and [w["check"] for w in found[preflight.WARN]] == ["KALIV_GPU_DEVICE_UUIDS"], found[preflight.WARN])
+rig = Rig(); rig.env["KALIV_GPU_DEVICE_UUIDS"] = f"cuda:0={UUID0},cuda:1={UUID1.upper().replace('GPU-', '')}"
+check("the same UUID in another spelling is not a mismatch", not rig.statuses()[preflight.WARN] and not rig.statuses()[preflight.FAIL])
+rig = Rig(); rig.env["KALIV_GPU_LEASE_DIR"] = "lease"
+check("a relative folder is a FAIL", "absolut" in only_fail(rig, "KALIV_GPU_LEASE_DIR")["detail"])
+rig = Rig(); rig.env["KALIV_MEDIA_ROOT"] = str(rig.tmp / "volume" / "nowhere")
+check("a folder that is not there is a FAIL", "findes ikke" in only_fail(rig, "KALIV_MEDIA_ROOT")["detail"])
+rig = Rig(); rig.env["KALIV_MEDIA_JOB_DB"] = str(rig.tmp / "work" / "state" / "jobs.sqlite3")
+check("a job database in a folder that is not there is a FAIL", "findes ikke" in only_fail(rig, "KALIV_MEDIA_JOB_DB")["detail"])
+rig = Rig(); rig.env["KALIV_MEDIA_PROFILES_ENABLED"] = "ltx-t2v,ltx-i2v"; rig.env["KALIV_IMAGE_TOOL_PROFILE"] = ""
+del rig.env["HF_HUB_OFFLINE"], rig.env["TRANSFORMERS_OFFLINE"]
+check("with no diffusers profile enabled the offline flags are not asked for (the executor does not either)",
+      not any(f["check"] in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE") for f in rig.evaluate()))
+rig = Rig(); rig.start = ("config", "KALIV_SOMETHING_ELSE is wrong")
+check("an environment that looks complete never outvotes the executor's own start check",
+      [f["check"] for f in rig.statuses()[preflight.FAIL]] == ["executor cuda:1: egen startkontrol"]
+      and any(f["check"] == "executor-miljø" and f["status"] == preflight.OK for f in rig.evaluate()))
+from app import gpu_lease, media_executor_main as executor_main  # noqa: E402
+
+names = {executor_main.JOB_DB_ENV, executor_main.MEDIA_ROOT_ENV, executor_main.VOLUME_ROOT_ENV, executor_main.WORK_ROOT_ENV,
+         executor_main.PROFILE_DIR_ENV, gpu_lease.LEASE_DIR_ENV, gpu_lease.DEVICE_UUIDS_ENV, gpu_lease.DEVICE_ORDER_ENV,
+         "KALIV_MEDIA_VOLUME_ID", *executor_main.OFFLINE_FLAGS}
+check("the keys asked for are the executor's own names, and the offline flags are its tuple",
+      names == set(ENVIRONMENT) and preflight.OFFLINE_FLAGS == executor_main.OFFLINE_FLAGS
+      and {key for key, _ in preflight.FOLDER_KEYS} < names and all(preflight.fixed_id(key) for key in ENVIRONMENT), names ^ set(ENVIRONMENT))
+check("only a FAIL whose fix is a whole KEY=VALUE line becomes a suggested line", preflight.suggested_lines([
+    {"status": preflight.FAIL, "check": "a", "detail": "", "fix": preflight.ADD_LINE + "A_KEY=1"},
+    {"status": preflight.WARN, "check": "b", "detail": "", "fix": preflight.ADD_LINE + "B_KEY=1"},
+    {"status": preflight.FAIL, "check": "c", "detail": "", "fix": "sæt C_KEY=1 i env-filen"},
+    {"status": preflight.FAIL, "check": "d", "detail": "", "fix": preflight.ADD_LINE + "d_key=1"},
+    {"status": preflight.FAIL, "check": "e", "detail": "", "fix": preflight.ADD_LINE + "E_KEY=" + preflight.HIDDEN + ' "; rm'},
+    {"status": preflight.FAIL, "check": "f", "detail": "", "fix": preflight.ADD_LINE + "A_KEY=1"}]) == ["A_KEY=1", "E_KEY=" + preflight.HIDDEN])
+
+# The work-area lines say which place and how much, in fixed words and numbers.
+rig = Rig(); rig.area = {"ok": False, "checks": [
+    {"check": "free_space:work_area", "ok": False, "detail": {"free_gib": 3.5, "minimum_gib": 20}},
+    {"check": "free_space:publication_volume", "ok": False, "detail": "PermissionError"},
+    {"check": f"free_space:{SECRET}", "ok": False, "detail": {"free_gib": SECRET, "minimum_gib": 1}}]}
+details = [f["detail"] for f in rig.statuses()[preflight.FAIL]]
+check("free space is told per place, with the two numbers when there are numbers",
+      details == ["for lidt fri plads på arbejdsområdet: 3.5 GiB fri, kræver 20", "fri plads på medievolumen kunne ikke måles", "ikke opfyldt"], details)
+rig = Rig(); rig.env["KALIV_MEDIA_VOLUME_ROOT"] = str(rig.tmp / "unplugged")
+rig.area = {"ok": False, "checks": [{"check": "publication_volume", "ok": False, "detail": "x"},
+                                    {"check": "free_space:publication_volume", "ok": False, "detail": "x"},
+                                    {"check": "free_space:work_area", "ok": False, "detail": {"free_gib": 1, "minimum_gib": 20}}]}
+failed = [f["check"] for f in rig.statuses()[preflight.FAIL]]
+check("a folder that is not there gets its one line with the key; the work-area lines about it are not repeated",
+      failed == ["KALIV_MEDIA_VOLUME_ROOT", "arbejdsområde: free_space"], failed)
+
 # 9b. Review of #2503 (Codex): what the executor refuses must be a FAIL here, in its own words.
 rig = Rig()
 rig.statuses()
@@ -549,7 +648,7 @@ from app.media_executor_main import build_from_env  # noqa: E402
 
 rig = Rig()
 for label, change in (("the executor switch off", {"KALIV_MEDIA_EXECUTOR": "0"}),
-                      ("no CUDA_DEVICE_ORDER in the env file", {})):
+                      ("no CUDA_DEVICE_ORDER in the env file", {"CUDA_DEVICE_ORDER": ""})):
     env = dict(rig.env, **change)
     refusal = preflight._executor_start(env, "cuda:1", sys.executable, str(ROOT / "worker"))
     try:
@@ -655,7 +754,7 @@ code, out, _ = run_main(rig)
 check("with a FAIL nothing is called ready", code == 1 and "klar til" not in out)
 
 # The supervisor's own environment cannot be seen; what this window has beyond the file is named.
-rig = Rig(); rig.process_env = {"CUDA_DEVICE_ORDER": "PCI_BUS_ID", "KALIV_TOOLS_ENABLED": "1", "PATH": "x", "HF_TOKEN": SECRET}
+rig = Rig(); del rig.env["CUDA_DEVICE_ORDER"]; rig.process_env = {"CUDA_DEVICE_ORDER": "PCI_BUS_ID", "KALIV_TOOLS_ENABLED": "1", "PATH": "x", "HF_TOKEN": SECRET}
 infos = [i for i in rig.statuses()[preflight.INFO] if i["check"] == "miljø uden for env-filen"]
 check("keys set in this window and absent from the file are listed by name only",
       len(infos) == 1 and "CUDA_DEVICE_ORDER" in infos[0]["detail"] and "HF_TOKEN" in infos[0]["detail"]
@@ -669,6 +768,7 @@ env_file = rig.tmp / "bare.env"
 # The file gets a throwaway filler where the internal secret goes: the fixture's stand-in value is
 # never written to disk (CodeQL #2503: clear-text storage).
 bare_env = dict(rig.plain_env, KALIV_MEDIA_EXECUTOR_PYTHON=sys.executable, KALIV_MEDIA_EXECUTOR_APP_DIR=str(ROOT / "worker"))
+del bare_env["CUDA_DEVICE_ORDER"]  # the rule the start check is expected to stop at
 lines = [f"{k}={v}\n" for k, v in bare_env.items()]
 lines.append("KALIV_MEDIA_INTERNAL_" + "SECRET=" + "filler-" * 6 + "\n")
 env_file.write_text("".join(lines), encoding="utf-8")

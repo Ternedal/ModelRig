@@ -676,6 +676,16 @@ if ($sha -notmatch '^[0-9a-f]{40}$') { throw "$tag er ikke hentet: git fetch --f
 py -3.11 scripts\media_release_preflight.py --env-file C:\Rig\ModelRig\modelrig.env --planner-model qwen3:14b --require-video --expect-version $tag.TrimStart('v') --expect-sha $sha 2>&1 | Tee-Object $env:TEMP\media-release-preflight.txt
 ```
 
+Executorens egen startkontrol standser ved det første, der er galt. Derfor spørger
+tjekket selv efter alt det, executoren skal have i sit miljø, i samme kørsel:
+kort-rækkefølge, GPU-UUID, lease-mappe, de fem stier, volumen-id og
+offline-flagene får hver sin linje, hvis de mangler. De linjer, der kun har ét
+rigtigt svar på maskinen (`CUDA_DEVICE_ORDER`, offline-flagene og
+`KALIV_GPU_DEVICE_UUIDS` med UUID'et læst fra `nvidia-smi`), samles nederst som én
+færdig `media_env_set.py`-kommando, der kan kopieres. Resten kræver et valg (hvilken
+mappe, hvilket kort) og står med et forslag. Startkontrollen er stadig dommeren:
+de ekstra linjer kan tilføje en `FAIL`, aldrig fjerne en.
+
 | Linje | Betyder |
 |---|---|
 | `OK` | som en release kræver det |
