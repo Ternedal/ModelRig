@@ -391,9 +391,16 @@ for kind in ("config", "volume"):
         check(f"a secret inside the executor's {kind} refusal is replaced, not printed ({'json' if extra else 'text'})",
               SECRET not in out + err and preflight.HIDDEN in out and "\x1b" not in out and "second line" in out, out[-300:])
 rig = Rig()
-(rig.profiles / "realvis.json").write_text("{" + SECRET)
-check("...and so is one inside any other error text (a profile file the loader refuses)",
-      SECRET not in json.dumps(rig.evaluate()))
+refusing = rig.probes()
+
+
+def loader_refuses(env):
+    raise ValueError("bad profile near " + SECRET)
+
+
+refusing.profiles = loader_refuses
+found = json.dumps(preflight.evaluate(rig.env, refusing))
+check("...and so is one inside any other error text (a loader that quotes it)", SECRET not in found and preflight.HIDDEN in found)
 rig = Rig()
 rig.start = ("old", "")
 check("an executor source without check_start is a FAIL that says it is older than this check",
