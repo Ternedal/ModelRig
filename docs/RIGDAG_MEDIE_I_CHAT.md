@@ -640,11 +640,15 @@ En fejl i en af dem viser sig som "der sker ingenting". `scripts\media_release_p
 stiller de samme spørgsmål på forhånd, på få sekunder, og skriver hvad der skal
 rettes. Den læser kun: env-filen, de filer den peger på, `nvidia-smi`,
 medie-miljøets `import torch`, Ollamas modelliste og appliancens `/healthz`. Den
-skriver intet, starter intet og viser ikke værdien af en hemmelighed.
+skriver intet (git uden valgfri låse, Python med `-B`), starter intet, taler kun
+med 127.0.0.1 (ingen proxy, ingen omdirigering) og viser ikke værdien af en
+hemmelighed: værdien af enhver nøgle med et hemmeligheds-navn erstattes i alt,
+den skriver ud.
 
 Linjen `executor cuda:N: egen startkontrol` er den, der afgør: den kører executorens
-egen kontrol (`check_start` — alt den ser på, før den rører jobdatabasen) mod
-env-filen og gengiver dens afvisning ordret. Det fanger også det, der hidtil kun
+egen kontrol (`check_start` — alt den ser på, før den rører jobdatabasen) med
+medie-miljøets Python i `KALIV_MEDIA_EXECUTOR_APP_DIR` — altså den kode, der
+faktisk ville starte, ikke scriptets eget checkout — og gengiver dens afvisning. Det fanger også det, der hidtil kun
 har været sat i et PowerShell-vindue, fx `CUDA_DEVICE_ORDER=PCI_BUS_ID`,
 lease-mappen og ComfyUI-mapperne pr. kort. Scriptet kører i en almindelig Python
 3.11; det kræver hverken FastAPI eller torch.
@@ -664,7 +668,7 @@ cd C:\Users\an001\Desktop\ModelRig-git
 $tag = 'v2.0.21'
 $sha = (git rev-parse "$tag^{commit}").Trim()
 if ($sha -notmatch '^[0-9a-f]{40}$') { throw "$tag er ikke hentet: git fetch --force origin tag $tag" }
-py -3.11 scripts\media_release_preflight.py --env-file C:\Rig\ModelRig\modelrig.env --planner-model qwen3:14b --expect-version $tag.TrimStart('v') --expect-sha $sha 2>&1 | Tee-Object $env:TEMP\media-release-preflight.txt
+py -3.11 scripts\media_release_preflight.py --env-file C:\Rig\ModelRig\modelrig.env --planner-model qwen3:14b --require-video --expect-version $tag.TrimStart('v') --expect-sha $sha 2>&1 | Tee-Object $env:TEMP\media-release-preflight.txt
 ```
 
 | Linje | Betyder |
@@ -674,10 +678,22 @@ py -3.11 scripts\media_release_preflight.py --env-file C:\Rig\ModelRig\modelrig.
 | `FAIL` | releasen laver ikke billede/video sådan; linjen under (`->`) siger hvad der skal ændres |
 | `INFO` | oplysning, ikke en dom (fx at appliancen ikke kører lige nu) |
 
-Sidste linje tæller dem. **Ingen FAIL er ikke en kvalifikation og ikke et job** —
-første billede og første klip fra den udgivne appliance er stadig prøven (§7).
-Tjekket læser kun env-filen: en nøgle, der kun er sat i supervisorens eget miljø,
-meldes som manglende, selv om appliancen ville se den.
+Næstsidste linje tæller dem; den sidste siger, hvad der er klar: billede, og hvilke
+videoopgaver. Uden `--require-video` er video, der er slået fra, kun en `WARN`, og
+sidste linje skriver så `IKKE klar: …` for klippene. Bundet til en release
+(`--expect-sha`) er ændrede eller ikke-sporede filer i executorens `worker\` en
+`FAIL`: så er det ikke releasens kode, der kører.
+
+**Ingen FAIL er ikke en kvalifikation og ikke et job** — første billede og første
+klip fra den udgivne appliance er stadig prøven (§7).
+
+Tjekket læser kun env-filen. Supervisorens børn arver også supervisorens eget
+miljø, som tjekket ikke kan se, og det går begge veje: en nøgle, der kun er sat
+dér, meldes her som manglende, selv om executoren ville se den — og en nøgle, der
+kun er sat dér, kan få executoren til at opføre sig anderledes end det, der er
+tjekket. Til en release skal alle medie-nøgler derfor stå i filen. Linjen
+`miljø uden for env-filen` nævner (kun ved navn) de nøgler, dit eget vindue har,
+og filen mangler.
 
 ## Hvad der skal med hjem
 

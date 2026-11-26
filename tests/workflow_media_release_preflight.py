@@ -80,7 +80,9 @@ class Rig:
             "KALIV_MEDIA_VOLUME_ROOT": str(self.tmp / "volume"), "KALIV_MEDIA_VOLUME_ID": "kaliv-media-a86762b9f60b",
         }
         self.env = dict(self.plain_env, KALIV_MEDIA_INTERNAL_SECRET=SECRET)
-        self.head, self.dirty = SHA, ""
+        self.head, self.dirty, self.untracked = SHA, "", ""
+        self.own_head: str | None = None  # HEAD of the checkout the script itself lies in; None: same as `head`
+        self.process_env: dict[str, str] = {}
         self.torch = {"torch": "2.8.0+cu126", "cuda": True, "count": 2}
         self.smi = "0, 12288, 1400\n1, 12288, 120\n"
         self.ollama = {"models": [{"name": "qwen3:14b"}, {"name": "gemma3:12b"}]}
@@ -106,9 +108,10 @@ class Rig:
         def run(cmd, timeout=60.0, cwd=None):
             self.commands.append(list(cmd))
             if cmd[0] == "git" and "rev-parse" in cmd:
-                return 0, self.head + "\n"
+                elsewhere = str(self.repo) not in cmd
+                return 0, (self.own_head if elsewhere and self.own_head else self.head) + "\n"
             if cmd[0] == "git" and "status" in cmd:
-                return 0, self.dirty
+                return 0, self.untracked if "--untracked-files=all" in cmd else self.dirty
             if cmd[0] == "nvidia-smi":
                 return (0, self.smi) if self.smi is not None else (127, "FileNotFoundError")
             if cmd[0] == str(self.python):
@@ -124,14 +127,16 @@ class Rig:
                 raise self.area
             return self.area
 
-        def start(env, device):
+        def start(env, device, python, app_dir):
             self.started.append(device)
+            self.start_args = (python, app_dir)
             if isinstance(self.start, Exception):
                 raise self.start
             return self.start
 
         return preflight.Probes(run=run, http_json=http, work_area=area, total_ram_gib=lambda: self.ram,
-                                secret_ok=lambda value: value == SECRET, executor_start=start)
+                                secret_ok=lambda value: value == SECRET, executor_start=start,
+                                process_env=lambda: self.process_env)
 
     def evaluate(self, **kwargs) -> list[dict]:
         return preflight.evaluate(self.env, self.probes(), **kwargs)
@@ -185,9 +190,20 @@ rig = Rig(); (rig.repo / "VERSION").write_text("2.0.20\n")
 only_fail(rig, "executor-kilde: version", expect_version="2.0.21", expect_sha=SHA)
 check("a different VERSION is a FAIL", True)
 rig = Rig(); rig.dirty = " M worker/app/media_executor.py\n M worker/app/x.py\n"
-warns = rig.statuses(expect_version="2.0.21", expect_sha=SHA)[preflight.WARN]
-check("local changes in the executor's source are a WARN that counts them",
+warns = rig.statuses()[preflight.WARN]
+check("unbound, local changes in the executor's source are a WARN that counts them",
       len(warns) == 1 and warns[0]["detail"].startswith("2 "), warns)
+fail = only_fail(rig, "executor-kilde: ændringer", expect_version="2.0.21", expect_sha=SHA)
+check("bound to a release, they are a FAIL: HEAD is the release but the files are not (ChatGPT #2503)", fail["detail"].startswith("2 "))
+rig = Rig(); rig.untracked = "?? worker/json.py\n M ignored-here\n"
+fail = only_fail(rig, "executor-kilde: ændringer", expect_version="2.0.21", expect_sha=SHA)
+check("...and so is an untracked file beside the executor's code", "1 ikke-sporede" in fail["detail"], fail)
+check("...which is looked for under worker/ with untracked files listed",
+      any("--untracked-files=all" in c and c[-2:] == ["--", "worker"] for c in rig.commands), rig.commands)
+rig = Rig(); rig.own_head = "e" * 40
+warns = rig.statuses(expect_version="2.0.21", expect_sha=SHA)[preflight.WARN]
+check("a script run from a checkout on another commit than the executor's source is a WARN",
+      [w["check"] for w in warns] == ["tjekkets eget checkout"], warns)
 
 # 4. The media Python and the GPUs.
 rig = Rig(); rig.torch = {"torch": "2.8.0", "cuda": True, "count": 1}
@@ -335,7 +351,17 @@ with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
     code = preflight.main(["--env-file", str(rig.tmp / "bad.env")], probes=rig.probes())
 check("an env file the supervisor would refuse exits 2 and says which line", code == 2 and "linje 2" in err.getvalue())
 commands = [" ".join(c[:2]) for c in rig.commands]
-check("it runs only read-only commands", all(c.startswith(("git -C", "nvidia-smi", str(rig.python))) for c in commands), commands)
+check("it runs only read-only commands", all(c.startswith(("git --no-optional-locks", "nvidia-smi", str(rig.python))) for c in commands), commands)
+rig = Rig()
+rig.statuses(expect_version="2.0.21", expect_sha=SHA)
+gits = [c for c in rig.commands if c[0] == "git"]
+pythons = [c for c in rig.commands if c[0] == str(rig.python)]
+check("every git command is run without optional locks (git status would refresh the index)",
+      len(gits) >= 3 and all(c[1] == "--no-optional-locks" for c in gits), gits)
+check("the media Python is started with -B (it would write __pycache__ beside torch)",
+      len(pythons) == 1 and pythons[0][1] == "-B", pythons)
+check("the start check is given the supervisor's interpreter and folder, not this script's",
+      rig.start_args == (rig.env["KALIV_MEDIA_EXECUTOR_PYTHON"], rig.env["KALIV_MEDIA_EXECUTOR_APP_DIR"]), rig.start_args)
 
 # 9b. Review of #2503 (Codex): what the executor refuses must be a FAIL here, in its own words.
 rig = Rig()
@@ -356,6 +382,23 @@ check("a refusal by the executor (the per-device ComfyUI folders) is a FAIL that
       "cuda1/input" in item["detail"] and "78" in item["detail"], item)
 rig.start = ("volume", "the media volume is not mounted")
 check("a volume that is not there is a FAIL that names exit 75", "75" in only_fail(rig, "egen startkontrol")["detail"])
+for kind in ("config", "volume"):
+    rig = Rig()
+    rig.start = (kind, f"refused: {SECRET} was seen\x1b[31m\nsecond line")
+    item = only_fail(rig, "egen startkontrol")
+    for extra in ((), ("--json",)):
+        _, out, err = run_main(rig, *extra)
+        check(f"a secret inside the executor's {kind} refusal is replaced, not printed ({'json' if extra else 'text'})",
+              SECRET not in out + err and preflight.HIDDEN in out and "\x1b" not in out and "second line" in out, out[-300:])
+rig = Rig()
+(rig.profiles / "realvis.json").write_text("{" + SECRET)
+check("...and so is one inside any other error text (a profile file the loader refuses)",
+      SECRET not in json.dumps(rig.evaluate()))
+rig = Rig()
+rig.start = ("old", "")
+check("an executor source without check_start is a FAIL that says it is older than this check",
+      "ældre" in only_fail(rig, "egen startkontrol")["detail"])
+rig = Rig()
 rig.start = RuntimeError("boom " + SECRET)
 item = only_fail(rig, "egen startkontrol")
 check("a start check that itself breaks is a FAIL, never OK, and its message is not printed",
@@ -392,7 +435,7 @@ rig = Rig()
 for label, change in (("the executor switch off", {"KALIV_MEDIA_EXECUTOR": "0"}),
                       ("no CUDA_DEVICE_ORDER in the env file", {})):
     env = dict(rig.env, **change)
-    refusal = preflight._executor_start(env, "cuda:1")
+    refusal = preflight._executor_start(env, "cuda:1", sys.executable, str(ROOT / "worker"))
     try:
         build_from_env("cuda:1", env)
         built = None
@@ -403,6 +446,105 @@ for label, change in (("the executor switch off", {"KALIV_MEDIA_EXECUTOR": "0"})
 check("...and the second one is the CUDA_DEVICE_ORDER rule the supervisor does not add for the executor",
       "CUDA_DEVICE_ORDER" in refusal[1], refusal)
 
+# The code that answers is the code in KALIV_MEDIA_EXECUTOR_APP_DIR, not this checkout's (ChatGPT
+# #2503): three stand-in sources, each run by the real probe.
+def source(body: str) -> str:
+    folder = Path(tempfile.mkdtemp(prefix="kaliv-preflight-src-"))
+    (folder / "app").mkdir()
+    (folder / "app" / "__init__.py").write_text("")
+    (folder / "app" / "media_executor.py").write_text("class ExecutorConfigError(Exception): pass\n")
+    (folder / "app" / "media_generation_contract.py").write_text("class ArtifactSinkUnavailable(Exception): pass\n")
+    (folder / "app" / "media_executor_main.py").write_text(body)
+    return str(folder)
+
+
+strict = source("from .media_executor import ExecutorConfigError\n"
+                "def check_start(device, env):\n    raise ExecutorConfigError('this source refuses ' + device)\n")
+check("the start check runs the source in the executor's folder: its refusal, not this checkout's",
+      preflight._executor_start(rig.env, "cuda:1", sys.executable, strict) == ("config", "this source refuses cuda:1"))
+gone = source("from .media_generation_contract import ArtifactSinkUnavailable\n"
+              "def check_start(device, env):\n    raise ArtifactSinkUnavailable('no volume')\n")
+check("...a volume refusal from it is kind volume", preflight._executor_start(rig.env, "cuda:1", sys.executable, gone) == ("volume", "no volume"))
+check("...a source that accepts gives None", preflight._executor_start(rig.env, "cuda:1", sys.executable, source("def check_start(device, env):\n    return None\n")) is None)
+check("...a source from before check_start is kind old", preflight._executor_start(rig.env, "cuda:1", sys.executable, source("x = 1\n"))[0] == "old")
+check("...a source that does not import is kind broken, never a pass",
+      preflight._executor_start(rig.env, "cuda:1", sys.executable, source("import nothing_like_this\n"))[0] == "broken")
+check("...and no stand-in source got a __pycache__: the child is started with -B",
+      not list(Path(strict).rglob("__pycache__")) and not list(Path(gone).rglob("__pycache__")))
+
+# Loopback only: no proxy from the environment, no redirect followed.
+import http.server  # noqa: E402
+import threading  # noqa: E402
+
+seen: list[str] = []
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802
+        seen.append(f"{self.server.server_port}{self.path}")
+        if self.path == "/redirect":
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{target.server_port}/landed")
+            self.end_headers()
+            return
+        body = b'{"ok": true}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+target = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+proxy = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+for server in (target, proxy):
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+saved = {key: os.environ.get(key) for key in ("http_proxy", "HTTP_PROXY", "no_proxy", "NO_PROXY")}
+try:
+    os.environ["http_proxy"] = os.environ["HTTP_PROXY"] = f"http://127.0.0.1:{proxy.server_port}"
+    os.environ.pop("no_proxy", None); os.environ.pop("NO_PROXY", None)
+    answer = preflight._http_json(f"http://127.0.0.1:{target.server_port}/direct")
+    check("a proxy in the environment is not used: the request reaches the loopback port itself",
+          answer == (200, {"ok": True}) and seen == [f"{target.server_port}/direct"], (answer, seen))
+    answer = preflight._http_json(f"http://127.0.0.1:{target.server_port}/redirect")
+    check("a redirect is refused, not followed", answer == (None, None) and not any(s.endswith("/landed") for s in seen), (answer, seen))
+finally:
+    for key, value in saved.items():
+        os.environ.pop(key, None) if value is None else os.environ.__setitem__(key, value)
+    target.shutdown(); proxy.shutdown()
+check("an address that is not 127.0.0.1 is not asked at all", preflight._http_json("http://example.invalid:80/x") == (None, None))
+
+# What a pass claims: only what is ready (ChatGPT #2503 P3).
+rig = Rig()
+code, out, _ = run_main(rig)
+check("image and both video tasks ready: the last line names them", code == 0 and "første klip (text_to_video, image_to_video)" in out, out[-200:])
+rig = Rig(); rig.env["KALIV_VIDEO_TOOL_ENABLED"] = "0"
+code, out, _ = run_main(rig)
+check("video off: exit 0, but the last line says the clips are NOT ready", code == 0 and "første klip" not in out and
+      "IKKE klar: text_to_video, image_to_video" in out, out[-200:])
+code, out, _ = run_main(rig, "--json")
+check("...and the JSON says the same", json.loads(out)["ready"] == {"image": True, "text_to_video": False, "image_to_video": False})
+code, out, _ = run_main(rig, "--require-video")
+check("--require-video turns it into a FAIL and exit 1", code == 1 and "ikke klar" in out and "ingen FAIL" not in out, out[-200:])
+rig = Rig(); (rig.profiles / "ltx-i2v.json").unlink(); rig.env["KALIV_MEDIA_PROFILES_ENABLED"] = "realvis,ltx-t2v"
+rig.env["KALIV_VIDEO_TOOL_PROFILE"] = "ltx-t2v"
+code, out, _ = run_main(rig)
+check("a video task with no profile is named as not ready", code == 0 and "klip (text_to_video). IKKE klar: image_to_video" in out, out[-200:])
+check("...and is a FAIL with --require-video", run_main(rig, "--require-video")[0] == 1)
+rig = Rig(); rig.env["KALIV_MEDIA_EXECUTOR"] = "0"
+code, out, _ = run_main(rig)
+check("with a FAIL nothing is called ready", code == 1 and "klar til" not in out)
+
+# The supervisor's own environment cannot be seen; what this window has beyond the file is named.
+rig = Rig(); rig.process_env = {"CUDA_DEVICE_ORDER": "PCI_BUS_ID", "KALIV_TOOLS_ENABLED": "1", "PATH": "x", "HF_TOKEN": SECRET}
+infos = [i for i in rig.statuses()[preflight.INFO] if i["check"] == "miljø uden for env-filen"]
+check("keys set in this window and absent from the file are listed by name only",
+      len(infos) == 1 and "CUDA_DEVICE_ORDER" in infos[0]["detail"] and "HF_TOKEN" in infos[0]["detail"]
+      and "KALIV_TOOLS_ENABLED" not in infos[0]["detail"] and SECRET not in json.dumps(infos), infos)
+
 # 9d. A bare Python: no FastAPI, no pydantic, no torch. The tool must still report, not crash.
 import subprocess  # noqa: E402
 
@@ -410,7 +552,8 @@ rig = Rig()
 env_file = rig.tmp / "bare.env"
 # The file gets a throwaway filler where the internal secret goes: the fixture's stand-in value is
 # never written to disk (CodeQL #2503: clear-text storage).
-lines = [f"{k}={v}\n" for k, v in rig.plain_env.items()]
+bare_env = dict(rig.plain_env, KALIV_MEDIA_EXECUTOR_PYTHON=sys.executable, KALIV_MEDIA_EXECUTOR_APP_DIR=str(ROOT / "worker"))
+lines = [f"{k}={v}\n" for k, v in bare_env.items()]
 lines.append("KALIV_MEDIA_INTERNAL_" + "SECRET=" + "filler-" * 6 + "\n")
 env_file.write_text("".join(lines), encoding="utf-8")
 blocker = ("import sys, importlib.abc, runpy\n"

@@ -16,16 +16,22 @@ what to change.
     ... --expect-version 2.0.21 --expect-sha <full sha of the tag>
 
 It reads the env file, files it names, `nvidia-smi`, the media Python
-(`import torch`), Ollama's tag list and the appliance's /healthz. It writes
-nothing, starts nothing, and prints no value of a secret.
+(`import torch`, and the executor's own start check run from the executor's
+own source), Ollama's tag list and the appliance's /healthz. It writes nothing
+(git without optional locks, Python with -B), starts nothing, talks to
+127.0.0.1 only (no proxy, no redirect) and prints no value of a secret.
 
 Only the env file is read. A child of the supervisor also inherits the
-supervisor's own environment, so a key set there and absent from the file is
-reported here as missing although the appliance would see it.
+supervisor's own environment, which this cannot see. That cuts both ways: a
+key set only there is reported here as missing although the executor would see
+it, and a key set only there can make the executor behave differently from
+what is checked here. For a release, every media key belongs in the file.
 
 Exit 0: no FAIL. Exit 1: at least one FAIL. Exit 2: usage or unreadable env
-file. A pass is this machine now -- not a qualification, and not a job: the
-first image and the first clip are still the proof.
+file. Without --require-video, video that is switched off is a WARN and the
+last line says that only the image is ready. A pass is this machine now -- not
+a qualification, and not a job: the first image and the first clip are still
+the proof.
 """
 from __future__ import annotations
 
@@ -92,17 +98,37 @@ def parse_env_file(text: str) -> dict[str, str]:
     return env
 
 
-def _run(cmd: list[str], timeout: float = 60.0, cwd: str | None = None) -> tuple[int, str]:
+def _run(cmd: list[str], timeout: float = 60.0, cwd: str | None = None, stdin: str | None = None) -> tuple[int, str]:
     try:
-        done = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd)
+        done = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd, input=stdin,
+                              encoding="utf-8", errors="replace")
         return done.returncode, (done.stdout or "") + (done.stderr or "")
     except (OSError, subprocess.SubprocessError) as exc:
         return 127, type(exc).__name__
 
 
+# Read-only means the tools this starts must not write either. `git status` refreshes the index
+# unless told not to; a Python child writes __pycache__ unless started with -B (this process's
+# own dont_write_bytecode is not inherited). ChatGPT on #2503.
+GIT = ["git", "--no-optional-locks"]
+PYTHON_FLAGS = ["-B"]
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):  # a redirect is refused, never followed
+        return None
+
+
+# No proxy from the environment or the system settings, and no redirect: a request to 127.0.0.1
+# goes to 127.0.0.1 or fails.
+_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+
+
 def _http_json(url: str, timeout: float = 5.0):
+    if not url.startswith("http://127.0.0.1:"):
+        return None, None
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:  # loopback only, see callers
+        with _LOCAL_OPENER.open(url, timeout=timeout) as response:
             return response.status, json.loads(response.read().decode("utf-8"))
     except (OSError, ValueError, urllib.error.URLError):
         return None, None
@@ -160,19 +186,54 @@ def _secret_ok(value: str) -> bool:
     return isinstance(value, str) and len(value) >= MIN_SECRET_CHARS and not any(c in value for c in "\r\n")
 
 
-def _executor_start(env: Mapping[str, str], device: str) -> "tuple[str, str] | None":
-    """The executor's own start rules for one device (`check_start`: it only looks). None when it
-    would start; otherwise (kind, text) with kind "config" (exit 78) or "volume" (exit 75)."""
-    from app.media_executor import ExecutorConfigError
-    from app.media_executor_main import check_start
-    from app.media_generation_contract import ArtifactSinkUnavailable
+_START_CHECK = """
+import json, sys
+env = json.load(sys.stdin)
+import app.media_executor_main as m
+if not hasattr(m, "check_start"):
+    print(json.dumps({"kind": "old"})); raise SystemExit(0)
+from app.media_executor import ExecutorConfigError
+from app.media_generation_contract import ArtifactSinkUnavailable
+try:
+    m.check_start(sys.argv[1], env)
+except ExecutorConfigError as exc:
+    out = {"kind": "config", "text": str(exc)}
+except ArtifactSinkUnavailable as exc:
+    out = {"kind": "volume", "text": str(exc)}
+else:
+    out = {"kind": "ok"}
+print(json.dumps(out))
+"""
+
+
+def _executor_start(env: Mapping[str, str], device: str, python: str, app_dir: str) -> "tuple[str, str] | None":
+    """The executor's own start rules for one device, run the way the supervisor runs the executor:
+    the media Python, in KALIV_MEDIA_EXECUTOR_APP_DIR, so the code that answers is the code that
+    would start -- not this script's checkout (ChatGPT on #2503). `check_start` only looks.
+
+    None when it would start; otherwise (kind, text): "config" (exit 78), "volume" (exit 75),
+    "old" (that source has no check_start) or "broken" (the check itself did not run)."""
+    code, out = _run([python, *PYTHON_FLAGS, "-c", _START_CHECK, device], 120.0, cwd=app_dir, stdin=json.dumps(dict(env)))
     try:
-        check_start(device, env)
-    except ExecutorConfigError as exc:
-        return "config", str(exc)
-    except ArtifactSinkUnavailable as exc:
-        return "volume", str(exc)
-    return None
+        answer = json.loads(out.strip().splitlines()[-1]) if code == 0 else None
+    except (ValueError, IndexError):
+        answer = None
+    if not isinstance(answer, dict) or answer.get("kind") not in ("ok", "old", "config", "volume"):
+        return "broken", f"exit {code}"
+    return None if answer["kind"] == "ok" else (answer["kind"], str(answer.get("text", "")))
+
+
+SECRET_KEY = re.compile(r"SECRET|TOKEN|PASSWORD|PASSPHRASE|CREDENTIAL|PRIVATE|API_?KEY", re.IGNORECASE)
+HIDDEN = "<skjult>"
+
+
+def scrub(text: str, env: Mapping[str, str]) -> str:
+    """One line, with every value of a secret-named key of the env file replaced. Applied to every
+    string of the report, whatever produced it: the executor's refusal, a loader's error, a path."""
+    for key, value in env.items():
+        if SECRET_KEY.search(key) and len(value) >= 4:
+            text = text.replace(value, HIDDEN)
+    return "".join(ch if ch.isprintable() else " " for ch in text)
 
 
 @dataclass
@@ -191,6 +252,7 @@ class Probes:
     profiles: Callable[[Mapping[str, str]], dict] = _profiles
     secret_ok: Callable[[str], bool] = _secret_ok
     executor_start: Callable[..., "tuple[str, str] | None"] = _executor_start
+    process_env: Callable[[], Mapping[str, str]] = lambda: dict(os.environ)
 
 
 @dataclass
@@ -201,10 +263,32 @@ class Report:
         self.checks.append({"status": status, "check": name, "detail": detail, "fix": fix})
 
 
+INHERITED = re.compile(r"^(KALIV_|CUDA_|HF_|TRANSFORMERS_|OLLAMA_)")
+
+
 def evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | None = None,
-             expect_sha: str | None = None, planner_model: str | None = None) -> list[dict]:
-    """The rules. Pure given `probes`; never prints and never raises on a bad configuration."""
+             expect_sha: str | None = None, planner_model: str | None = None,
+             require_video: bool = False) -> list[dict]:
+    """The rules. Pure given `probes`; never prints and never raises on a bad configuration.
+    Every string that leaves here has been through `scrub`."""
+    checks = _evaluate(env, probes, expect_version=expect_version, expect_sha=expect_sha,
+                       planner_model=planner_model, require_video=require_video)
+    return [{key: scrub(value, env) if isinstance(value, str) else value for key, value in item.items()} for item in checks]
+
+
+def readiness(checks: list[dict]) -> dict:
+    """What a run with no FAIL actually says is ready. Video is ready per task, and only when the
+    task has its own OK line: switched off, or no profile for the task, is not ready."""
+    clean = not any(item["status"] == FAIL for item in checks)
+    ok = {item["check"] for item in checks if item["status"] == OK}
+    return {"image": clean, "text_to_video": clean and "video: text_to_video" in ok,
+            "image_to_video": clean and "video: image_to_video" in ok}
+
+
+def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | None, expect_sha: str | None,
+              planner_model: str | None, require_video: bool) -> list[dict]:
     report = Report()
+    video_missing = FAIL if require_video else WARN
     get = lambda key: env.get(key, "").strip()  # noqa: E731
 
     # --- 1. the switches a released appliance reads from its env file -------------------------
@@ -219,7 +303,7 @@ def evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | No
     if video:
         report.add(OK, "video", "KALIV_MEDIA_VIDEO=1 og KALIV_VIDEO_TOOL_ENABLED=1")
     else:
-        report.add(WARN, "video", "video er slået fra (begge kontakter skal være 1)",
+        report.add(video_missing, "video", "video er slået fra (begge kontakter skal være 1)",
                    "sæt KALIV_MEDIA_VIDEO=1 og KALIV_VIDEO_TOOL_ENABLED=1, hvis releasen skal lave klip")
     if probes.secret_ok(env.get("KALIV_MEDIA_INTERNAL_SECRET", "")):
         report.add(OK, "KALIV_MEDIA_INTERNAL_SECRET", "sat og brugbar (værdien vises ikke)")
@@ -262,10 +346,14 @@ def evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | No
         repo = os.path.dirname(app_dir.rstrip("\\/"))
         version_file = os.path.join(repo, "VERSION")
         version = probes.read_text(version_file).strip() if probes.is_file(version_file) else None
-        code, head = probes.run(["git", "-C", repo, "rev-parse", "HEAD"], 20.0)
+        code, head = probes.run([*GIT, "-C", repo, "rev-parse", "HEAD"], 20.0)
         head = head.strip() if code == 0 else None
-        code, dirty = probes.run(["git", "-C", repo, "status", "--porcelain", "--untracked-files=no"], 30.0)
+        code, dirty = probes.run([*GIT, "-C", repo, "status", "--porcelain", "--untracked-files=no"], 30.0)
         dirty_count = len([line for line in dirty.splitlines() if line.strip()]) if code == 0 else None
+        # Untracked files beside the executor's code count too: Python runs in that folder, so a
+        # stray worker/json.py would be imported instead of the standard library's.
+        code, extra = probes.run([*GIT, "-C", repo, "status", "--porcelain", "--untracked-files=all", "--", "worker"], 30.0)
+        extra_count = len([line for line in extra.splitlines() if line.startswith("??")]) if code == 0 else None
         seen = f"VERSION={version or '?'} HEAD={(head or '?')[:12]}"
         if expect_version and version != expect_version:
             report.add(FAIL, "executor-kilde: version", f"{seen}, forventet {expect_version}",
@@ -277,14 +365,25 @@ def evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | No
             report.add(OK, "executor-kilde", seen)
         else:
             report.add(INFO, "executor-kilde", f"{seen} (ikke bundet: giv --expect-version/--expect-sha, når tagget findes)")
-        if dirty_count:
-            report.add(WARN, "executor-kilde: ændringer", f"{dirty_count} ændrede filer i {repo}",
-                       "executoren kører den kode, der ligger der, ikke releasens")
+        # Bound to a release, a checkout that is not exactly that commit is a FAIL: the HEAD says
+        # one thing and the files the executor runs say another. Unbound, it is a WARN.
+        drift = FAIL if expect_sha else WARN
+        if dirty_count is None or extra_count is None:
+            report.add(drift, "executor-kilde: ændringer", f"git status kunne ikke køres i {repo}", "tjek at git er på PATH og mappen er et checkout")
+        elif dirty_count or extra_count:
+            report.add(drift, "executor-kilde: ændringer", f"{dirty_count} ændrede og {extra_count} ikke-sporede filer (worker/) i {repo}",
+                       "executoren kører den kode, der ligger der, ikke releasens: git stash -u, eller brug et rent checkout")
+        own = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if os.path.normcase(os.path.realpath(own)) != os.path.normcase(os.path.realpath(repo)):
+            code, own_head = probes.run([*GIT, "-C", own, "rev-parse", "HEAD"], 20.0)
+            if code != 0 or own_head.strip() != head:
+                report.add(WARN, "tjekkets eget checkout", f"dette script ligger i {own}, på en anden commit end executorens kilde",
+                           "startkontrollen er executorens egen; de forklarende linjer (profiler, arbejdsområde) kan afvige. Kør scriptet fra executorens checkout")
 
     # --- 4. the media Python can see the GPUs it is told to use ---------------------------------
     highest = max((int(d.split(":")[1]) for d in devices), default=-1)
     if probes.is_file(python) and os.path.isabs(python):
-        code, out = probes.run([python, "-c", "import json,torch;print(json.dumps({'torch':torch.__version__,"
+        code, out = probes.run([python, *PYTHON_FLAGS, "-c", "import json,torch;print(json.dumps({'torch':torch.__version__,"
                                               "'cuda':torch.cuda.is_available(),'count':torch.cuda.device_count()}))"], 120.0)
         try:
             torch_info = json.loads(out.strip().splitlines()[-1]) if code == 0 else None
@@ -340,7 +439,7 @@ def evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | No
                 serving = [pid for pid, p in enabled.items() if p.modality == "video" and task in p.tasks]
                 chosen = [pid for pid in configured if pid in serving]
                 if not serving:
-                    report.add(WARN, f"video: {task}", "ingen slået-til profil laver den opgave", "slå en profil til, der har opgaven, hvis den skal virke")
+                    report.add(video_missing, f"video: {task}", "ingen slået-til profil laver den opgave", "slå en profil til, der har opgaven, hvis den skal virke")
                 elif not chosen and len(serving) > 1:
                     report.add(FAIL, f"video: {task}", f"{len(serving)} profiler kan ({', '.join(sorted(serving))}), og ingen er valgt",
                                "sæt KALIV_VIDEO_TOOL_PROFILE til ét id pr. opgave, adskilt af komma")
@@ -402,17 +501,25 @@ def evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | No
     # caught, in the executor's own words.
     for device in devices:
         name = f"executor {device}: egen startkontrol"
-        try:
-            refusal = probes.executor_start(env, device)
-        except Exception as exc:  # the check itself broke: say so, never claim OK
-            report.add(FAIL, name, f"kunne ikke køres: {type(exc).__name__}", "kør scriptet fra et checkout af releasens commit")
+        if not app_dir or not (os.path.isabs(python) and probes.is_file(python)):
+            # Both causes are FAIL lines of their own above, so this is not a second verdict.
+            report.add(INFO, name, "ikke kørt: medie-python eller executorens kilde mangler (FAIL ovenfor)")
             continue
+        try:
+            refusal = probes.executor_start(env, device, python, app_dir)
+        except Exception as exc:  # the check itself broke: say so, never claim OK
+            refusal = ("broken", type(exc).__name__)
         if refusal is None:
             report.add(OK, name, "ville starte (alt den ser på før jobdatabasen)")
         elif refusal[0] == "volume":
             report.add(FAIL, name, f"medievolumen er ikke klar (exit 75): {refusal[1][:300]}", "tilslut medievolumen og kør igen")
-        else:
+        elif refusal[0] == "config":
             report.add(FAIL, name, f"afviser start (exit 78): {refusal[1][:300]}", "ret det, linjen nævner, i env-filen eller på disken")
+        elif refusal[0] == "old":
+            report.add(FAIL, name, "executorens kilde har ingen check_start: den er ældre end dette tjek",
+                       "check releasens commit ud i KALIV_MEDIA_EXECUTOR_APP_DIR's checkout")
+        else:
+            report.add(FAIL, name, f"kunne ikke køres ({refusal[1][:60]})", "kør medie-python i executorens mappe: python -c \"import app.media_executor_main\"")
 
     # --- 8. the GPUs, as the driver reports them now ---------------------------------------------
     code, out = probes.run(["nvidia-smi", "--query-gpu=index,memory.total,memory.used", "--format=csv,noheader,nounits"], 30.0)
@@ -455,6 +562,12 @@ def evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | No
             report.add(INFO if not expect_version else OK, "appliance", f"kører {version}")
     else:
         report.add(INFO, "appliance", "svarer ikke på 127.0.0.1:8080 (ikke startet)")
+    # The supervisor's children also inherit ITS environment, which this cannot see. What this
+    # window has and the file lacks is the nearest hint -- names only.
+    stray = sorted(key for key in probes.process_env() if INHERITED.match(key) and key not in env)
+    if stray:
+        report.add(INFO, "miljø uden for env-filen", f"sat i dette vindue, ikke i filen: {', '.join(stray)[:400]}",
+                   "")
     return report.checks
 
 
@@ -466,8 +579,16 @@ def render(checks: list[dict]) -> str:
             lines.append(f"        -> {item['fix']}")
     counts = {status: sum(1 for item in checks if item["status"] == status) for status in (OK, WARN, FAIL, INFO)}
     lines.append("")
-    lines.append(f"  {counts[OK]} OK, {counts[WARN]} WARN, {counts[FAIL]} FAIL, {counts[INFO]} INFO"
-                 + ("" if counts[FAIL] else "  -- ingen FAIL: klar til første billede og første klip"))
+    lines.append(f"  {counts[OK]} OK, {counts[WARN]} WARN, {counts[FAIL]} FAIL, {counts[INFO]} INFO")
+    ready = readiness(checks)
+    if ready["image"]:
+        clips = [task for task in ("text_to_video", "image_to_video") if ready[task]]
+        missing = [task for task in ("text_to_video", "image_to_video") if not ready[task]]
+        lines.append("  ingen FAIL: klar til første billede"
+                     + (f" og første klip ({', '.join(clips)})" if clips else "")
+                     + (f". IKKE klar: {', '.join(missing)}" if missing else ""))
+    else:
+        lines.append("  ikke klar: ret FAIL-linjerne og kør igen")
     return "\n".join(lines)
 
 
@@ -477,6 +598,8 @@ def main(argv: list[str] | None = None, probes: Probes | None = None) -> int:
     parser.add_argument("--expect-version", help="releasens version, fx 2.0.21")
     parser.add_argument("--expect-sha", help="den fulde commit, tagget peger på")
     parser.add_argument("--planner-model", help="chatmodellen, fx qwen3:14b")
+    parser.add_argument("--require-video", action="store_true",
+                        help="releasen skal lave klip: video slået fra eller en videoopgave uden profil er FAIL")
     parser.add_argument("--json", action="store_true", help="skriv JSON i stedet for tekst")
     args = parser.parse_args(argv)
     for stream in (sys.stdout, sys.stderr):
@@ -496,9 +619,10 @@ def main(argv: list[str] | None = None, probes: Probes | None = None) -> int:
         print(f"{args.env_file}: {exc} -- supervisoren afviser også filen", file=sys.stderr)
         return 2
     checks = evaluate(env, probes, expect_version=args.expect_version, expect_sha=args.expect_sha,
-                      planner_model=args.planner_model)
+                      planner_model=args.planner_model, require_video=args.require_video)
     if args.json:
-        print(json.dumps({"schema": SCHEMA, "env_file": args.env_file, "checks": checks}, ensure_ascii=False, indent=2))
+        print(json.dumps({"schema": SCHEMA, "env_file": args.env_file, "ready": readiness(checks), "checks": checks},
+                         ensure_ascii=False, indent=2))
     else:
         print(render(checks))
     return 1 if any(item["status"] == FAIL for item in checks) else 0
