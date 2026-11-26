@@ -625,6 +625,84 @@ vindue under S5 (#2475) og ikke `output_has_no_sound`. Det er en accept af denne
 kæde på udviklingskanalen — ikke en V1-gate og ikke en kvalificering af
 profilerne, som fortsat er `candidate`.
 
+## 8. Medie fra en udgivet appliance — tjek før du sætter tid af
+
+Alt ovenfor er kørt fra kildekoden med executoren startet i hånden. I en release
+er tre ting anderledes, og ingen af dem er set på riggen:
+
+- **Supervisoren starter executoren** ud fra fire nøgler i env-filen
+  (`KALIV_MEDIA_EXECUTOR`, `_DEVICES`, `_PYTHON`, `_APP_DIR`).
+- **Executoren kører stadig fra et kilde-checkout** (`_APP_DIR`), fordi torch ikke
+  er i den pakkede worker. Det checkout skal stå på releasens egen commit.
+- **Alle kontakter læses fra env-filen**, ikke fra et PowerShell-vindue.
+
+En fejl i en af dem viser sig som "der sker ingenting". `scripts\media_release_preflight.py`
+stiller de samme spørgsmål på forhånd, på få sekunder, og skriver hvad der skal
+rettes. Den læser kun: env-filen, de filer den peger på, `nvidia-smi`,
+medie-miljøets `import torch`, Ollamas modelliste og appliancens `/healthz`. Den
+skriver intet (git uden valgfri låse, Python med `-B`), starter intet, taler kun
+med 127.0.0.1 (ingen proxy, ingen omdirigering) og viser ikke værdien af en
+hemmelighed. Tekst, som en anden komponent har skrevet (executorens afvisning,
+profil-loaderens fejl, arbejdsområde-kontrollens detaljer), gengives aldrig: af
+den vises kun en af scriptets egne sætninger og navnene på de nøgler, teksten
+nævner. Oven i det erstattes værdien af enhver nøgle med et hemmeligheds-navn i
+det, scriptet selv skriver. Outputtet kan derfor deles.
+
+Linjen `executor cuda:N: egen startkontrol` er den, der afgør: den kører executorens
+egen kontrol (`check_start` — alt den ser på, før den rører jobdatabasen) med
+medie-miljøets Python i `KALIV_MEDIA_EXECUTOR_APP_DIR` — altså den kode, der
+faktisk ville starte, ikke scriptets eget checkout. Ved en afvisning står
+årsagen i scriptets ord med de nøgler, executoren nævner; executorens egen tekst
+står i `logs\executor-cudaN.log` efter et startforsøg. Det fanger også det, der hidtil kun
+har været sat i et PowerShell-vindue, fx `CUDA_DEVICE_ORDER=PCI_BUS_ID`,
+lease-mappen og ComfyUI-mapperne pr. kort. Scriptet kører i en almindelig Python
+3.11; det kræver hverken FastAPI eller torch.
+
+Fra et checkout, der har scriptet (her kandidat-checkouten):
+
+```powershell
+cd C:\Users\an001\Desktop\ModelRig-git
+py -3.11 scripts\media_release_preflight.py --env-file C:\Rig\ModelRig\modelrig.env --planner-model qwen3:14b 2>&1 | Tee-Object $env:TEMP\media-release-preflight.txt
+```
+
+Når tagget findes, bindes executorens kilde til det (blokken stopper, hvis tagget
+ikke er hentet):
+
+```powershell
+cd C:\Users\an001\Desktop\ModelRig-git
+$tag = 'v2.0.21'
+$sha = (git rev-parse "$tag^{commit}").Trim()
+if ($sha -notmatch '^[0-9a-f]{40}$') { throw "$tag er ikke hentet: git fetch --force origin tag $tag" }
+py -3.11 scripts\media_release_preflight.py --env-file C:\Rig\ModelRig\modelrig.env --planner-model qwen3:14b --require-video --expect-version $tag.TrimStart('v') --expect-sha $sha 2>&1 | Tee-Object $env:TEMP\media-release-preflight.txt
+```
+
+| Linje | Betyder |
+|---|---|
+| `OK` | som en release kræver det |
+| `WARN` | virker, men er værd at se på (fx hukommelse i brug på executorens kort) |
+| `FAIL` | releasen laver ikke billede/video sådan; linjen under (`->`) siger hvad der skal ændres |
+| `INFO` | oplysning, ikke en dom (fx at appliancen ikke kører lige nu) |
+
+Næstsidste linje tæller dem; den sidste siger, hvad der er klar: billede, og hvilke
+videoopgaver. Uden `--require-video` er video, der er slået fra, kun en `WARN`, og
+sidste linje skriver så `IKKE klar: …` for klippene. Bundet til en release
+(`--expect-sha`) er ændrede eller ikke-sporede filer i executorens `worker\` en
+`FAIL`: så er det ikke releasens kode, der kører. Det samme gælder scriptets eget
+checkout, hvis det er et andet end executorens: profil- og arbejdsområde-reglerne
+køres derfra, så det skal stå på samme commit og være uændret. Nemmest er at køre
+scriptet fra executorens checkout.
+
+**Ingen FAIL er ikke en kvalifikation og ikke et job** — første billede og første
+klip fra den udgivne appliance er stadig prøven (§7).
+
+Tjekket læser kun env-filen. Supervisorens børn arver også supervisorens eget
+miljø, som tjekket ikke kan se, og det går begge veje: en nøgle, der kun er sat
+dér, meldes her som manglende, selv om executoren ville se den — og en nøgle, der
+kun er sat dér, kan få executoren til at opføre sig anderledes end det, der er
+tjekket. Til en release skal alle medie-nøgler derfor stå i filen. Linjen
+`miljø uden for env-filen` nævner (kun ved navn) de nøgler, dit eget vindue har,
+og filen mangler.
+
 ## Hvad der skal med hjem
 
 Skriv det som én kommentar på #2419:

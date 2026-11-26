@@ -20,7 +20,7 @@ for extra in (ROOT / "worker", ROOT / "tests"):
     sys.path.insert(0, str(extra))
 
 from app.gpu_lease import acquire_gpu_lease  # noqa: E402
-from app.media_executor import EXIT_CONFIG, EXIT_SINK_UNAVAILABLE  # noqa: E402
+from app.media_executor import EXIT_CONFIG, EXIT_SINK_UNAVAILABLE, ExecutorConfigError  # noqa: E402
 from app.media_executor_main import _on_one_device as real_on_one_device, build_from_env, main  # noqa: E402
 from app.media_generation_contract import ArtifactSinkUnavailable, RenderedArtifact  # noqa: E402
 from app.media_volume import STABLE_ID_FILESYSTEMS  # noqa: E402
@@ -520,6 +520,28 @@ class EntryPointTests(unittest.TestCase):
         self.assertEqual(result.returncode, EXIT_SINK_UNAVAILABLE, result.stderr)
         self.assertIn("volume is not available", result.stderr)
         self.assertFalse(Path(env["KALIV_MEDIA_JOB_DB"]).exists(), "nothing written before the volume is proven")
+
+    def test_check_start_only_looks(self):
+        """`check_start` is what the rig preflight runs against a live appliance's configuration:
+        on a configuration the executor would start from it accepts, and it creates and changes
+        nothing -- no job database, no file, no timestamp."""
+        from app.media_executor_main import check_start
+
+        def tree():
+            roots = {os.path.dirname(self.env["KALIV_MEDIA_JOB_DB"]), self.env["KALIV_MEDIA_VOLUME_ROOT"],
+                     self.env["KALIV_GPU_LEASE_DIR"]}
+            return sorted((str(p), p.lstat().st_mtime_ns, p.lstat().st_size) for root in roots
+                          for p in [Path(root), *Path(root).rglob("*")])
+
+        before = tree()
+        with patch("app.media_gallery_catalog.os.path.ismount", return_value=True):
+            start = check_start("cuda:0", self.env)
+        self.assertEqual(sorted(start.mine), ["sdxl-a"])
+        self.assertFalse(Path(self.env["KALIV_MEDIA_JOB_DB"]).exists(), "the job database is the store's to create")
+        self.assertEqual(tree(), before)
+        with self.assertRaises(ExecutorConfigError) as refused:
+            check_start("cuda:0", {**self.env, "KALIV_MEDIA_PROFILES_ENABLED": ""})
+        self.assertIn("no enabled profile allows cuda:0", str(refused.exception))
 
     def test_end_to_end_a_job_is_published_job_keyed_to_the_gallery(self):
         from app.image_job_store import ImageJobStore
