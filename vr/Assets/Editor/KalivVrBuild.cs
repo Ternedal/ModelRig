@@ -27,6 +27,8 @@ namespace Kaliv.VR.EditorTools
                 ValidatePackageLockAuthority();
                 ValidatePlayerSettingsAuthority();
                 string[] scenes = CreateTemporaryBootScene();
+                ApplyLauncherIcon();
+                ApplySplashSettings();
 
                 string root = Directory.GetParent(Application.dataPath)!.FullName;
                 string outDir = Path.Combine(root, OutputDirectory);
@@ -313,6 +315,37 @@ namespace Kaliv.VR.EditorTools
             Debug.Log(
                 $"[KalivVR] Committed player authority verified " +
                 $"(IL2CPP/ARM64/GLES3/Linear/API29/4xMSAA, quality={activeQuality}).");
+        }
+
+        /// <summary>
+        /// Design v2.1's gold ankh as the launcher icon, set for this build only. It is applied
+        /// in memory rather than committed to ProjectSettings, which the build tooling restores
+        /// after every batch build (XR Management rewrites it).
+        /// </summary>
+        private static void ApplyLauncherIcon()
+        {
+            const string iconPath = "Assets/Branding/kaliv_icon.png";
+            var icon = AssetDatabase.LoadAssetAtPath<Texture2D>(iconPath);
+            if (icon == null)
+            {
+                Debug.LogWarning("[KalivVR] Launcher icon missing at " + iconPath + " — default icon used.");
+                return;
+            }
+            PlayerSettings.SetIcons(UnityEditor.Build.NamedBuildTarget.Unknown, new[] { icon }, IconKind.Any);
+            Debug.Log("[KalivVR] Launcher icon: design v2.1 ankh.");
+        }
+
+        /// <summary>
+        /// No Unity logo at startup — Kaliv VR's own splash (KalivSplash) is the first thing
+        /// seen. SkyPlayer ships with the Unity logo off for the same reason. Per build, like the
+        /// icon, because ProjectSettings is restored after batch builds.
+        /// </summary>
+        private static void ApplySplashSettings()
+        {
+            PlayerSettings.SplashScreen.showUnityLogo = false;
+            PlayerSettings.SplashScreen.show = false;   // honoured on licences that allow it
+            PlayerSettings.SplashScreen.backgroundColor = new Color(6 / 255f, 19 / 255f, 38 / 255f, 1f);
+            Debug.Log($"[KalivVR] Unity splash: show={PlayerSettings.SplashScreen.show}, logo={PlayerSettings.SplashScreen.showUnityLogo}.");
         }
 
         private static string[] CreateTemporaryBootScene()

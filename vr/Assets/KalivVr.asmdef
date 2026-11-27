@@ -1,0 +1,26 @@
+{
+    "name": "KalivVr",
+    "rootNamespace": "Kaliv.VR",
+    "references": [
+        "UniGLTF",
+        "UniGLTF.Utils",
+        "UniHumanoid",
+        "VRM10",
+        "VrmLib",
+        "Ternedal.SkyPlayer.Engine",
+        "Unity.XR.OpenXR",
+        "Unity.XR.Management",
+        "Unity.XR.CoreUtils",
+        "Unity.InputSystem",
+        "Unity.Mathematics"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

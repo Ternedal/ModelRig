@@ -32,23 +32,11 @@ namespace Kaliv.VR.EditorTools
 
             if (doc.SelectSingleNode("/manifest", ns) is XmlElement root)
             {
-                bool hasInternet = false;
-                foreach (XmlNode node in doc.SelectNodes("/manifest/uses-permission", ns))
-                {
-                    if (node is XmlElement permission &&
-                        permission.GetAttribute("name", androidNs) == "android.permission.INTERNET")
-                    {
-                        hasInternet = true;
-                        break;
-                    }
-                }
-
-                if (!hasInternet)
-                {
-                    var permission = doc.CreateElement("uses-permission");
-                    permission.SetAttribute("name", androidNs, "android.permission.INTERNET");
-                    root.PrependChild(permission);
-                }
+                // RECORD_AUDIO for the voice turn. Unity usually infers it from the Microphone
+                // API, but "usually" is not a contract — without it the runtime permission
+                // request silently never shows and the mic records nothing.
+                EnsurePermission(doc, ns, root, androidNs, "android.permission.INTERNET");
+                EnsurePermission(doc, ns, root, androidNs, "android.permission.RECORD_AUDIO");
 
                 bool hasPassthrough = false;
                 foreach (XmlNode node in doc.SelectNodes("/manifest/uses-feature", ns))
@@ -71,7 +59,19 @@ namespace Kaliv.VR.EditorTools
             }
 
             doc.Save(manifestPath);
-            Debug.Log("[KalivVR] Android manifest: INTERNET + cleartext + optional passthrough verified.");
+            Debug.Log("[KalivVR] Android manifest: INTERNET + RECORD_AUDIO + cleartext + optional passthrough verified.");
+        }
+
+        private static void EnsurePermission(XmlDocument doc, XmlNamespaceManager ns, XmlElement root,
+                                             string androidNs, string name)
+        {
+            foreach (XmlNode node in doc.SelectNodes("/manifest/uses-permission", ns))
+                if (node is XmlElement p && p.GetAttribute("name", androidNs) == name)
+                    return;
+
+            var permission = doc.CreateElement("uses-permission");
+            permission.SetAttribute("name", androidNs, name);
+            root.PrependChild(permission);
         }
     }
 }
