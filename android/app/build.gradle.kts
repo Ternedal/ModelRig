@@ -117,10 +117,10 @@ dependencies {
     //  * CameraX giver et livscyklus-bundet kamera uden at vi skal skrive
     //    Camera2-state selv. Vi tager kun de fire moduler vi bruger.
     implementation("com.google.zxing:core:3.5.4")
-    implementation("androidx.camera:camera-core:1.4.2")
-    implementation("androidx.camera:camera-camera2:1.4.2")
-    implementation("androidx.camera:camera-lifecycle:1.4.2")
-    implementation("androidx.camera:camera-view:1.4.2")
+    implementation("androidx.camera:camera-core:1.7.0")
+    implementation("androidx.camera:camera-camera2:1.7.0")
+    implementation("androidx.camera:camera-lifecycle:1.7.0")
+    implementation("androidx.camera:camera-view:1.7.0")
     testImplementation("junit:junit:4.13.2")
     // Screenshot-regression: Robolectric 4.17 (SDK 36 + JDK 21) + Roborazzi.
     testImplementation("org.robolectric:robolectric:4.17")
