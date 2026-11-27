@@ -646,7 +646,12 @@ hemmelighed. Tekst, som en anden komponent har skrevet (executorens afvisning,
 profil-loaderens fejl, arbejdsområde-kontrollens detaljer), gengives aldrig: af
 den vises kun en af scriptets egne sætninger og navnene på de nøgler, teksten
 nævner. Oven i det erstattes værdien af enhver nøgle med et hemmeligheds-navn i
-det, scriptet selv skriver. Outputtet kan derfor deles.
+det, scriptet selv skriver. Outputtet indeholder altså ingen hemmeligheder — men
+det indeholder stier, og når `KALIV_GPU_DEVICE_UUIDS` mangler eller er forkert,
+også kortenes GPU-UUID'er. Et UUID er ikke en adgangshemmelighed, men det er et
+varigt hardware-id for netop den maskine. Det gælder både skærmteksten,
+`--json` og filen fra `Tee-Object`: del dem med dem, der skal hjælpe, ikke
+offentligt.
 
 Linjen `executor cuda:N: egen startkontrol` er den, der afgør: den kører executorens
 egen kontrol (`check_start` — alt den ser på, før den rører jobdatabasen) med
@@ -681,8 +686,11 @@ tjekket selv efter alt det, executoren skal have i sit miljø, i samme kørsel:
 kort-rækkefølge, GPU-UUID, lease-mappe, de fem stier, volumen-id og
 offline-flagene får hver sin linje, hvis de mangler. De linjer, der kun har ét
 rigtigt svar på maskinen (`CUDA_DEVICE_ORDER`, offline-flagene og
-`KALIV_GPU_DEVICE_UUIDS` med UUID'et læst fra `nvidia-smi`), samles nederst som én
-færdig `media_env_set.py`-kommando, der kan kopieres. Resten kræver et valg (hvilken
+`KALIV_GPU_DEVICE_UUIDS`), samles nederst som én færdig `media_env_set.py`-kommando,
+der kan kopieres. UUID'et for hver `cuda:N` er CUDA's eget svar — torch i
+medie-miljøet, spurgt i executorens miljø — og aldrig `nvidia-smi`'s indeks, som
+ikke behøver at være CUDA's. Er `CUDA_VISIBLE_DEVICES` sat i vinduet, men ikke i
+filen, er det uvist, hvilke kort executoren ser; så foreslås ingen UUID-linje. Resten kræver et valg (hvilken
 mappe, hvilket kort) og står med et forslag. Startkontrollen er stadig dommeren:
 de ekstra linjer kan tilføje en `FAIL`, aldrig fjerne en.
 

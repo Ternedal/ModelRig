@@ -101,10 +101,13 @@ def parse_env_file(text: str) -> dict[str, str]:
     return env
 
 
-def _run(cmd: list[str], timeout: float = 60.0, cwd: str | None = None, stdin: str | None = None) -> tuple[int, str]:
+def _run(cmd: list[str], timeout: float = 60.0, cwd: str | None = None, stdin: str | None = None,
+         env: Mapping[str, str] | None = None) -> tuple[int, str]:
+    """`env`, when given, is laid over this process's own environment -- what the supervisor does
+    for its children with the env file."""
     try:
         done = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd, input=stdin,
-                              encoding="utf-8", errors="replace")
+                              encoding="utf-8", errors="replace", env=None if env is None else {**os.environ, **env})
         return done.returncode, (done.stdout or "") + (done.stderr or "")
     except (OSError, subprocess.SubprocessError) as exc:
         return 127, type(exc).__name__
@@ -307,15 +310,49 @@ def _uuid_map(env: Mapping[str, str]) -> "dict[int, str] | None":
         return None
 
 
+# The only lines ever offered for copying, each as a whole-line pattern. Nothing else a FAIL says
+# can become part of a command, whatever its fix text contains (ChatGPT on #2505).
+_UUID_ENTRY = r"cuda:(?:0|[1-9][0-9]?)=GPU-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"
+SUGGESTABLE = (
+    re.compile(r"CUDA_DEVICE_ORDER=PCI_BUS_ID"),
+    re.compile(r"HF_HUB_OFFLINE=1"),
+    re.compile(r"TRANSFORMERS_OFFLINE=1"),
+    re.compile(rf"KALIV_GPU_DEVICE_UUIDS={_UUID_ENTRY}(?:,{_UUID_ENTRY}){{0,7}}"),
+)
+
+
 def suggested_lines(checks: list[dict]) -> list[str]:
-    """The KEY=VALUE lines a FAIL gives in full: the ones with one right answer on this machine."""
+    """The KEY=VALUE lines a FAIL gives in full: the ones with one right answer on this machine.
+    The whole of the fix after the marker must be one of SUGGESTABLE -- not its first word."""
     lines = []
     for item in checks:
         if item["status"] == FAIL and item["fix"].startswith(ADD_LINE):
-            line = item["fix"][len(ADD_LINE):].split(" ", 1)[0]
-            if re.fullmatch(r"[A-Z][A-Z0-9_]*=[\x21-\x7e]+", line) and line not in lines:
+            line = item["fix"][len(ADD_LINE):]
+            if any(pattern.fullmatch(line) for pattern in SUGGESTABLE) and line not in lines:
                 lines.append(line)
     return lines
+
+
+# PowerShell ends a single-quoted string at any of these, not only at the ASCII apostrophe.
+_PS_QUOTES = "'\u2018\u2019\u201a\u201b"
+
+
+def ps_literal(text: str) -> str:
+    """`text` as a PowerShell single-quoted literal: nothing in it is expanded ($(), $var, `),
+    and every character PowerShell reads as a single quote is doubled. A path is not a command."""
+    return "'" + "".join(ch * 2 if ch in _PS_QUOTES else ch for ch in text) + "'"
+
+
+TORCH_PROBE = (
+    "import json,torch\n"
+    "ok=torch.cuda.is_available()\n"
+    "n=torch.cuda.device_count() if ok else 0\n"
+    "u=[]\n"
+    "for i in range(n):\n"
+    "    r=getattr(torch.cuda.get_device_properties(i),'uuid',None)\n"
+    "    u.append(None if r is None else str(r))\n"
+    "print(json.dumps({'torch':torch.__version__,'cuda':ok,'count':n,'uuids':u}))\n"
+)
 
 
 @dataclass
@@ -511,13 +548,23 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
 
     # --- 4. the media Python can see the GPUs it is told to use ---------------------------------
     highest = max((int(d.split(":")[1]) for d in devices), default=-1)
+    cuda_uuids: dict[int, str] = {}  # cuda:N -> UUID, as CUDA itself numbers the cards
     if probes.is_file(python) and os.path.isabs(python):
-        code, out = probes.run([python, *PYTHON_FLAGS, "-c", "import json,torch;print(json.dumps({'torch':torch.__version__,"
-                                              "'cuda':torch.cuda.is_available(),'count':torch.cuda.device_count()}))"], 120.0)
+        # Asked in the environment the executor will have: the env file over this window's, with
+        # the device order the executor insists on. cuda:N and its UUID are then CUDA's own
+        # answer -- the one image_gpu_admission compares against -- under whatever
+        # CUDA_VISIBLE_DEVICES the file sets (an empty one hides every card: count 0).
+        code, out = probes.run([python, *PYTHON_FLAGS, "-c", TORCH_PROBE], 120.0,
+                               env={**env, "CUDA_DEVICE_ORDER": "PCI_BUS_ID"})
         try:
             torch_info = json.loads(out.strip().splitlines()[-1]) if code == 0 else None
         except (ValueError, IndexError):
             torch_info = None
+        if torch_info and isinstance(torch_info.get("uuids"), list):
+            for index, raw in enumerate(torch_info["uuids"]):
+                candidate = "GPU-" + str(raw).strip().lower().removeprefix("gpu-") if raw is not None else ""
+                if GPU_UUID.match(candidate):
+                    cuda_uuids[index] = candidate
         if not torch_info:
             report.add(FAIL, "medie-python: torch", "kunne ikke importere torch", "geninstaller medie-miljøet (deploy/media-image-requirements.txt)")
         elif not torch_info.get("cuda") or torch_info.get("count", 0) <= highest:
@@ -578,16 +625,13 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
                     report.add(OK, f"video: {task}", (chosen or serving)[0])
 
     # --- 5b. the executor's environment, all of it in one run -----------------------------------
-    code, out = probes.run(["nvidia-smi", "--query-gpu=index,memory.total,memory.used,uuid", "--format=csv,noheader,nounits"], 30.0)
+    code, out = probes.run(["nvidia-smi", "--query-gpu=index,memory.total,memory.used", "--format=csv,noheader,nounits"], 30.0)
     gpus: dict[int, tuple[int, int]] = {}
-    gpu_uuids: dict[int, str] = {}
     if code == 0:
         for line in out.splitlines():
             parts = [part.strip() for part in line.split(",")]
-            if len(parts) in (3, 4) and all(part.isdigit() for part in parts[:3]):
+            if len(parts) == 3 and all(part.isdigit() for part in parts):
                 gpus[int(parts[0])] = (int(parts[1]), int(parts[2]))
-                if len(parts) == 4 and GPU_UUID.match(parts[3]):
-                    gpu_uuids[int(parts[0])] = "GPU-" + parts[3][4:].lower()
     # Before KALIV_MEDIA_EXECUTOR_DEVICES is set, the cards the enabled profiles run on stand in.
     cards = devices or sorted({d for p in enabled.values() for d in p.resources.devices if DEVICE.match(d)})
     before = len(report.checks)
@@ -595,19 +639,23 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
         report.add(FAIL, "CUDA_DEVICE_ORDER", f"er {get('CUDA_DEVICE_ORDER')!r}: executoren kræver PCI_BUS_ID, så cuda:N er samme kort overalt",
                    ADD_LINE + "CUDA_DEVICE_ORDER=PCI_BUS_ID")
     indices = [int(card.split(":")[1]) for card in cards]
-    # With CUDA_VISIBLE_DEVICES set, cuda:N counts the VISIBLE cards, not nvidia-smi's: cuda:0 can
-    # be physical card 1. Then nvidia-smi's index says nothing about which UUID a cuda:N is, so
-    # no line is offered and nothing is compared (Codex on #2505). The window's own value counts
-    # too: the supervisor may have inherited it.
-    remapped = bool(get("CUDA_VISIBLE_DEVICES")) or bool(str(probes.process_env().get("CUDA_VISIBLE_DEVICES", "")).strip())
-    wanted = ",".join(f"cuda:{i}={gpu_uuids[i]}" for i in indices) if indices and all(i in gpu_uuids for i in indices) else ""
-    if remapped:
-        uuid_fix = ("CUDA_VISIBLE_DEVICES er sat, så cuda:N tæller de synlige kort og ikke nvidia-smi's indeks: "
-                    "skriv selv UUID'et for det kort, hver cuda:N ender på (nvidia-smi --query-gpu=index,uuid --format=csv)")
+    # Which UUID a cuda:N is, is CUDA's to say, not nvidia-smi's: nvidia-smi's index need not be
+    # CUDA's, with or without CUDA_VISIBLE_DEVICES, and a valid UUID of the WRONG card would make
+    # the lease guard the wrong card (ChatGPT and Codex on #2505). `cuda_uuids` is torch's answer
+    # in the executor's environment (section 4). One case stays unknowable from here: the window
+    # sets CUDA_VISIBLE_DEVICES and the file does not -- the supervisor may or may not have
+    # inherited it -- and then nothing is offered and nothing is compared.
+    unsure = "CUDA_VISIBLE_DEVICES" not in env and "CUDA_VISIBLE_DEVICES" in probes.process_env()
+    known = {} if unsure else cuda_uuids
+    wanted = ",".join(f"cuda:{i}={known[i]}" for i in indices) if indices and all(i in known for i in indices) else ""
+    how = "medie-python: torch.cuda.get_device_properties(N).uuid, i executorens miljø"
+    if unsure:
+        uuid_fix = ("CUDA_VISIBLE_DEVICES er sat i dette vindue, men ikke i env-filen, så det er uvist hvilke kort executoren ser: "
+                    "sæt den i filen (eller fjern den fra vinduet) og kør igen")
     elif wanted:
         uuid_fix = ADD_LINE + "KALIV_GPU_DEVICE_UUIDS=" + wanted
     else:
-        uuid_fix = "én post pr. kort, cuda:N=GPU-<uuid>, fra: nvidia-smi --query-gpu=index,uuid --format=csv"
+        uuid_fix = f"én post pr. kort, cuda:N=GPU-<uuid>; UUID'et er CUDA's eget ({how})"
     try:
         mapping = probes.uuid_map(env)
     except Exception:
@@ -616,12 +664,13 @@ def _evaluate(env: Mapping[str, str], probes: Probes, *, expect_version: str | N
         report.add(FAIL, "KALIV_GPU_DEVICE_UUIDS", "mangler eller er ikke en liste af cuda:N=GPU-<uuid>", uuid_fix)
     else:
         unmapped = [f"cuda:{i}" for i in indices if i not in mapping]
-        other = [] if remapped else [f"cuda:{i}" for i in indices
-                                     if i in mapping and i in gpu_uuids and mapping[i].lower() != gpu_uuids[i].lower()]
+        other = [f"cuda:{i}" for i in indices if i in mapping and i in known and mapping[i].lower() != known[i].lower()]
         if unmapped:
             report.add(FAIL, "KALIV_GPU_DEVICE_UUIDS", f"har ingen post for {', '.join(unmapped)}", uuid_fix)
         elif other:
-            report.add(WARN, "KALIV_GPU_DEVICE_UUIDS", f"posten for {', '.join(other)} er et andet UUID end det, nvidia-smi viser for det kort", uuid_fix)
+            # Not a matter of taste: the executor compares the same two values before it loads
+            # an image model, and refuses the job.
+            report.add(FAIL, "KALIV_GPU_DEVICE_UUIDS", f"posten for {', '.join(other)} er et andet UUID end det, CUDA selv giver for den enhed", uuid_fix)
     for key, what in FOLDER_KEYS:
         path = get(key)
         if not path:
@@ -817,8 +866,9 @@ def render(checks: list[dict], env_file: str = "") -> str:
         # media_env_set.py changes only the named keys and takes a backup first (see its docstring).
         lines.append("")
         lines.append(f"  {len(direct)} af linjerne har kun ét rigtigt svar på denne maskine og kan sættes sådan:")
-        lines.append("    python scripts\\media_env_set.py --file " + (f'"{env_file}"' if env_file else "<env-fil>")
-                     + "".join(f' "{line}"' for line in direct))
+        # PowerShell literals: a path is data, also when it contains $(...) or a quote.
+        lines.append("    python scripts\\media_env_set.py --file " + (ps_literal(env_file) if env_file else "<env-fil>")
+                     + "".join(" " + ps_literal(line) for line in direct))
     return "\n".join(lines)
 
 
